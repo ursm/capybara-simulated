@@ -294,6 +294,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "headersSet", set_op, context_id);
     crate::dom::register(scope, ns, "headersDelete", delete_op, context_id);
     crate::dom::register(scope, ns, "headersGet", get_op, context_id);
+    crate::dom::register(scope, ns, "headersContentLength", content_length_op, context_id);
     crate::dom::register(scope, ns, "headersHas", has_op, context_id);
     crate::dom::register(scope, ns, "headersSetCookies", set_cookies_op, context_id);
     crate::dom::register(scope, ns, "headersPairs", pairs_op, context_id);
@@ -336,6 +337,46 @@ fn delete_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_uint32(l.borrow_mut().delete(&name));
 }
 // __dom.headersGet(list, name) -> the name's values combined, null for none, undefined for a name that is no header
+// Fetch "get, decode, and split" a header's combined value: its values split at commas outside a quoted string (a quote's
+// backslash escaping the next character), each trimmed of HTTP tabs and spaces.
+pub(crate) fn decode_split(value: &str) -> Vec<String> {
+    let (mut values, mut current, mut quoted, mut escaped) = (Vec::new(), String::new(), false, false);
+    for c in value.chars() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            ',' if !quoted => {
+                values.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(c);
+    }
+    values.push(current);
+    values.into_iter().map(|v| v.trim_matches(['\t', ' ']).to_owned()).collect()
+}
+
+// Fetch "extract a length" from a header list's combined `Content-Length` value (None: it has none): its values all the
+// same — one of ASCII digits — that number; none where they differ, or it is no number.
+pub(crate) fn extract_length(combined: Option<&str>) -> Option<u64> {
+    let values = decode_split(combined?);
+    let candidate = values.first()?;
+    if values.iter().any(|v| v != candidate) || candidate.is_empty() || !candidate.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    candidate.parse().ok()
+}
+// __dom.headersContentLength(list) -> the length its `Content-Length` gives (`extract_length`), or null.
+fn content_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(l) = list(scope, args.get(0)) else { return rv.set_null() };
+    let combined = l.borrow().get(b"content-length").map(|v| String::from_utf8_lossy(&v).into_owned());
+    match extract_length(combined.as_deref()) {
+        Some(n) => rv.set_double(n as f64),
+        None => rv.set_null(),
+    }
+}
 // name.
 fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = bytes(scope, args.get(1));
@@ -430,6 +471,17 @@ fn for_xhr_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracts_a_length() {
+        assert_eq!(extract_length(Some("42")), Some(42));
+        assert_eq!(extract_length(Some("42, 42")), Some(42));
+        assert_eq!(extract_length(Some("42, 43")), None);
+        assert_eq!(extract_length(Some("12abc")), None);
+        assert_eq!(extract_length(Some("")), None);
+        assert_eq!(extract_length(Some("-1")), None);
+        assert_eq!(extract_length(None), None);
+    }
 
     fn pairs(l: &HeaderList) -> Vec<(String, String)> {
         l.sorted().iter().map(|(n, v)| (String::from_utf8_lossy(n).into(), String::from_utf8_lossy(v).into())).collect()
