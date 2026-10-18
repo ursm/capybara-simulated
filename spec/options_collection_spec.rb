@@ -42,10 +42,11 @@ RSpec.describe 'HTMLOptionsCollection' do
   it 'refuses a length over 100,000 and removes through the collection as through the select' do
     got = session.evaluate_script(<<~JS)
       (() => {
+        const big = document.createElement('select');
+        big.length = 50000;
+        big.length = 120000;
+        const grown = big.length;
         const s = document.getElementById('s');
-        s.length = 50000;
-        s.length = 120000;
-        const grown = s.length;
         s.length = 3;
         s.options.remove(1);
         return [grown, s.length, Array.from(s.options, (o) => o.text || '-').join(' ')];
