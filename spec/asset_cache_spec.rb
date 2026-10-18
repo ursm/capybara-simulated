@@ -44,11 +44,21 @@ RSpec.describe Capybara::Simulated::AssetCache do
   # but for those describing a content it carries none of, and the driver's own: RFC 9111 §3.2, §4.3.4)
   it 'updates what is stored from a 304' do
     cache = described_class.new
-    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => '"v1"', 'content-length' => '4'}, 'body')
+    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => '"v1"', 'content-length' => '4', 'set-cookie' => 'a=1'}, 'body')
     entry = cache.lookup('http://app/e')
-    cache.refresh(entry, {'etag' => '"v2"', 'content-length' => '0', 'x-csim-status-text' => 'Not Modified'})
+    before = entry.headers
+    cache.refresh('http://app/e', entry, {'etag' => '"v2"', 'content-length' => '0', 'x-csim-status-text' => 'Not Modified', 'set-cookie' => 'b=2'})
     expect(cache.revalidation_headers(entry)).to eq('If-None-Match' => '"v2"')
-    expect(entry.headers.to_h.slice('content-length', 'x-csim-status-text')).to eq('content-length' => '4')
+    expect(entry.headers.to_h.slice('content-length', 'x-csim-status-text', 'set-cookie')).to eq('content-length' => '4')
+    expect([entry.no_cache, before['etag']]).to eq([true, '"v1"'])
+    # (…a new Date shortening an Expires; and a 304 that forbids storing it dropping the entry)
+    now = Time.now
+    cache.store('http://app/x', 200, {'date' => (now - 50).httpdate, 'expires' => (now + 10).httpdate}, 'body')
+    expiring = cache.lookup('http://app/x')
+    cache.refresh('http://app/x', expiring, {'date' => now.httpdate})
+    expect(expiring.fresh?(now + 30)).to be(false)
+    cache.refresh('http://app/e', entry, {'cache-control' => 'no-store'})
+    expect(cache.lookup('http://app/e')).to be_nil
   end
 end
 

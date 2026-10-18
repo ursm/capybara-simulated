@@ -13,9 +13,10 @@ RSpec.describe 'Fetch Response semantics' do
     Rack::Builder.new {
       run lambda {|env|
         case Rack::Request.new(env).path_info
-        when '/'     then [200, {'content-type' => 'text/html'}, ['<html><body>hi</body></html>']]
-        when '/data' then [200, {'content-type' => 'application/json'}, ['{"ok":true}']]
-        else              [404, {'content-type' => 'text/plain'}, ['nope']]
+        when '/'       then [200, {'content-type' => 'text/html'}, ['<html><body>hi</body></html>']]
+        when '/data'   then [200, {'content-type' => 'application/json'}, ['{"ok":true}']]
+        when '/cookie' then [200, {'content-type' => 'text/plain', 'set-cookie' => 'a=1', 'x-kept' => '1'}, ['c']]
+        else                [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
     }.to_app
@@ -68,6 +69,15 @@ RSpec.describe 'Fetch Response semantics' do
     expect(r['builtHas']).to eq('v')
     expect(r['fetchedThrew']).to eq('TypeError')
     expect(r['fetchedHas']).to be_nil
+  end
+
+  # A fetched response is a filtered one — its cookies (`Set-Cookie`, a forbidden response-header name) never script's to
+  # read, as XHR's are not — set all the same.
+  it "hides a fetched response's cookies, which it sets" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script("fetch('/cookie').then((r) => { globalThis.__r = [r.headers.get('set-cookie'), r.headers.get('x-kept'), document.cookie]; })")
+    expect(poll_until { session.evaluate_script('globalThis.__r') }).to eq([nil, '1', 'a=1'])
   end
 
   # A Response or Request another realm made is cloned in ITS realm, whichever realm's `clone` is called (Fetch "clone":

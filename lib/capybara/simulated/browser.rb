@@ -9716,7 +9716,7 @@ module Capybara
           if status == 304 && cache_entry
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
-            @@asset_cache.refresh(cache_entry, resp_headers)
+            @@asset_cache.refresh(target, cache_entry, resp_headers)
             # The cache stores the RAW response headers, so a cross-origin cached entry must
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.

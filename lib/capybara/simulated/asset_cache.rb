@@ -123,6 +123,8 @@ module Capybara
       def store(url, status, headers, body, encoded: nil)
         return unless CACHEABLE_STATUSES.include?(status)
         h = ensure_lowercase(headers)
+        # (…its cookies not kept: they were set as the response came, and a replay is no response that sets them)
+        h.delete('set-cookie')
         return unless vary_compatible?(h['vary'])
         cc = parse_cache_control(h['cache-control'])
         # Honour the server's explicit directives only (RFC 9111) — no
@@ -157,26 +159,31 @@ module Capybara
         h
       end
 
-      # RFC 9111 §4.3.4: a 304 refreshes the cached entry's freshness
-      # window without replacing the body, and updates the stored header
-      # fields with the ones it carries — a rotated ETag or Last-Modified
-      # is what the next revalidation sends — but for those describing the
-      # content it carries none of (§3.2) and the driver's own `x-csim-*`
-      # (a 304's status text is no 200's). Mutation under the GVL is fine
-      # — see class-level Mutex note.
-      def refresh(entry, new_headers)
-        h  = ensure_lowercase(new_headers)
-        h.each {|k, v| entry.headers[k] = v unless UNREFRESHED_FIELDS.include?(k) || k.start_with?('x-csim-') }
-        cc = parse_cache_control(h['cache-control'])
+      # RFC 9111 §4.3.4: a 304 that revalidates the entry stored for `url`
+      # refreshes it without replacing the body: its header fields updated
+      # with the ones the 304 carries — a rotated ETag or Last-Modified what
+      # the next revalidation sends — but for those describing the content it
+      # carries none of (§3.2), its cookies (kept no more than a stored 200's)
+      # and the driver's own `x-csim-*` (a 304's status text is no 200's);
+      # and its freshness, no-cache and immutability read again off the
+      # fields as they now are (a bare 304 keeps the stored Cache-Control, a
+      # new Date shortens an Expires). Where they now forbid storing it —
+      # `no-store`, `private`, a Vary it cannot honour — it is dropped, though
+      # this request is still answered from it. The fields are written as one
+      # new header map, never mutated in place: a thread reading the entry's
+      # (an image load, a keepalive) iterates the one it took.
+      def refresh(url, entry, new_headers)
+        merged = ensure_lowercase(entry.headers)
+        ensure_lowercase(new_headers).each do |k, v|
+          merged[k] = v unless UNREFRESHED_FIELDS.include?(k) || k == 'set-cookie' || k.start_with?('x-csim-')
+        end
+        cc = parse_cache_control(merged['cache-control'])
+        entry.headers   = merged
         entry.stored_at = Time.now
-        entry.max_age   = freshness_seconds(cc, h, heuristic: HEURISTIC_STATUSES.include?(entry.status)) || entry.max_age
-        # RFC 9111 §4.3.4: a 304 UPDATES stored header fields with the ones
-        # it carries; it does not delete them. A bare 304 (no Cache-Control —
-        # the common ETag / Last-Modified revalidation) must therefore PRESERVE
-        # the stored no-cache flag, otherwise a `no-cache` resource would stop
-        # revalidating after its first 304 and start serving fresh. Only a 304
-        # that actually resends Cache-Control re-derives it.
-        entry.no_cache  = h['cache-control'] ? cc[:no_cache] : entry.no_cache
+        entry.max_age   = freshness_seconds(cc, merged, heuristic: HEURISTIC_STATUSES.include?(entry.status))
+        entry.no_cache  = cc[:no_cache]
+        entry.immutable = cc[:immutable] == true
+        @entries.delete(url) if (cc[:no_store] || cc[:private] || !vary_compatible?(merged['vary'])) && @entries[url].equal?(entry)
         entry
       end
 
