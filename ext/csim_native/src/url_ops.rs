@@ -12,9 +12,9 @@ use crate::dom::register;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "urlParse", url_parse, context_id);
     register(scope, ns, "urlSet", url_set, context_id);
-    register(scope, ns, "urlHasOpaquePath", url_has_opaque_path, context_id);
     register(scope, ns, "urlIsFragmentNavigation", url_is_fragment_navigation, context_id);
     register(scope, ns, "urlCanRewrite", url_can_rewrite, context_id);
+    register(scope, ns, "locationSet", location_set_op, context_id);
     register(scope, ns, "postMessageTarget", post_message_target_op, context_id);
     register(scope, ns, "postMessageReaches", post_message_reaches_op, context_id);
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
@@ -77,10 +77,8 @@ fn url_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // (none, or UTF-8, as the parser does it).
 pub(crate) fn encoding_parse(input: &str, base: Option<&str>, label: Option<&str>) -> Option<Url> {
     let mut url = Url::parse(input, base).ok()?;
-    if let Some(encoding) = label.and_then(|l| encoding_rs::Encoding::for_label(l.as_bytes())).map(|e| e.output_encoding()) {
-        if encoding != encoding_rs::UTF_8 {
-            encode_query_in(&mut url, input, encoding);
-        }
+    if let Some(encoding) = query_encoding(&url, label) {
+        encode_query_in(&mut url, input, encoding);
     }
     Some(url)
 }
@@ -213,10 +211,9 @@ pub(crate) fn document_base_url(arena: &crate::dom::RealmArena, doc: crate::dom:
 
 // The URL's query as the input wrote it, percent-encoded in `encoding` (the parser did it in UTF-8). A query is what
 // follows the input's first `?` — no state before the query takes one — up to its `#`; a URL whose query came from its
-// base (the input has none of its own) keeps it as it is. Only a special URL's, and not a `ws:` / `wss:` one's: the
-// query state takes UTF-8 for the others whatever the document's encoding (`mailto:…?subject=é` stays `%C3%A9`).
+// base (the input has none of its own) keeps it as it is.
 fn encode_query_in(url: &mut Url, input: &str, encoding: &'static encoding_rs::Encoding) {
-    if !url.has_search() || !matches!(url.protocol(), "http:" | "https:" | "ftp:" | "file:") {
+    if !url.has_search() {
         return;
     }
     // (…the input as the parser reads it: no leading or trailing C0 control or space, no tab or newline anywhere)
@@ -227,8 +224,14 @@ fn encode_query_in(url: &mut Url, input: &str, encoding: &'static encoding_rs::E
         return;
     }
     let query = input[start + 1..].split('#').next().unwrap_or_default();
+    if let Some(encoded) = encoded_query(query, encoding) {
+        url.set_search(Some(&encoded));
+    }
+}
+// …`query` so, `?` first: None where it is what the parser's UTF-8 made of it already.
+fn encoded_query(query: &str, encoding: &'static encoding_rs::Encoding) -> Option<String> {
     if query.is_ascii() && encoding.is_ascii_compatible() {
-        return;
+        return None;
     }
     let mut encoded = String::from("?");
     for byte in encode(encoding, query) {
@@ -240,7 +243,16 @@ fn encode_query_in(url: &mut Url, input: &str, encoding: &'static encoding_rs::E
             encoded.push(byte as char);
         }
     }
-    url.set_search(Some(&encoded));
+    Some(encoded)
+}
+// …and the encoding a URL's query is in: `label`'s for a special URL, but not a `ws:` / `wss:` one — the query state
+// takes UTF-8 for the others whatever the document's encoding (`mailto:…?subject=é` stays `%C3%A9`) — None for UTF-8.
+fn query_encoding(url: &Url, label: Option<&str>) -> Option<&'static encoding_rs::Encoding> {
+    if !matches!(url.protocol(), "http:" | "https:" | "ftp:" | "file:") {
+        return None;
+    }
+    let encoding = encoding_rs::Encoding::for_label(label?.as_bytes())?.output_encoding();
+    (encoding != encoding_rs::UTF_8).then_some(encoding)
 }
 
 // `text` in `encoding`, a character it cannot encode written `&#N;` — and that already percent-encoded, as the URL
@@ -272,11 +284,6 @@ fn encode(encoding: &'static encoding_rs::Encoding, text: &str) -> Vec<u8> {
 // with "/" (`mailto:x`, `foo:`), where `foo://` has an empty host and `foo:/x` a list.
 fn has_opaque_path(url: &Url) -> bool {
     !url.has_hostname() && !url.pathname().starts_with('/')
-}
-// __dom.urlHasOpaquePath(href) -> `has_opaque_path` (false for no URL).
-fn url_has_opaque_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let href = usv(scope, args.get(0));
-    rv.set_bool(Url::parse(href.as_str(), None).is_ok_and(|u| has_opaque_path(&u)));
 }
 
 // HTML "navigate" (step "navigate to a fragment"): whether a navigation to `url` from a document at `current` is one to a
@@ -315,6 +322,85 @@ pub(crate) fn can_rewrite(current: &str, target: &str) -> bool {
         _ => same(Url::pathname) && same(Url::search),
     }
 }
+// HTML "the Location interface" (§7.2.4): what setting the part `part` — "protocol", "host", "hostname", "port",
+// "pathname", "search" or "hash" — of a location whose URL is `current` to `value` does, in a document of the encoding
+// `label` names: the URL the location navigates to, as that part's setter steps set it on a copy (the URL Standard's
+// state overrides, ada's setters), or none —
+//   protocol: `value` and a colon taken as a scheme, which must parse (Err otherwise: a SyntaxError), and a navigation
+//     only to an HTTP(S) URL;
+//   host, hostname, pathname: none for a URL with an opaque path; port: none for one that cannot have a port (no host,
+//     an empty one, or `file:`);
+//   search: the query `value` makes, percent-encoded in the document's encoding;
+//   hash: none where the fragment comes out what it was — a null one the empty string, so `location.hash = ''` on a URL
+//     with none does not navigate (the note there: deployed content sets it redundantly).
+pub(crate) fn location_set(current: &str, part: &str, value: &str, label: Option<&str>) -> Result<Option<String>, ()> {
+    let Ok(mut url) = Url::parse(current, None) else { return Ok(None) };
+    match part {
+        "protocol" => {
+            // (…the basic URL parser's input: no tab or newline; the scheme start state then the scheme state, which a
+            // state override fails on anything but a scheme's characters before the colon)
+            let scheme: String = value.chars().filter(|c| !matches!(c, '\t' | '\n' | '\r')).take_while(|&c| c != ':').collect();
+            let mut chars = scheme.chars();
+            let valid = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+                && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+            if !valid {
+                return Err(());
+            }
+            // (…a scheme the setter refuses — a special one for a non-special URL or the reverse, `file:` for one with
+            // credentials or a port — leaves the copy as it was: no failure, a navigation to the URL itself)
+            drop(url.set_protocol(value));
+            if !matches!(url.protocol(), "http:" | "https:") {
+                return Ok(None);
+            }
+        }
+        "host" | "hostname" | "pathname" if has_opaque_path(&url) => return Ok(None),
+        "port" if !url.has_hostname() || url.hostname().is_empty() || url.protocol() == "file:" => return Ok(None),
+        "host" => drop(url.set_host(Some(value))),
+        "hostname" => drop(url.set_hostname(Some(value))),
+        "port" => drop(url.set_port(Some(value))),
+        "pathname" => drop(url.set_pathname(Some(value))),
+        "search" if value.is_empty() => url.set_search(None),
+        "search" => {
+            let query = value.strip_prefix('?').unwrap_or(value);
+            match query_encoding(&url, label).and_then(|e| encoded_query(query, e)) {
+                Some(encoded) => url.set_search(Some(&encoded)),
+                None => url.set_search(Some(value)),
+            }
+        }
+        "hash" => {
+            // (…`#` before the value, its own taken off: the URL interface's setter takes the empty string for no
+            // fragment, which this one does not)
+            let was = url.hash().to_owned();
+            url.set_hash(Some(&format!("#{}", value.strip_prefix('#').unwrap_or(value))));
+            if url.hash() == was {
+                return Ok(None);
+            }
+        }
+        _ => return Ok(None),
+    }
+    Ok(Some(url.href().to_owned()))
+}
+// __dom.locationSet(href, part, value, encoding) -> the URL `location_set` navigates to, null for none; a SyntaxError
+// for a protocol that is none.
+fn location_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (current, value) = (usv(scope, args.get(0)), usv(scope, args.get(2)));
+    let part = args.get(1).to_rust_string_lossy(scope);
+    let label = args.get(3).is_string().then(|| args.get(3).to_rust_string_lossy(scope));
+    match location_set(&current, &part, &value, label.as_deref()) {
+        Ok(Some(url)) => match v8::String::new(scope, &url) {
+            Some(url) => rv.set(url.into()),
+            None => rv.set_null(),
+        },
+        Ok(None) => rv.set_null(),
+        Err(()) => {
+            let message = format!("Failed to set the 'protocol' property on 'Location': '{value}' is an invalid protocol.");
+            if let Some(message) = v8::String::new(scope, &message) {
+                crate::clone::throw_dom_exception(scope, message, "SyntaxError");
+            }
+        }
+    }
+}
+
 fn url_can_rewrite(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (current, target) = (usv(scope, args.get(0)), usv(scope, args.get(1)));
     rv.set_bool(can_rewrite(&current, &target));
@@ -450,6 +536,28 @@ mod tests {
         assert!(!is_fragment_navigation(at, "https://a.test/p?r#x"));
         assert!(!is_fragment_navigation("https://a.test/p", "https://a.test/p"));
         assert!(is_fragment_navigation("https://a.test/p", "https://a.test/p#z"));
+    }
+
+    #[test]
+    fn a_location_setter_navigates_to_its_copy_with_the_part_set() {
+        let at = "https://a.test/p?q#x";
+        assert_eq!(location_set(at, "protocol", "http", None), Ok(Some("http://a.test/p?q#x".into())));
+        assert_eq!(location_set(at, "protocol", "ftp:x", None), Ok(None));
+        assert_eq!(location_set(at, "protocol", "1x", None), Err(()));
+        assert_eq!(location_set(at, "protocol", "h\tt tp", None), Err(()));
+        assert_eq!(location_set(at, "protocol", "", None), Err(()));
+        assert_eq!(location_set(at, "host", "b.test:81", None), Ok(Some("https://b.test:81/p?q#x".into())));
+        assert_eq!(location_set("mailto:x", "pathname", "y", None), Ok(None));
+        assert_eq!(location_set("file:///p", "port", "81", None), Ok(None));
+        assert_eq!(location_set(at, "port", "81", None), Ok(Some("https://a.test:81/p?q#x".into())));
+        assert_eq!(location_set(at, "search", "", None), Ok(Some("https://a.test/p#x".into())));
+        assert_eq!(location_set(at, "search", "??é#", None), Ok(Some("https://a.test/p??%C3%A9%23#x".into())));
+        assert_eq!(location_set(at, "search", "?é", Some("windows-1252")), Ok(Some("https://a.test/p?%E9#x".into())));
+        assert_eq!(location_set("wss://a.test/", "search", "é", Some("windows-1252")), Ok(Some("wss://a.test/?%C3%A9".into())));
+        assert_eq!(location_set(at, "hash", "#x", None), Ok(None));
+        assert_eq!(location_set(at, "hash", "y", None), Ok(Some("https://a.test/p?q#y".into())));
+        assert_eq!(location_set("https://a.test/p", "hash", "", None), Ok(None));
+        assert_eq!(location_set(at, "hash", "", None), Ok(Some("https://a.test/p?q#".into())));
     }
 
     #[test]
