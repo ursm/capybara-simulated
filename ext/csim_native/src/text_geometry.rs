@@ -92,7 +92,7 @@ fn by_run(rows: &[TextRow], runs: usize) -> Vec<std::ops::Range<usize>> {
     let mut out = vec![0..0; runs];
     for (i, r) in rows.iter().enumerate() {
         let Some(range) = out.get_mut(r[0] as usize) else { continue };
-        if range.is_empty() {
+        if std::ops::Range::is_empty(range) {
             *range = i..i + 1;
         } else {
             range.end = i + 1;

@@ -1037,7 +1037,7 @@ mod tests {
         let a = agent(&mut reg);
         reg.databases.insert(key("db"), Database { version: 1.0, stores: BTreeMap::from([(name("s"), 9)]), connections: vec![1], transactions: Vec::new(), upgrade: None });
         reg.connections.insert(1, Connection { db: key("db"), agent: a, version: 1.0, store_names: vec![name("s")], close_pending: false, closed: false });
-        let mut new_tx = |reg: &mut Registry, id: u32, mode: u32| {
+        let new_tx = |reg: &mut Registry, id: u32, mode: u32| {
             reg.transactions.insert(id, Transaction::new(1, key("db"), vec![name("s")], mode, false));
             reg.databases.get_mut(&key("db")).expect("made").transactions.push(id);
             reg.schedule(&key("db"), None);

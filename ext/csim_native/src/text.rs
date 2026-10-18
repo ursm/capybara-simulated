@@ -287,7 +287,7 @@ fn outlines(placed: &[Placed]) -> (Vec<Ring>, Vec<Sprite>, Option<(f64, f64)>) {
     let mut pen = Rings { rings: Vec::new(), cur: Vec::new(), at: (0.0, 0.0), origin: (0.0, 0.0) };
     let mut sprites = Vec::new();
     let mut edges: Option<(f64, f64)> = None;
-    let mut widen = |edges: &mut Option<(f64, f64)>, l: f64, r: f64| *edges = Some(edges.map_or((l, r), |(el, er)| (el.min(l), er.max(r))));
+    let widen = |edges: &mut Option<(f64, f64)>, l: f64, r: f64| *edges = Some(edges.map_or((l, r), |(el, er)| (el.min(l), er.max(r))));
     for g in placed {
         let (font, upem) = (g.face.font(), g.face.upem());
         let Some(outline) = font.outline_glyphs().get(skrifa::GlyphId::new(g.glyph)) else {
@@ -548,7 +548,7 @@ fn canvas_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     };
     let Some(line) = std::panic::catch_unwind(|| line(&text, handle, size, kerning, small_caps, rtl, place.as_ref())).ok().flatten() else { return rv.set_null() };
     let obj = v8::Object::new(scope);
-    let mut set = |scope: &mut v8::PinScope<'_, '_>, key: &str, value: v8::Local<'_, v8::Value>| {
+    let set = |scope: &mut v8::PinScope<'_, '_>, key: &str, value: v8::Local<'_, v8::Value>| {
         let key = v8::String::new(scope, key).expect("a short string");
         obj.set(scope, key.into(), value);
     };

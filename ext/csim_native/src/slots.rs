@@ -160,7 +160,7 @@ impl RealmArena {
     // slot's a node was taken from — to have their slots assigned.
     pub(crate) fn assign_manual(&mut self, slot: NodeId, nodes: &[NodeId]) -> Vec<NodeId> {
         let mut roots = Vec::new();
-        let mut touch = |arena: &RealmArena, roots: &mut Vec<NodeId>, s: NodeId| {
+        let touch = |arena: &RealmArena, roots: &mut Vec<NodeId>, s: NodeId| {
             if let Some(root) = enclosing_shadow_root(arena, s).filter(|r| !roots.contains(r)) {
                 roots.push(root);
             }

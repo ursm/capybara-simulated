@@ -401,7 +401,7 @@ fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         Err(refused) => refused,
     };
     let why = v8::Integer::new_from_unsigned(scope, why).into();
-    let mut item = |s: &str| v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let item = |s: &str| v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into);
     let (host, effective) = (item(&host), item(effective.as_deref().unwrap_or_default()));
     rv.set(v8::Array::new_with_elements(scope, &[why, host, effective]).into());
 }

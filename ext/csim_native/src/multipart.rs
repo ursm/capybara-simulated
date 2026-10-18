@@ -181,7 +181,7 @@ fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         let value = list.get_index(scope, k + 1);
         let entry = match value.and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) {
             Some(file) => {
-                let mut part = |i: u32| file.get_index(scope, i);
+                let part = |i: u32| file.get_index(scope, i);
                 let filename = part(0).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
                 let kind = part(1).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
                 let bytes = part(2).and_then(|v| v8::Local::<v8::String>::try_from(v).ok()).map(|s| {
