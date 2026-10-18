@@ -92,6 +92,10 @@ module Capybara
       # the map is bounded the way `@@asset_src` is: wipe and restart when it fills.
       MAX_ENTRIES = 4096
 
+      # A response header's value as one: a Rack 3 app may give it as an Array of its fields, which an HTTP response's
+      # header list combines with ", ".
+      def self.combined(value) = value.is_a?(Array) ? value.join(', ') : value
+
       def initialize
         @entries = {}
       end
@@ -204,22 +208,17 @@ module Capybara
 
       # Apps may return mixed-case header hashes on Rack 2; Rack 3 ships
       # lowercase. Normalise once per store/refresh so subsequent O(1)
-      # lookups work either way without per-call linear scans. On Rack 3
-      # delegate to `Rack::Headers` (its `[]=` canonicalises keys); Rack
-      # 2 has no such class — downcase keys into a plain Hash ourselves.
+      # lookups work either way without per-call linear scans — each value
+      # one String, its fields combined (`combined`: a `no-store` given as
+      # `['no-store']` is no-store, an ETag sent back as it was given). On
+      # Rack 3 delegate to `Rack::Headers` (its `[]=` canonicalises keys);
+      # Rack 2 has no such class — downcase keys into a plain Hash ourselves.
       # The `defined?` check is per-call because Rack loads after the gem
       # entry point requires this file.
       def ensure_lowercase(headers)
-        if defined?(::Rack::Headers)
-          return headers if headers.is_a?(::Rack::Headers)
-          out = ::Rack::Headers.new
-          headers.each {|k, v| out[k] = v }
-          out
-        else
-          out = {}
-          headers.each {|k, v| out[k.to_s.downcase] = v }
-          out
-        end
+        out = defined?(::Rack::Headers) ? ::Rack::Headers.new : {}
+        headers.each {|k, v| out[defined?(::Rack::Headers) ? k : k.to_s.downcase] = self.class.combined(v) }
+        out
       end
 
       DIRECTIVE_RE = /\A(?<key>[a-zA-Z-]+)(?:=(?<val>.+))?\z/

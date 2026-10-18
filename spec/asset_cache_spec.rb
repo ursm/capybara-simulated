@@ -28,6 +28,17 @@ RSpec.describe Capybara::Simulated::AssetCache do
     cache.clear
     expect(cache.lookup('http://app/a.js')).to be_nil
   end
+
+  # (…a header a Rack 3 app gives as an Array of its fields read as one: `no-store` given as `['no-store']` stored not
+  # at all, an ETag revalidated as it was given)
+  it 'reads Array fields as one' do
+    cache = described_class.new
+    cache.store('http://app/n', 200, {'cache-control' => ['no-store'], 'etag' => '"x"'}, 'body')
+    expect(cache.lookup('http://app/n')).to be_nil
+    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => ['"v1"'], 'content-length' => '4'}, 'body')
+    entry = cache.lookup('http://app/e')
+    expect(cache.revalidation_headers(entry)).to eq('If-None-Match' => '"v1"')
+  end
 end
 
 # …and the same contract seen from a session: a `reset!` between visits keeps an immutable

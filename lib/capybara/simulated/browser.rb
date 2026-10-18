@@ -4624,13 +4624,6 @@ module Capybara
         {'status' => status, 'headers' => headers, 'body' => body}
       end
 
-      private def normalize_response_headers(headers)
-        return {} unless headers
-        out = {}
-        headers.each {|k, v| out[k.to_s.downcase] = v.to_s }
-        out
-      end
-
       # ── Web Workers ────────────────────────────────────────────────
       #
       # `new Worker(url)` in JS lands in `worker_spawn`. The Ruby
@@ -9823,8 +9816,7 @@ module Capybara
           # target, so navigation keeps rendering the 3xx), so recognize it here and fail
           # directly — fetch-only (redirect-empty-location follow mode).
           if REDIRECT_STATUSES.include?(status.to_i)
-            raw_loc = resp_headers['location'] || resp_headers['Location']
-            raw_loc = raw_loc.first if raw_loc.is_a?(Array)
+            raw_loc = location_field(resp_headers)
             if raw_loc && raw_loc.to_s.empty?
               resp_body.close if resp_body.respond_to?(:close)
               return nil
@@ -9885,12 +9877,11 @@ module Capybara
       def trace_network(method, url, status, req_headers, req_body, resp_headers, resp_body, t0, redirected)
         return unless @trace
         ct = resp_headers && (resp_headers['content-type'] || resp_headers['Content-Type'])
-        ct = ct.first if ct.is_a?(Array)  # Rack 3 permits array-valued header fields
-        ct = ct.split(';', 2).first&.strip if ct.is_a?(String)   # "" → split is [] → first is nil
+        ct = header_text(ct).split(';', 2).first&.strip if ct   # "" → split is [] → first is nil
         size = if resp_body
                  resp_body.bytesize
                elsif (cl = resp_headers && (resp_headers['content-length'] || resp_headers['Content-Length']))
-                 (cl.is_a?(Array) ? cl.first : cl).to_i
+                 header_text(cl).to_i
                end
         log_network(method, url, status,
                     content_type:     (ct if ct.is_a?(String)),
@@ -11421,7 +11412,7 @@ module Capybara
       # frame's own `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service
       # worker's own COEP (it is never isolated here).
       private def cross_origin_isolated_response?
-        policy = ->(name) { (@last_response_headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last.then { Array(_1).first.to_s.split(';').first.to_s.strip } }
+        policy = ->(name) { (@last_response_headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last.then { header_text(_1).split(';').first.to_s.strip } }
         policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
       end
 
@@ -12087,7 +12078,7 @@ module Capybara
       # transparent-auth retry in rack_fetch answers.
       def www_authenticate_basic?(headers)
         return false unless headers.is_a?(Hash)
-        headers.each {|k, v| return true if k.to_s.casecmp?('www-authenticate') && v.to_s.strip.downcase.start_with?('basic') }
+        headers.each {|k, v| return true if k.to_s.casecmp?('www-authenticate') && header_text(v).strip.downcase.start_with?('basic') }
         false
       end
 
@@ -12177,7 +12168,7 @@ module Capybara
 
       # …a header's value as script reads it: its fields combined with `, `, each byte the code point it is.
       def header_text(value)
-        (value.is_a?(Array) ? value.join(', ') : value.to_s).b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+        AssetCache.combined(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
       end
 
       # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
@@ -12191,14 +12182,23 @@ module Capybara
       REDIRECT_DROPPED_HEADERS = %w[content-encoding content-language content-location content-type content-length].freeze
       def redirect_location(status, headers)
         return nil unless REDIRECT_STATUSES.include?(status.to_i)
-        loc = headers['location'] || headers['Location']
-        loc = loc.first if loc.is_a?(Array)   # Rack 3 permits array-valued header fields
+        loc = location_field(headers)
         # A blank (or absent) Location has no FOLLOWABLE target: an empty value parses back
         # to the current URL, so following it would just self-redirect. Return nil so a
         # caller renders the 3xx as-is rather than looping — the several navigation handlers
         # rely on this. (The fetch redirect loop recognizes a present-but-empty Location
         # separately and turns it into a network error per Fetch — see rack_fetch.)
         loc unless loc.to_s.empty?
+      end
+
+      # A response's Location, as Fetch's "location URL" extracts it: its field — Rack 3 permits an Array of them — or ''
+      # for more than one, which the one value Location takes cannot be ("extract header list values": failure; Chrome's
+      # ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION) and so has no followable target; nil for none (an empty Array too).
+      def location_field(headers)
+        loc = headers['location'] || headers['Location']
+        return loc unless loc.is_a?(Array)
+        return nil if loc.empty?
+        loc.uniq.one? ? loc.first : ''
       end
 
       # …parsed as the page parses a URL (url_ops.rs): Ruby's URI refused what the URL Standard keeps, and the URL came
