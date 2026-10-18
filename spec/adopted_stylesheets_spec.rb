@@ -177,5 +177,26 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
     JS
     expect(out).to eq([0, 3, false, 3, true, 2, true, false, 2])
   end
+  # …nor a `defineProperty` that would: an index defined as a sheet is set and cascades, one past the end is refused
+  # (WebIDL returns false — Chrome answers true, its length kept), a non-sheet throws, and the list stays whole.
+  it 'defines an index as it sets one' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const mk = (n) => { const s = new CSSStyleSheet(); s.replaceSync('#target { color: rgb(' + n + ', ' + n + ', ' + n + ') !important }'); return s; };
+        const [a, b] = [mk(1), mk(2)];
+        const list = document.adoptedStyleSheets;
+        const data = (value) => ({value, writable: true, enumerable: true, configurable: true});
+        const colour = () => getComputedStyle(document.getElementById('target')).color;
+        const out = [Reflect.defineProperty(list, '0', data(a)), list.length, colour()];
+        out.push(Reflect.defineProperty(list, '3', data(b)), list.length);
+        try { Reflect.defineProperty(list, '1', data('x')); out.push('no throw'); } catch (e) { out.push(e.name); }
+        out.push(list.push(b), colour());
+        return out;
+      })()
+    JS
+    expect(out).to eq([true, 1, 'rgb(1, 1, 1)', false, 1, 'TypeError', 2, 'rgb(2, 2, 2)'])
+  end
 end
 
