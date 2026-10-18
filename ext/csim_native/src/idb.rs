@@ -7,7 +7,7 @@
 // (clone.rs): its bytes.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -865,7 +865,8 @@ fn count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
 
 // A cursor (§2.10, §4.8): its transaction, its source (a store, or an index of one), its range and direction, whether
 // it reads keys only, its position (and an index cursor's object store position) — and whether it holds a record
-// ("got value"), and where its next iteration goes, as a `continue()` / `advance()` asked (`pending`).
+// ("got value"), and where its iterations go, each as the `continue()` / `advance()` that queued it asked, in order
+// (`pending`: a move a key's getter makes inside another's is a request of its own, which its own iteration reads).
 #[derive(Clone)]
 pub(crate) struct Cursor {
     pub(crate) tx: u32,
@@ -877,7 +878,7 @@ pub(crate) struct Cursor {
     position: Option<Key>,
     os_position: Option<Key>,
     got_value: bool,
-    pending: (Option<Key>, Option<Key>, u32),
+    pending: VecDeque<(Option<Key>, Option<Key>, u32)>,
 }
 
 // "Iterate a cursor" over `source` `count` times from `position` (an index cursor's `os_position` too, in a direction
@@ -946,7 +947,7 @@ fn cursor_open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let key_only = args.get(5).is_true();
     let id = with(|s| {
         let id = s.next_id();
-        let cursor = Cursor { tx, store, index, range, direction, key_only, position: None, os_position: None, got_value: false, pending: (None, None, 1) };
+        let cursor = Cursor { tx, store, index, range, direction, key_only, position: None, os_position: None, got_value: false, pending: VecDeque::new() };
         s.cursors.insert(id, cursor);
         id
     });
@@ -1041,7 +1042,7 @@ fn cursor_move<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackA
     with(|s| {
         if let Some(c) = s.cursors.get_mut(&id) {
             c.got_value = false;
-            c.pending = pending;
+            c.pending.push_back(pending);
         }
     });
     rv.set_uint32(MOVE_OK);
@@ -1056,11 +1057,11 @@ fn cursor_iterate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         let c = s.cursors.get(&id)?.clone();
         let st = s.stores.get(&c.store)?;
         let source = Source::of(st, c.index)?;
-        let (key, primary, count) = c.pending.clone();
+        let (key, primary, count) = c.pending.front().cloned().unwrap_or((None, None, 1));
         let landed = iterate_source(&source, c.index.is_some(), &c.range, c.direction, c.position.clone(), c.os_position.clone(), key, primary, count);
         let value = landed.as_ref().and_then(|(_, p)| (!c.key_only).then(|| st.records.get(p).map(|r| r.value.clone())).flatten());
         let c = s.cursors.get_mut(&id)?;
-        c.pending = (None, None, 1);
+        c.pending.pop_front();
         match &landed {
             Some((k, p)) => {
                 c.position = Some(k.clone());

@@ -533,6 +533,9 @@ impl Registry {
         }
         self.queues.retain(|k, _| k.partition != partition);
         self.transactions.retain(|_, t| t.db.partition != partition);
+        // (…and the cursors of the transactions gone with it, which no `finished` will come for)
+        let transactions = &self.transactions;
+        self.cursors.retain(|_, c| transactions.contains_key(&c.tx));
         self.connections.retain(|_, c| c.db.partition != partition);
     }
 }
