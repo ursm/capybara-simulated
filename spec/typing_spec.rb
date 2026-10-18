@@ -275,5 +275,16 @@ RSpec.describe 'typing into a text control' do
     expect(s.evaluate_script("(() => { const t = document.getElementById('t'); return [t.value, t.selectionStart, t.selectionEnd, document.getElementById('u').value]; })()"))
       .to eq(["1\n2\n3b", 0, 6, "a\nb"])
   end
+  # Keys sent to a container that takes no focus go to the focused element inside it, whatever the container's tag
+  # (chromedriver refuses such a target; this driver hands the keys on).
+  it 'hands the keys a focusless container is sent to the element focused inside it' do
+    html = '<!DOCTYPE html><meta charset=utf-8><section id=s><input id=i></section><ul id=u><li><input id=j></li></ul>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] }).tap {|session| session.visit '/' }
+    s.execute_script("document.getElementById('i').focus()")
+    s.find(:css, '#s').send_keys('x')
+    s.execute_script("document.getElementById('j').focus()")
+    s.find(:css, '#u').send_keys('y')
+    expect(s.evaluate_script("[document.getElementById('i').value, document.getElementById('j').value]")).to eq(%w[x y])
+  end
 end
 
