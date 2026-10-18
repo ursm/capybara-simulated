@@ -75,6 +75,25 @@ RSpec.describe 'Service Worker bindings' do
                 .catch(() => {}).then(() => self.skipWaiting()));
             });
           JS
+        # (…a router that answers `/hit` from the cache it filled while installing and `/named` from a cache that does
+        # not exist; once active, the members a script may replace replaced)
+        when '/router.js'
+          [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+            self.addEventListener('install', (e) => {
+              e.waitUntil(caches.open('filled').then((c) => c.put('/hit', new Response('cached'))));
+              e.addRoutes([
+                { condition: { urlPattern: new URLPattern({ pathname: '/hit' }) }, source: 'cache' },
+                { condition: { urlPattern: new URLPattern({ pathname: '/named' }) }, source: { cacheName: 'absent' } }
+              ]);
+            });
+            self.addEventListener('activate', () => {
+              const boom = () => { throw new Error('page member'); };
+              Object.defineProperty(self, 'caches', { get: boom, configurable: true });
+              CacheStorage.prototype.match = CacheStorage.prototype.open = Cache.prototype.match = boom;
+            });
+            self.addEventListener('fetch', () => {});
+          JS
+        when '/hit', '/named' then [200, {'content-type' => 'text/plain'}, ["network #{env['PATH_INFO']}"]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -179,5 +198,32 @@ RSpec.describe 'Service Worker bindings' do
       'clients' => [true, true, true, false, 'visible', 'InvalidAccessError', 'TypeError'],
       'events' => ['InvalidStateError', 'TypeError', true, true, nil, 'none', 'TypeError', 'none', true]
     )
+  end
+
+  # A router's `cache` source is the worker's cache storage itself ("Get Router Source Response"), not the members its
+  # script may have replaced: `/hit` comes from the cache filled while installing, `/named` — whose cache does not
+  # exist — from the network, and asking for it made no cache of that name.
+  it "answers a router's cache source from the storage, not the script's members" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__out = null;
+      (async () => {
+        const reg = await navigator.serviceWorker.register('/router.js', {scope: '/'});
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const frame = await new Promise((res) => {
+          const f = document.createElement('iframe');
+          f.src = '/blank';
+          f.addEventListener('load', () => res(f), {once: true});
+          document.body.appendChild(f);
+        });
+        const win = frame.contentWindow;
+        const text = async (path) => (await win.fetch(path)).text();
+        globalThis.__out = [!!win.navigator.serviceWorker.controller, await text('/hit'), await text('/named'), await caches.keys()];
+      })().catch((e) => { globalThis.__out = String(e); });
+    JS
+    poll_until { session.evaluate_script('globalThis.__out !== null') }
+    expect(session.evaluate_script('globalThis.__out')).to eq([true, 'cached', 'network /named', ['filled']])
   end
 end
