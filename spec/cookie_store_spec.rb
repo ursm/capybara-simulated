@@ -2,12 +2,15 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # A session's cookies are its cookie store's, the engine's (cookie_jar.rs), as RFC 6265bis has a user agent keep them: a
 # cookie set with a Domain goes to every host that domain-matches it — a public suffix none — one set with a Path only to
 # the paths under it, an HttpOnly one to no `document.cookie`, an expired one nowhere, and a `__Host-` one only where it
 # is Secure, host-only and at `/`. (They had been a name → value table per host, which read none of these.)
 RSpec.describe 'the cookie store' do
+  include PollUntil
+
   let(:seen) { [] }
   let(:app) {
     seen = self.seen
@@ -15,6 +18,10 @@ RSpec.describe 'the cookie store' do
       req = Rack::Request.new(env)
       seen << [req.host, req.path, env['HTTP_COOKIE'].to_s]
       case req.path
+      when '/sandboxed-worker'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe sandbox="allow-scripts" srcdoc="<script>const w = new Worker(\'http://www.example.com/w.js\'); w.onerror = () => parent.postMessage(\'error\', \'*\');</script>"></iframe><script>window.onmessage = (e) => { window.got = e.data; };</script>']]
+      when '/w.js'
+        [200, {'content-type' => 'text/javascript'}, ['']]
       when '/sandboxed'
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe sandbox="allow-scripts" srcdoc="<script>try { document.cookie; parent.postMessage(\'read\', \'*\'); } catch (e) { parent.postMessage(e.name, \'*\'); }</script>"></iframe><script>window.onmessage = (e) => { window.got = e.data; };</script>']]
       when '/set'
@@ -111,5 +118,14 @@ RSpec.describe 'the cookie store' do
     s = simulated_session(app)
     s.visit 'http://www.example.com/page'
     expect(seen).to eq('plain' => 'http://www.example.com/page', 'none' => nil, 'bogus' => 'http://www.example.com/page')
+  end
+
+  # …nor may it run a worker from an http(s) script: no script is same-origin with an opaque origin, so its fetch is a
+  # network error and the worker's `error` fires (HTML "fetch a classic worker script", mode same-origin).
+  it 'fails a sandboxed document a worker' do
+    s = simulated_session(app)
+    s.visit 'http://www.example.com/sandboxed-worker'
+    expect(poll_until { s.evaluate_script('window.got') }).to eq('error')
+    expect(seen.map {|_, path, _| path }).not_to include('/w.js')
   end
 end

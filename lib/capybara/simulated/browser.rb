@@ -3619,8 +3619,8 @@ module Capybara
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
-      def rack_fetch_body(url, cors_mode: nil, client_url: nil)
-        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url)
+      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -4691,7 +4691,8 @@ module Capybara
         body = if service && (pending = (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_body))
           pending
         elsif !sw_script
-          fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id))
+          fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id),
+                              opaque: creator_key.to_s.start_with?('opaque:'))
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -4739,7 +4740,15 @@ module Capybara
         # (…a dedicated worker's site for cookies its owner document's, kept as it was made — HTML's worker settings —
         # which its fetches, on its own thread, are judged by; a nested worker's its parent's)
         unless service
-          record[:site_for_cookies] = parent_worker ? @workers.dig(parent_worker, :site_for_cookies) : site_for_cookies(realm_id)
+          # (…an opaque origin's none: a sandboxed frame's)
+          record[:site_for_cookies] =
+            if creator_key.to_s.start_with?('opaque:')
+              nil
+            elsif parent_worker
+              @workers.dig(parent_worker, :site_for_cookies)
+            else
+              site_for_cookies(realm_id)
+            end
         end
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
@@ -9225,7 +9234,9 @@ module Capybara
       # A worker's script, of `url`: an http(s) one fetched in mode 'same-origin' against its creator's URL `client_url` —
       # a cross-origin URL or redirect a network error, as for a classic and a module worker alike (HTML "fetch a classic
       # worker script", "fetch a single module script") — which fires the worker's `error`.
-      private def fetch_worker_script(url, client_url)
+      # (…its client of an opaque origin — a sandboxed frame's — one no http(s) script is same-origin with: a network error,
+      # the worker's `error`)
+      private def fetch_worker_script(url, client_url, opaque: false)
         u = url.to_s
         if u.start_with?('blob:')
           # Resolve via the Driver's partition store so a SAME-partition blob created
@@ -9248,7 +9259,7 @@ module Capybara
         # from a data: URL — its origin is opaque, so its blob: URLs serialize
         # with a 'null' origin). Decode inline; Rack can't serve a data: URL.
         return decode_data_url_body(u) if u.start_with?('data:')
-        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url)
+        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url, client_origin: opaque ? 'null' : nil)
       end
 
       # The decoded body of a `data:` URL, by Fetch's data: URL processor (the engine's, the page's too) — empty for one
@@ -11951,6 +11962,8 @@ module Capybara
         urls = []
         rid  = realm_id.to_i
         while rid.positive? && !@runtime.top_level_realm?(rid)
+          return nil if frame_document_origin_opaque?(rid)   # (…a document of an opaque origin is of no site at all)
+
           urls << frame_realm_url(rid)
           rid = @runtime.frame_realm_parent(rid).to_i
         end
