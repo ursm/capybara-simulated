@@ -866,6 +866,16 @@ module Capybara
       MAX_FRAME_DEPTH = 16
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
+      # The frame realms being made, until they are registered as alive: a frame's document still parsing, whose own
+      # inline scripts run first — and the URL one has (its location's), which a descendant's cookies ask after (nil
+      # for no such realm).
+      def loading_frame_realms = (@loading_frame_realms ||= {})
+      def loading_frame_realm_url(realm_id)
+        realm = loading_frame_realms[realm_id] or return nil
+        realm.call('__csimLocationHref').to_s
+      rescue StandardError
+        nil
+      end
 
       # A frame whose document URL is opaque — about:blank (empty src), about:srcdoc,
       # or empty — has no scope of its own; its controller is inherited from the
@@ -907,6 +917,7 @@ module Capybara
         # never trips.
         frame_realm_depths[realm.id]  = depth
         frame_realm_parents[realm.id] = parent_id.to_i   # owning realm, for contentWindow-reached rebuilds
+        loading_frame_realms[realm.id] = realm           # (…its URL asked for while it loads: loading_frame_realm_url)
         seed_realm_bridge(realm)
         # Wire `parent` / `top` to the realm that owns this iframe (its context
         # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
@@ -1030,6 +1041,7 @@ module Capybara
           end
         end
         frame_realms[realm.id] = realm
+        loading_frame_realms.delete(realm.id)
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual
         # `window.onload = () => parent.postMessage(...)` a frame reports back

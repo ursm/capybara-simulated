@@ -10458,7 +10458,8 @@ module Capybara
         entry[:form_state] = capture_frame_form_state(realm_id) if entry
       end
       def frame_realm_url(realm_id)
-        return nil unless @runtime.frame_realm_alive?(realm_id)
+        return @runtime.loading_frame_realm_url(realm_id) unless @runtime.frame_realm_alive?(realm_id)
+
         @runtime.realm_call(realm_id, '__csimLocationHref').to_s
       rescue StandardError
         nil
@@ -11034,17 +11035,21 @@ module Capybara
       # Every cookie of the session gone (WebDriver "Delete All Cookies", which the WPT harness's testdriver asks for).
       def delete_all_cookies = Native.cookie_jar_clear(@cookie_jar)
 
-      # `document.cookie` reads/writes the cookies of a document's URL (`url`, the document's own: its path, its host);
-      # one that is no http(s) one's — about:blank, srcdoc — those of the document that embeds it (realm `realm`'s
-      # parent, and so on up: its creator's, as Chrome's cookie URL is), else the session's default host.
+      # `document.cookie` reads/writes the cookies of a document's cookie URL (`url`, Chrome's: its own, or an about:blank
+      # / srcdoc frame's creator's, which the bindings find); a top-level window's about:blank one its opener's (realm
+      # `realm`'s, a window realm's; this window's, another window's browser), else the session's default host.
       def document_cookie_url(url = nil, realm = nil)
-        rid = realm.to_i
-        until url.to_s.match?(%r{\Ahttps?://}i) || !rid.positive? || @runtime.top_level_realm?(rid)
-          rid = @runtime.frame_realm_parent(rid).to_i
-          url = rid.positive? ? frame_realm_url(rid) : @current_url
-        end
-        url = current_browsing_context_url if realm.nil? && !url.to_s.match?(%r{\Ahttps?://}i)
+        url = opener_cookie_url(realm) unless url.to_s.match?(%r{\Ahttps?://}i)
         cookie_host(url) ? url : @default_host
+      end
+      private def opener_cookie_url(realm)
+        rid = realm.to_i
+        if rid.positive?
+          opener = @runtime.window_realm_meta.dig(rid, :opener_id).to_i
+          return opener.positive? ? frame_realm_url(opener) : @current_url
+        end
+        handle = opener_handle
+        handle && @driver.window_browser(handle)&.current_url
       end
 
       # (…its text: HTML's UTF-8 decode of the bytes) — in the browsing context of realm `realm`, cross-site for cookies
@@ -11895,8 +11900,9 @@ module Capybara
         while rid.positive? && !@runtime.top_level_realm?(rid)
           parent       = @runtime.frame_realm_parent(rid).to_i
           ancestor_url = parent.positive? ? frame_realm_url(parent) : @current_url
-          # (…an ancestor of an opaque origin — a `data:` document's — is of no site at all: cross-site)
-          return true if ancestor_url.to_s.match?(/\Adata:/i) || sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'
+          # (…an ancestor of an opaque origin — a `data:` document's — is of no site at all, nor one whose URL is not
+          # known: cross-site, closed rather than open)
+          return true if ancestor_url.nil? || ancestor_url.to_s.match?(/\Adata:/i) || sec_fetch_site(ancestor_url, target_url.to_s) == 'cross-site'
 
           rid = parent
         end
