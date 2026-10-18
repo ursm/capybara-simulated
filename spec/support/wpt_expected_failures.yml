@@ -40,6 +40,159 @@ IndexedDB/file_support.sub.html:
 - Sliced file can be stored and retrieved from IndexedDB
 IndexedDB/serialize-sharedarraybuffer-throws.https.html:
 - 'IndexedDB: Attempting to serialize a SharedArrayBuffer should throw'
+cookies/attributes/attributes-ctl.sub.html:
+- Cookie with %x9 after Secure attribute is handled correctly.
+cookies/attributes/domain.sub.html:
+- Cookie returned for bare domain attribute following mismatched domain attribute
+  (after redirect to same-origin page).
+- Cookies with same name, path, and domain (differing only in leading '.') overwrite
+  each other ('.' first)
+- Cookies with same name, path, and domain (differing only in leading '.') overwrite
+  each other ('.' second)
+- Empty domain treated as host cookie 1
+- Empty domain treated as host cookie 2
+- Empty domain treated as host cookie 3
+- No cookie returned for cookie set on different domain (with no domain attribute)
+- No cookie returned for domain attribute mismatch (first attribute doesn't, second
+  does, third doesn't)
+- No cookie returned for domain attribute mismatch (first attribute matches, but second
+  does not)
+- No cookie returned for domain attribute value between quotes
+- No cookie returned for domain attribute value with port
+- No cookie returned for domain attribute with TLD as value
+- No cookie returned for domain attribute with TLD as value, with leading '.'
+- No cookie returned for domain attribute with TLD as value, with leading and trailing
+  '.'
+- No cookie returned for domain attribute with double leading '.'
+- No cookie returned for domain attribute with subdomain followed by ..
+- No cookie returned for domain attribute with trailing '.'
+- No cookie returned for domain attribute with trailing '..'
+- No cookie returned for domain attribute with trailing whitespace and '.'
+- No cookie returned for domain attribute with whitespace that surrounds a leading
+  '.'
+- No cookie returned for domain mismatch (first attribute is a different subdomain
+  and second is bare)
+- No cookie returned for domain mismatch (subdomains differ, with leading '.')
+- No cookie returned for domain mismatch when cookie was created (which would match
+  after the redirect, with one subdomain level)
+- No cookie returned for domain mismatch when cookie was created (which would match
+  after the redirect, with two subdomain levels)
+- No cookie returned for domain with single dot ('.') value.
+- No cookie returned when domain attribute does not domain-match (and first does)
+- No cookie set on domain mismatch before a (domain matching) redirect
+- No cookie set on domain mismatch before a (domain matching) redirect (for second
+  level subdomain)
+- No host cookies returned for host cookies after non-host redirect 1
+- No host cookies returned for host cookies after non-host redirect 2
+- No host cookies returned for host cookies after non-host redirect 3
+- Return cookie for a domain match with leading whitespace and '.'
+- Return cookie for domain attribute match (first does not, but second does)
+- Return cookie for domain match (domain attribute is suffix of the host name and
+  first level subdomain)
+- Return cookie for domain match (domain attribute is suffix of the host name and
+  first level subdomain, with leading '.')
+- Return cookie for domain match (domain attribute is suffix of the host name)
+- Return cookie for domain match (domain attribute is suffix of the host name, with
+  leading '.')
+- Return cookie for domain match (first attribute doesn't, but second does)
+- Return cookie for domain match (first attribute matches, second doesn't, third does)
+- Return cookie for domain match (with bizarre capitalization for domain attribute
+  value)
+- Return cookie for domain match (with first domain attribute a match for host name
+  and second as suffix of host name)
+- Return cookie for domain match (with first domain attribute as suffix of host name
+  and second a bare attribute)
+- Return cookie for domain match (with first domain attribute as suffix of host name
+  and second a match for host name)
+- Return cookie for domain match (with two identical domain attributes)
+- Return cookie set with bare domain= attribute
+- Return cookie that domain-matches with bizarre-cased URL
+- Return cookie with valid domain after domain with single dot ('.') value.
+- Return multiple cookies that match on domain (with and without leading '.')
+- Return multiple cookies that match on domain (without and with leading '.')
+- Return multiple cookies that match on domain and subdomain (with and without leading
+  '.')
+- Return multiple cookies that match on subdomain and domain (without and with leading
+  '.')
+- "[harness] TIMEOUT"
+cookies/attributes/secure-non-secure.html:
+- "[harness] TIMEOUT"
+cookies/domain/domain-attribute-host-with-and-without-leading-period.sub.https.html:
+- Domain=.web-platform.test => Second value available via `document.cookie`
+- Domain=.web-platform.test => Second value sent with same-origin requests.
+- Domain=.web-platform.test => Second value sent with subdomain requests.
+cookies/domain/domain-attribute-host-with-leading-period.sub.https.html:
+- Domain=.web-platform.test => available via `document.cookie`
+- Domain=.web-platform.test => sent with same-origin requests.
+- Domain=.web-platform.test => sent with subdomain requests.
+cookies/domain/domain-attribute-idn-host.sub.https.html:
+- IDN with invalid UTF-8 bytes in domain attribute
+- punycode IDN in domain attribute
+cookies/domain/domain-attribute-matches-host.sub.https.html:
+- Domain=web-platform.test => available via `document.cookie`
+- Domain=web-platform.test => sent with same-origin requests.
+- Domain=web-platform.test => sent with subdomain requests.
+cookies/name/name-ctl.html:
+- Cookie with %xa in name is rejected or modified (HTTP).
+- Cookie with %xd in name is rejected or modified (HTTP).
+cookies/navigated-away.html:
+- document.cookie behavior on documents without browser context
+cookies/origin-bound-cookies/port-bound-cookies.html:
+- Cookies should be bound to their origin's port.
+cookies/origin-bound-cookies/scheme-bound-cookies.https.html:
+- Check scheme bounding behavior is working.
+cookies/partitioned-cookies/partitioned-cookies-samesite-attribute.https.html:
+- In top-level contexts, partitioned cookies can be set with all SameSite attributes.
+- In top-level contexts, partitioned cookies default to the same SameSite attribute
+  as unpartitioned cookies.
+cookies/samesite/fetch.https.html:
+- Cross-site redirecting to same-host fetches are cross-site
+- Cross-site redirecting to subdomain fetches are cross-site
+cookies/samesite/get_all_cookies-default-samesite.html:
+- Get all cookies w/ default SameSite
+cookies/samesite/get_named_cookie-default-samesite.html:
+- Get Named cookie  w/ default SameSite
+cookies/samesite/iframe-reload.https.html:
+- Reloaded cross-site fetches are cross-site
+cookies/samesite/iframe.https.html:
+- Cross-site fetches are cross-site
+- Cross-site navigating to cross-site fetches are cross-site
+- Cross-site navigating to same-host fetches are cross-site
+- Cross-site navigating to subdomain fetches are cross-site-site
+- Cross-site redirecting to cross-site fetches are cross-site
+- Same-host navigating to cross-site fetches are cross-site
+- Same-host redirecting to cross-site fetches are cross-site
+- Subdomain navigating to cross-site fetches are cross-site
+- Subdomain redirecting to cross-site fetches are cross-site
+cookies/samesite/img.https.html:
+- Cross-site images are cross-site
+- Cross-site redirecting to cross-site images are cross-site
+- Cross-site redirecting to same-host images are cross-site
+- Cross-site redirecting to subdomain images are cross-site
+- Same-host redirecting to cross-site images are cross-site
+- Subdomain redirecting to cross-site images are cross-site
+cookies/samesite/multiple-samesite-attributes.https.html:
+- Cross-site redirecting to same-host images are cross-site
+- Cross-site redirecting to subdomain images are cross-site
+cookies/samesite/sandbox-iframe-nested.https.html:
+- SameSite cookies with intervening sandboxed iframe and navigation
+cookies/samesite/sandbox-iframe-subresource.https.html:
+- SameSite cookies with intervening sandboxed iframe and subresources
+cookies/samesite/setcookie-lax.https.html:
+- Cross-site window shouldn't be able to set `SameSite=Lax` or `SameSite=Strict` cookies.
+cookies/secure/set-from-dom.https.sub.html:
+- "'secure' cookie visible in HTTP request"
+- "'secure' cookie visible in `document.cookie`"
+cookies/secure/set-from-http.https.sub.html:
+- "'secure' cookie present in `document.cookie`"
+- "'secure' cookie sent in HTTP request"
+cookies/secure/set-from-wss.https.sub.html:
+- "'secure' cookie not sent in HTTP request"
+cookies/value/value-ctl.html:
+- Cookie with %xa in name is rejected or modified (HTTP).
+- Cookie with %xd in name is rejected or modified (HTTP).
+cookies/value/value.html:
+- Set cookie but ignore value after LF
 css/css-animations/animate-with-background-color-oklch-002.html:
 - Animate from legacy rgb to color-mix oklch
 - Animate from legacy rgb to oklch

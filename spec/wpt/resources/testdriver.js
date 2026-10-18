@@ -610,7 +610,12 @@
     set_test_context: function () {},
     set_timeout_multiplier: function () {},
     get_computed_label: function () { return Promise.resolve(''); },
-    get_computed_role: function () { return Promise.resolve(''); }
+    get_computed_role: function () { return Promise.resolve(''); },
+    // WebDriver "Delete All Cookies": the session's cookie store emptied (the host's, cookie_jar.rs) — every cookie, not
+    // only those of the active document's address, which is all a test that starts from none tells apart.
+    delete_all_cookies: function () {
+      try { globalThis.__csimDeleteAllCookies(); return Promise.resolve(); } catch (e) { return Promise.reject(e); }
+    }
   };
 
   W.test_driver = test_driver;

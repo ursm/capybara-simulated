@@ -56,7 +56,8 @@ const HTTP: u32 = 1;
 // …over a secure channel (https, or a host the host takes as potentially trustworthy);
 const SECURE: u32 = 2;
 // …for a request that is cross-site ("site for cookies"), where only a SameSite=None cookie goes — but a Lax one (and
-// one of none) too where it is a top-level navigation by a safe method (`LAX_OK`)…
+// one of none) too where it is a top-level navigation by a safe method (`LAX_OK`; setting one, any top-level
+// navigation's response)…
 const CROSS_SITE: u32 = 4;
 const LAX_OK: u32 = 8;
 
@@ -174,8 +175,11 @@ struct Parsed {
     value: String,
     expires: Option<f64>,
     max_age: Option<f64>,
+    // (…the last Domain and Path attributes', and whether there was any)
     domain: Option<String>,
+    has_domain: bool,
     path: Option<String>,
+    has_path: bool,
     secure: bool,
     http_only: bool,
     same_site: SameSite,
@@ -188,7 +192,8 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
     let trim = |s: &str| s.trim_matches([' ', '\t']).to_owned();
     let (pair, attributes) = line.split_once(';').map_or((line, ""), |(p, a)| (p, a));
     let (name, value) = pair.split_once('=').map_or((String::new(), trim(pair)), |(n, v)| (trim(n), trim(v)));
-    if (name.is_empty() && value.is_empty()) || name.len() + value.len() > 4096 {
+    // (…its lengths in octets: each character one, a byte of the bytes it was)
+    if (name.is_empty() && value.is_empty()) || name.chars().count() + value.chars().count() > 4096 {
         return None;
     }
     let mut parsed = Parsed {
@@ -197,14 +202,16 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
         expires: None,
         max_age: None,
         domain: None,
+        has_domain: false,
         path: None,
+        has_path: false,
         secure: false,
         http_only: false,
         same_site: SameSite::Default,
     };
     for av in attributes.split(';') {
         let (key, value) = av.split_once('=').map_or((trim(av), String::new()), |(k, v)| (trim(k), trim(v)));
-        if value.len() > 1024 {
+        if value.chars().count() > 1024 {
             continue;
         }
         match key.to_ascii_lowercase().as_str() {
@@ -221,11 +228,15 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
                 }
             }
             "domain" => {
+                parsed.has_domain = true;
                 if !value.is_empty() {
                     parsed.domain = Some(value.strip_prefix('.').unwrap_or(&value).to_ascii_lowercase());
                 }
             }
-            "path" => parsed.path = value.starts_with('/').then_some(value),
+            "path" => {
+                parsed.has_path = true;
+                parsed.path = value.starts_with('/').then_some(value);
+            }
             "secure" => parsed.secure = true,
             "httponly" => parsed.http_only = true,
             "samesite" => {
@@ -242,6 +253,12 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
     Some(parsed)
 }
 
+// The cookie name prefixes (§4.1.3).
+const PREFIXES: [&str; 4] = ["__Secure-", "__Host-", "__Http-", "__Host-Http-"];
+fn starts_with_ignoring_case(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len()).is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
 // ── Storing (§5.7) ───────────────────────────────────────────────────────────────────────────────────────────────────
 // A request URL's host (lowercased, as a URL's is) and path — None for one with no host.
 fn host_and_path(url: &str) -> Option<(String, String)> {
@@ -256,8 +273,7 @@ impl Jar {
         let Some(p) = parse(line, now) else { return };
         let (http, secure_channel) = (context & HTTP != 0, context & SECURE != 0);
         // (…a nameless cookie whose value would read as a prefixed name: none)
-        let lower_value = p.value.to_ascii_lowercase();
-        if p.name.is_empty() && (lower_value.starts_with("__secure-") || lower_value.starts_with("__host-")) {
+        if p.name.is_empty() && PREFIXES.iter().any(|prefix| starts_with_ignoring_case(&p.value, prefix)) {
             return;
         }
         let expiry = p.max_age.or(p.expires);
@@ -283,8 +299,12 @@ impl Jar {
         if (p.secure && !secure_channel) || (p.http_only && !http) {
             return;
         }
-        // SameSite=None needs Secure (Chrome, and the draft's "SameSite=None requires Secure").
+        // SameSite=None needs Secure (Chrome, and the draft's "SameSite=None requires Secure"); any other is not stored
+        // from a cross-site response but a top-level navigation's (§5.7 step 15: `CROSS_SITE`, `LAX_OK`).
         if p.same_site == SameSite::None && !p.secure {
+            return;
+        }
+        if p.same_site != SameSite::None && context & CROSS_SITE != 0 && context & LAX_OK == 0 {
             return;
         }
         // A non-secure channel may not shadow a Secure cookie of the name whose domain and path are its (§5.7 step 16).
@@ -293,12 +313,16 @@ impl Jar {
         }) {
             return;
         }
-        // The prefixes: `__Secure-` Secure, `__Host-` Secure, host-only and at `/` (case-insensitively, §5.7 step 19-20).
-        let lower_name = p.name.to_ascii_lowercase();
-        if lower_name.starts_with("__secure-") && !p.secure {
+        // The prefixes, case-insensitively (§5.7 steps 19-22): `__Secure-` Secure; `__Host-` Secure, with no Domain
+        // attribute and a Path one of `/`; `__Http-` Secure and HttpOnly, set through HTTP; `__Host-Http-` both.
+        let prefixed = |prefix: &str| starts_with_ignoring_case(&p.name, prefix);
+        if prefixed("__Secure-") && !p.secure {
             return;
         }
-        if lower_name.starts_with("__host-") && !(p.secure && host_only && path == "/") {
+        if prefixed("__Host-") && !(p.secure && !p.has_domain && p.has_path && path == "/") {
+            return;
+        }
+        if (prefixed("__Http-") || prefixed("__Host-Http-")) && !(p.secure && p.http_only && http) {
             return;
         }
         let same = |c: &Cookie| c.name == p.name && c.domain == domain && c.host_only == host_only && c.path == path;
@@ -483,9 +507,33 @@ mod tests {
             ("https://a.test/", "__Secure-b=2; Secure", H | SECURE),
             ("https://a.test/", "__Host-c=3; Secure; Path=/; Domain=a.test", H | SECURE),
             ("https://a.test/", "__Host-d=4; Secure; Path=/", H | SECURE),
+            ("https://a.test/", "__Host-e=5; Secure", H | SECURE),
+            ("https://a.test/", "__Http-f=6; Secure; Path=/", H | SECURE),
+            ("https://a.test/", "__Http-g=7; Secure; HttpOnly; Path=/", H | SECURE),
+            ("https://a.test/", "__Host-Http-h=8; Secure; Path=/", H | SECURE),
+            ("https://a.test/", "__Host-Http-i=9; Secure; HttpOnly; Path=/", H | SECURE),
+            ("https://a.test/", "__http-j=10; Secure; HttpOnly; Path=/", SECURE),
             ("https://a.test/", "lone", H | SECURE),
             ("https://a.test/", "=__Host-x", H | SECURE),
         ]);
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "__Secure-b=2; __Host-d=4; lone");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "__Secure-b=2; __Host-d=4; __Http-g=7; __Host-Http-i=9; lone");
+        // (…a Domain attribute naming the host's public suffix leaves a `__Host-` one out too)
+        let mut g = jar(&[("https://github.io/", "__Host-gh=1; Secure; Path=/; Domain=github.io", H | SECURE)]);
+        assert_eq!(g.retrieve("https://github.io/", H | SECURE, NOW), "");
+    }
+
+    #[test]
+    fn measures_octets_and_keeps_same_site_cookies_from_cross_site_responses_out() {
+        let big = format!("big={}", "\u{e9}".repeat(2200));
+        let mut j = jar(&[
+            ("https://a.test/", &big, H | SECURE),
+            ("https://a.test/", "lax=1; SameSite=Lax", H | SECURE | CROSS_SITE),
+            ("https://a.test/", "def=1", H | SECURE | CROSS_SITE),
+            ("https://a.test/", "none=1; SameSite=None; Secure", H | SECURE | CROSS_SITE),
+            ("https://a.test/", "nav=1; SameSite=Strict", H | SECURE | CROSS_SITE | LAX_OK),
+        ]);
+        let got = j.retrieve("https://a.test/", H | SECURE, NOW);
+        assert!(got.starts_with("big="));
+        assert!(got.ends_with("; none=1; nav=1"));
     }
 }
