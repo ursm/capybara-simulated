@@ -41,7 +41,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "blobUrlKey", blob_url_key, context_id);
     register(scope, ns, "blobUrlSet", blob_url_set, context_id);
     register(scope, ns, "blobUrlGet", blob_url_get, context_id);
-    register(scope, ns, "blobUrlRealm", blob_url_realm, context_id);
     register(scope, ns, "blobUrlDelete", blob_url_delete, context_id);
 }
 
@@ -71,13 +70,6 @@ fn blob_url_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some((_, blob)) = dom(scope).arena.blob_urls.0.get(&url) else { return };
     let blob = blob.clone();
     rv.set(v8::Local::new(scope, blob).into());
-}
-
-// __dom.blobUrlRealm(url) -> whether the calling realm made the blob `url` resolves to.
-fn blob_url_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let cid = realm_id(scope, &args);
-    rv.set_bool(dom(scope).arena.blob_urls.made_by(&url, cid));
 }
 
 // __dom.blobUrlDelete(url): `url` names no blob any more — revoked (the origin's check the bindings', before), or

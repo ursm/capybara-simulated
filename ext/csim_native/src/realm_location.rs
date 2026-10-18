@@ -134,7 +134,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "realmOriginKey", realm_origin_key, context_id);
     register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
-    register(scope, ns, "sandboxedOrigin", sandboxed_origin, context_id);
     register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
     register(scope, ns, "setDomain", set_domain_op, context_id);
     register(scope, ns, "ipHost", ip_host_op, context_id);
@@ -239,12 +238,6 @@ fn set_origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let key = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
     realm(scope, cid).location.origin_key = key;
-}
-
-// __dom.sandboxedOrigin() -> whether the calling realm's document has a new opaque origin, sandboxed (`sandboxed`).
-fn sandboxed_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_bool(realm(scope, cid).location.sandboxed);
 }
 
 // __dom.locationPart(part) -> the realm's URL's part number `part` (url_ops.rs `parts`' order) — its origin the one a
@@ -412,6 +405,27 @@ mod tests {
         let mut location = RealmLocation::default();
         location.set_url(href);
         location
+    }
+
+    #[test]
+    fn a_frame_document_takes_its_origins() {
+        let mut arena = RealmArena::default();
+        arena.location = at("http://a.test/p");
+        let inherited = (Some("http://a.test".to_owned()), Some("null"));
+        for url in ["", "about:blank#x", "JAVASCRIPT:void 0"] {
+            assert_eq!(frame_origins(&mut arena, 0, url, None, None), inherited, "{url}");
+        }
+        for url in ["http://b.test/", "data:,x", "blob:http://a.test/0000"] {
+            assert_eq!(frame_origins(&mut arena, 0, url, None, None), (None, None), "{url}");
+        }
+        assert_eq!(frame_origins(&mut arena, 0, "http://b.test/", Some(""), None), (Some("null".to_owned()), None));
+        assert_eq!(frame_origins(&mut arena, 0, "", Some("allow-same-origin"), None), inherited);
+        assert_eq!(frame_origins(&mut arena, 0, "http://a.test/", None, Some("sandbox")), (Some("null".to_owned()), None));
+        // (…an opaque origin inherited, its key with it; a sandboxed creator's frames each a new one)
+        arena.location.set_document_origin(Some("null|k".to_owned()));
+        assert_eq!(frame_origins(&mut arena, 0, "", None, None), (Some("null|k".to_owned()), Some("null")));
+        arena.location.set_document_origin(Some("null".to_owned()));
+        assert_eq!(frame_origins(&mut arena, 0, "", None, None), (Some("null".to_owned()), Some("null")));
     }
 
     #[test]

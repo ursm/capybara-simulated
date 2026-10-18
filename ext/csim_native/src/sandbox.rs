@@ -34,17 +34,6 @@ pub(crate) fn opaque_origin(csp: Option<&str>, attribute: Option<&str>) -> bool 
     !sources.is_empty() && !sources.iter().all(|s| allows_same_origin(s))
 }
 
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "sandboxedOpaque", opaque_op, context_id);
-}
-// __dom.sandboxedOpaque(cspHeader, sandboxAttribute) -> `opaque_origin` (null for either none).
-fn opaque_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| (!v.is_null_or_undefined()).then(|| v.to_rust_string_lossy(scope));
-    let csp = text(scope, args.get(0));
-    let attribute = text(scope, args.get(1));
-    rv.set_bool(opaque_origin(csp.as_deref(), attribute.as_deref()));
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
