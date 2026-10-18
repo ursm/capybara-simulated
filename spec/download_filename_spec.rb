@@ -25,17 +25,18 @@ RSpec.describe 'a download' do
       '/ext'  => %q{attachment; filename*=UTF-8''%C3%A9t%C3%A9.csv; filename="fallback.csv"},
       '/raw'  => "attachment; filename=\"caf\xC3\xA9.txt\"".b,
       '/path' => 'attachment; filename="../../escape.txt"',
+      '/nul'  => %q{attachment; filename*=UTF-8''a%00b.txt; filename="plain.txt"},
       '/bad'  => "attachment; filename=\"bad\xE9.txt\"".dup.force_encoding('UTF-8')
     }
     app = lambda {|env|
       next [200, {'content-type' => 'text/plain', 'content-disposition' => dispositions[env['PATH_INFO']]}, ['x']] if dispositions.key?(env['PATH_INFO'])
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="/ext">e</a><a href="/raw">r</a><a href="/path">p</a><a href="/bad" download>b</a>']]
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="/ext">e</a><a href="/raw">r</a><a href="/path">p</a><a href="/nul">n</a><a href="/bad" download>b</a>']]
     }
     s = simulated_session(app)
-    %w[e r p b].each do |link|
+    %w[e r p n b].each do |link|
       s.visit '/'
       s.click_link link
     end
-    expect(Dir.children(@dir).sort).to eq(%w[badé.txt café.txt escape.txt été.csv].sort)
+    expect(Dir.children(@dir).sort).to eq(%w[badé.txt café.txt escape.txt plain.txt été.csv].sort)
   end
 end

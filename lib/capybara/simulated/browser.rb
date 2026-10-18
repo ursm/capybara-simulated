@@ -9888,9 +9888,9 @@ module Capybara
                     size:             size,
                     duration_ms:      (t0 && ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).round),
                     redirected:       (redirected || nil),
-                    request_headers:  normalize_trace_headers(req_headers),
+                    request_headers:  normalize_trace_headers(req_headers) {|v| Array(v).join(', ') },
                     request_body:     (req_body && !req_body.to_s.empty? ? cap_trace_body(req_body) : nil),
-                    response_headers: normalize_trace_headers(resp_headers),
+                    response_headers: normalize_trace_headers(resp_headers) {|v| header_text(v) },
                     response_body:    (resp_body ? cap_trace_body(resp_body) : nil))
       rescue StandardError => e
         # A trace-logging bug must NEVER break the real fetch: rack_fetch's
@@ -9916,6 +9916,8 @@ module Capybara
         s.bytesize > NETWORK_BODY_CAP ? (s.byteslice(0, NETWORK_BODY_CAP).scrub + "\n…[truncated, #{s.bytesize} bytes total]") : s
       end
 
+      # Each of the headers as one line of text, which the block reads: a request's are the page's text already, a
+      # response's are the server's bytes.
       def normalize_trace_headers(headers)
         return nil unless headers
         headers.each_with_object({}) do |(k, v), out|
@@ -9923,7 +9925,7 @@ module Capybara
           # phrase (response_hash lifts it into statusText); it's never a real wire
           # header, so keep it out of the trace.
           next if k.to_s.downcase == 'x-csim-status-text'
-          out[k.to_s] = header_text(v)
+          out[k.to_s] = yield(v)
         end
       end
 
@@ -11720,10 +11722,10 @@ module Capybara
       # save path here keeps the page state unchanged (no rebuild),
       # mirroring what a real browser does after a download.
       # The filename a Content-Disposition gives (RFC 6266 §4.3): `filename*`'s ext-value (RFC 8187: its charset's bytes,
-      # percent-encoded) where it decodes — in a charset Ruby knows, to valid text — else `filename`'s, a quoted-string's
-      # backslash escapes undone, its bytes UTF-8 where they are (Chrome: a raw UTF-8 name), else each byte the code point
-      # it is; trimmed, and no directory of it (`../x` is `x`). '' for none, and for a name no file can have (`.`, `..`,
-      # one holding a NUL). `cd` the header's text, each byte a code point (`header_text`).
+      # percent-encoded) where it decodes — in a charset Ruby knows, to valid text with no NUL — else `filename`'s, a
+      # quoted-string's backslash escapes undone, its bytes UTF-8 where they are (Chrome: a raw UTF-8 name), else each
+      # byte the code point it is; trimmed, and no directory of it (`../x` is `x`). '' for none, and for a name no file
+      # can have (`.`, `..`, one holding a NUL). `cd` the header's text, each byte a code point (`header_text`).
       def disposition_filename(cd)
         params = disposition_params(cd.encode(Encoding::ISO_8859_1, invalid: :replace, undef: :replace).b)
         name = ext_value_text(params['filename*']) || params['filename']&.then {|plain|
@@ -11752,7 +11754,7 @@ module Capybara
         encoding = Encoding.find(m[1]) rescue nil
         return nil unless encoding && m[2].match?(/\A(?:[^%]|%\h\h)*\z/n)
         text = m[2].gsub(/%(\h\h)/n) { $1.hex.chr }.force_encoding(encoding)
-        text.valid_encoding? ? text.encode(Encoding::UTF_8) : nil
+        text.valid_encoding? && !text.include?("\0") ? text.encode(Encoding::UTF_8) : nil
       rescue EncodingError
         nil
       end
