@@ -7767,11 +7767,11 @@ module Capybara
       # `cors` (a `crossorigin` <img>) fetches under CORS: a cross-origin response without a
       # matching Access-Control-Allow-Origin fails the load. `credentials` is 'include' for
       # crossorigin="use-credentials", 'same-origin' (uncredentialed cross-origin) otherwise.
-      def load_image(url, cors = false, credentials = 'same-origin', realm: nil)
+      def load_image(url, cors = false, credentials = 'same-origin', realm: nil, referrer_policy: nil, opaque: false)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         Thread.current[:csim_image_meta] = nil
-        entry = cached_image(key, cors, credentials, client: load_client(realm, key))
+        entry = cached_image(key, cors, credentials, client: load_client(realm, key, referrer_policy: referrer_policy, opaque: opaque))
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
         image_payload(entry, image_tainted?(key, cors), Thread.current[:csim_image_meta])
@@ -7782,10 +7782,10 @@ module Capybara
       # JS side files its pending element under, or -1 when the URL can't resolve (the caller
       # falls back to the synchronous path). The heavy call chain is exactly `load_image`'s —
       # same cache, same CORS enforcement, same taint verdict — just off-thread.
-      def image_load_start(url, cors = false, credentials = 'same-origin', realm: nil)
+      def image_load_start(url, cors = false, credentials = 'same-origin', realm: nil, referrer_policy: nil, opaque: false)
         key = resolve_against_current(url.to_s)
         return -1 unless key.is_a?(String)
-        client = load_client(realm, key)
+        client = load_client(realm, key, referrer_policy: referrer_policy, opaque: opaque)
         id = nil
         @image_load_lock.synchronize do
           id = (@image_load_seq += 1)
@@ -11913,19 +11913,24 @@ module Capybara
       # it.
       # The document a load the host makes is for — realm `realm`'s, the top-level one's for none — as a request to
       # `target_url` takes it: its URL (an about:blank / srcdoc one's its creator's, whose origin it has), whether the
-      # request is cross-site for cookies (where it, or an ancestor, is: `container_cross_site?`), and the referrer and
-      # policy it refers by (`realm_referrer_initiator`: a srcdoc document its container's, a sandboxed one none). Read on
-      # the main thread, which a realm's URL is asked on; a frame gone, the top-level one's.
+      # request is cross-site for cookies (where it, or an ancestor, is: `container_cross_site?`; one of an opaque origin
+      # always), and the referrer and policy it refers by — its document's `referrer_policy` and opacity the bindings
+      # tell (a frame still parsing has none the host could ask), a srcdoc document its container's referrer and, with
+      # none of its own, policy; an opaque one none (Referrer Policy "determine request's referrer"). Read on the main
+      # thread, which a realm's URL is asked on; a frame gone, the top-level one's.
       LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy)
-      def load_client(realm, target_url)
-        rid = realm.to_i
-        # (…the top-level document's own policy left to rack_fetch's default, as it had been: a load runs inside a call
-        # of its realm's, which the policy is not asked back through)
-        return LoadClient.new(@current_url, false, @current_url, nil) unless rid.positive? && (url = frame_realm_url(rid))
+      def load_client(realm, target_url, referrer_policy: nil, opaque: false)
+        rid    = realm.to_i
+        policy = opaque ? 'no-referrer' : referrer_policy.to_s
+        return LoadClient.new(@current_url, opaque, @current_url, policy) unless rid.positive? && (url = frame_realm_url(rid))
 
-        referrer, policy = realm_referrer_initiator(rid)
+        referrer = url
+        if url.match?(/\Aabout:srcdoc\z/i)
+          referrer, container_policy = realm_referrer_initiator(@runtime.frame_realm_parent(rid).to_i)
+          policy = container_policy if policy.empty?
+        end
         url = referrer unless url.match?(%r{\Ahttps?://}i)
-        LoadClient.new(url, container_cross_site?(rid, target_url), referrer, policy)
+        LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy)
       end
       private def container_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
