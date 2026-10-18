@@ -1054,14 +1054,15 @@ fn cursor_move<'s>(scope: &mut v8::PinScope<'s, '_>, args: v8::FunctionCallbackA
 fn cursor_iterate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = id_arg(scope, &args, 0);
     let found = with(|s| {
-        let c = s.cursors.get(&id)?.clone();
+        // (…the move this iteration is of taken off first, whatever it finds: the queue keeps to its requests)
+        let cursor = s.cursors.get_mut(&id)?;
+        let (key, primary, count) = cursor.pending.pop_front().unwrap_or((None, None, 1));
+        let c = cursor.clone();
         let st = s.stores.get(&c.store)?;
         let source = Source::of(st, c.index)?;
-        let (key, primary, count) = c.pending.front().cloned().unwrap_or((None, None, 1));
         let landed = iterate_source(&source, c.index.is_some(), &c.range, c.direction, c.position.clone(), c.os_position.clone(), key, primary, count);
         let value = landed.as_ref().and_then(|(_, p)| (!c.key_only).then(|| st.records.get(p).map(|r| r.value.clone())).flatten());
         let c = s.cursors.get_mut(&id)?;
-        c.pending.pop_front();
         match &landed {
             Some((k, p)) => {
                 c.position = Some(k.clone());
