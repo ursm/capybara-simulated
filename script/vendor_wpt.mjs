@@ -115,6 +115,7 @@ const TREES = [
                                        // service worker's static router (`InstallEvent.addRoutes`) matches
                                        // requests by, so the objective bar for the engine behind both
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
+  'fetch/content-length',              // a response's Content-Length: repeated values, a mismatch as a network error
   'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)
   'html/webappapis/structured-clone',  // structuredClone — deep-clone of platform objects, no layout
   'webmessaging',                      // postMessage / MessageChannel / MessagePort / BroadcastChannel /

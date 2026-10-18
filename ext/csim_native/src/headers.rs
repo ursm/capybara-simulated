@@ -367,6 +367,26 @@ pub(crate) fn extract_length(combined: Option<&str>) -> Option<u64> {
     }
     candidate.parse().ok()
 }
+// The length a response's body is framed by (RFC 9112 §6.3, as Chrome and Firefox frame one — fetch/content-length):
+// `Err` where its `Content-Length` values differ — no length to frame it by, the response a network error — else the
+// length `extract_length` gives, None for none (one that is no number ignored too: the body read to its end).
+pub(crate) fn message_length(combined: Option<&str>) -> Result<Option<u64>, ()> {
+    let Some(combined) = combined else { return Ok(None) };
+    let values = decode_split(combined);
+    if values.iter().any(|v| *v != values[0]) {
+        return Err(());
+    }
+    Ok(extract_length(Some(combined)))
+}
+// (…for the host, of the header's value combined — its bytes: `[framable, length]`)
+pub(crate) fn message_length_for_ruby(combined: Option<magnus::RString>) -> (bool, Option<u64>) {
+    // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
+    let combined = combined.map(|s| String::from_utf8_lossy(unsafe { s.as_slice() }).into_owned());
+    match message_length(combined.as_deref()) {
+        Ok(length) => (true, length),
+        Err(()) => (false, None),
+    }
+}
 // __dom.headersContentLength(list) -> the length its `Content-Length` gives (`extract_length`), or null.
 fn content_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(l) = list(scope, args.get(0)) else { return rv.set_null() };
@@ -481,6 +501,19 @@ mod tests {
         assert_eq!(extract_length(Some("")), None);
         assert_eq!(extract_length(Some("-1")), None);
         assert_eq!(extract_length(None), None);
+    }
+
+    #[test]
+    fn frames_a_message() {
+        assert_eq!(message_length(Some("30, 30,  30  , 30")), Ok(Some(30)));
+        assert_eq!(message_length(Some("030")), Ok(Some(30)));
+        assert_eq!(message_length(Some("aaaah, aaaah")), Ok(None));
+        assert_eq!(message_length(Some("")), Ok(None));
+        assert_eq!(message_length(None), Ok(None));
+        assert_eq!(message_length(Some("30, 42")), Err(()));
+        assert_eq!(message_length(Some("030, 30")), Err(()));
+        assert_eq!(message_length(Some("30, ")), Err(()));
+        assert_eq!(message_length(Some("aaaah, nah")), Err(()));
     }
 
     fn pairs(l: &HeaderList) -> Vec<(String, String)> {

@@ -3369,12 +3369,7 @@ module Capybara
           # Same post-response pipeline as the network POST below: a network error commits
           # an error document at the target URL; 307/308 re-POST, other redirects GET;
           # an attachment downloads.
-          if sw['networkError']
-            @current_url = url
-            record_response(0, {'content-type' => 'text/html'})
-            boot_response_into_ctx('')
-            return
-          end
+          return commit_error_document(url) if sw['networkError']
           sw_headers = sw['headers'] || {}
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
@@ -3403,7 +3398,8 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: hop_referer)
-        status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
+        response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return commit_error_document(url)
+        status, headers, resp_body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = resolve_location(loc, url)
@@ -6688,7 +6684,7 @@ module Capybara
             headers = sw['headers'] || {}
             body    = Base64.decode64(sw['body_b64'].to_s)
           else
-            status, headers, resp_body = dispatch_navigation_request(
+            response = dispatch_navigation_request(
               target,
               method:          meth,
               initiator:       initiator,
@@ -6698,7 +6694,8 @@ module Capybara
               body:            req_body.empty? ? nil : req_body,
               content_type:    req_ct,
               dest:            dest
-            )
+            ) or return nil
+            status, headers, resp_body = response
             body = nil   # read only for the terminal hop, below
           end
           if (loc = redirect_location(status, headers))
@@ -9688,7 +9685,8 @@ module Capybara
             end
           end
           env.merge!(env_extras) if env_extras
-          status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
+          response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
+          status, resp_headers, resp_body = response
           Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(resp_headers)
           # Transparent HTTP Basic auth (RFC 7617): a request carrying CHALLENGE credentials (open()
           # user/pass / URL userinfo) that gets a 401 "Basic" challenge — and hasn't already sent an
@@ -9700,7 +9698,8 @@ module Capybara
           if answered
             resp_body.close if resp_body.respond_to?(:close)
             env['HTTP_AUTHORIZATION'] = challenge_authz
-            status, resp_headers, resp_body = dispatch_rack_or_http(target, env, method: method, body: body)
+            response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
+            status, resp_headers, resp_body = response
           end
           # Fetch credentials mode "omit" ignores credentials the response sends back too —
           # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
@@ -9822,7 +9821,9 @@ module Capybara
               return nil
             end
           end
-          body_str = read_rack_body(resp_body)
+          # (…a body the wire cut short read as far as it came, and then fails — no response the cache keeps)
+          cut_short = resp_body.is_a?(CutShortBody)
+          body_str  = read_rack_body(resp_body)
           # A HEAD response, and a null-body status (204/205/304), have NO body — the UA
           # discards whatever the server sent and exposes response.body as null
           # (response-method HEAD; response-null-body). `null_body` flags it so the JS
@@ -9852,12 +9853,12 @@ module Capybara
           # the author's own conditional bypasses the UA cache entirely (read AND write) — it's
           # "treated similarly to no-store" (request-cache-default-conditional). Every other mode
           # (incl. reload, which refreshes it) stores a cacheable GET response.
-          @@asset_cache.store(target, status, resp_headers, body_str, encoded: encoded_size) if method == 'GET' && cache_mode != 'no-store' && !skip_cache
+          @@asset_cache.store(target, status, resp_headers, body_str, encoded: encoded_size) if method == 'GET' && cache_mode != 'no-store' && !skip_cache && !cut_short
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
           return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size) if no_cors_mode && crossed
-          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
+          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -9965,7 +9966,7 @@ module Capybara
       # that decodes the bytes here and never shows them to script): the bytes ride
       # `body_raw` untouched and the text decode is skipped — it would be pure waste on
       # a path that runs for EVERY image load.
-      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, opaque_render: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, body_cut_short: false, opaque_render: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
         raw     = body.to_s
         hdrs    = stringify(headers)
         # Resource Timing's sizes: the decoded body, the body on the wire (before a
@@ -9974,6 +9975,8 @@ module Capybara
         # plus the three headers its checks read from the UNFILTERED response (a cross-origin
         # fetch exposes only the CORS-safelisted headers to script, and none of these is).
         timing  = {'bytes' => raw.bytesize, 'encoded' => encoded || raw.bytesize, 'cached' => cached}
+        # (…a body the wire cut short: what came, and then a network error as the page reads it)
+        timing['body_error'] = true if body_cut_short
         (raw_headers || headers).each do |k, v|
           case k.to_s.downcase
           when 'timing-allow-origin' then timing['tao'] = header_text(v)
@@ -10522,7 +10525,8 @@ module Capybara
           env['CONTENT_LENGTH'] = body.bytesize.to_s
         end
         apply_default_request_env(env, referer: compute_referrer(referrer_policy, referrer_source, url))
-        status, headers, resp_body = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil)
+        response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return
+        status, headers, resp_body = response
         merge_set_cookie(headers, url)
         return if download_response?(headers)
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore)
@@ -10654,7 +10658,7 @@ module Capybara
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
         end
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url))
-        status, headers, resp_body = dispatch_navigation_request(
+        response = dispatch_navigation_request(
           get_url,
           method:            'GET',
           initiator:         initiator,
@@ -10662,7 +10666,8 @@ module Capybara
           site:              site,
           origin_null:       origin_null,
           cookie_cross_site: cookie_cross
-        )
+        ) or return
+        status, headers, resp_body = response
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(get_url, resolve_against(loc, get_url))
           resp_body.close if resp_body.respond_to?(:close)
@@ -10737,7 +10742,7 @@ module Capybara
         # navigation carries that document's Origin + a Referer under its Referrer-Policy + the
         # Fetch-Metadata triple (Sec-Fetch-Dest 'iframe' for a subframe).
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
-        status, headers, resp_body = dispatch_navigation_request(
+        response = dispatch_navigation_request(
           url,
           method:            'POST',
           initiator:         initiator,
@@ -10747,7 +10752,8 @@ module Capybara
           body:              body,
           content_type:      content_type,
           cookie_cross_site: cookie_cross
-        )
+        ) or return
+        status, headers, resp_body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
@@ -11167,7 +11173,8 @@ module Capybara
         env = rack_env_for(url, method: 'GET')
         # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
         apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
-        status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
+        response = dispatch_rack_or_http(url, env, method: 'GET') or return
+        status, headers, body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
@@ -11190,7 +11197,8 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
-        status, headers, resp_body = dispatch_rack_or_http(url, env, method: 'POST', body: body)
+        response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return
+        status, headers, resp_body = response
         merge_set_cookie(headers, url)
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
@@ -11323,15 +11331,8 @@ module Capybara
           nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
           if (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: from_history && !is_reload, dest: 'document',
                                                        referrer_source: initiator, site_seed: site_seed))
-            # A network-error respondWith FAILS the navigation. Chrome still commits an
-            # error document at the target URL (the history entry above stands), so the
-            # URL moves even though nothing loaded.
-            if sw['networkError']
-              @current_url = url
-              record_response(0, {'content-type' => 'text/html'})
-              boot_response_into_ctx('')
-              return
-            end
+            # A network-error respondWith FAILS the navigation (the history entry above stands).
+            return commit_error_document(url) if sw['networkError']
             # An SW-served response joins the same post-response pipeline as a network
             # one: a redirect is followed (re-entering SW interception at the new URL),
             # an attachment downloads — never booted as the document.
@@ -11357,7 +11358,8 @@ module Capybara
           env['HTTP_SEC_FETCH_DEST'] ||= 'document'
           env['HTTP_SEC_FETCH_SITE'] ||= nav_site
           apply_default_request_env(env, referer: hop_referer)
-          status, headers, body = dispatch_rack_or_http(url, env, method: 'GET')
+          response = dispatch_rack_or_http(url, env, method: 'GET') or return commit_error_document(url)
+          status, headers, body = response
           merge_set_cookie(headers, url)
           if (loc = redirect_location(status, headers))
             next_url = resolve_location(loc, url)
@@ -11931,7 +11933,8 @@ module Capybara
           origin_null:     origin_null
         )
         extra_headers&.each {|k, v| env[k] = v }
-        status, headers, resp_body = dispatch_rack_or_http(url, env, method: method, body: body)
+        response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil
+        status, headers, resp_body = response
         merge_set_cookie(headers, url)
         [status, headers, resp_body]
       end
@@ -11945,7 +11948,7 @@ module Capybara
       # redirect loop. Returns the response wire hash for the fetch-event JSON, or nil on a hard error.
       def navigation_preload_response(url, referrer_source, referrer_policy, site_seed, origin_null, header_value, dest: 'iframe', cookie_cross_site: false)
         site = widen_sec_fetch_site(site_seed, sec_fetch_site(referrer_source, url))
-        status, headers, resp_body = dispatch_navigation_request(
+        response = dispatch_navigation_request(
           url,
           method:            'GET',
           initiator:         referrer_source,
@@ -11955,7 +11958,8 @@ module Capybara
           dest:              dest,
           cookie_cross_site: cookie_cross_site,
           extra_headers:     {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
-        )
+        ) or return nil
+        status, headers, resp_body = response
         {
           'status'     => status,
           'statusText' => RuntimeShared.utf8_text(Rack::Utils::HTTP_STATUS_CODES[status.to_i] || ''),
@@ -12010,20 +12014,59 @@ module Capybara
       # non-http(s) URL.
       def registrable_site(url) = Native.site(url.to_s)
 
+      # A top-level navigation that FAILED — a network error: Chrome still commits an error document at the target URL, so
+      # the URL moves even though nothing loaded.
+      def commit_error_document(url)
+        @current_url = url
+        record_response(0, {'content-type' => 'text/html'})
+        boot_response_into_ctx('')
+      end
+
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
       # redirecting to a real WEBrick on `localhost:9100`) must cross
       # the wire — Rails' router doesn't have routes for the external
       # server's paths, and the external server's redirect back to the
       # app host needs to come through @app again. Real-browser drivers
-      # get this for free; we have to detect the boundary.
+      # get this for free; we have to detect the boundary. nil for a network error (`framed_response`).
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
         # External fetch: if the network is blocked (WebMock) or the
         # host is unreachable, fall back to @app — Rails will 404 or
         # otherwise handle it, matching the pre-cross-host behavior
         # for tests that route through an external OAuth provider URL
         # without intending the call to land.
-        status, headers, body = url_is_local?(url) ? @app.call(env) : (net_http_fetch(url, env, method: method, body: body) || @app.call(env))
+        remote = net_http_fetch(url, env, method: method, body: body) unless url_is_local?(url)
+        response = remote || framed_response(method, *@app.call(env)) or return nil
+        status, headers, body = response
         [status, utf8_tagged_headers(headers), body]
+      end
+
+      # A body that ended before its Content-Length did: the bytes that came, and then a network error.
+      CutShortBody = Struct.new(:bytes) do
+        def each = yield(bytes)
+      end
+
+      # A Rack response read as an HTTP/1.1 client reads it off the wire (RFC 9112 §6.3; Net::HTTP frames a remote one):
+      # unless a Transfer-Encoding frames its body, its Content-Length values that differ are a network error (nil — a
+      # navigation fails, Chrome and Firefox measured), and its body — but a HEAD's, a 1xx's, a 204's and a 304's, which
+      # have none whatever the app gave — is as long as one says (the engine's `message_length`): what is past it
+      # dropped, what falls short of it a `CutShortBody` (a fetch's body then fails as it is read; a document renders
+      # what came, as Firefox does — Chrome commits an empty one).
+      def framed_response(method, status, headers, body)
+        return [status, headers, body] if headers.any? {|k, _| k.to_s.casecmp?('transfer-encoding') }
+
+        field          = headers.find {|k, _| k.to_s.casecmp?('content-length') }&.last
+        framed, length = Native.message_length(AssetCache.combined(field))
+        unless framed
+          body.close if body.respond_to?(:close)
+          return nil
+        end
+        code = status.to_i
+        return [status, headers, body] if length.nil? || method.to_s.casecmp?('HEAD') || code < 200 || code == 204 || code == 304
+
+        bytes = read_rack_body(body)
+        return [status, headers, CutShortBody.new(bytes)] if bytes.bytesize < length
+
+        [status, headers, [bytes.bytesize > length ? bytes.byteslice(0, length) : bytes]]
       end
 
       # A response's header values tagged by what their bytes are — UTF-8 where they are that, binary where not: a
@@ -12394,7 +12437,8 @@ module Capybara
         # VERBATIM — `patch` stays `patch`, matching the byte-case-sensitive grant check.
         env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] = method.to_s
         env['HTTP_ACCESS_CONTROL_REQUEST_HEADERS'] = unsafe.join(',') unless unsafe.empty?
-        status, ph, pbody = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil)
+        response = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil) or return nil
+        status, ph, pbody = response
         pbody.close if pbody.respond_to?(:close)
         # A slow preflight counts toward the client's timeout too (timeout-multiple-fetches).
         Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(ph) if Thread.current[:csim_fetch_server_delay_ms]
