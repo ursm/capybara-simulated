@@ -295,23 +295,31 @@ pub(crate) fn ip_host(host: &str) -> bool {
 // A host's public suffix (URL §3.2: the Public Suffix List's, a TLD it does not list its own — the `*` rule) and its
 // registrable domain, that suffix and the label before it — none for an IP address, nor the latter for a host that is
 // a public suffix itself; a host's trailing dot theirs too (`example.com.`'s are `com.` and `example.com.`), which the
-// list's lookup drops.
+// list's lookup drops — and none for a host whose last label is empty after it (`example.com..`: its own site, Chrome
+// measured).
 fn public_suffix(host: &str) -> Option<String> {
-    (!ip_host(host)).then(|| psl::suffix_str(host)).flatten().map(|s| with_trailing_dot(host, s))
+    listed(host).then(|| psl::suffix_str(host)).flatten().map(|s| with_trailing_dot(host, s))
 }
 fn registrable_domain(host: &str) -> Option<String> {
-    (!ip_host(host)).then(|| psl::domain_str(host)).flatten().map(|d| with_trailing_dot(host, d))
+    listed(host).then(|| psl::domain_str(host)).flatten().map(|d| with_trailing_dot(host, d))
+}
+fn listed(host: &str) -> bool {
+    !ip_host(host) && !host.ends_with("..")
 }
 fn with_trailing_dot(host: &str, part: &str) -> String {
     if host.ends_with('.') && !part.ends_with('.') { format!("{part}.") } else { part.to_owned() }
 }
 // HTML "is a registrable domain suffix of or is equal to": `suffix` the host itself, or — both domains — the end of it
-// after a dot, where `suffix` is no public suffix, nor the end of the host's.
+// after a dot, where `suffix` is no public suffix, nor the end of the host's (and neither with an empty last label, nor
+// `suffix` with an empty first one — `com..`, `.com` — which Chrome refuses).
 pub(crate) fn registrable_domain_suffix(suffix: &str, host: &str) -> bool {
     if suffix == host {
         return true;
     }
-    if ip_host(suffix) || ip_host(host) || !host.strip_suffix(suffix).is_some_and(|sub| sub.ends_with('.')) {
+    if !listed(suffix) || !listed(host) || suffix.starts_with('.') {
+        return false;
+    }
+    if !host.strip_suffix(suffix).is_some_and(|sub| sub.ends_with('.')) {
         return false;
     }
     let public = public_suffix(host).unwrap_or_else(|| host.to_owned());
@@ -428,6 +436,12 @@ mod tests {
         assert!(!registrable_domain_suffix("com.", "www.example.com."));
         assert!(!registrable_domain_suffix("com", "www.example.com."));
         assert!(registrable_domain_suffix("example.com.", "www.example.com."));
+        // (…an empty label: a host ending in two dots its own site, `.com` / `com..` no suffix — `a..com` one, Chrome's)
+        assert_eq!(site("http://www.example.com../").as_deref(), Some("http://www.example.com.."));
+        assert!(!registrable_domain_suffix("com..", "example.com.."));
+        assert!(!registrable_domain_suffix(".com", "x.a..com"));
+        assert!(registrable_domain_suffix("a..com", "x.a..com"));
+        assert!(!registrable_domain_suffix("example.com.", "www.example.com.."));
     }
 
     #[test]
