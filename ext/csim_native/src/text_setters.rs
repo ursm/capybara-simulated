@@ -30,18 +30,20 @@ fn runs(units: &[u16]) -> Vec<&[u16]> {
     runs
 }
 
-// The rendered text fragment's nodes, in `near`'s node document, made by realm `caller`'s code — a Text of each run but
-// an empty one, a `<br>` between each two — and what holds their handles until a tree does.
-fn fragment_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, near: NodeId, units: &[u16]) -> (Vec<NodeId>, Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>) {
+// The rendered text fragment's nodes, in `near`'s node document and of realm `cid`'s interfaces — the element's, whose
+// setter in whichever realm made them (Chrome and Firefox: a frame's setter called on the page's element makes the page's
+// Text and `<br>`) — a Text of each run but an empty one, a `<br>` between each two; and what holds their handles until a
+// tree does.
+fn fragment_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, near: NodeId, units: &[u16]) -> (Vec<NodeId>, Vec<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>) {
     let (mut nodes, mut held) = (Vec::new(), Vec::new());
     for (i, run) in runs(units).into_iter().enumerate() {
         if i > 0 {
-            let (br, handle) = crate::editing::make_br(scope, cid, caller, near);
+            let (br, handle) = crate::editing::make_br(scope, cid, cid, near);
             nodes.push(br);
             held.push(handle);
         }
         if !run.is_empty() {
-            let (text, handle) = crate::editing::make(scope, cid, caller, near, NodeData::of_kind(NodeKind::Text, run.to_vec()));
+            let (text, handle) = crate::editing::make(scope, cid, cid, near, NodeData::of_kind(NodeKind::Text, run.to_vec()));
             nodes.push(text);
             held.push(handle);
         }
@@ -64,7 +66,7 @@ fn set_inner_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
     let caller = realm_id(scope, &args);
     let Some(cid) = crate::dom::dom(scope).arena.get(element).map(|n| n.realm) else { return };
-    let (nodes, held) = fragment_nodes(scope, cid, caller, element, &units);
+    let (nodes, held) = fragment_nodes(scope, cid, element, &units);
     let Some(change) = crate::mutation::replace_all(scope, cid, caller, element, &nodes, steps) else { return };
     if let Some(out) = crate::tables::answer(scope, cid, None, &[change]) {
         rv.set(out);
@@ -87,9 +89,9 @@ fn set_outer_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         return rv.set_bool(false);
     }
     let (next, previous) = (arena.sibling(element, 1), arena.sibling(element, -1));
-    let (mut nodes, mut held) = fragment_nodes(scope, cid, caller, element, &units);
+    let (mut nodes, mut held) = fragment_nodes(scope, cid, element, &units);
     if nodes.is_empty() {
-        let (text, handle) = crate::editing::make(scope, cid, caller, element, NodeData::of_kind(NodeKind::Text, Vec::new()));
+        let (text, handle) = crate::editing::make(scope, cid, cid, element, NodeData::of_kind(NodeKind::Text, Vec::new()));
         nodes.push(text);
         held.push(handle);
     }
