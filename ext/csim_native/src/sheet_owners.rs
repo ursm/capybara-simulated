@@ -218,14 +218,14 @@ fn cascade_rekey_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let viewport = size.map(f64::to_bits);
     let cid = crate::dom::realm_id(scope, &args);
     // (…its adopted sheets: each that applies by its id and version — a `replace` makes it another sheet to the engine —
-    // one that does not as -1, so toggling `disabled` or a media change re-keys too)
+    // one that does not as a marker, so toggling `disabled` or a media change re-keys too)
     let adopted = {
         let d = crate::dom::dom(scope);
         let screen = crate::style::Screen { viewport: (size[0] as f32, size[1] as f32), touch: d.touch_input };
         let engine = d.styles.get(&cid);
         let arena: &crate::dom::RealmArena = d.arena.enter(cid);
         let mut key = Vec::new();
-        for &id in arena.sheets.adopted(doc) {
+        for &id in arena.adopted_of(doc, cid) {
             match arena.sheets.get(id).filter(|_| crate::dom::sheet_applies_at(engine, arena, screen, id)) {
                 Some(stored) => key.extend([u64::from(id), u64::from(stored.version)]),
                 None => key.push(u64::MAX),

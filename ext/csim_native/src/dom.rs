@@ -872,6 +872,11 @@ pub(crate) struct RealmArena {
     custom_states: std::collections::HashMap<NodeId, Vec<String>>,
     // An element's custom validity (validity.rs `set_custom_validity`), for the few that have one.
     pub(crate) custom_validity: std::collections::HashMap<NodeId, crate::validity::CustomValidity>,
+    // Each document's and shadow root's `adoptedStyleSheets` (CSSOM §6.6: the list the bindings' ObservableArray backs),
+    // as its sheets' ids in order, with the realm whose sheet store they are of — its node document's, every sheet's
+    // constructor document being that one: what that realm's cascade takes of it after its owned sheets. Kept beside the
+    // nodes, not in a realm's state, as a root moves between realms' trees and its list does not.
+    pub(crate) adopted_sheets: std::collections::HashMap<NodeId, (i32, Vec<u32>)>,
     // The `<link>`s whose `disabled` attribute was removed — "explicitly enabled" (HTML): an alternate style sheet one
     // applies then, whatever the selected set (sheet_owners.rs).
     pub(crate) explicitly_enabled: std::collections::HashSet<NodeId>,
@@ -1187,6 +1192,8 @@ impl RealmArena {
         }
         self.enter(cid);
         self.timers_begin(cid);
+        // (…and the adopted sheet lists its last page's sheets made: their ids are none of the next page's)
+        self.adopted_sheets.retain(|_, (realm, _)| *realm != cid);
         // (…afresh, but its faces table and sheet store in place: the realm's style engine, which outlives the context,
         // holds the one, and the ids the other hands out are never to be handed out again — a late drop of the old
         // context's sheet would free the new page's)
@@ -1258,6 +1265,7 @@ impl RealmArena {
         self.forget_reactions_of(cid);
         self.blob_urls.forget_realm(cid);
         self.task_keys.discarded.remove(&cid);
+        self.adopted_sheets.retain(|_, (realm, _)| *realm != cid);
         self.dropped.insert(cid);
         self.parked.remove(&cid);
         if self.cur == cid {
@@ -1312,6 +1320,7 @@ impl RealmArena {
         });
         self.custom_states.retain(|id, _| live(slots, id));
         self.custom_validity.retain(|id, _| live(slots, id));
+        self.adopted_sheets.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));
         self.change_baselines.retain(|id, _| live(slots, id));
         self.explicit_elements.retain(|(id, _), _| live(slots, id));
@@ -1585,6 +1594,9 @@ impl RealmArena {
         }
         if !self.custom_validity.is_empty() {
             self.custom_validity.remove(&id);
+        }
+        if !self.adopted_sheets.is_empty() {
+            self.adopted_sheets.remove(&id);
         }
         self.observers.forget(id);
         // …and the slot it was assigned to no longer lists it: a change to the slot's flat children.
@@ -4519,20 +4531,30 @@ pub(crate) fn sheet_applies_at(engine: Option<&crate::style::StyleEngine>, arena
     let media = String::from_utf16_lossy(&stored.media_text);
     media.is_empty() || crate::style::media_matches(engine, arena, screen, &media)
 }
-// …and the adopted sheets of `root` that do, in its list's order.
-pub(crate) fn adopted_applying(engine: Option<&crate::style::StyleEngine>, arena: &RealmArena, screen: crate::style::Screen, root: NodeId) -> Vec<u32> {
-    arena.sheets.adopted(root).iter().copied().filter(|&id| sheet_applies_at(engine, arena, screen, id)).collect()
+impl RealmArena {
+    // The adopted sheets of `root` the realm `cid` cascades — its list, where its sheets are of that realm's store — in
+    // order…
+    pub(crate) fn adopted_of(&self, root: NodeId, cid: i32) -> &[u32] {
+        self.adopted_sheets.get(&root).filter(|(realm, _)| *realm == cid).map_or(&[], |(_, ids)| ids.as_slice())
+    }
 }
-// __dom.adoptedSheetsSet(rootNid, ids): the document's or shadow root's `adoptedStyleSheets` is the sheets of `ids` (a
-// Float64Array) — in the realm whose tree it is.
+// …and those of them that apply at `screen` (the arena entered in `cid`).
+pub(crate) fn adopted_applying(engine: Option<&crate::style::StyleEngine>, arena: &RealmArena, screen: crate::style::Screen, root: NodeId, cid: i32) -> Vec<u32> {
+    arena.adopted_of(root, cid).iter().copied().filter(|&id| sheet_applies_at(engine, arena, screen, id)).collect()
+}
+// __dom.adoptedSheetsSet(rootNid, docNid, ids): the document's or shadow root's `adoptedStyleSheets` is the sheets of
+// `ids` (a Float64Array) — of the store of the realm whose document `docNid` (its node document) is.
 fn adopted_sheets_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
-    let ids: Vec<u32> = f64_arg(args.get(1)).iter().map(|&id| id as u32).collect();
+    let doc = nid_arg(scope, &args, 1);
+    let ids: Vec<u32> = f64_arg(args.get(2)).iter().map(|&id| id as u32).collect();
     let caller = realm_id(scope, &args);
     let d = dom(scope);
-    let cid = d.arena.get(root).map_or(caller, |n| n.realm);
-    if let Some(arena) = d.arena.enter_known(cid) {
-        arena.sheets.set_adopted(root, ids);
+    let realm = doc.and_then(|doc| d.arena.get(doc)).map_or(caller, |n| n.realm);
+    if ids.is_empty() {
+        d.arena.adopted_sheets.remove(&root);
+    } else {
+        d.arena.adopted_sheets.insert(root, (realm, ids));
     }
 }
 // __dom.sheetModificationDisallowed(handle[, on]) -> whether the sheet's disallow modification flag is set (a
@@ -4811,7 +4833,7 @@ fn style_sheets_unguarded(
     let screen = crate::style::Screen { viewport, touch: d.touch_input };
     let arena = d.arena.enter(cid);
     // (…its owned sheets, then its adopted ones that apply)
-    ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, doc));
+    ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, doc, cid));
     let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, screen);
     let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
     engine.set_sheets(doc, &sheets);
@@ -4842,7 +4864,7 @@ fn style_shadow_sheets_unguarded(
         let d = dom(scope);
         let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
         if let Some(arena) = d.arena.enter_known(cid) {
-            ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, root));
+            ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, root, cid));
         }
     }
     let (arena, engine) = arena_and_engine(scope, cid);

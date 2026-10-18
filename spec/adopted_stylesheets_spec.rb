@@ -110,7 +110,7 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
   end
   # The adopted sheets the cascade takes are the list's own, the engine's — not what a getter a page replaced answers:
   # a rebuild after `adoptedStyleSheets` was redefined to answer [] keeps the adopted rule (Chrome).
-  it "cascades the adopted list itself, whatever getter a page put over it" do
+  it 'cascades the adopted list itself, whatever getter a page put over it' do
     session = simulated_session(app)
     session.visit '/'
     out = session.evaluate_script(<<~JS)
@@ -125,6 +125,57 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
       })()
     JS
     expect(out).to eq(['rgb(255, 0, 0)', 'rgb(255, 0, 0)'])
+  end
+  # A shadow root's list goes with it between realms' trees: one adopted into a frame's document takes that document's
+  # sheets and its cascade styles by them; moved back, its list emptied (the frame's sheets are none of this document's),
+  # it takes none — and no sheet of this realm's that happened to share an id. An index past the list's end is refused.
+  it "follows a shadow root's list between realms, and refuses a hole" do
+    page = '<!DOCTYPE html><meta charset=utf-8><body><b>b</b><iframe id=f srcdoc="<!DOCTYPE html><body>"></iframe>'
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }).tap {|s| s.visit '/' }
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const held = [];
+        for (let i = 0; i < 30; i++) { const s = new CSSStyleSheet(); s.replaceSync('b { color: rgb(' + i + ', 0, 0) }'); held.push(s); }
+        const fw = document.getElementById('f').contentWindow, fd = fw.document;
+        const host = document.createElement('div');
+        const sr = host.attachShadow({mode: 'open'});
+        sr.innerHTML = '<p>x</p>';
+        fd.adoptNode(host);
+        const green = new fw.CSSStyleSheet();
+        green.replaceSync('p { color: rgb(0, 128, 0) }');
+        sr.adoptedStyleSheets = [green];
+        fd.body.append(host);
+        const inFrame = fw.getComputedStyle(sr.querySelector('p')).color;
+        document.body.append(host);
+        const back = [sr.adoptedStyleSheets.length, getComputedStyle(document.querySelector('b')).color];
+        document.adoptedStyleSheets[3] = held[7];
+        return [inFrame, back, document.adoptedStyleSheets.length, getComputedStyle(document.querySelector('b')).color];
+      })()
+    JS
+    expect(out).to eq(['rgb(0, 128, 0)', [0, 'rgb(0, 0, 0)'], 0, 'rgb(0, 0, 0)'])
+  end
+  # ObservableArray takes no hole: an index past the end, a longer length and a delete but at the end are refused (WebIDL;
+  # Chrome: the log below).
+  it 'refuses every write that would leave a hole in the list' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const [a, b, c] = [new CSSStyleSheet(), new CSSStyleSheet(), new CSSStyleSheet()];
+        const list = document.adoptedStyleSheets;
+        const out = [];
+        list[3] = a;
+        out.push(list.length);
+        document.adoptedStyleSheets = [a, b, c];
+        list.length = 5;
+        out.push(list.length);
+        out.push(delete list[1], list.length);
+        out.push(delete list[2], list.length, list[1] === b);
+        out.push(delete list[7], list.length);
+        return out;
+      })()
+    JS
+    expect(out).to eq([0, 3, false, 3, true, 2, true, false, 2])
   end
 end
 

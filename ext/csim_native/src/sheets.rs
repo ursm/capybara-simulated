@@ -92,9 +92,6 @@ pub(crate) struct SheetStore {
     // The last identity a page's `@font-face` rule was given (style.rs `FaceIds`) — the realm's, so one never names
     // two rules, whatever style engine the realm has made since.
     pub(crate) last_face: std::cell::Cell<u32>,
-    // Each document's and shadow root's `adoptedStyleSheets`, as their sheets' ids in order (CSSOM §6.6: the list the
-    // bindings' ObservableArray backs): what its cascade takes after its owned sheets.
-    adopted: std::collections::HashMap<crate::dom::NodeId, Vec<u32>>,
 }
 
 #[derive(PartialEq, Eq, Hash)]
@@ -251,23 +248,10 @@ impl SheetStore {
         self.sheets.remove(&id);
     }
 
-    // `root`'s adopted sheets set — none, emptied…
-    pub(crate) fn set_adopted(&mut self, root: crate::dom::NodeId, ids: Vec<u32>) {
-        if ids.is_empty() {
-            self.adopted.remove(&root);
-        } else {
-            self.adopted.insert(root, ids);
-        }
-    }
-    // …and read, in order.
-    pub(crate) fn adopted(&self, root: crate::dom::NodeId) -> &[u32] {
-        self.adopted.get(&root).map_or(&[], Vec::as_slice)
-    }
 
     // The realm's page was replaced: none of its sheets is the next page's (and none of their ids will be).
     pub(crate) fn reset(&mut self) {
         self.sheets.clear();
-        self.adopted.clear();
         self.rules.clear();
         self.pending.get_mut().clear();
     }
