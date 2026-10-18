@@ -78,6 +78,10 @@ impl RealmArena {
         let top = std::iter::once(realm).chain(self.ancestor_realms(realm)).last().unwrap_or(realm);
         let mut windows = vec![top];
         windows.extend(self.descendant_realms(top));
+        // (…the initial about:blank window of a frame whose realm is not made yet among them)
+        for container in self.unbuilt_frames(&windows) {
+            self.consume_unbuilt_activation(container);
+        }
         for window in windows {
             if let Some(state) = self.realm_state_mut(window).filter(|s| s.last_activation.is_some()) {
                 state.last_activation = Some(f64::NEG_INFINITY);

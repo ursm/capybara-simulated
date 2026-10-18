@@ -41,4 +41,16 @@ RSpec.describe 'user activation' do
     s.find('#open').click
     expect(s.evaluate_script('[window.after, navigator.userActivation.hasBeenActive]')).to eq([false, true])
   end
+
+  # (…and consumed with the rest of the page while its realm is still not made; and gone with its navigable as the
+  # frame is removed: one inserted again is a new window)
+  it "consumes a frame not built yet, and forgets one removed" do
+    page = '<!DOCTYPE html><meta charset=utf-8><body><button>b</button><select><option>o</select><iframe id=a></iframe><iframe id=b></iframe>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.find('button').click
+    s.execute_script("document.querySelector('select').showPicker(); const b = document.getElementById('b'); b.remove(); document.body.append(b)")
+    got = s.evaluate_script('[...document.querySelectorAll("iframe")].map((f) => [f.id, f.contentWindow.navigator.userActivation.hasBeenActive, f.contentWindow.navigator.userActivation.isActive])')
+    expect(got).to eq([['a', true, false], ['b', false, false]])
+  end
 end

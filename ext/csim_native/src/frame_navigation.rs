@@ -91,6 +91,7 @@ impl RealmArena {
     // The frames in the documents of realms `parents` whose navigables exist but have no realm made — an `about:blank`
     // frame no script has looked into — which an activation of those documents reaches all the same.
     pub(crate) fn unbuilt_frames(&self, parents: &[i32]) -> Vec<NodeId> {
+        let parents: std::collections::HashSet<i32> = parents.iter().copied().collect();
         let ready = |nav: &FrameNavigation| nav.flags & CONTEXT_READY != 0;
         let in_parents = |c: NodeId| self.get(c).is_some_and(|n| parents.contains(&n.realm));
         self.frame_navigations.0.iter().filter(|&(&c, nav)| ready(nav) && in_parents(c) && self.frame_realm(c).is_none() && self.is_connected(c)).map(|(&c, _)| c).collect()
@@ -100,6 +101,12 @@ impl RealmArena {
     pub(crate) fn note_unbuilt_activation(&mut self, container: NodeId, at: f64) {
         let nav = self.frame_navigation(container);
         nav.activation = Some((at, nav.activation.map_or(0, |(_, n)| n) + 1));
+    }
+    // …its activation consumed (negative infinity), where it had one…
+    pub(crate) fn consume_unbuilt_activation(&mut self, container: NodeId) {
+        if let Some((at, _)) = self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.activation.as_mut()) {
+            *at = f64::NEG_INFINITY;
+        }
     }
     // …and what it had, taken as its realm is made.
     pub(crate) fn take_unbuilt_activation(&mut self, container: NodeId) -> Option<(f64, u32)> {
@@ -339,6 +346,11 @@ fn set_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         arena.frame_navigation(container).flags |= flags;
     } else if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
         nav.flags &= !flags;
+        // (…its navigable destroyed with its post-insertion step undone — the container removed — and what the window
+        // of its initial about:blank document had with it: one inserted again is a new one's)
+        if flags & CONTEXT_READY != 0 {
+            nav.activation = None;
+        }
     }
 }
 
