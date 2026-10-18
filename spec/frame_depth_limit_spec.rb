@@ -6,7 +6,8 @@ require_relative 'support/session_teardown'
 # A frame nested past the depth limit has no realm of its own (v8_runtime.rb `MAX_FRAME_DEPTH`): its window is one over
 # its parent realm's global (bridge.entry.js `makeFrameWindow`), and its document is that realm's — same-origin with it,
 # so its parent reads `contentDocument`, as before the origin checks became the engine's (where it read as another
-# realm's, cross-origin, and answered null).
+# realm's, cross-origin, and answered null) — and it is its response's, decoded as a realm's is: the bytes had been
+# written into it as their numbers, `60,33,…`, so no frame past the limit had a frame in it.
 RSpec.describe 'a frame past the nesting limit' do
   it "is the parent realm's, same-origin with it" do
     app = ->(env) {
@@ -22,8 +23,8 @@ RSpec.describe 'a frame past the nesting limit' do
     s.visit '/?d=0'
     got = s.evaluate_script(<<~JS)
       (() => {
-        // (…each frame's document its own: the next one down — whose frame names the depth after it — or, past the
-        // limit, an empty one, which is still no other frame's)
+        // (…each frame's document its own, the next one down — whose frame names the depth after it — past the limit
+        // too, to the leaf, which has none)
         const seen = [];
         let doc = document;
         for (let depth = 0; depth < 25; depth++) {
@@ -39,6 +40,6 @@ RSpec.describe 'a frame past the nesting limit' do
         return seen;
       })()
     JS
-    expect(got).to eq(['built'] * 16 + ['empty'])
+    expect(got).to eq(['built'] * 19 + ['empty'])
   end
 end
