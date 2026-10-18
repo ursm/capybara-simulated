@@ -37,4 +37,21 @@ RSpec.describe '<html>.innerHTML' do
     JS
     expect(got).to eq([1, '<p>a</p>', false, '<p>a</p>', '<p>a</p>'])
   end
+  # An HTML template's `innerHTML` set in an XML document parses into its contents too (DOM Parsing). Chrome: 1 / 0.
+  it "parses into an XHTML template's contents" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html; charset=utf-8'}, ['<!DOCTYPE html><p>x</p>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const x = new DOMParser().parseFromString(
+          '<html xmlns="http://www.w3.org/1999/xhtml"><body><template id="t"></template></body></html>', 'application/xhtml+xml'
+        );
+        const t = x.getElementById('t');
+        t.innerHTML = '<p xmlns="http://www.w3.org/1999/xhtml">x</p>';
+        return [t.content.childNodes.length, t.childNodes.length];
+      })()
+    JS
+    expect(got).to eq([1, 0])
+  end
 end
+

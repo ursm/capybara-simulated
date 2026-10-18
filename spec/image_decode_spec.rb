@@ -338,5 +338,44 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq([0, 100])
   end
+  # A blob: image's URL is read after a stable state, as "update the image data" parses it: one revoked in the same task
+  # is gone, one revoked after loads. And an image element is an HTML `<img>` / `<input>` or an SVG `<image>`, of a
+  # document with a browsing context — a `<source>` change in a DOMParser document loads nothing, nor does an SVG `img`
+  # or an HTML `image`. Chrome: the log below.
+  it "reads a blob: image after a stable state, and loads only an image element of a document with a window" do
+    session = simulated_session(app).tap {|s| s.visit '/' }
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const png = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAC56t6BAAAAEklEQVR4nGNgYGD4z8DAwMDAAAAQAAH/0XvFsQAAAABJRU5ErkJggg==';
+      const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
+      const mk = () => URL.createObjectURL(new Blob([bytes], {type: 'image/png'}));
+      const out = [];
+      const ev = (img, name) => new Promise((r) => {
+        img.onload = () => r(name + ':load');
+        img.onerror = () => r(name + ':error');
+        setTimeout(() => r(name + ':none'), 300);
+      });
+      const [same, later] = [new Image(), new Image()];
+      const waits = [ev(same, 'same'), ev(later, 'later')];
+      const u1 = mk();
+      same.src = u1;
+      out.push('sync:' + same.complete + ':' + same.naturalWidth);
+      URL.revokeObjectURL(u1);
+      const u2 = mk();
+      later.src = u2;
+      setTimeout(() => URL.revokeObjectURL(u2), 0);
+      const d = new DOMParser().parseFromString('<picture><source><img></picture>', 'text/html');
+      waits.push(ev(d.querySelector('img'), 'picture'));
+      d.querySelector('source').srcset = 'data:image/png;base64,' + png;
+      const svgImg = document.createElementNS('http://www.w3.org/2000/svg', 'img');
+      waits.push(ev(svgImg, 'svgimg'));
+      svgImg.setAttribute('src', 'data:image/png;base64,' + png);
+      const htmlImage = document.createElement('image');
+      waits.push(ev(htmlImage, 'htmlimage'));
+      htmlImage.setAttribute('href', 'data:image/png;base64,' + png);
+      Promise.all(waits).then((r) => done(out.concat(r)));
+    JS
+    expect(got).to eq(%w[sync:false:0 same:error later:load picture:none svgimg:none htmlimage:none])
+  end
 end
 
