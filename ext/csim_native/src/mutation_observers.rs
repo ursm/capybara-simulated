@@ -414,8 +414,8 @@ fn observe_options(mut flags: u32, given: u32, filtered: bool) -> Result<u32, &'
 // attribute names given, or null; a TypeError where they are refused.
 fn observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let observer = args.get(0).uint32_value(scope).unwrap_or(0);
-    let Some(target) = nid_arg(scope, &args, 1) else { return };
     let (flags, given) = (args.get(2).uint32_value(scope).unwrap_or(0), args.get(3).uint32_value(scope).unwrap_or(0));
+    // (…whatever the target: an Attr, a node of no tree the engine keeps, is refused the same and registers nothing)
     let flags = match observe_options(flags, given, !args.get(4).is_null_or_undefined()) {
         Ok(flags) => flags,
         Err(words) => {
@@ -427,6 +427,7 @@ fn observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
             return;
         }
     };
+    let Some(target) = nid_arg(scope, &args, 1) else { return };
     let filter = v8::Local::<v8::Array>::try_from(args.get(4)).ok().map(|names| {
         let mut filter = Vec::new();
         for i in 0..names.length() {

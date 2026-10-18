@@ -781,6 +781,10 @@ fn anim_composite_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 // (keyframes.rs `keyframe_property`).
 fn keyframe_property_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let member = args.get(0).to_rust_string_lossy(scope);
+    // (…a custom property the member itself, as the page wrote it — a lone surrogate in it kept)
+    if member.starts_with("--") {
+        return rv.set(args.get(0));
+    }
     match crate::keyframes::keyframe_property(&member).and_then(|p| v8::String::new(scope, &p)) {
         Some(p) => rv.set(p.into()),
         None => rv.set_null(),
