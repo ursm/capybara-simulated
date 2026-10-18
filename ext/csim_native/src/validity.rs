@@ -32,7 +32,7 @@ pub(crate) const BAD_INPUT: u16 = 1 << 8;
 pub(crate) const CUSTOM_ERROR: u16 = 1 << 9;
 
 // HTML "normalize newlines": every CRLF and every lone CR a LF.
-fn normalize_newlines(units: impl Iterator<Item = u16>) -> Vec<u16> {
+pub(crate) fn normalize_newlines(units: impl Iterator<Item = u16>) -> Vec<u16> {
     let mut units = units.peekable();
     let mut out = Vec::new();
     while let Some(u) = units.next() {

@@ -460,7 +460,8 @@ pub(crate) fn colour_value(engine: Option<&crate::style::StyleEngine>, arena: &c
 }
 
 // __dom.inputSanitize(nid, type, value) -> the input's value sanitized as `type` (`sanitize`), by its attributes; a
-// colour by the style engine, opaque sRGB `#rrggbb`, `#000000` for no colour.
+// colour by the style engine, opaque sRGB `#rrggbb`, `#000000` for no colour — and as `textarea`, a textarea's: its
+// newlines normalized (CR LF and CR a LF), as its `value` setter normalizes them.
 fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let id = crate::dom::nid_arg(scope, &args, 0);
@@ -470,8 +471,11 @@ fn input_sanitize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let arena: &crate::dom::RealmArena = d.arena.enter(cid);
     let engine = d.styles.get(&cid);
     let colour = |v: &str| colour_value(engine, arena, v);
-    let attrs = id.and_then(|id| arena.get(id)).map_or(NO_ATTRS, Attrs::of);
-    let out = sanitize_units(&ty, &value, &attrs, &colour);
+    let out = if ty == "textarea" {
+        crate::validity::normalize_newlines(value.iter().copied())
+    } else {
+        sanitize_units(&ty, &value, &id.and_then(|id| arena.get(id)).map_or(NO_ATTRS, Attrs::of), &colour)
+    };
     let out = crate::dom::utf16_value(scope, &out);
     rv.set(out);
 }
