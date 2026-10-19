@@ -117,4 +117,22 @@ RSpec.describe 'programmatic file upload' do
     expect(page).to have_css('#result', text: 'memo=日本語メモ')
     expect(page).to have_css('#result', text: 'name=shot')
   end
+
+  # A picked file gone from the disk cannot be read: a read of its blob — `text()`, `arrayBuffer()`, `bytes()`, its
+  # stream, a FileReader's — fails with a NotReadableError (File API §3.3.1's read of its stream, §6.4's read
+  # operation), not with an empty file's bytes.
+  it 'fails every read of a picked file gone from the disk' do
+    attach_file 'picker', png.path, make_visible: true
+    File.delete(png.path)
+    got = page.evaluate_async_script(<<~JS)
+      const done = arguments[0], file = document.getElementById('picker').files[0];
+      const name = (p) => p.then(() => 'read', (e) => e.name);
+      const streamed = name(file.stream().getReader().read());
+      const reader = new FileReader();
+      const read = new Promise((resolve) => { reader.onerror = () => resolve(reader.error.name); reader.onload = () => resolve('read'); });
+      reader.readAsArrayBuffer(file);
+      Promise.all([name(file.text()), name(file.arrayBuffer()), name(file.bytes()), streamed, read]).then(done);
+    JS
+    expect(got).to eq(['NotReadableError'] * 5)
+  end
 end
