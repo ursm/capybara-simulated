@@ -25,6 +25,11 @@ impl Navigator {
     fn user_agent(&self) -> &str {
         self.user_agent.as_deref().unwrap_or(USER_AGENT)
     }
+    // …what `appVersion` takes from it: what follows its `Mozilla/`, the whole of one without.
+    fn app_version(&self) -> &str {
+        let ua = self.user_agent();
+        ua.strip_prefix("Mozilla/").unwrap_or(ua)
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -43,9 +48,9 @@ const APP_VERSION: u32 = 1;
 fn user_agent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let which = args.get(0).uint32_value(scope).unwrap_or(USER_AGENT_STRING);
-    let ua = crate::dom::realm(scope, cid).navigator.user_agent().to_owned();
-    let text = if which == APP_VERSION { ua.strip_prefix("Mozilla/").unwrap_or(&ua) } else { &ua };
-    if let Some(s) = v8::String::new(scope, text) {
+    let navigator = &crate::dom::realm(scope, cid).navigator;
+    let text = if which == APP_VERSION { navigator.app_version() } else { navigator.user_agent() }.to_owned();
+    if let Some(s) = v8::String::new(scope, &text) {
         rv.set(s.into());
     }
 }
@@ -69,4 +74,18 @@ fn set_on_line_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let offline = !args.get(0).is_true();
     let state = &mut crate::dom::realm(scope, cid).navigator;
     rv.set_bool(std::mem::replace(&mut state.offline, offline) != offline);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn user_agent() {
+        let mut n = Navigator::default();
+        assert_eq!(n.user_agent(), USER_AGENT);
+        assert!(n.app_version().starts_with("5.0 (X11;"));
+        n.user_agent = Some("Other/2.0".into());
+        assert_eq!(n.app_version(), "Other/2.0");
+    }
 }
