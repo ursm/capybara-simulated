@@ -76,7 +76,11 @@ impl Graph {
             // (…its dependents marked in the order they were added, depth first, as a recursion would)
             pending.extend(std::mem::take(&mut s.dependents).into_iter().rev());
         }
-        // (…each root they follow swept of them once, however many of its dependents abort)
+        // (…each root they follow swept of them once, however many of its dependents abort — none where the signal
+        // aborted alone)
+        if order.len() <= 1 {
+            return order;
+        }
         let aborted: std::collections::HashSet<u64> = order.iter().copied().collect();
         let roots: std::collections::HashSet<u64> = order.iter().filter_map(|id| self.of.get(id)).flat_map(|s| s.roots.iter().copied()).collect();
         for root in roots {
