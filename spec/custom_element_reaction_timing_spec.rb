@@ -217,7 +217,7 @@ RSpec.describe 'custom element reaction timing' do
   # An upgrade enqueued again — a constructor moving a later element of its own fragment — puts the element on the moving
   # call's element queue, which upgrades it as that call returns, before the constructor goes on: HTML enqueues it again,
   # and an upgrade no longer owed returns at once. Chrome and Firefox: true both, the frame's document the page's too.
-  it "upgrades a later element of a fragment a constructor moves, as the move returns" do
+  it 'upgrades a later element of a fragment a constructor moves, as the move returns' do
     page = '<!DOCTYPE html><meta charset="utf-8"><body><div id="host"></div><iframe id="f" srcdoc="<!DOCTYPE html><body>"></iframe>'
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
     s.visit '/'
