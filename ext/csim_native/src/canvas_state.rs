@@ -217,6 +217,10 @@ pub(crate) struct CanvasStateHandle {
     // handle, whatever the stack does.
     stack: RefCell<Vec<(State, bool)>>,
     saved: UnsafeCell<v8::TracedReference<v8::Object>>,
+    // The canvas's bitmap (a Uint8ClampedArray of its width × height RGBA pixels, in its colour space), the context's
+    // own — none until something is drawn, and none again once the canvas is reset or resized — which every draw writes
+    // and every read of the canvas as a source reads (`canvasBitmap`). On V8's heap, so the collector counts it.
+    bitmap: UnsafeCell<v8::TracedReference<v8::Object>>,
     // The bitmap's origin-clean flag: false once a source that is not origin-clean — a cross-origin image whose bytes
     // are not CORS-approved, a tainted canvas or bitmap, a pattern made of one — was drawn or set as a paint, which
     // getImageData / toDataURL / toBlob then refuse with a SecurityError. Not drawing state, and nothing sets it true
@@ -227,7 +231,7 @@ pub(crate) struct CanvasStateHandle {
 
 unsafe impl GarbageCollected for CanvasStateHandle {
     fn trace(&self, visitor: &mut Visitor) {
-        for r in self.refs.iter().chain([&self.saved]) {
+        for r in self.refs.iter().chain([&self.saved, &self.bitmap]) {
             // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
             visitor.trace(unsafe { &*r.get() });
         }
@@ -323,6 +327,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         refs: [(); 3].map(|_| UnsafeCell::new(v8::TracedReference::empty())),
         stack: RefCell::new(Vec::new()),
         saved: UnsafeCell::new(v8::TracedReference::empty()),
+        bitmap: UnsafeCell::new(v8::TracedReference::empty()),
         origin_clean: Cell::new(true),
     };
     let heap = scope.get_cpp_heap().expect("CanvasStateBase is installed only on an isolate with a C++ heap");
@@ -376,6 +381,28 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasFontFace", canvas_font_face, context_id);
     crate::dom::register(scope, ns, "canvasOriginClean", canvas_origin_clean, context_id);
     crate::dom::register(scope, ns, "canvasTaint", canvas_taint, context_id);
+    crate::dom::register(scope, ns, "canvasBitmap", canvas_bitmap, context_id);
+    crate::dom::register(scope, ns, "canvasSetBitmap", canvas_set_bitmap, context_id);
+}
+
+// __dom.canvasBitmap(state) -> the context's bitmap, or null where it has none (nothing drawn since it was made, reset or
+// resized: transparent black).
+fn canvas_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle_of(scope, args.get(0)) else { return rv.set_null() };
+    // SAFETY: the handle lives while its object, the argument, does; the main thread reads the reference, nothing else
+    // writes it meanwhile.
+    match unsafe { (*h.as_ref().bitmap.get()).get(scope) } {
+        Some(bitmap) => rv.set(bitmap.into()),
+        None => rv.set_null(),
+    }
+}
+// __dom.canvasSetBitmap(state, bitmap | null) — the context's bitmap becomes `bitmap` (one the bindings made of its size),
+// or none: the canvas reset, resized, or its bitmap transferred away.
+fn canvas_set_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(h) = handle_of(scope, args.get(0)) else { return };
+    let bitmap = v8::Local::<v8::Uint8ClampedArray>::try_from(args.get(1)).ok().map(Into::into);
+    // SAFETY: as `canvas_bitmap`.
+    unsafe { (*h.as_ref().bitmap.get()).reset(scope, bitmap) };
 }
 
 // The handle of a state argument.
