@@ -23,13 +23,10 @@ enum Kind {
 }
 
 impl Kind {
+    // …each by its name, in alphabetical order: PerformanceObserver's supportedEntryTypes (§6.4).
+    const NAMED: [(&'static str, Kind); 3] = [("mark", Kind::Mark), ("measure", Kind::Measure), ("resource", Kind::Resource)];
     fn of(name: &str) -> Option<Kind> {
-        match name {
-            "mark" => Some(Kind::Mark),
-            "measure" => Some(Kind::Measure),
-            "resource" => Some(Kind::Resource),
-            _ => None,
-        }
+        Kind::NAMED.iter().find(|(n, _)| *n == name).map(|&(_, k)| k)
     }
 }
 
@@ -136,7 +133,8 @@ impl PerfTimeline {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "perfRecord", perf_record, context_id);
     crate::dom::register(scope, ns, "perfEntries", perf_entries, context_id);
-    crate::dom::register(scope, ns, "perfMarkTimestamp", perf_mark_timestamp, context_id);
+    crate::dom::register(scope, ns, "perfMeasure", perf_measure, context_id);
+    crate::dom::register(scope, ns, "perfEntryTypes", perf_entry_types, context_id);
     crate::dom::register(scope, ns, "perfTimingName", perf_timing_name, context_id);
     crate::dom::register(scope, ns, "perfClear", perf_clear, context_id);
     crate::dom::register(scope, ns, "perfSetResourceBufferSize", perf_set_resource_buffer_size, context_id);
@@ -251,30 +249,96 @@ const MARK_TIMING_IN_WORKER: f64 = -2.0;
 const MARK_TIMING_EMPTY: f64 = -3.0;
 const MARK_NONE: f64 = -4.0;
 
-// __dom.perfMarkTimestamp(mark, inWindow) -> "convert a mark to a timestamp" (User Timing §3.1): a number itself; a
-// PerformanceTiming name navigation's (§3.2: navigationStart 0, every other an event not yet happened); any other name
-// the start time of the most recent mark of it — or, refused, one of the `MARK_*` codes (each below 0, which no
-// timestamp is).
-fn perf_mark_timestamp(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let mark = args.get(0);
+// "Convert a mark to a timestamp" (User Timing §3.1) of `mark`, in a window or not: a number itself; a PerformanceTiming
+// name navigation's (§3.2: navigationStart 0, every other an event not yet happened); any other name the start time of
+// the most recent mark of it — or, refused, one of the `MARK_*` codes (each below 0, which no timestamp is).
+fn mark_timestamp(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, mark: v8::Local<'_, v8::Value>, in_window: bool) -> f64 {
     if mark.is_number() {
         // (…a number that is none no timestamp either — the bindings' conversion lets none through)
         let at = mark.number_value(scope).unwrap_or(f64::NAN);
-        return rv.set_double(if at < 0.0 || at.is_nan() { MARK_NEGATIVE } else { at });
+        return if at < 0.0 || at.is_nan() { MARK_NEGATIVE } else { at };
     }
     let name = utf16_arg(scope, mark);
     if performance_timing_name(&name) {
-        let answer = if !args.get(1).is_true() {
+        return if !in_window {
             MARK_TIMING_IN_WORKER
         } else if name == "navigationStart".encode_utf16().collect::<Vec<u16>>() {
             0.0
         } else {
             MARK_TIMING_EMPTY
         };
-        return rv.set_double(answer);
     }
-    let t = timeline(scope, &args);
-    rv.set_double(t.entries.iter().rev().find(|e| e.kind == Kind::Mark && e.name == name).map_or(MARK_NONE, |e| e.start));
+    let t = timeline(scope, args);
+    t.entries.iter().rev().find(|e| e.kind == Kind::Mark && e.name == name).map_or(MARK_NONE, |e| e.start)
+}
+
+// __dom.perfEntryTypes() -> the entry types the timeline supports, by name (`Kind::NAMED`).
+fn perf_entry_types(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let names: Vec<v8::Local<v8::Value>> = Kind::NAMED.iter().filter_map(|(n, _)| v8::String::new(scope, n)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &names).into());
+}
+
+// What measure()'s options refuse (User Timing §3.1.3, each a TypeError): an end mark beside non-empty options, options
+// with neither a start nor an end, options with all of a start, a duration and an end.
+const MEASURE_END_MARK: f64 = 1.0;
+const MEASURE_NO_START_OR_END: f64 = 2.0;
+const MEASURE_ALL_THREE: f64 = 3.0;
+
+// __dom.perfMeasure(inWindow, now, options, endMark, start, end, duration, startMark) -> [0, startTime, endTime], or what
+// refuses it: [MEASURE_* code, -1], or [MARK_* code, which] — the argument whose mark it was (3 the end mark, 4 the
+// start, 5 the end, 6 the duration, 7 the start mark). The measure() steps (User Timing §3.1.3): `options` 0 for a
+// start mark given (`startMark`), 1 for empty options, 2 for options with members — `start`, `end`, `duration`
+// undefined for each absent; the end time the end mark's, the end's, the start plus the duration, or `now`; the start
+// time the start's, the end less the duration, the start mark's, or 0 — each mark converted as its turn comes.
+fn perf_measure(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let in_window = args.get(0).is_true();
+    let now = args.get(1).number_value(scope).unwrap_or(0.0);
+    let options = args.get(2).uint32_value(scope).unwrap_or(0);
+    let given = |i: i32| !args.get(i).is_undefined();
+    let (end_mark, start, end, duration) = (given(3), given(4), given(5), given(6));
+    if options == 2 {
+        let code = if end_mark {
+            MEASURE_END_MARK
+        } else if !start && !end {
+            MEASURE_NO_START_OR_END
+        } else if start && duration && end {
+            MEASURE_ALL_THREE
+        } else {
+            0.0
+        };
+        if code != 0.0 {
+            return rv.set(numbers(scope, [code, -1.0]));
+        }
+    }
+    // (…a mark converted, or the op answered with its refusal)
+    macro_rules! at {
+        ($i:expr) => {{
+            let at = mark_timestamp(scope, &args, args.get($i), in_window);
+            if at < 0.0 {
+                return rv.set(numbers(scope, [at, f64::from($i)]));
+            }
+            at
+        }};
+    }
+    let end_time = if end_mark {
+        at!(3)
+    } else if end {
+        at!(5)
+    } else if start && duration {
+        at!(4) + at!(6)
+    } else {
+        now
+    };
+    let start_time = if start {
+        at!(4)
+    } else if duration && end {
+        at!(5) - at!(6)
+    } else if options == 0 {
+        at!(7)
+    } else {
+        0.0
+    };
+    rv.set(numbers(scope, [0.0, start_time, end_time]));
 }
 // __dom.perfTimingName(name) -> whether `name` is a PerformanceTiming attribute's name (User Timing §3.2).
 fn perf_timing_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
