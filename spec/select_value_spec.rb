@@ -199,4 +199,21 @@ RSpec.describe 'picking a disabled option' do
     session.find(:css, '#multi option', text: 'Stuck').unselect_option
     expect(session.find(:css, '#multi').value).to eq(['Stay', 'Stuck'])
   end
+
+  # An options collection reads and sets its select's selected index as the select's own members do — never through
+  # them, which a page may replace (Chrome: the collection's answers are the select's, whatever the page defined).
+  it "answers the options collection's selectedIndex by its select's own steps" do
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><select id=s><option>a<option>b</select>']] })
+    session.visit('/')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const s = document.getElementById('s');
+        Object.defineProperty(s, 'selectedIndex', {get() { return 42; }, set() {}});
+        const before = s.options.selectedIndex;
+        s.options.selectedIndex = 1;
+        return [before, s.options.selectedIndex, s.value];
+      })()
+    JS
+    expect(got).to eq([0, 1, 'b'])
+  end
 end

@@ -2811,7 +2811,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // …and CSSOM's rules over them (cssom_rule.rs).
     register(scope, ns, "sheetRules", sheet_rules, context_id);
     register(scope, ns, "sheetVersion", sheet_version, context_id);
-    register(scope, ns, "sheetImports", sheet_imports, context_id);
+    register(scope, ns, "styleImports", style_imports, context_id);
     register(scope, ns, "ruleRules", rule_rules, context_id);
     register(scope, ns, "ruleText", rule_text, context_id);
     register(scope, ns, "ruleGet", rule_get, context_id);
@@ -4415,23 +4415,14 @@ fn sheet_version(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let version = with_sheets(scope, &args, |store, _| sheet.and_then(|id| store.get(id)).map(|s| s.version));
     rv.set_double(version.map_or(-1.0, |v| v as f64));
 }
-// __dom.sheetImports(sheetId) -> the URLs, resolved, of the sheet's `@import` rules — the ones the style engine's parse
-// took (a rule it refused, or one after the rules that may import, none).
-fn sheet_imports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    use style::stylesheets::{CssRule, StylesheetInDocument};
-    let sheet = handle_arg(scope, &args, 0);
-    let urls: Vec<String> = with_sheets(scope, &args, |store, lock| {
-        let guard = lock.read();
-        let stored = sheet.and_then(|id| store.get(id))?;
-        let rules = stored.sheet.contents(&guard).rules.read_with(&guard);
-        let urls = rules.0.iter().filter_map(|r| match r {
-            CssRule::Import(i) => Some(i.read_with(&guard).url.as_str().to_owned()),
-            _ => None,
-        });
-        Some(urls.collect())
-    })
-    .unwrap_or_default();
-    let urls: Vec<v8::Local<v8::Value>> = urls.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::into).collect();
+// __dom.styleImports(css, base, docNid) -> the URLs a style block of `css` at `base` in the document imports
+// (`sheets::import_urls`): what its `load` waits for.
+fn style_imports(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let css = args.get(0).to_rust_string_lossy(scope);
+    let base = args.get(1).to_rust_string_lossy(scope);
+    let quirks = quirks_arg(scope, &args, 2);
+    let urls: Vec<v8::Local<v8::Value>> =
+        crate::sheets::import_urls(&css, &base, quirks).iter().filter_map(|u| v8::String::new(scope, u)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &urls).into());
 }
 // __dom.ruleRules(handle) -> [handle, interface, …]: the rules (or keyframes) the rule holds; null where it holds none.

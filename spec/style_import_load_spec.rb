@@ -10,9 +10,11 @@ require_relative 'support/poll_until'
 # over). The wait an import's `?pipe=trickle(dN)` asks (the WPT server's) is the observable: Chrome waits for the sheets
 # it imports, and loads one with none at once.
 RSpec.describe 'a style block waiting on its @imports' do
+  let(:fetched) { [] }
   let(:app) {
     lambda {|env|
       if env['PATH_INFO'].end_with?('.css')
+        fetched << env['PATH_INFO']
         [200, {'content-type' => 'text/css'}, ['p { color: rgb(1, 2, 3) }']]
       else
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p>x</p>']]
@@ -40,5 +42,26 @@ RSpec.describe 'a style block waiting on its @imports' do
   it 'waits for none past the rules that may import, nor in a comment' do
     expect(load_after("@import '/d.css'; @layer x; @import '/e.css?pipe=trickle(d1)';")).to be < 1000
     expect(load_after("/* @import '/f.css?pipe=trickle(d1)'; */ p {}")).to be < 1000
+  end
+
+  # Telling which `@import`s a block waits for fetches none of them: a document with no browsing context fetches nothing
+  # (Chrome: no request), and an import's Resource Timing entry is filed when the cascade fetches it, not inside the
+  # `append` that connected the block (Chrome: none there).
+  it 'fetches nothing to learn what it waits for' do
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = document.implementation.createHTMLDocument('');
+        const inert = d.createElement('style');
+        inert.textContent = "@import '/inert.css';";
+        d.head.append(inert);
+        const style = document.createElement('style');
+        style.textContent = "@import '/rt.css';";
+        document.head.append(style);
+        return performance.getEntriesByType('resource').map((e) => e.name);
+      })()
+    JS
+    expect(got).to eq([])
+    expect(fetched).not_to include('/inert.css')
   end
 end
