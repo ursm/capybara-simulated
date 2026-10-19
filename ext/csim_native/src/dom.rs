@@ -1023,6 +1023,8 @@ pub(crate) struct RealmArena {
 pub(crate) struct RealmState {
     // Its window viewport and its resize steps' (viewport.rs).
     pub(crate) window_viewport: crate::viewport::Viewport,
+    // What its navigator says of the user agent (navigator.rs).
+    pub(crate) navigator: crate::navigator::Navigator,
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
@@ -2937,6 +2939,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::integrity::install(scope, ns, context_id);
     crate::pointer::install(scope, ns, context_id);
     crate::viewport::install(scope, ns, context_id);
+    crate::navigator::install(scope, ns, context_id);
     crate::import_map::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);

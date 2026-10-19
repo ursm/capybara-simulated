@@ -171,25 +171,12 @@ module Capybara
       # the ~5-10 % wall on action-heavy suites where Capybara would
       # otherwise poll N times to catch a single debounce.
       USER_ACTION_DRAIN_MS = (ENV['CSIM_USER_ACTION_DRAIN_MS'] || '0').to_i
-      # Sent on every driver-originated Rack call. `HTTP_USER_AGENT`
-      # must lead with `Mozilla/5.0` so server-side bot detectors
-      # (ahoy_matey's `Browser.new(ua).bot?`) treat us as a real
-      # client. `REMOTE_ADDR` has to be a non-empty, parseable IP —
-      # Devise's `trackable` mixin runs `IPAddr.new(request.remote_ip)`
-      # during `set_user`/sign-in, and an empty string trips
-      # `IPAddr::AddressFamilyError`.
-      # Keep `USER_AGENT` in sync with `navigator.userAgent` in
-      # `lib/capybara/simulated/js/bridge.js` — the JS side ships in the V8
-      # snapshot, so injecting from Ruby at boot would defeat snapshot
-      # warmth.
-      # Discourse's `non_crawler_user_agents` adds a "Rails Testing"
-      # bypass in test mode (see lib/crawler_detection.rb); without one
-      # of its bypass tokens here Discourse serves a no-JS crawler-only
-      # HTML view. Putting "Rails Testing" in the UA satisfies that
-      # without claiming a specific real-browser engine (which would
-      # send Turbo / Stimulus down chrome-specific code paths Avo's
-      # tests don't exercise).
-      USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 capybara-simulated'
+      # Sent on every driver-originated Rack call — the engine's (navigator.rs `USER_AGENT`), the page's
+      # `navigator.userAgent` too: it leads with `Mozilla/5.0` so server-side bot detectors (ahoy_matey's
+      # `Browser.new(ua).bot?`) treat us as a real client. `REMOTE_ADDR` has to be a non-empty, parseable
+      # IP — Devise's `trackable` mixin runs `IPAddr.new(request.remote_ip)` during `set_user`/sign-in,
+      # and an empty string trips `IPAddr::AddressFamilyError`.
+      USER_AGENT = Native.user_agent.freeze
       # Approximate Chrome's resolution: when connecting to `localhost`,
       # Linux glibc returns IPv6 (::1) first and the server sees the
       # client at `::1`; for any literal IP (or a non-localhost name),

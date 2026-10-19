@@ -124,6 +124,7 @@ mod frame_navigation;
 mod navigables;
 mod observation_list;
 mod namespaces;
+mod navigator;
 mod node_handle;
 mod numbers;
 mod node_iterators;
@@ -230,6 +231,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("blob_url_key", magnus::function!(blob_urls::entry_key_for_ruby, 1))?;
     // The display a window starts out filling (viewport.rs `SCREEN`), the page's `screen` too.
     native.define_module_function("screen_size", magnus::function!(viewport::screen_size_for_ruby, 0))?;
+    // The user agent string every request sends and the page's navigator reads (navigator.rs `USER_AGENT`).
+    native.define_module_function("user_agent", magnus::function!(navigator::user_agent_for_ruby, 0))?;
     // A GET form submission's URL: the action's query the entry list (url_ops.rs `mutated_action_url`), the page's too.
     native.define_module_function("form_action_url", magnus::function!(url_ops::mutated_action_url_for_ruby, 2))?;
     // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one
