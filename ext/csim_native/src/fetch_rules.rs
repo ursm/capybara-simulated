@@ -343,9 +343,9 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 }
 
 // ── For the bindings ──
-// The headers a fetch's request has where its author set none of the name (Fetch §4.1 "main fetch": `Accept: */*`
-// for one with no destination, which XHR's and fetch()'s are — not a document navigation's richer Accept, which the
-// host fills in — and the user agent's `Accept-Language`).
+// The headers a fetch's request has where its author set none of the name (Fetch §4 "fetching", its steps 12-13):
+// `Accept: */*` for one with no destination, which XHR's and fetch()'s are — not a document navigation's richer Accept,
+// which the host fills in — and the user agent's `Accept-Language`.
 const DEFAULT_REQUEST_HEADERS: [(&str, &str); 2] = [("Accept", "*/*"), ("Accept-Language", "en-US,en;q=0.9")];
 // __dom.defaultRequestHeaders() -> [name, value, …]: `DEFAULT_REQUEST_HEADERS`.
 fn default_request_headers_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

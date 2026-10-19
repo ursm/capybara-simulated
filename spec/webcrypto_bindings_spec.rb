@@ -98,6 +98,22 @@ RSpec.describe 'Web Crypto bindings' do
     ])
   end
 
+  # A key's state is the engine's and no page member answers for it: generateKey tells a key from a pair by nothing an
+  # `Object.prototype.publicKey` can answer, nor hands a getter of one the engine's state.
+  it 'makes a key whatever Object.prototype says' do
+    got = run(<<~JS)
+      let seen = null;
+      Object.defineProperty(Object.prototype, 'publicKey', { get() { seen = this; return 1; }, configurable: true });
+      try {
+        const key = await crypto.subtle.generateKey({name: 'HMAC', hash: 'SHA-256'}, true, ['sign']);
+        return [Object.prototype.toString.call(key), seen === null];
+      } finally {
+        delete Object.prototype.publicKey;
+      }
+    JS
+    expect(got).to eq(['[object CryptoKey]', true])
+  end
+
   # A CryptoKey is [Serializable]: a structured clone is a key of its own with the same algorithm and material, and one
   # posted to a worker is a key there that signs alike — and comes back one.
   it 'clones' do
