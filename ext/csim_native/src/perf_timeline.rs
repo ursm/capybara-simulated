@@ -65,6 +65,9 @@ pub(crate) struct PerfTimeline {
     navigation_id: Option<u64>,
     observers: Vec<Observer>,
     next_observer: u32,
+    // Each observer's type, as its first observe() fixed it — whether it observes by `entryTypes` ('multiple') — kept
+    // past a disconnect(), as the observer's own (Performance Timeline §6 "observer type").
+    observer_types: std::collections::HashMap<u32, bool>,
     // Whether the PerformanceObserver task is queued — one at a time.
     observer_task_queued: bool,
 }
@@ -83,6 +86,7 @@ impl Default for PerfTimeline {
             navigation_id: None,
             observers: Vec::new(),
             next_observer: 0,
+            observer_types: std::collections::HashMap::new(),
             observer_task_queued: false,
         }
     }
@@ -91,6 +95,8 @@ impl Default for PerfTimeline {
 // What a new entry, or an observe(), leaves the bindings to queue (`perfRecord`, `poObserve`).
 const BUFFER_FULL_TASK: u32 = 1;
 const OBSERVER_TASK: u32 = 2;
+// …and that an observe() registered the observer: it observes a supported type.
+const OBSERVER_REGISTERED: u32 = 4;
 
 impl PerfTimeline {
     // "Generate an id" (§5.7): the last performance entry id, starting at a random integer between 100 and 10000 and
@@ -341,17 +347,29 @@ fn po_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_uint32(t.next_observer);
 }
 
-// __dom.poObserve(id, types, replace, bufferedType) -> `[tasks, serial…]`: observer `id` observing `types` — its types
-// replaced by them (observe({entryTypes})) or they added (observe({type})) — its next callback reporting dropped
-// entries, and registered where it is not; with a `bufferedType`, the serials of the entries already buffered of it,
-// for the bindings to queue on it, and the observers' task (`perfRecord`'s 2) where that queues any. With no types, it
-// stays as it was, but for the dropped entries.
+// __dom.poObserve(id, types, multiple, bufferedType) -> `[tasks, serial…]`: observer `id` observing `types` (their names,
+// the supported among them) — its types replaced by them (observe({entryTypes}), `multiple`) or they added
+// (observe({type})) — its next callback reporting dropped entries, and registered where it is not; with a
+// `bufferedType`, the serials of the entries already buffered of it, for the bindings to queue on it, and the observers'
+// task (`perfRecord`'s 2) where that queues any, and 4 where it is registered. With no supported types, it stays as it
+// was, but for the dropped entries. Null — an InvalidModificationError — where its first observe() was the other of the
+// two, disconnect() or no disconnect() (a bool an observer keeps for as long as the timeline does).
 fn po_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
-    let types = u8::try_from(args.get(1).uint32_value(scope).unwrap_or(0) & 7).unwrap_or(0);
+    let mut types = 0u8;
+    if let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(1)) {
+        for i in 0..list.length() {
+            if let Some(kind) = list.get_index(scope, i).and_then(|v| Kind::of(&v.to_rust_string_lossy(scope))) {
+                types |= kind as u8;
+            }
+        }
+    }
     let replace = args.get(2).is_true();
     let buffered = Some(args.get(3)).filter(|b| b.is_string()).and_then(|b| Kind::of(&b.to_rust_string_lossy(scope)));
     let t = timeline(scope, &args);
+    if *t.observer_types.entry(id).or_insert(replace) != replace {
+        return rv.set_null();
+    }
     if let Some(o) = t.observer(id) {
         o.requires_dropped_entries = true;
     }
@@ -364,7 +382,7 @@ fn po_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let o = t.observer(id).expect("registered above");
     o.types = if replace { types } else { o.types | types };
     let entries = buffered.map(|kind| t.filtered(Some(kind), None)).unwrap_or_default();
-    let tasks = if entries.is_empty() { 0 } else { t.queue_observer_task() };
+    let tasks = OBSERVER_REGISTERED | if entries.is_empty() { 0 } else { t.queue_observer_task() };
     rv.set(serials(scope, std::iter::once(tasks).chain(entries)));
 }
 
