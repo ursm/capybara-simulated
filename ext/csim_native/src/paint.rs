@@ -17,6 +17,7 @@
 use std::collections::HashMap;
 
 use crate::dom::{NodeId, RealmArena};
+use crate::numbers::to_js_string;
 use crate::style::StyleEngine;
 
 // The text pieces the last pass that paints placed (walk_ops.rs `paint_rows`): `[x, y, baseline, width, justify, owner,
@@ -118,14 +119,6 @@ fn parse_float(s: &str) -> f64 {
     }
     longest.and_then(|n| s[..n].parse().ok()).unwrap_or(f64::NAN)
 }
-// …and a number written as JavaScript writes it (`${n}`), for the font shorthand.
-fn js_number(n: f64) -> String {
-    if n.fract() == 0.0 && n.abs() < 1e21 {
-        format!("{}", n as i64)
-    } else {
-        format!("{n}")
-    }
-}
 
 // Where a piece's style comes from: the element it was written in — or that element's `::before` / `::after` box — and
 // for a control's placeholder the element whose `::placeholder` it is drawn in.
@@ -193,7 +186,7 @@ impl Painter<'_> {
         let style = self.font_value(owner, "font-style").unwrap_or_else(|| "normal".to_owned());
         let family = self.font_value(owner, "font-family").filter(|f| !f.is_empty()).unwrap_or_else(|| "Times New Roman".to_owned());
         let style = if style == "normal" { String::new() } else { format!("{style} ") };
-        format!("{style}{} {}px {family}", js_number(weight), js_number(size))
+        format!("{style}{} {}px {family}", to_js_string(weight), to_js_string(size))
     }
     // A border side's width: 0 for none — whatever its colour, which decides only whether it shows.
     fn border_width(&mut self, el: NodeId, side: &str) -> f64 {
@@ -666,8 +659,8 @@ mod tests {
         assert_eq!(parse_float(" -2e1px"), -20.0);
         assert_eq!(parse_float("1e"), 1.0);
         assert!(parse_float("px").is_nan());
-        assert_eq!(js_number(16.0), "16");
-        assert_eq!(js_number(13.333), "13.333");
+        assert_eq!(to_js_string(16.0), "16");
+        assert_eq!(to_js_string(13.333), "13.333");
         assert!(opaque("rgba(0, 0, 0, 0)".to_owned()).is_none());
         assert!(opaque("rgba(0, 0, 0, 0.5)".to_owned()).is_some());
     }
