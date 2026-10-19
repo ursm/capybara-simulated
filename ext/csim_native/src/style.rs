@@ -237,11 +237,13 @@ struct AuthorSheet {
     version: u32,
 }
 
-// An `@font-face` rule of the page's, as `font_faces` lists it.
+// An `@font-face` rule of the page's, as `font_faces` lists it: its identity, its declarations' text, the first of its
+// sources' URLs, and each descriptor it declares, by its name — `src` among them — serialized.
 pub(crate) struct SheetFace {
     pub(crate) id: u32,
     pub(crate) text: String,
     pub(crate) first_url: Option<String>,
+    pub(crate) declared: Vec<(&'static str, String)>,
 }
 
 // The identities the page's `@font-face` rules have (`font_faces`): each rule's by the version of the sheet it is in
@@ -762,14 +764,18 @@ impl StyleEngine {
                 let face = rule.read_with(&guard);
                 let d = &face.descriptors;
                 let mut text = String::new();
+                let mut declared = Vec::new();
                 for id in DESCRIPTORS {
                     let mut value = String::new();
                     if d.get(id, &mut value).is_ok() && !value.is_empty() {
                         text.push_str(&format!("{}: {}; ", id.name(), value));
+                        declared.push((id.name(), value));
                     }
                 }
                 if let Some(src) = &d.src {
-                    text.push_str(&format!("src: {}; ", font_face_src(src)));
+                    let src = font_face_src(src);
+                    text.push_str(&format!("src: {src}; "));
+                    declared.push(("src", src));
                 }
                 let first_url = d.src.as_ref().and_then(|src| {
                     src.0.iter().find_map(|source| match source {
@@ -777,7 +783,7 @@ impl StyleEngine {
                         style::font_face::Source::Local(_) => None,
                     })
                 });
-                faces.push(SheetFace { id, text: text.trim_end().to_owned(), first_url });
+                faces.push(SheetFace { id, text: text.trim_end().to_owned(), first_url, declared });
             }
         }
         faces

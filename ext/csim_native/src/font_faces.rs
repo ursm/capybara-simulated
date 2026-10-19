@@ -229,6 +229,56 @@ pub(crate) fn family_list(stack: &str) -> Vec<(String, bool)> {
         }
     }
 }
+// The descriptors a FontFace's attributes reflect (CSS Font Loading §2.1), in the order its bindings name them
+// (font-face.js `FONT_DESCRIPTORS`): what a CSS-connected face's attributes read of its rule.
+pub(crate) const FACE_ATTRIBUTE_DESCRIPTORS: [&str; 11] = [
+    "font-style",
+    "font-weight",
+    "font-stretch",
+    "unicode-range",
+    "font-feature-settings",
+    "font-variation-settings",
+    "font-display",
+    "ascent-override",
+    "descent-override",
+    "line-gap-override",
+    "size-adjust",
+];
+
+// What the FontFaceSet makes of an `@font-face` rule (CSS Font Loading §2.2, a CSS-connected face): its `font-family` and
+// `src` as declared, whether it is a face at all — one names a family and a source this UA would try (a rule of only
+// `format("embedded-opentype")` sources is none: Chrome) — what makes it the same face from one read to the next (its
+// family's name and its sources, resolved: not its text, which a descriptor rewritten changes), and each attribute's
+// descriptor as declared, empty where it declares none.
+pub(crate) struct RuleFace {
+    pub(crate) family: String,
+    pub(crate) src: String,
+    pub(crate) is_face: bool,
+    pub(crate) identity: String,
+    pub(crate) attributes: [String; 11],
+}
+pub(crate) fn rule_face(declared: &[(&str, String)]) -> RuleFace {
+    let of = |name: &str| declared.iter().find(|(n, _)| *n == name).map_or_else(String::new, |(_, v)| v.clone());
+    let (family, src) = (of("font-family"), of("src"));
+    let sources = parse(&format!("font-family: x; src: {src}"), "about:blank").map_or(Vec::new(), |f| f.sources);
+    let name = family_descriptor(&family).map_or_else(|| family.trim().to_owned(), |(name, _)| name);
+    let mut identity = name;
+    for source in &sources {
+        identity.push('\n');
+        identity.push_str(&match source {
+            FaceSource::Url(u) => format!("url:{u}"),
+            FaceSource::Local(n) => format!("local:{n}"),
+        });
+    }
+    RuleFace {
+        is_face: !family.is_empty() && !sources.is_empty(),
+        attributes: FACE_ATTRIBUTE_DESCRIPTORS.map(of),
+        family,
+        src,
+        identity,
+    }
+}
+
 // A `@font-face` rule's `font-family` descriptor — what a FontFace's `family` is parsed as (CSS Font Loading §2.1, CSS
 // Fonts 4 §4.1): its one `<family-name>`, a string or identifiers (no generic family nor CSS-wide keyword among them
 // unquoted, nothing more), as (the name, unquoted and unescaped; its serialization: a string quoted, identifiers as

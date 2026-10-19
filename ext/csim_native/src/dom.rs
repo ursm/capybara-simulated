@@ -4901,9 +4901,10 @@ fn style_shadow_sheets_unguarded(
     engine.set_shadow_sheets(arena, root, &sheets);
 }
 
-// __dom.styleFontFaces() -> [faceId, faceText, firstUrl, …]: the `@font-face` rules the document's sheets hold that
-// apply (`StyleEngine::font_faces`), each by its identity, its declarations as text and its first `url()` source
-// resolved (null for none). Undefined with no engine yet.
+// __dom.styleFontFaces() -> [faceId, faceText, firstUrl, isFace, family, src, identity, attribute × 11, …]: the
+// `@font-face` rules the document's sheets hold that apply (`StyleEngine::font_faces`), each by its identity, its
+// declarations as text, its first `url()` source resolved (null for none), and what the FontFaceSet makes of it
+// (`font_faces::rule_face`). Undefined with no engine yet.
 fn style_font_faces(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4923,9 +4924,14 @@ fn style_font_faces_unguarded(
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
     for face in engine.font_faces(&arena.sheets) {
         let (Some(text), url) = (v8::String::new(scope, &face.text), face.first_url.and_then(|u| v8::String::new(scope, &u))) else { continue };
+        let rule = crate::font_faces::rule_face(&face.declared);
         items.push(v8::Integer::new_from_unsigned(scope, face.id).into());
         items.push(text.into());
         items.push(url.map_or_else(|| v8::null(scope).into(), Into::into));
+        items.push(v8::Boolean::new(scope, rule.is_face).into());
+        for value in [&rule.family, &rule.src, &rule.identity].into_iter().chain(&rule.attributes) {
+            items.push(v8::String::new(scope, value).map_or_else(|| v8::undefined(scope).into(), Into::into));
+        }
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
