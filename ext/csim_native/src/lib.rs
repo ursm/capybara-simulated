@@ -8,6 +8,7 @@
 
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
 mod adopt;
+mod agents;
 mod animation_ops;
 mod animations;
 mod autofocus;
@@ -291,11 +292,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
     // A driver session's IndexedDB, Cache Storage and system clipboard: a new partition of their registries
-    // (idb_databases.rs, cache_storage.rs, system_clipboard.rs), cleared as the session resets — and whether an
-    // IndexedDB agent of it has notices to take, its event loop work.
+    // (idb_databases.rs, cache_storage.rs, system_clipboard.rs), cleared as the session resets — and whether an agent
+    // of it has notices to take (agents.rs), its event loop work.
     native.define_module_function("session_partition_new", magnus::function!(session_partition_new, 0))?;
     native.define_module_function("session_partition_clear", magnus::function!(session_partition_clear, 1))?;
-    native.define_module_function("idb_pending", magnus::function!(idb_databases::pending, 1))?;
+    native.define_module_function("agent_notices_pending", magnus::function!(agents::pending, 1))?;
     native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
     native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;
     Ok(())

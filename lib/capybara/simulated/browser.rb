@@ -1122,34 +1122,35 @@ module Capybara
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
       def async_io_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending? || idb_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending? || agent_notices_pending?
       end
 
-      # IndexedDB's notices for this window's realms, taken — each realm its own, as its next event loop step would — and
-      # for the session's other windows: an auxiliary window's event loop runs only as the active window's does, and a
-      # `versionchange` it never fires would hold every other window's upgrade.
-      def deliver_idb_notices
-        return 0 unless Native.idb_pending(@session_partition)
+      # The engine registries' notices (agents.rs — IndexedDB's, Web Locks') for this window's realms, taken — each realm
+      # its own, as its next event loop step would — and for the session's other windows: an auxiliary window's event loop
+      # runs only as the active window's does, and a `versionchange` it never fires would hold every other window's
+      # upgrade, a lock it is never granted every request queued after it.
+      def deliver_agent_notices
+        return 0 unless Native.agent_notices_pending(@session_partition)
 
-        idb_windows.sum(&:deliver_own_idb_notices)
+        agent_windows.sum(&:deliver_own_agent_notices)
       end
 
-      def deliver_own_idb_notices
-        return 0 unless @runtime.call('__csimIdbPending')
+      def deliver_own_agent_notices
+        return 0 unless @runtime.call('__csimAgentsPending')
 
-        @runtime.call('__csimIdbDeliver')
-        @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, '__csimIdbDeliver') }
+        @runtime.call('__csimAgentDeliver')
+        @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, '__csimAgentDeliver') }
         1
       end
 
-      # Whether IndexedDB owes a realm of one of the session's windows a notice another realm's or a worker's call caused
-      # (idb.js `deliver`). The session's check first, which costs no V8 call.
-      def idb_pending? = Native.idb_pending(@session_partition) && idb_windows.any? {|b| b.runtime_idb_pending? }
+      # Whether a registry owes a realm of one of the session's windows a notice another realm's or a worker's call caused
+      # (engine-notices.js `deliver`). The session's check first, which costs no V8 call.
+      def agent_notices_pending? = Native.agent_notices_pending(@session_partition) && agent_windows.any? {|b| b.runtime_agent_notices_pending? }
 
-      def runtime_idb_pending? = @runtime.call('__csimIdbPending') == true
+      def runtime_agent_notices_pending? = @runtime.call('__csimAgentsPending') == true
 
       # (…this window first, then the session's others)
-      private def idb_windows = [self, *(@driver&.window_browsers || []).reject {|b| b.equal?(self) }]
+      private def agent_windows = [self, *(@driver&.window_browsers || []).reject {|b| b.equal?(self) }]
 
       # Single-slot cache for the most recent find_xpath / find_css /
       # find_first_css result. Capybara's `synchronize` retry loop
@@ -1949,7 +1950,7 @@ module Capybara
           deliver_window_messages
           deliver_websocket_events
           deliver_image_loads
-          deliver_idb_notices
+          deliver_agent_notices
           break if @runtime.settle_gen > start_gen
           break unless @timers_active || async_io_pending?
           # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
@@ -1966,7 +1967,7 @@ module Capybara
           deliver_window_messages
           deliver_websocket_events
           deliver_image_loads
-          deliver_idb_notices
+          deliver_agent_notices
           break if @runtime.settle_gen > start_gen
           # A background worker thread owes us a CONTRACTUAL reply (a swack / bcack /
           # fetch_response is posted under `ensure`, so it always comes) but hasn't posted it
@@ -3092,7 +3093,7 @@ module Capybara
       # Returns true if any channel delivered.
       private def drain_async_channels
         n = deliver_worker_messages + deliver_event_source_events + deliver_hijacked_fetches +
-            deliver_window_messages + deliver_websocket_events + deliver_image_loads + deliver_idb_notices
+            deliver_window_messages + deliver_websocket_events + deliver_image_loads + deliver_agent_notices
         @find_cache_dirty = true if n.positive?
         n.positive?
       end
@@ -3122,7 +3123,7 @@ module Capybara
         end
         # (1) Background async (cheap Ruby-side checks, no V8 crossing) we must let
         #     land before jumping the clock: advance one fixed step, reset the guard.
-        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || image_loads_pending? || idb_pending?
+        if worker_pending? || event_source_pending? || hijack_fetch_pending? || websocket_pending? || image_loads_pending? || agent_notices_pending?
           @ff_transient_polls = 0
           return POLL_TICK_STEP_MS
         end
@@ -6661,9 +6662,9 @@ module Capybara
         reset_websockets
         reset_hijacked_fetches
         Native.sw_clients(@sw_partition).each {|id, *| unregister_client(id) }
-        # …and its IndexedDB connections, which a closed window's are not left open by: no other window's upgrade waits on
-        # a page nothing runs any more.
-        @runtime.call('__csimIdbDropAgents')
+        # …and the agents its realms were — their IndexedDB connections, which a closed window's are not left open by, and
+        # their locks: no other window's upgrade or lock request waits on a page nothing runs any more.
+        @runtime.call('__csimAgentsDrop')
       end
 
       # Drop the parked browser's queued worker→main messages (claims, client
@@ -8661,7 +8662,7 @@ module Capybara
         # the two, the window is a few instructions wide.
         run_worker_timers = lambda do |floor|
           step = worker_clock_step.call(floor)
-          next if stopping.call || (rt.call('__nextTimerDelay').to_f < 0 && !(Native.idb_pending(@session_partition) && rt.call('__csimIdbPending')))
+          next if stopping.call || (rt.call('__nextTimerDelay').to_f < 0 && !(Native.agent_notices_pending(@session_partition) && rt.call('__csimAgentsPending')))
 
           rt.drain_microtasks
           rt.drain_timers(step)

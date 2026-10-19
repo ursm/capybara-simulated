@@ -3,17 +3,16 @@
 // connections, its transactions and their order, and the queue its open and delete requests wait in — so every realm
 // and worker of a session reads the same database, and a page reloaded finds what the last one wrote.
 //
-// Who asks is an AGENT: a realm of an isolate (a window's, a frame's, a worker's), made as it first uses IndexedDB and
-// gone with its realm (`drop_realm`, or its isolate). What the registry owes an agent — an event to fire at one of its
-// connections, a request of its answered, a transaction of its started — waits in the agent's notices until it takes
-// them (`idbTake`): at once, by the bindings after each of their own calls, and at each step of its event loop for what
-// another agent's call caused. The bindings (idb.js) keep the requests and events, a transaction's state between its
-// events and its requests' order, key conversion and key paths.
+// Who asks is an AGENT (agents.rs): a realm of an isolate, gone with its realm, and its connections with it
+// (`agent_gone`). What the registry owes an agent — an event to fire at one of its connections, a request of its
+// answered, a transaction of its started — is a notice of its (kinds 1-8 below). The bindings (idb.js) keep the
+// requests and events, a transaction's state between its events and its requests' order, key conversion and key paths.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-use crate::dom::{realm_id, register};
+use crate::agents::{agent_of, tell};
+use crate::dom::register;
 use crate::idb::{name_arg, name_value, Store};
 
 pub(crate) type Name = Vec<u16>;
@@ -112,14 +111,7 @@ struct Pending {
     version: f64,
 }
 
-// What an agent is told, its kind and up to four numbers (NaN: null), and whether it is a task of its own or fires as it
-// is taken.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Notice {
-    kind: u32,
-    args: [f64; 4],
-    later: bool,
-}
+// What an agent is told (agents.rs `Notice`), by kind, each with up to four numbers (NaN: null).
 // `versionchange` at a connection: [connection, old version, new version].
 const VERSION_CHANGE: u32 = 1;
 // `blocked` at a request: [request, old version, new version].
@@ -137,21 +129,14 @@ const TURN: u32 = 7;
 // A transaction started: [transaction].
 const STARTED: u32 = 8;
 
-struct Agent {
-    partition: u64,
-    notices: Vec<Notice>,
-}
-
 #[derive(Default)]
 pub(crate) struct Registry {
     next: u32,
-    next_agent: u64,
     pub(crate) stores: HashMap<u32, Store>,
     databases: HashMap<DbKey, Database>,
     queues: HashMap<DbKey, VecDeque<Pending>>,
     connections: HashMap<u32, Connection>,
     transactions: HashMap<u32, Transaction>,
-    agents: HashMap<u64, Agent>,
     // (…the cursors the transactions opened, each gone with its transaction: idb.rs `Cursor`)
     pub(crate) cursors: HashMap<u32, crate::idb::Cursor>,
 }
@@ -168,11 +153,6 @@ impl Registry {
         self.next = self.next.wrapping_add(1);
         self.next
     }
-    fn tell(&mut self, agent: u64, kind: u32, args: [f64; 4], later: bool) {
-        if let Some(a) = self.agents.get_mut(&agent) {
-            a.notices.push(Notice { kind, args, later });
-        }
-    }
 
     // ── Liveness ──
     // Whether store `id` is one of its database's now.
@@ -188,7 +168,7 @@ impl Registry {
         let queue = self.queues.entry(key).or_default();
         queue.push_back(Pending { id, agent, request, open, conn: None, waiting: Vec::new(), unacked: Vec::new(), blocked: false, version: 0.0 });
         if queue.len() == 1 {
-            self.tell(agent, TURN, [f64::from(id), 0.0, 0.0, 0.0], true);
+            tell(agent, TURN, [f64::from(id), 0.0, 0.0, 0.0], true);
         }
     }
     fn queue_of(&self, entry: u32) -> Option<DbKey> {
@@ -214,7 +194,7 @@ impl Registry {
                 let version = asked.unwrap_or(if existed { db.version } else { 1.0 });
                 if db.version > version {
                     let current = db.version;
-                    self.tell(agent, OPEN_REFUSED, [f64::from(request), version, current, 0.0], false);
+                    tell(agent, OPEN_REFUSED, [f64::from(request), version, current, 0.0], false);
                     return self.finish(&key);
                 }
                 let conn = self.next_id();
@@ -224,7 +204,7 @@ impl Registry {
                 let current = db.version;
                 self.connections.insert(conn, Connection { db: key.clone(), agent, version: current, store_names, close_pending: false, closed: false });
                 if current == version {
-                    self.tell(agent, OPENED, [f64::from(request), f64::from(conn), 0.0, 0.0], false);
+                    tell(agent, OPENED, [f64::from(request), f64::from(conn), 0.0, 0.0], false);
                     return self.finish(&key);
                 }
                 let p = self.queues.get_mut(&key).and_then(VecDeque::front_mut).expect("its turn");
@@ -234,7 +214,7 @@ impl Registry {
             }
             None => {
                 if !self.databases.contains_key(&key) {
-                    self.tell(agent, DELETED, [f64::from(request), 0.0, 0.0, 0.0], false);
+                    tell(agent, DELETED, [f64::from(request), 0.0, 0.0, 0.0], false);
                     return self.finish(&key);
                 }
                 self.wait_for_connections(&key);
@@ -254,7 +234,7 @@ impl Registry {
             let Some(conn) = self.connections.get(&c) else { continue };
             if !conn.close_pending {
                 let agent = conn.agent;
-                self.tell(agent, VERSION_CHANGE, [f64::from(c), old, new, 0.0], false);
+                tell(agent, VERSION_CHANGE, [f64::from(c), old, new, 0.0], false);
                 unacked.push(c);
             }
         }
@@ -277,7 +257,7 @@ impl Registry {
             p.blocked = true;
             let new = if p.open.is_some() { p.version } else { f64::NAN };
             let (agent, request) = (p.agent, p.request);
-            self.tell(agent, BLOCKED, [f64::from(request), old, new, 0.0], true);
+            tell(agent, BLOCKED, [f64::from(request), old, new, 0.0], true);
         } else {
             self.proceed(key, false);
         }
@@ -289,7 +269,7 @@ impl Registry {
     // The waiting over: an open's upgrade begun, a delete's database gone — a task later where a close ended the wait.
     fn proceed(&mut self, key: &DbKey, later: bool) {
         // (…none for a request whose agent is gone)
-        if self.queues[key].front().is_some_and(|p| !self.agents.contains_key(&p.agent)) {
+        if self.queues[key].front().is_some_and(|p| !crate::agents::live(p.agent)) {
             return self.finish(key);
         }
         let p = self.queues.get_mut(key).and_then(VecDeque::front_mut).expect("its turn");
@@ -310,13 +290,13 @@ impl Registry {
                 c.version = version;
             }
             self.transactions.insert(tx, Transaction::new(conn, key.clone(), scope, VERSIONCHANGE, true));
-            self.tell(agent, UPGRADE, [f64::from(request), f64::from(conn), f64::from(tx), old], later);
+            tell(agent, UPGRADE, [f64::from(request), f64::from(conn), f64::from(tx), old], later);
         } else {
             let Some(db) = self.databases.remove(key) else { return };
             for id in db.stores.values() {
                 self.stores.remove(id);
             }
-            self.tell(agent, DELETED, [f64::from(request), db.version, 0.0, 0.0], later);
+            tell(agent, DELETED, [f64::from(request), db.version, 0.0, 0.0], later);
             self.finish(key);
         }
     }
@@ -327,7 +307,7 @@ impl Registry {
         match queue.front() {
             Some(next) => {
                 let (agent, id) = (next.agent, next.id);
-                self.tell(agent, TURN, [f64::from(id), 0.0, 0.0, 0.0], true);
+                tell(agent, TURN, [f64::from(id), 0.0, 0.0, 0.0], true);
             }
             None => {
                 self.queues.remove(key);
@@ -394,7 +374,7 @@ impl Registry {
                 t.started = true;
             }
             if let Some(agent) = agent.filter(|_| quiet != Some(tx)) {
-                self.tell(agent, STARTED, [f64::from(tx), 0.0, 0.0, 0.0], false);
+                tell(agent, STARTED, [f64::from(tx), 0.0, 0.0, 0.0], false);
             }
         }
     }
@@ -483,7 +463,6 @@ impl Registry {
     // An agent gone with its realm: its connections closed, its transactions aborted (what they wrote put back), its
     // requests out of their queues.
     fn drop_agent(&mut self, agent: u64) {
-        self.agents.remove(&agent);
         // (…its requests out first, the first of a queue too: a connection of its closing must not go on with a request
         // of its own that waited on it)
         let keys: Vec<DbKey> = self.queues.keys().cloned().collect();
@@ -544,25 +523,8 @@ fn conflicts(a: &Transaction, b: &Transaction) -> bool {
     (a.mode != READONLY || b.mode != READONLY) && a.scope.iter().any(|n| b.scope.contains(n))
 }
 
-// ── The agents of an isolate ─────────────────────────────────────────────────────────────────────────────────────────
-// Each realm's agent, by realm — gone from the registry with the realm, or with the isolate.
-#[derive(Default)]
-struct Agents(HashMap<i32, u64>);
-impl Drop for Agents {
-    fn drop(&mut self) {
-        let mut reg = lock();
-        for agent in self.0.values() {
-            reg.drop_agent(*agent);
-        }
-    }
-}
-fn agent_of(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<u64> {
-    let realm = realm_id(scope, args);
-    scope.get_slot::<Agents>().and_then(|a| a.0.get(&realm).copied())
-}
-// The agent realm `realm` was, gone (its context begun anew or disposed).
-pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
-    let Some(agent) = scope.get_slot_mut::<Agents>().and_then(|a| a.0.remove(&realm)) else { return };
+// Agent `agent` gone (agents.rs): its requests out of their queues, its transactions aborted, its connections closed.
+pub(crate) fn agent_gone(agent: u64) {
     lock().drop_agent(agent);
 }
 
@@ -571,17 +533,8 @@ pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
 pub(crate) fn clear(partition: u64) {
     lock().clear(partition);
 }
-// Whether an agent of a session has notices it has yet to take — some event loop of the session has work (which one,
-// each isolate's `idbPending` says).
-pub(crate) fn pending(partition: u64) -> bool {
-    lock().agents.values().any(|a| a.partition == partition && !a.notices.is_empty())
-}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    register(scope, ns, "idbAgent", agent_op, context_id);
-    register(scope, ns, "idbTake", take, context_id);
-    register(scope, ns, "idbPending", pending_here, context_id);
-    register(scope, ns, "idbDropAgents", drop_agents, context_id);
     register(scope, ns, "idbOpen", open, context_id);
     register(scope, ns, "idbDeleteDatabase", delete_database, context_id);
     register(scope, ns, "idbTurn", turn, context_id);
@@ -619,7 +572,7 @@ fn string_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
 fn db_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, agent: u64) -> Option<DbKey> {
     let storage = string_arg(scope, args, 0);
     let name = name_arg(scope, args.get(1))?;
-    let partition = lock().agents.get(&agent)?.partition;
+    let partition = crate::agents::partition(agent)?;
     Some(DbKey { partition, storage, name })
 }
 fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: &[Name]) -> v8::Local<'s, v8::Value> {
@@ -627,57 +580,6 @@ fn names_value<'s>(scope: &mut v8::PinScope<'s, '_>, names: &[Name]) -> v8::Loca
     v8::Array::new_with_elements(scope, &items).into()
 }
 
-// __dom.idbAgent(partition): this realm an agent of session `partition`'s, where it is not yet one.
-fn agent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if agent_of(scope, &args).is_some() {
-        return;
-    }
-    let partition = args.get(0).integer_value(scope).unwrap_or(0) as u64;
-    let realm = realm_id(scope, &args);
-    let agent = {
-        let mut reg = lock();
-        reg.next_agent += 1;
-        let agent = reg.next_agent;
-        reg.agents.insert(agent, Agent { partition, notices: Vec::new() });
-        agent
-    };
-    if scope.get_slot::<Agents>().is_none() {
-        scope.set_slot(Agents::default());
-    }
-    scope.get_slot_mut::<Agents>().expect("Agents slot was just set").0.insert(realm, agent);
-}
-// __dom.idbTake() -> [kind, later, a, b, c, d, …]: the notices this realm's agent has, taken (null for none).
-fn take(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(agent) = agent_of(scope, &args) else { return rv.set_null() };
-    let notices = lock().agents.get_mut(&agent).map(|a| std::mem::take(&mut a.notices)).unwrap_or_default();
-    if notices.is_empty() {
-        return rv.set_null();
-    }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(notices.len() * 6);
-    for n in notices {
-        items.push(v8::Integer::new_from_unsigned(scope, n.kind).into());
-        items.push(v8::Boolean::new(scope, n.later).into());
-        for a in n.args {
-            items.push(if a.is_nan() { v8::null(scope).into() } else { v8::Number::new(scope, a).into() });
-        }
-    }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.idbPending() -> whether an agent of this isolate — any realm's — has notices to take.
-fn pending_here(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let agents: Vec<u64> = scope.get_slot::<Agents>().map(|a| a.0.values().copied().collect()).unwrap_or_default();
-    let reg = lock();
-    rv.set_bool(agents.iter().any(|a| reg.agents.get(a).is_some_and(|a| !a.notices.is_empty())));
-}
-// __dom.idbDropAgents(): every agent of this isolate gone — its window closed while the isolate lives on (kept for its
-// service workers): its connections closed, as a closed window's are.
-fn drop_agents(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let agents: Vec<u64> = scope.get_slot_mut::<Agents>().map(|a| a.0.drain().map(|(_, agent)| agent).collect()).unwrap_or_default();
-    let mut reg = lock();
-    for agent in agents {
-        reg.drop_agent(agent);
-    }
-}
 // __dom.idbOpen(storageKey, name, version, request): an open request queued (`version` undefined: none asked).
 fn open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(agent) = agent_of(scope, &args) else { return };
@@ -711,7 +613,7 @@ fn databases(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let storage = string_arg(scope, &args, 0);
     let found: Vec<(Name, f64)> = {
         let reg = lock();
-        let Some(partition) = reg.agents.get(&agent).map(|a| a.partition) else { return };
+        let Some(partition) = crate::agents::partition(agent) else { return };
         let mut found: Vec<(Name, f64)> = reg
             .databases
             .iter()
@@ -976,25 +878,23 @@ mod tests {
     fn key(s: &str) -> DbKey {
         DbKey { partition: 1, storage: "o".into(), name: name(s) }
     }
-    fn agent(reg: &mut Registry) -> u64 {
-        reg.next_agent += 1;
-        reg.agents.insert(reg.next_agent, Agent { partition: 1, notices: Vec::new() });
-        reg.next_agent
+    fn agent() -> u64 {
+        crate::agents::new_agent(1)
     }
-    fn taken(reg: &mut Registry, agent: u64) -> Vec<(u32, [f64; 4])> {
-        std::mem::take(&mut reg.agents.get_mut(&agent).expect("an agent").notices).into_iter().map(|n| (n.kind, n.args)).collect()
+    fn taken(agent: u64) -> Vec<(u32, [f64; 4])> {
+        crate::agents::take(agent).into_iter().map(|n| (n.kind, n.args)).collect()
     }
 
     // An open of a new database: its turn a task later, an upgrade begun, the version committed only as it commits.
     #[test]
     fn an_open_upgrades_a_new_database() {
         let mut reg = Registry::default();
-        let a = agent(&mut reg);
+        let a = agent();
         reg.enqueue(key("db"), a, 7, Some(None));
-        let turn = taken(&mut reg, a);
+        let turn = taken(a);
         assert_eq!(turn[0].0, TURN);
         reg.turn(turn[0].1[0] as u32);
-        let n = taken(&mut reg, a);
+        let n = taken(a);
         assert_eq!(n.len(), 1);
         assert_eq!((n[0].0, n[0].1[0], n[0].1[3]), (UPGRADE, 7.0, 0.0));
         let tx = n[0].1[2] as u32;
@@ -1008,25 +908,25 @@ mod tests {
     #[test]
     fn an_upgrade_waits_for_another_agents_connection() {
         let mut reg = Registry::default();
-        let (a, b) = (agent(&mut reg), agent(&mut reg));
+        let (a, b) = (agent(), agent());
         reg.enqueue(key("db"), a, 1, Some(Some(1.0)));
-        let t = taken(&mut reg, a)[0].1[0] as u32;
+        let t = taken(a)[0].1[0] as u32;
         reg.turn(t);
-        let up = taken(&mut reg, a)[0].1;
+        let up = taken(a)[0].1;
         reg.finished(up[2] as u32);
         reg.upgrade_committed(up[2] as u32);
         reg.finish(&key("db"));
         let conn_a = up[1] as u32;
         reg.enqueue(key("db"), b, 2, Some(Some(2.0)));
-        let t = taken(&mut reg, b)[0].1[0] as u32;
+        let t = taken(b)[0].1[0] as u32;
         reg.turn(t);
-        let to_a = taken(&mut reg, a);
+        let to_a = taken(a);
         assert_eq!(to_a, vec![(VERSION_CHANGE, [f64::from(conn_a), 1.0, 2.0, 0.0])]);
-        assert!(taken(&mut reg, b).is_empty());
+        assert!(taken(b).is_empty());
         reg.ack(conn_a);
-        assert_eq!(taken(&mut reg, b), vec![(BLOCKED, [2.0, 1.0, 2.0, 0.0])]);
+        assert_eq!(taken(b), vec![(BLOCKED, [2.0, 1.0, 2.0, 0.0])]);
         reg.close(conn_a);
-        let n = taken(&mut reg, b);
+        let n = taken(b);
         assert_eq!((n[0].0, n[0].1[3]), (UPGRADE, 1.0));
     }
 
@@ -1034,7 +934,7 @@ mod tests {
     #[test]
     fn transactions_start_as_they_may() {
         let mut reg = Registry::default();
-        let a = agent(&mut reg);
+        let a = agent();
         reg.databases.insert(key("db"), Database { version: 1.0, stores: BTreeMap::from([(name("s"), 9)]), connections: vec![1], transactions: Vec::new(), upgrade: None });
         reg.connections.insert(1, Connection { db: key("db"), agent: a, version: 1.0, store_names: vec![name("s")], close_pending: false, closed: false });
         let new_tx = |reg: &mut Registry, id: u32, mode: u32| {
@@ -1045,8 +945,8 @@ mod tests {
         new_tx(&mut reg, 10, 1);
         new_tx(&mut reg, 11, READONLY);
         new_tx(&mut reg, 12, READONLY);
-        assert_eq!(taken(&mut reg, a), vec![(STARTED, [10.0, 0.0, 0.0, 0.0])]);
+        assert_eq!(taken(a), vec![(STARTED, [10.0, 0.0, 0.0, 0.0])]);
         reg.finished(10);
-        assert_eq!(taken(&mut reg, a), vec![(STARTED, [11.0, 0.0, 0.0, 0.0]), (STARTED, [12.0, 0.0, 0.0, 0.0])]);
+        assert_eq!(taken(a), vec![(STARTED, [11.0, 0.0, 0.0, 0.0]), (STARTED, [12.0, 0.0, 0.0, 0.0])]);
     }
 }
