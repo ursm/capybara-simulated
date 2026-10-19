@@ -245,6 +245,11 @@ impl CanvasStateHandle {
     pub(crate) fn state(&self) -> std::cell::Ref<'_, State> {
         self.state.borrow()
     }
+    // Its bitmap (`canvasBitmap`), what an operation draws into — undefined for none, which it draws nothing into.
+    pub(crate) fn bitmap<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+        // SAFETY: the main thread reads the reference; nothing else writes it meanwhile.
+        unsafe { (*self.bitmap.get()).get(scope) }.map_or_else(|| v8::undefined(scope).into(), Into::into)
+    }
     // The object the current state traces in `slot` (`FILL`, `STROKE`, `CLIP`).
     pub(crate) fn object<'s>(&self, scope: &mut v8::PinScope<'s, '_>, slot: usize) -> Option<v8::Local<'s, v8::Object>> {
         // SAFETY: the main thread reads the reference; nothing else writes it meanwhile.
@@ -389,12 +394,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // resized: transparent black).
 fn canvas_bitmap(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle_of(scope, args.get(0)) else { return rv.set_null() };
-    // SAFETY: the handle lives while its object, the argument, does; the main thread reads the reference, nothing else
-    // writes it meanwhile.
-    match unsafe { (*h.as_ref().bitmap.get()).get(scope) } {
-        Some(bitmap) => rv.set(bitmap.into()),
-        None => rv.set_null(),
-    }
+    // SAFETY: the handle lives while its object, the argument, does.
+    let bitmap = unsafe { &*(h.as_ref() as *const CanvasStateHandle) }.bitmap(scope);
+    if bitmap.is_undefined() { rv.set_null() } else { rv.set(bitmap) }
 }
 // __dom.canvasSetBitmap(state, bitmap | null) — the context's bitmap becomes `bitmap` (one the bindings made of its size),
 // or none: the canvas reset, resized, or its bitmap transferred away.

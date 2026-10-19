@@ -905,8 +905,8 @@ fn stops_of(flat: &[f64]) -> Vec<Stop> {
 const FILL_COLOR: u32 = 0;
 const STROKE_COLOR: u32 = 1;
 
-// __dom.canvasDraw(state, bitmap, w, h, p3, plain, shape, mask, paint, pixels): one drawing operation on a `w` × `h`
-// bitmap (`Draw::run`), in Display P3 where `p3`, under the context's `state` (canvas_state.rs) — its clip, CTM,
+// __dom.canvasDraw(state, w, h, p3, plain, shape, mask, paint, pixels): one drawing operation on the context's `w` × `h`
+// bitmap (`Draw::run`; `canvasBitmap`), in Display P3 where `p3`, under the context's `state` (canvas_state.rs) — its clip, CTM,
 // `globalAlpha`, compositing operator and shadow — or, `plain`, opaque and source-over with no shadow, as a focus ring
 // is drawn, the clip still applying.
 //   shape: `[0, x0, y0, x1, y1]` a device box; `[1, evenOdd, …path]` a path filled, `[3, …pen, …path]` a path
@@ -920,13 +920,14 @@ fn canvas_draw(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(h) = crate::canvas_state::handle_of(scope, args.get(0)) else { return };
     // SAFETY: the handle lives while its object, the argument, does — through this op.
     let h = unsafe { &*(h.as_ref() as *const crate::canvas_state::CanvasStateHandle) };
-    let size = [2, 3].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
-    let (p3, plain) = (args.get(4).is_true(), args.get(5).is_true());
-    let shape = crate::dom::f64_arg(args.get(6)).to_vec();
-    let mask = bytes_read(args.get(7), bytes_span(args.get(1))).unwrap_or_default();
-    let given = v8::Local::new(scope, args.get(9));
-    let (paint, pixels) = paint_arg(scope, h, args.get(8), given);
-    draw(scope, h, args.get(1), size, p3, plain, &shape, &mask, &paint, pixels);
+    let bitmap = h.bitmap(scope);
+    let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let (p3, plain) = (args.get(3).is_true(), args.get(4).is_true());
+    let shape = crate::dom::f64_arg(args.get(5)).to_vec();
+    let mask = bytes_read(args.get(6), bytes_span(bitmap)).unwrap_or_default();
+    let given = v8::Local::new(scope, args.get(8));
+    let (paint, pixels) = paint_arg(scope, h, args.get(7), given);
+    draw(scope, h, bitmap, size, p3, plain, &shape, &mask, &paint, pixels);
 }
 
 // A draw's paint as `canvasDraw` takes it: the state's fill or stroke style (`FILL_COLOR`, `STROKE_COLOR`) — its

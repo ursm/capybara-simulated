@@ -162,25 +162,26 @@ struct TextDraw<'s> {
     pixels: v8::Local<'s, v8::Value>,
 }
 
-// __dom.canvasDrawText(state, bitmap, w, h, p3, text, x, y, maxWidth, paint, pixels, face, inheritedRtl, rootFontSize):
-// `fillText()` / `strokeText()` on a `w` × `h` bitmap — `paint` as `canvasDraw` takes it, the fill style's or the stroke
+// __dom.canvasDrawText(state, w, h, p3, text, x, y, maxWidth, paint, pixels, face, inheritedRtl, rootFontSize):
+// `fillText()` / `strokeText()` on the context's `w` × `h` bitmap (`canvasBitmap`) — `paint` as `canvasDraw` takes it, the fill style's or the stroke
 // style's — the line placed at (x, y) through the CTM by `textAlign` and `textBaseline`, condensed to `maxWidth` (one
 // given that is not above 0 drawing nothing, undefined none), spaced a character at a time where letter or word spacing
 // opens gaps a line's single mask has no room for.
 fn canvas_draw_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
-    let size = [2, 3].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
-    let p3 = args.get(4).is_true();
-    let text = prepared(&args.get(5).to_rust_string_lossy(scope));
-    let [x, y] = [6, 7].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
-    let max_width = (!args.get(8).is_undefined()).then(|| args.get(8).number_value(scope).unwrap_or(f64::NAN));
+    let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let p3 = args.get(3).is_true();
+    let text = prepared(&args.get(4).to_rust_string_lossy(scope));
+    let [x, y] = [5, 6].map(|i| args.get(i).number_value(scope).unwrap_or(f64::NAN));
+    let max_width = (!args.get(7).is_undefined()).then(|| args.get(7).number_value(scope).unwrap_or(f64::NAN));
     if text.is_empty() || !x.is_finite() || !y.is_finite() || max_width.is_some_and(|m| !(m > 0.0)) {
         return;
     }
-    let given = v8::Local::new(scope, args.get(10));
-    let (paint, pixels) = crate::canvas::paint_arg(scope, h, args.get(9), given);
-    let s = setting_args(scope, &args, h, 11);
-    let draw = TextDraw { bitmap: args.get(1), size, p3, paint, pixels };
+    let given = v8::Local::new(scope, args.get(9));
+    let (paint, pixels) = crate::canvas::paint_arg(scope, h, args.get(8), given);
+    let s = setting_args(scope, &args, h, 10);
+    let bitmap = h.bitmap(scope);
+    let draw = TextDraw { bitmap, size, p3, paint, pixels };
     if (s.letter != 0.0 || s.word != 0.0) && spaced(scope, h, &draw, &s, &text, x, y, max_width) {
         return;
     }
