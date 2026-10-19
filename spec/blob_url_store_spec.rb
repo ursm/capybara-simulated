@@ -96,4 +96,19 @@ RSpec.describe 'the blob URL store' do
     expect(s.evaluate_script('document.body ? document.body.textContent : ""')).to eq('')
     expect(paths).to eq(['/', '/'])
   end
+
+  # …its document an entry of the session history as any is: back leaves it, forward returns to its URL (Chrome; the
+  # document there is the blob's where the URL still resolves — here the page that made it went with the back, revoking
+  # it, where Chrome's back-forward cache keeps that page).
+  it "keeps a blob URL's document in the session history" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><p id=h>home</p>']] })
+    s.visit '/'
+    u = s.evaluate_script("URL.createObjectURL(new Blob(['<p id=b>blob</p>'], {type: 'text/html'}))")
+    s.execute_script("location.href = #{u.to_json}")
+    expect(s).to have_css('#b')
+    s.go_back
+    expect(s).to have_css('#h')
+    s.go_forward
+    expect(s).to have_current_path(u, url: true)
+  end
 end

@@ -10233,11 +10233,6 @@ module Capybara
           # A page navigating its top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the
           # URL's document would run with no origin of its own).
           nil
-        elsif !@current_realm_id && url.match?(/\Ablob:/i)
-          # …and to a `blob:` URL, which no server answers: its blob's document — wherever the window that made it is
-          # (its partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`).
-          blob = @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
-          blob ? boot_blob_document(url, blob[:bytes], blob[:type]) : fail_blob_document(url)
         elsif @current_realm_id
           # A JS-driven `location.*` from inside a `within_frame` block
           # navigates the FRAME, not the top page (same as a self-targeted
@@ -11372,6 +11367,13 @@ module Capybara
           unless from_history || depth > 0
             capture_outgoing_form_state
             replace ? replace_history({method: :get, url: url}) : record_history({method: :get, url: url})
+          end
+          # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
+          # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
+          # the one above, which a traversal or a reload replays here.
+          if url.to_s.match?(/\Ablob:/i)
+            blob = @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
+            return blob ? boot_blob_document(url, blob[:bytes], blob[:type]) : fail_blob_document(url)
           end
           # A controlled top-level navigation goes to the controlling SW's fetch event
           # first (mode 'navigate', dest 'document') — the registration may live in ANY
