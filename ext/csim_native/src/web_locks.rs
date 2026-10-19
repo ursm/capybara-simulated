@@ -182,6 +182,7 @@ pub(crate) fn clear(partition: u64) {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "locksRefusal", refusal_op, context_id);
     register(scope, ns, "locksRequest", request_op, context_id);
     register(scope, ns, "locksRelease", release_op, context_id);
     register(scope, ns, "locksAbort", abort_op, context_id);
@@ -191,6 +192,32 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn bucket(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, agent: u64) -> Option<Bucket> {
     let storage = args.get(0).to_rust_string_lossy(scope);
     Some(Bucket { partition: crate::agents::partition(agent)?, storage })
+}
+
+// What `request()` refuses with a NotSupportedError (Web Locks §4.1), in the order its steps check: a name starting with
+// '-' (reserved), `steal` with `ifAvailable`, `steal` with a shared mode, a `signal` with either.
+const RESERVED_NAME: u32 = 1;
+const STEAL_IF_AVAILABLE: u32 = 2;
+const STEAL_SHARED: u32 = 3;
+const SIGNAL_STEAL_OR_IF_AVAILABLE: u32 = 4;
+fn refusal(name: &str, exclusive: bool, steal: bool, if_available: bool, signal: bool) -> u32 {
+    if name.starts_with('-') {
+        RESERVED_NAME
+    } else if steal && if_available {
+        STEAL_IF_AVAILABLE
+    } else if steal && !exclusive {
+        STEAL_SHARED
+    } else if signal && (steal || if_available) {
+        SIGNAL_STEAL_OR_IF_AVAILABLE
+    } else {
+        0
+    }
+}
+// __dom.locksRefusal(name, exclusive, steal, ifAvailable, signalGiven) -> what refuses the request (`refusal`), 0 none.
+fn refusal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let [exclusive, steal, if_available, signal] = [1, 2, 3, 4].map(|i| args.get(i).is_true());
+    rv.set_uint32(refusal(&name, exclusive, steal, if_available, signal));
 }
 
 // __dom.locksRequest(storageKey, name, exclusive, ask, clientId) -> the request's number, or null where it asked only
