@@ -558,6 +558,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbUpgradeEnd", upgrade_end, context_id);
     register(scope, ns, "idbRequestDone", request_done, context_id);
     register(scope, ns, "idbStoreId", store_id, context_id);
+    register(scope, ns, "idbTxStoreId", tx_store_id, context_id);
+    register(scope, ns, "idbTxScope", tx_scope, context_id);
+    register(scope, ns, "idbClosePending", close_pending, context_id);
     register(scope, ns, "idbStoreCreate", store_create, context_id);
     register(scope, ns, "idbStoreDelete", store_delete, context_id);
     register(scope, ns, "idbStoreRename", store_rename, context_id);
@@ -644,8 +647,19 @@ fn close(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     let conn = u32_arg(scope, &args, 0);
     lock().close(conn);
 }
+// What `transaction()` refuses (IDB §4.4 `transaction()`), in the order its steps check: an upgrade transaction of the
+// connection running, its close pending (both InvalidStateError), a store of the scope that is none of the database's
+// (NotFoundError), an empty scope (InvalidAccessError), a mode neither readonly nor readwrite (TypeError).
+const TX_UPGRADE_RUNNING: i32 = -1;
+const TX_CLOSING: i32 = -2;
+const TX_NO_STORE: i32 = -3;
+const TX_EMPTY_SCOPE: i32 = -4;
+const TX_BAD_MODE: i32 = -5;
+const READWRITE: u32 = 1;
+
 // __dom.idbTransaction(connection, scope, mode) -> a transaction's number (whether it started its lifecycle's): scheduled — `STARTED`
-// told once it may run, where it may not at once; 0 where a store of the scope is none of the database's.
+// told once it may run, where it may not at once — its scope the names given, once each, sorted; or what refuses it
+// (`TX_*`, negative).
 fn transaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let conn = u32_arg(scope, &args, 0);
     let mut names = Vec::new();
@@ -660,10 +674,23 @@ fn transaction(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     names.dedup();
     let mode = u32_arg(scope, &args, 2);
     let mut reg = lock();
-    let Some(key) = reg.connections.get(&conn).map(|c| c.db.clone()) else { return rv.set_uint32(0) };
-    let Some(db) = reg.databases.get(&key) else { return rv.set_uint32(0) };
+    if reg.transactions.values().any(|t| t.conn == conn && t.mode == VERSIONCHANGE && t.state != FINISHED) {
+        return rv.set_int32(TX_UPGRADE_RUNNING);
+    }
+    let Some(c) = reg.connections.get(&conn) else { return rv.set_int32(TX_CLOSING) };
+    if c.close_pending {
+        return rv.set_int32(TX_CLOSING);
+    }
+    let key = c.db.clone();
+    let Some(db) = reg.databases.get(&key) else { return rv.set_int32(TX_NO_STORE) };
     if names.iter().any(|n| !db.stores.contains_key(n)) {
-        return rv.set_uint32(0);
+        return rv.set_int32(TX_NO_STORE);
+    }
+    if names.is_empty() {
+        return rv.set_int32(TX_EMPTY_SCOPE);
+    }
+    if mode != READONLY && mode != READWRITE {
+        return rv.set_int32(TX_BAD_MODE);
     }
     let tx = reg.next_id();
     reg.transactions.insert(tx, Transaction::new(conn, key.clone(), names, mode, false));
@@ -801,6 +828,32 @@ fn store_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let reg = lock();
     let id = reg.connections.get(&conn).and_then(|c| reg.databases.get(&c.db)).and_then(|db| db.stores.get(&name).copied());
     rv.set_uint32(id.unwrap_or(0));
+}
+// __dom.idbTxStoreId(transaction, name) -> the number of the store `name` its `objectStore()` gives — one of its scope's,
+// or any of an upgrade's database — or 0 for none.
+fn tx_store_id(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_uint32(0) };
+    let reg = lock();
+    let id = reg
+        .transactions
+        .get(&tx)
+        .filter(|t| t.mode == VERSIONCHANGE || t.scope.contains(&name))
+        .and_then(|t| reg.databases.get(&t.db))
+        .and_then(|db| db.stores.get(&name).copied());
+    rv.set_uint32(id.unwrap_or(0));
+}
+// __dom.idbTxScope(transaction) -> its scope: the names of its stores, sorted.
+fn tx_scope(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let tx = u32_arg(scope, &args, 0);
+    let names = lock().transactions.get(&tx).map_or_else(Vec::new, |t| t.scope.clone());
+    let values: Vec<v8::Local<v8::Value>> = names.iter().map(|n| name_value(scope, n)).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+// __dom.idbClosePending(connection) -> whether its close is pending (or it is closed).
+fn close_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let conn = u32_arg(scope, &args, 0);
+    rv.set_bool(lock().connections.get(&conn).is_none_or(|c| c.close_pending || c.closed));
 }
 // __dom.idbStoreCreate(transaction, name, keyPath, autoIncrement) -> a new store's number, in the upgrade's database (0
 // where it has one of the name).
