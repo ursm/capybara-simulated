@@ -174,6 +174,7 @@ mod video;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
+mod abort_signal;
 mod web_locks;
 mod xml_parse;
 mod xpath;
