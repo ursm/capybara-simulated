@@ -1021,6 +1021,8 @@ pub(crate) struct RealmArena {
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
+    // Its window viewport and its resize steps' (viewport.rs).
+    pub(crate) window_viewport: crate::viewport::Viewport,
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
@@ -2934,6 +2936,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::webcrypto::install(scope, ns, context_id);
     crate::integrity::install(scope, ns, context_id);
     crate::pointer::install(scope, ns, context_id);
+    crate::viewport::install(scope, ns, context_id);
     crate::import_map::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);
@@ -4858,7 +4861,7 @@ fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
     crate::sheets::SheetSource { css, base, media, constructed: args.get(at + 3).is_true() }
 }
 
-// __dom.styleSheets(docNid, baseUrl, width, height, [sheetId, …]): the realm document's sheets (the realm's,
+// __dom.styleSheets(docNid, baseUrl, [sheetId, …]): the realm document's sheets (the realm's,
 // sheetMake), in document order, and after them its adopted ones that apply (`adopted_applying`), for its style engine —
 // which is made again only when the document's base URL, mode, kind (an HTML document or not: `document_mode`) or
 // viewport moved.
@@ -4877,11 +4880,9 @@ fn style_sheets_unguarded(
 ) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let base = args.get(1).to_rust_string_lossy(scope);
-    let viewport = (
-        args.get(2).number_value(scope).unwrap_or(0.0) as f32,
-        args.get(3).number_value(scope).unwrap_or(0.0) as f32,
-    );
-    let mut ids = sheet_ids(scope, args.get(4));
+    let [w, h] = crate::viewport::here(scope, &args);
+    let viewport = (w as f32, h as f32);
+    let mut ids = sheet_ids(scope, args.get(2));
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     if d.arena.is_dropped(cid) {
@@ -4898,8 +4899,8 @@ fn style_sheets_unguarded(
     d.styles.insert(cid, engine);
 }
 
-// __dom.styleShadowSheets(rootNid, [sheetId, …], width, height): a shadow root's own sheets (the realm's), in its tree
-// order, and after them its adopted ones that apply at that viewport (`adopted_applying`).
+// __dom.styleShadowSheets(rootNid, [sheetId, …]): a shadow root's own sheets (the realm's), in its tree order, and after
+// them its adopted ones that apply at the realm's viewport (`adopted_applying`).
 fn style_shadow_sheets(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4915,7 +4916,7 @@ fn style_shadow_sheets_unguarded(
 ) {
     let Some(root) = nid_arg(scope, &args, 0) else { return };
     let mut ids = sheet_ids(scope, args.get(1));
-    let viewport = [2, 3].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
+    let viewport = crate::viewport::here(scope, &args).map(|v| v as f32);
     let cid = realm_id(scope, &args);
     // (…its owned sheets, then its adopted ones that apply at the viewport)
     {
@@ -5317,7 +5318,7 @@ fn easing_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // (`style::media_matches`).
 fn media_matches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
-    let viewport = crate::media_query_lists::viewport_args(scope, &args, 1);
+    let viewport = crate::media_query_lists::viewport_here(scope, &args);
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::media_query_lists::matches(scope, cid, &text, viewport));
 }

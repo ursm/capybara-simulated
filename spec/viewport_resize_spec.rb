@@ -91,9 +91,8 @@ RSpec.describe 'window resize' do
     expect(s.current_window.size).to eq([1024, 768])
   end
 
-  it 'mirrors the Ruby-side display constant' do
-    # Two hand-kept copies of the display size (js/src/platform-globals.js and Browser::SCREEN_SIZE);
-    # this is what stops them drifting.
+  it 'answers the display the Ruby side restores to' do
+    # One display size, the engine's (viewport.rs `SCREEN`): the page's `screen` and Browser::SCREEN_SIZE read it.
     expect(session.evaluate_script('[screen.width, screen.height]'))
       .to eq(Capybara::Simulated::Browser::SCREEN_SIZE)
   end

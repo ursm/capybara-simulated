@@ -134,11 +134,10 @@ module Capybara
       # debounce fires" tests (Discourse refetchForSearch / doubled-filter, Avo
       # filters) still observe the intermediate state across several polls.
       FF_TRANSIENT_GUARD_POLLS = (ENV['CSIM_FF_TRANSIENT_GUARD_POLLS'] || '6').to_i
-      # The display the window lives on. Mirrors the JS-side `screen` /
-      # initial `innerWidth` / `innerHeight` (js/src/platform-globals.js)
-      # — the window starts filling it, `resize_to` moves the viewport
-      # off it, and `maximize` / `fullscreen` restore it.
-      SCREEN_SIZE = [1024, 768].freeze
+      # The display the window lives on — the engine's (viewport.rs `SCREEN`), the page's `screen` and
+      # its window's first `innerWidth` / `innerHeight`: the window starts filling it, `resize_to` moves
+      # the viewport off it, and `maximize` / `fullscreen` restore it.
+      SCREEN_SIZE = Native.screen_size.freeze
       SETTLE_DRAIN_MS = 32
       SETTLE_MAX_ITER = 10
       # How long a boot will park for the page's own <img> fetches before letting the window
@@ -2216,7 +2215,7 @@ module Capybara
         @viewport_width  = w.to_i
         @viewport_height = h.to_i
         invalidate_find_cache
-        # One slot for the viewport (`__csimViewport`): `innerWidth` / `innerHeight` are
+        # One slot for the viewport (the engine's, viewport.rs): `innerWidth` / `innerHeight` are
         # `[Replaceable]` accessors over it, and the `@media` cascade and the layout engine read it
         # directly. Every live frame's content box moves with it — a frame lays out against its
         # container — handed on by the resize steps below.

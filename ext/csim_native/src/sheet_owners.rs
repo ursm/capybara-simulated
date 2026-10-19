@@ -208,14 +208,14 @@ pub(crate) struct CascadeKey {
     adopted: Vec<u64>,
 }
 
-// __dom.cascadeRekey(docNid, width, height) -> where the document's cascade is made of other sheets than the realm last
+// __dom.cascadeRekey(docNid) -> where the document's cascade is made of other sheets than the realm last
 // handed its style engine (`CascadeKey`, its adopted sheets the store's — `adoptedSheetsSet`): the `<style>` / `<link>`
 // elements whose sheets take part, in tree order (`sheetSet`'s), the realm's rule-set generation moved (`GEN_CASCADE`) —
 // else null, nothing to hand it.
 fn cascade_rekey_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
-    let size = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(0.0));
+    let size = crate::viewport::here(scope, &args);
     let viewport = size.map(f64::to_bits);
     let cid = crate::dom::realm_id(scope, &args);
     // (…its adopted sheets: each that applies by its id and version — a `replace` makes it another sheet to the engine —

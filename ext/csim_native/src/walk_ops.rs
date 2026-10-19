@@ -48,22 +48,22 @@ fn note_scrolled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     realm(scope, cid).generations.bump(GEN_SCROLL);
 }
 
-// __dom.layoutBuild(rootNid, fontGeneration, rootCbW, rootCbH, records, check): a whole layout pass the Rust walk builds
-// from the arena and the style engine — its records, runs and tables — and lays out (the root placed natively), its
-// boxes kept in the arena for the geometry (geometry.rs `store_layout`) — `records` 1 or 2 recording its text pieces
-// for the text geometry too (text_geometry.rs) — and where `records` is 2, for a pass a painter records, each text piece
-// as it draws it, kept for the painter (paint.rs `Painted`): answered `true`. Or `[family, bucket, …]` — the faces the
+// __dom.layoutBuild(rootNid, fontGeneration, records, check): a whole layout pass the Rust walk builds from the arena
+// and the style engine — its records, runs and tables — and lays out against the realm's viewport (viewport.rs, the
+// root placed natively), its boxes kept in the arena for the geometry (geometry.rs `store_layout`) — `records` 1 or 2
+// recording its text pieces for the text geometry too (text_geometry.rs) — and where `records` is 2, for a pass a
+// painter records, each text piece as it draws it, kept for the painter (paint.rs `Painted`): answered `true`. Or `[family, bucket, …]` — the faces the
 // walk needs first, for the JS side to resolve (`walkFace`) and ask again — or the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };
     let generation = args.get(1).to_rust_string_lossy(scope);
-    let root_cb_w = args.get(2).number_value(scope).unwrap_or(0.0);
-    let basis = Basis { w: root_cb_w, h: args.get(3).number_value(scope).unwrap_or(f64::NAN) };
-    let records = args.get(4).integer_value(scope).unwrap_or(0);
+    let [w, h] = crate::viewport::here(scope, &args);
+    let basis = Basis { w, h };
+    let records = args.get(2).integer_value(scope).unwrap_or(0);
     let (texts, paints) = (records >= 1, records == 2);
     // …and whether to CHECK every measure put back against laying it out again (`CSIM_NL_REUSE_VERIFY`).
-    let check = args.get(5).is_true();
+    let check = args.get(3).is_true();
     let d = dom(scope);
     let Some(arena) = d.arena.enter_known(cid) else { return };
     // (…a pass that paints keeps the pieces it placed, or none where it lays nothing out)
@@ -127,7 +127,7 @@ fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let mut measure = std::mem::take(&mut reuse.measure);
     let maths = std::mem::take(&mut reuse.maths);
     let cache = Some((&mut measure, roots, check));
-    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, root_cb_w, root_rtl, cache, texts);
+    let out = crate::layout::layout_block_in_place(&mut inputs, &runs, &run_texts, &grids, &inlines, &maths.values, f64::NAN, f64::NAN, basis.w, root_rtl, cache, texts);
     // (…and a pass that paints answers each text piece as the painter draws it — beside the rows that index the runs, which
     // only this side has: its row, its text and its pen steps, the baseline's run shift taken back off and a hyphen's owner
     // the character's before it)

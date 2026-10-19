@@ -177,6 +177,7 @@ mod user_activation;
 mod validity;
 mod values;
 mod video;
+mod viewport;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
@@ -227,6 +228,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
     native.define_module_function("blob_url_key", magnus::function!(blob_urls::entry_key_for_ruby, 1))?;
+    // The display a window starts out filling (viewport.rs `SCREEN`), the page's `screen` too.
+    native.define_module_function("screen_size", magnus::function!(viewport::screen_size_for_ruby, 0))?;
     // A GET form submission's URL: the action's query the entry list (url_ops.rs `mutated_action_url`), the page's too.
     native.define_module_function("form_action_url", magnus::function!(url_ops::mutated_action_url_for_ruby, 2))?;
     // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one

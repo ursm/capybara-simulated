@@ -60,18 +60,18 @@ pub(crate) fn matches(scope: &mut v8::PinScope<'_, '_>, cid: i32, media: &str, v
     crate::style::media_matches(d.styles.get(&cid), arena, screen, media)
 }
 
-pub(crate) fn viewport_args(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, at: i32) -> (f32, f32) {
-    let [w, h] = [at, at + 1].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
-    (w, h)
+pub(crate) fn viewport_here(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> (f32, f32) {
+    let [w, h] = crate::viewport::here(scope, args);
+    (w as f32, h as f32)
 }
 
-// __dom.mqlNew(list, media, width, height) -> the number of `list`, a new one of the calling realm's for the serialized
-// media query list `media`, its matches state its answer on that viewport.
+// __dom.mqlNew(list, media) -> the number of `list`, a new one of the calling realm's for the serialized media query list
+// `media`, its matches state its answer on the realm's viewport.
 fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let object = v8::Weak::new(scope, args.get(0));
     let realm = realm_id(scope, &args);
     let media = args.get(1).to_rust_string_lossy(scope);
-    let viewport = viewport_args(scope, &args, 2);
+    let viewport = viewport_here(scope, &args);
     let matches = matches(scope, realm, &media, viewport);
     let lists = &mut dom(scope).media_query_lists;
     if lists.of.len() >= lists.sweep_at.max(64) {
@@ -99,11 +99,11 @@ fn listened_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     dom(scope).media_query_lists = lists;
 }
 
-// __dom.mqlChanges(width, height) -> the calling realm's lists whose answer on that viewport flipped since the last
+// __dom.mqlChanges() -> the calling realm's lists whose answer on its viewport flipped since the last
 // evaluation, oldest first, each with its new one — [list, matches, list, matches, …] — their matches states updated.
 fn changes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = realm_id(scope, &args);
-    let viewport = viewport_args(scope, &args, 0);
+    let viewport = viewport_here(scope, &args);
     let mut lists = std::mem::take(&mut dom(scope).media_query_lists);
     let mut flips = Vec::new();
     for l in lists.of.values_mut().filter(|l| l.realm == realm) {
