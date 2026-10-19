@@ -57,6 +57,8 @@ struct FrameNavigation {
 
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
 const NAV_PENDING: u32 = 1 << 1;
+// The navigation is a reload (frame-nav.js `FN_RELOAD_NAV`).
+const RELOAD_NAV: u32 = 1 << 5;
 // Its post-insertion step ran: its navigable exists (frame-nav.js `FN_CONTEXT_READY`).
 const CONTEXT_READY: u32 = 1 << 6;
 // Its `src` refused as its attributes were last processed (frame-nav.js `FN_SRC_REFUSED`, `process_src`).
@@ -144,6 +146,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameContentUrl", frame_content_url, context_id);
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
+    crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
 
 // HTML "shared attribute processing steps for iframe and frame elements" step 3, as the frame `container`'s attributes
@@ -417,8 +420,89 @@ fn set_frame_nav_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }
 }
 
-// The slot a scripted navigation's response is carried in (frame-nav.js `FC_NAV`).
+// The slot a scripted navigation's response is carried in (frame-nav.js `FC_NAV`), and the one the document loaded last
+// is (`FC_LOADED`).
 const CONTENT_NAV: usize = 0;
+const CONTENT_LOADED: usize = 1;
+
+// What a frame's document is loaded from (`__dom.frameSource`, bridge.entry.js `FRAME_SOURCE_*`): a scripted
+// navigation's response, its `srcdoc`, no URL (the initial about:blank), or a URL of a scheme: about:, data:,
+// javascript:, blob:, or one fetched.
+const SOURCE_NAVIGATION: i32 = 0;
+const SOURCE_SRCDOC: i32 = 1;
+const SOURCE_NONE: i32 = 2;
+const SOURCE_ABOUT: i32 = 3;
+const SOURCE_DATA: i32 = 4;
+const SOURCE_JAVASCRIPT: i32 = 5;
+const SOURCE_BLOB: i32 = 6;
+const SOURCE_FETCH: i32 = 7;
+
+// __dom.frameSource(container) -> where a build of the frame's document loads it from (HTML "process the iframe
+// attributes"), its reload flag and the document URL a reload keeps taken as it begins — whichever branch it takes, so
+// neither leaks to a later load:
+// - [SOURCE_NAVIGATION, reload, url, bytes, contentType]: a scripted navigation's response (a form submitted into it),
+//   taken, and kept as the document loaded last, which a reload loads again;
+// - [SOURCE_SRCDOC, reload, srcdoc];
+// - [kind, reload, url] for the URL it navigates to: a reload's kept URL, else the one its navigation started with, else
+//   its `src` — none (SOURCE_NONE) where that is none, empty or about:blank, refused as its attributes were last
+//   processed, or no URL its document parses; else by its scheme.
+fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    let doc = crate::node_handle::handle_of(scope, args.get(0))
+        // SAFETY: the handle lives while the object, an argument, does.
+        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
+        .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let nav = arena.frame_navigation(container);
+    let reload = nav.flags & RELOAD_NAV != 0;
+    nav.flags &= !RELOAD_NAV;
+    let kept = nav.reload.take();
+    let reload_url = kept.filter(|_| reload);
+    if let Some(content) = nav.contents[CONTENT_NAV].take() {
+        nav.contents[CONTENT_LOADED] = Some(content.clone());
+        let url = utf16_value(scope, &content.url);
+        let bytes = crate::dom::u8_array(scope, content.bytes);
+        let content_type = utf16_value(scope, &content.content_type);
+        let (kind, reload) = (v8::Integer::new(scope, SOURCE_NAVIGATION).into(), v8::Boolean::new(scope, reload).into());
+        return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url, bytes, content_type]).into());
+    }
+    let started = nav.src.clone();
+    let refused = nav.flags & SRC_REFUSED != 0;
+    let Some(node) = arena.get(container) else { return rv.set_null() };
+    if let Some(srcdoc) = node.plain_attr("srcdoc").map(str::to_owned) {
+        let (kind, reload) = (v8::Integer::new(scope, SOURCE_SRCDOC).into(), v8::Boolean::new(scope, reload).into());
+        let srcdoc = v8::String::new(scope, &srcdoc).map_or_else(|| v8::undefined(scope).into(), Into::into);
+        return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, srcdoc]).into());
+    }
+    // (…a reload's URL, else the one its navigation started with, else its `src` — that refused by its attributes'
+    // processing none, but not a reload's nor that of a navigation under way, which a refused change leaves to go on)
+    let src = match (&reload_url, &started) {
+        (Some(url), _) => Some(String::from_utf16_lossy(url)),
+        (None, Some(started)) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
+        (None, None) if refused => None,
+        (None, None) => node.plain_attr("src").map(str::to_owned),
+    };
+    let root = arena.root_of(container);
+    let doc = doc.or_else(|| arena.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root));
+    let url = src.filter(|s| !s.is_empty() && s != "about:blank").zip(doc).and_then(|(s, doc)| arena.parse_document_url(doc, &s));
+    let (kind, url) = match url {
+        None => (SOURCE_NONE, String::new()),
+        Some(url) => {
+            let kind = match url.protocol() {
+                "about:" => SOURCE_ABOUT,
+                "data:" => SOURCE_DATA,
+                "javascript:" => SOURCE_JAVASCRIPT,
+                "blob:" => SOURCE_BLOB,
+                _ => SOURCE_FETCH,
+            };
+            (kind, url.href().to_owned())
+        }
+    };
+    let (kind, reload) = (v8::Integer::new(scope, kind).into(), v8::Boolean::new(scope, reload).into());
+    let url = v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url]).into());
+}
 
 // __dom.frameBuildsEagerly(container, allHostsLocal) -> whether a frame container's document is built as it connects,
 // not when its `contentWindow` is first read: one a navigation carries a response for, a `srcdoc` one, and one whose URL
