@@ -177,4 +177,20 @@ RSpec.describe 'CSSOM bindings' do
     JS
     expect(out).to eq(['q', 'em', 'ins', 'a', true, 'color: blue;', 'NotAllowedError', 0, 1, 'none', 2, nil, true, 'print', ''])
   end
+
+  # A `<style>`'s `media` attribute sets its sheet's media list as the list's own `mediaText` setter does — not through
+  # the setter a page may have replaced on MediaList.prototype.
+  it "follows a style's media attribute whatever a page did to MediaList's setter" do
+    s = simulated_session(->(_) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><style>p { color: red }</style><p>x</p>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        Object.defineProperty(MediaList.prototype, 'mediaText', { set() {}, get() { return 'page'; } });
+        const style = document.querySelector('style');
+        style.setAttribute('media', 'print');
+        return getComputedStyle(document.querySelector('p')).color;
+      })()
+    JS
+    expect(got).to eq('rgb(0, 0, 0)')
+  end
 end

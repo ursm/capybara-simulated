@@ -9,6 +9,9 @@ use crate::dom::{realm_id, register};
 // The display (`screen.width` / `screen.height`): what a top-level window starts out filling, and what `maximize` /
 // `fullscreen` restore it to (the Ruby side's `Browser::SCREEN_SIZE`, `Native.screen_size`).
 pub(crate) const SCREEN: [f64; 2] = [1024.0, 768.0];
+// The display's device pixel ratio (`window.devicePixelRatio`): one CSS pixel a device pixel, what a ResizeObserver's
+// device-pixel-content-box sizes are in.
+pub(crate) const DEVICE_PIXEL_RATIO: f64 = 1.0;
 // …for the host: `[width, height]`.
 pub(crate) fn screen_size_for_ruby() -> Vec<i64> {
     SCREEN.map(|v| v as i64).to_vec()
@@ -65,6 +68,7 @@ impl Viewport {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "viewport", viewport_op, context_id);
     register(scope, ns, "screenSize", screen_size_op, context_id);
+    register(scope, ns, "devicePixelRatio", device_pixel_ratio_op, context_id);
     register(scope, ns, "viewportSet", set_op, context_id);
     register(scope, ns, "frameViewportGive", give_op, context_id);
     register(scope, ns, "frameViewportMoved", moved_op, context_id);
@@ -104,6 +108,11 @@ fn viewport_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn screen_size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let axis = usize::from(args.get(0).uint32_value(scope) == Some(1));
     rv.set_double(SCREEN[axis]);
+}
+
+// __dom.devicePixelRatio() -> the display's (`DEVICE_PIXEL_RATIO`).
+fn device_pixel_ratio_op(_scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_double(DEVICE_PIXEL_RATIO);
 }
 
 // __dom.viewportSet(width, height, loading): the driver moved the realm's (top-level) window, or loads its document at

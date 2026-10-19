@@ -37,11 +37,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "resizeObservations", resize_observations_op, context_id);
 }
 
-// __dom.resizeObservations(devicePixelRatio, nid, laidOut, …) -> Float64Array, eleven numbers a target: its sizes
-// (`observed_box_sizes`, 0 where `laidOut` is false) and its depth (`flat_depth`).
+// __dom.resizeObservations(nid, laidOut, …) -> Float64Array, eleven numbers a target: its sizes (`observed_box_sizes`,
+// at the display's device pixel ratio: viewport.rs `DEVICE_PIXEL_RATIO`; 0 where `laidOut` is false) and its depth
+// (`flat_depth`).
 fn resize_observations_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let ratio = args.get(0).number_value(scope).filter(|r| r.is_finite() && *r > 0.0).unwrap_or(1.0);
-    let targets: Vec<(Option<NodeId>, bool)> = (0..(args.length() - 1) / 2).map(|i| (nid_arg(scope, &args, 1 + i * 2), args.get(2 + i * 2).is_true())).collect();
+    let ratio = crate::viewport::DEVICE_PIXEL_RATIO;
+    let targets: Vec<(Option<NodeId>, bool)> = (0..args.length() / 2).map(|i| (nid_arg(scope, &args, i * 2), args.get(1 + i * 2).is_true())).collect();
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let mut out = Vec::with_capacity(targets.len() * 11);

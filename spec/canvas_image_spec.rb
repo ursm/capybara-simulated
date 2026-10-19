@@ -2869,4 +2869,18 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     got = Timeout.timeout(5) { sleep 0.05 until (v = session.evaluate_script('window.got')); v }
     expect(got).to eq([2, [255, 0, 0, 255, 0, 255, 0, 255], 2, 1])
   end
+
+  # No VideoFrame is made here, so a page's own class of that name is no image source: drawing one is the TypeError any
+  # object that is none throws.
+  it "takes a page's own VideoFrame class for no image source" do
+    s = simulated_session(->(_) { [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><canvas id=c></canvas>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        window.VideoFrame = class {};
+        try { c.getContext('2d').drawImage(new VideoFrame(), 0, 0); return 'drawn'; } catch (e) { return e.name; }
+      })()
+    JS
+    expect(got).to eq('TypeError')
+  end
 end
