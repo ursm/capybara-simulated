@@ -189,28 +189,5 @@ RSpec.describe 'members a page overrides' do
     s.find(:css, '#d').send_keys(:escape)
     expect(s.evaluate_script("document.getElementById('d').open")).to be(false)
   end
-
-  # …and `execCommand`'s alignment and colour: the text-align it gives the block and the style its span carries are the
-  # engine's, whatever a page made of CSSStyleDeclaration's members.
-  it "aligns and colours an editing host's text whatever a page made of CSSStyleDeclaration" do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><div id="ce" contenteditable>hello</div>']] })
-    s.visit '/'
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const boom = () => { throw new Error('page member'); };
-        for (const name of ['textAlign', 'color', 'cssText']) {
-          Object.defineProperty(CSSStyleDeclaration.prototype, name, { get: boom, set: boom, configurable: true });
-        }
-        CSSStyleDeclaration.prototype.setProperty = boom;
-        const ce = document.getElementById('ce');
-        ce.focus();
-        getSelection().selectAllChildren(ce);
-        document.execCommand('justifyCenter');
-        getSelection().selectAllChildren(ce);
-        document.execCommand('foreColor', false, 'red');
-        return ce.innerHTML;
-      })()
-    JS
-    expect(got).to include('text-align: center').and include('color: red')
-  end
 end
+

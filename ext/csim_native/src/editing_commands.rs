@@ -21,7 +21,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // What the bindings do to carry a command out, beyond `inputType`'s `input` (codes as `commandAction` hands them): the
 // engine's edit of it alone (`editCommand`); text inserted (the selection deleted, for none); the selection's deletion,
 // backward or forward; a line break, a paragraph; a span carrying a CSS property (`commandStyle`); the block aligned
-// (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste; markup's text into a control.
+// (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste; markup — in a text control, its
+// text; in an editing host, the edit.
 #[derive(Clone, Copy)]
 enum Action {
     Edit,
@@ -127,15 +128,17 @@ fn command_action_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let arg = v8::String::new(scope, arg).map_or_else(|| v8::undefined(scope).into(), Into::into);
     rv.set(v8::Array::new_with_elements(scope, &[code, arg]).into());
 }
-// __dom.commandStyle(property, value) -> [the style attribute a styling command's span carries, the `input` event's
-// `data`]: `property: value` as an inline style serializes it ('' for a value that does not parse); the data a colour
+// __dom.commandStyle(property, value, docNid) -> [the style attribute a styling command's span carries, the `input`
+// event's `data`]: `property: value` as an inline style of the document serializes it, in its mode (a quirks one's
+// hashless colour) — '' for a value that does not parse, which styles nothing; the data a colour
 // as the value's CSS serialization — a legacy-syntax one's (a name, a hex, rgb()), lowercased where it is a bare word,
 // `currentcolor` and the CSS-wide keywords so; the string itself where it does not parse — Chrome's report; a font name
 // as given.
 fn command_style_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let property = args.get(0).to_rust_string_lossy(scope);
     let value = args.get(1).to_rust_string_lossy(scope);
-    let key = crate::cssom_decl::Key::new("", crate::cssom_decl::Kind::Style, false, "about:blank");
+    let quirks = crate::dom::quirks_arg(scope, &args, 2);
+    let key = crate::cssom_decl::Key::new("", crate::cssom_decl::Kind::Style, quirks, "about:blank");
     let text = crate::cssom_decl::set(&key, None, &property, &value, false).map(|w| w.text).unwrap_or_default();
     let data = if property.ends_with("color") {
         let trimmed = value.trim_matches(|c: char| c.is_ascii_whitespace());

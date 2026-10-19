@@ -146,4 +146,29 @@ RSpec.describe 'execCommand in an editing host' do
     JS
     expect(got).to eq(['bold,BOLD,insertText,delete,copy,paste', '', 'bold,BOLD,insertText,delete,copy,paste', 'insertText,delete,copy,paste'])
   end
+
+  # A colour or a font the style attribute refuses styles nothing: no span, the `input` alone — the selection's DOM as
+  # it was (Chrome: true, `hi`). A quirks document parses the colour in its mode: a hashless hex is one there.
+  it "makes no span of a value that styles nothing, and takes a quirks document's hashless colour" do
+    pick = lambda {|doctype|
+      session = simulated_session(lambda {|_env|
+        [200, {'content-type' => 'text/html'}, ["#{doctype}<meta charset=utf-8><div id=e contenteditable>hi</div>"]]
+      }).tap {|s| s.visit '/' }
+      session.evaluate_script(<<~JS)
+        (() => {
+          const e = document.getElementById('e'), got = [];
+          e.addEventListener('input', (ev) => got.push(ev.data));
+          for (const [command, value] of [['foreColor', 'not a color'], ['fontName', 'a;color:red'], ['foreColor', 'ff0000']]) {
+            e.innerHTML = 'hi';
+            e.focus();
+            getSelection().selectAllChildren(e);
+            got.push(String(document.execCommand(command, false, value)), e.innerHTML);
+          }
+          return got;
+        })()
+      JS
+    }
+    expect(pick.call('<!DOCTYPE html>')).to eq(['not a color', 'true', 'hi', 'a;color:red', 'true', 'hi', 'ff0000', 'true', 'hi'])
+    expect(pick.call('').last(2)).to eq(['true', '<span style="color: rgb(255, 0, 0);">hi</span>'])
+  end
 end

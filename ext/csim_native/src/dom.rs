@@ -5114,7 +5114,7 @@ fn decl_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
 }
 // …and the quirks mode a declaration or a sheet parses in: that of the document argument `i` names by its nid
 // (`document_mode`; none, -1, an HTML no-quirks one's).
-fn quirks_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> bool {
+pub(crate) fn quirks_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> bool {
     let doc = nid_arg(scope, args, i);
     dom(scope).arena.document_mode(doc).0
 }
