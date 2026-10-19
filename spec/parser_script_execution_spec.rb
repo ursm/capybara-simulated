@@ -134,6 +134,24 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L').sort).to eq(%w[a as b m])
   end
 
+  # …where at its END TAG a script the parser put in a subtree an earlier script removed is not connected, and runs
+  # nothing — an inline one, an external one, an import map. Chrome: 1, 3.
+  it 'runs nothing the parser puts in a subtree an earlier script removed' do
+    app = lambda do |env|
+      if env['PATH_INFO'] == '/b.js'
+        [200, {'content-type' => 'text/javascript'}, ["L.push('b')"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><script>window.L = []</script>
+          <div id="d"><script>document.getElementById('d').remove(); L.push('1')</script><script>L.push('2')</script><script src="b.js"></script><script type="importmap">{"imports": {"x": "./b.js"}}</script></div>
+          <script>L.push('3'); import('x').then(() => L.push('mapped'), () => L.push('unmapped'))</script>
+        HTML
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L')).to eq(%w[1 3 unmapped])
+  end
+
   # …and "the end" is for the PARSER's scripts alone: a script an innerHTML fragment made (already started, never
   # runs) or a clone of a started one (the flag is copied) stays inert even when inserted mid-parse — swept up after the
   # parse, both ran. Chrome: neither runs, and the original runs once.

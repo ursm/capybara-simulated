@@ -76,6 +76,12 @@ pub(crate) const PREPARE_CLASSIC: u32 = 2;
 pub(crate) const PREPARE_MODULE: u32 = 3;
 pub(crate) const PREPARE_IMPORT_MAP: u32 = 4;
 
+// Who prepares it: a script no parser is preparing; the parser, at its end tag (or the XML parser's after-parse pass,
+// in its place); and the after-parse pass, a deferred, async or module script out of the lists "the end" runs.
+pub(crate) const BY_SCRIPT: u32 = 0;
+pub(crate) const BY_PARSER: u32 = 1;
+pub(crate) const BY_PARSER_LIST: u32 = 2;
+
 impl RealmArena {
     // HTML "prepare the script element" — for one no parser is preparing (its children changed, it was connected, its
     // `src` set), and for the parser's import maps — as far as the element decides it: an "already started" one, one with
@@ -84,18 +90,19 @@ impl RealmArena {
     // reckoning), and does nothing as a classic script marked `nomodule`, fires `error` with an empty `src` — an import
     // map with any, there being no external import maps — and else runs, or registers its import map.
     // (…and, `scripting` false — its node document has no browsing context — "already started" and nothing more: step 19)
-    // (…the `parser`'s script is "already started" here from its creation, as the insertion the parser makes prepares
-    // nothing, so what says it has been prepared is its having run — and it runs connected or not: the parser prepared
-    // it at its end tag, connected, and one an earlier script removed since is still in the list of scripts to execute
-    // after parsing, which "execute the script element" checks against its preparation-time document alone)
-    pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool, parser: bool) -> u32 {
+    // (…the parser's script — `by` it, not `BY_SCRIPT` — is "already started" here from its creation, as the insertion
+    // the parser makes prepares nothing, so what says it has been prepared is its having run; and one of the lists runs
+    // connected or not: the parser prepared it at its end tag, connected, and one an earlier script removed since is
+    // still in the list of scripts to execute after parsing, which "execute the script element" checks against its
+    // preparation-time document alone — where at its end tag one the parser put in a removed subtree is not connected)
+    pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool, by: u32) -> u32 {
         let Some(n) = self.get(id) else { return PREPARE_NONE };
-        if n.script_flags & if parser { SCRIPT_RUN } else { SCRIPT_ALREADY_STARTED } != 0 {
+        if n.script_flags & if by == BY_SCRIPT { SCRIPT_ALREADY_STARTED } else { SCRIPT_RUN } != 0 {
             return PREPARE_NONE;
         }
         let src = n.plain_attr("src").map(str::is_empty);
         let has_text = n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty()));
-        if (src.is_none() && !has_text) || (!parser && !self.is_connected(id)) {
+        if (src.is_none() && !has_text) || (by != BY_PARSER_LIST && !self.is_connected(id)) {
             return PREPARE_NONE;
         }
         let Some(n) = self.get(id) else { return PREPARE_NONE };
@@ -271,12 +278,13 @@ fn script_blocks_parser_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     rv.set_bool(id.and_then(|id| crate::dom::dom(scope).arena.get(id)).is_some_and(blocks_parser));
 }
 
-// __dom.prepareScript(nid, scripting, parser) -> what preparing the script element found it is to do (`prepare_script`: `PREPARE_NONE`, …).
+// __dom.prepareScript(nid, scripting, by) -> what preparing the script element found it is to do, prepared `by` whom
+// (`prepare_script`: `PREPARE_NONE`, …; `BY_*`).
 fn prepare_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(PREPARE_NONE) };
     let cid = crate::dom::realm_id(scope, &args);
-    let (scripting, parser) = (args.get(1).is_true(), args.get(2).is_true());
-    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id, scripting, parser));
+    let (scripting, by) = (args.get(1).is_true(), args.get(2).uint32_value(scope).unwrap_or(BY_SCRIPT));
+    rv.set_uint32(crate::dom::realm(scope, cid).prepare_script(id, scripting, by));
 }
 
 #[cfg(test)]
