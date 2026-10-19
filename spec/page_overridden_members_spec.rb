@@ -237,6 +237,21 @@ RSpec.describe 'members a page overrides' do
     expect(s.evaluate_script('got')).to eq(['mutations:1', 'message:hi'])
   end
 
+  # …nor what a page made of the realm's own promises: resolving one with a thenable reads no `constructor` off it, so a
+  # page's getter there (a species hook) stops neither a microtask nor a mutation record.
+  it "queues its microtasks whatever a page made of Promise.prototype.constructor" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = [];
+      new MutationObserver(() => got.push('mutations')).observe(document.body, { childList: true });
+      Object.defineProperty(Promise.prototype, 'constructor', { get() { throw new Error('page species'); } });
+      queueMicrotask(() => got.push('microtask'));
+      document.body.append(document.createElement('p'));
+    JS
+    expect(s.evaluate_script('got')).to eq(['microtask', 'mutations'])
+  end
+
   # …and the promises the platform hands back are the realm's own, whatever a page (Zone.js) put in `Promise`.
   it "hands back the realm's own promises whatever a page put in Promise" do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
@@ -255,6 +270,24 @@ RSpec.describe 'members a page overrides' do
       })()
     JS
     expect(got).to eq([true] * 6)
+  end
+
+  # …and one it hands back later is the engine's to settle: a pending image's decode waits for its load, here one that
+  # breaks, and rejects with the EncodingError of that, not with what the page's `Promise` threw.
+  it "settles a pending image's decode whatever a page put in Promise" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const Own = Promise;
+      const img = new Image();
+      img.src = '/not-an-image';
+      window.Promise = function () { throw new Error('page Promise'); };
+      const decoded = img.decode();
+      window.Promise = Own;
+      decoded.then(() => done('resolved'), (e) => done(e.name));
+    JS
+    expect(got).to eq('EncodingError')
   end
 
   # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that

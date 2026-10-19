@@ -56,8 +56,16 @@ fn bytes_base64_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // __dom.base64Bytes(text) -> a new ArrayBuffer of `text`'s bytes, forgiving-base64 decoded — what
 // `Uint8Array.fromBase64` gives the bindings, through no member a page may replace — null where it is no base64.
 fn base64_bytes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let input = args.get(0).to_rust_string_lossy(scope);
-    match data_url::forgiving_base64::decode_to_vec(input.as_bytes()) {
+    // (…its characters read as the bytes they are — base64 is ASCII — with no UTF-8 copy of a long body's text first)
+    let Some(text) = args.get(0).to_string(scope) else { return rv.set_null() };
+    let input = if text.contains_only_onebyte() {
+        let mut bytes = vec![0u8; text.length()];
+        text.write_one_byte_v2(scope, 0, &mut bytes, v8::WriteFlags::empty());
+        bytes
+    } else {
+        text.to_rust_string_lossy(scope).into_bytes()
+    };
+    match data_url::forgiving_base64::decode_to_vec(&input) {
         Ok(bytes) => rv.set(crate::webcrypto::array_buffer(scope, bytes)),
         Err(_) => rv.set_null(),
     }
