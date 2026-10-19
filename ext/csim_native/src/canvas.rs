@@ -1139,7 +1139,7 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // one's linear counterpart ("srgb-linear", "display-p3-linear") through the sRGB transfer function both share, decoded
 // to its base space first and encoded from it last; its alpha untouched, nothing done where they match.
 // An ImageData's components between its two pixel formats (HTML §4.12.5.1.15): "rgba-float16" ones — IEEE half-precision,
-// as a Float16Array holds them (little-endian) — and "rgba-unorm8" ones, a byte each.
+// as a Float16Array holds them (in the platform's byte order) — and "rgba-unorm8" ones, a byte each.
 // A half's value.
 fn half_value(bits: u16) -> f64 {
     let sign = if bits & 0x8000 != 0 { -1.0 } else { 1.0 };
@@ -1184,14 +1184,14 @@ fn half_bits(value: f64) -> u16 {
 // `Uint8ClampedArray.from(data, (v) => v * 255)` makes, at no call per component.
 fn pixels_unorm8(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let halves = bytes_read(args.get(0), None).unwrap_or_default();
-    let bytes: Vec<u8> = halves.chunks_exact(2).map(|h| byte(half_value(u16::from_le_bytes([h[0], h[1]])) * 255.0)).collect();
+    let bytes: Vec<u8> = halves.chunks_exact(2).map(|h| byte(half_value(u16::from_ne_bytes([h[0], h[1]])) * 255.0)).collect();
     rv.set(crate::webcrypto::array_buffer(scope, bytes));
 }
 // __dom.pixelsFloat16(bytes) -> a new ArrayBuffer of each byte over 255 as a half (`half_bits(v / 255)`) — what
 // `Float16Array.from(bytes, (v) => v / 255)` makes.
 fn pixels_float16(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let bytes = bytes_read(args.get(0), None).unwrap_or_default();
-    let halves: Vec<u8> = bytes.iter().flat_map(|&b| half_bits(f64::from(b) / 255.0).to_le_bytes()).collect();
+    let halves: Vec<u8> = bytes.iter().flat_map(|&b| half_bits(f64::from(b) / 255.0).to_ne_bytes()).collect();
     rv.set(crate::webcrypto::array_buffer(scope, halves));
 }
 
