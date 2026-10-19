@@ -211,6 +211,19 @@ impl RealmArena {
         found
     }
     // …and those of its ancestor navigables: its container's document's, up.
+    // The origin of the host realm `realm`'s document was served from (`RealmLocation::url_origin`) — for a document of
+    // no URL of its own (an about:srcdoc one, an about:blank one that inherited no origin), its container's document's,
+    // up: whatever a sandbox made of any of their origins.
+    pub(crate) fn served_origin(&self, realm: i32) -> String {
+        for r in std::iter::once(realm).chain(self.ancestor_realms(realm)) {
+            let Some(state) = self.realm_state(r) else { break };
+            let origin = state.location.url_origin();
+            if origin != "null" {
+                return origin.to_owned();
+            }
+        }
+        "null".to_owned()
+    }
     pub(crate) fn ancestor_realms(&self, realm: i32) -> Vec<i32> {
         let mut found = Vec::new();
         let mut at = realm;
