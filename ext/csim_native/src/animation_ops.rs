@@ -474,6 +474,21 @@ fn resolved_matrix_css(transform: &style::values::computed::Transform, width: f3
 }
 
 // __dom.animNextFrameDelay() -> ms until an animation next needs a frame, or -1 (none runs).
+// The time to the next frame an animation the style engine of realm `cid` runs is due one at — waiting on a frame (0),
+// or running to an end its events and its finished state fall at — on that realm's clock; none for none.
+pub(crate) fn next_frame_delay_of(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Option<f64> {
+    let mut delay = None;
+    crate::dom::style_op(scope, cid, |scope| {
+        let d = dom(scope);
+        let Some(now) = d.arena.realm_state(cid).map(|s| s.clock) else { return };
+        let Some(engine) = d.styles.get_mut(&cid) else { return };
+        if engine.web_animations.timeline_time != Some(now) {
+            engine.web_animations_op(|model| model.set_timeline_time(now));
+        }
+        delay = engine.web_animations.next_frame_delay();
+    });
+    delay
+}
 fn anim_next_frame_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set(v8::Number::new(scope, -1.0).into());
     with_engine(scope, &args, |scope, engine, arena| {

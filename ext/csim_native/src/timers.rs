@@ -219,6 +219,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerNext", timer_next, context_id);
     register(scope, ns, "realmPending", realm_pending, context_id);
     register(scope, ns, "timerNextDue", timer_next_due, context_id);
+    register(scope, ns, "nextTimerDelay", next_timer_delay, context_id);
     register(scope, ns, "timerStep", timer_step, context_id);
     register(scope, ns, "timerTaskEnd", timer_task_end, context_id);
     register(scope, ns, "frameAdd", frame_add, context_id);
@@ -532,6 +533,31 @@ fn pending(scope: &mut v8::PinScope<'_, '_>, realm: i32, subtree: bool) -> bool 
 }
 
 // __dom.timerNextDue() -> when the calling realm's next timer falls due, or undefined for none.
+// __dom.nextTimerDelay() -> the time, on its clock, to the next work the calling realm's event loop has due — 0 for an
+// animation frame callback requested, else its earliest timer's, or a frame an animation its style engine runs is due —
+// and its frames', whose steps its own run (`drainChildRealms`), the earliest of them; -1 for none. What the host's
+// fast-forward goes as far as, a far-future timer left parked.
+fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let mut pending = vec![cid];
+    let mut min = f64::INFINITY;
+    while let Some(realm) = pending.pop() {
+        let arena = &dom(scope).arena;
+        let Some(state) = arena.realm_state(realm) else { continue };
+        if !state.timers.frames.is_empty() {
+            return rv.set_double(0.0);
+        }
+        if let Some(&(Due(due), _, _)) = state.timers.order.first() {
+            min = min.min(due - state.clock);
+        }
+        pending.extend(arena.child_realms(realm));
+        if let Some(delay) = crate::animation_ops::next_frame_delay_of(scope, realm).filter(|d| *d >= 0.0) {
+            min = min.min(delay);
+        }
+    }
+    rv.set_double(if min == f64::INFINITY { -1.0 } else { min.max(0.0) });
+}
+
 fn timer_next_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     if let Some(&(Due(due), _, _)) = dom(scope).arena.enter(cid).timers.order.first() {
