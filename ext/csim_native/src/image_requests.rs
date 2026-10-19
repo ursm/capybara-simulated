@@ -2,9 +2,10 @@
 // `<input type=image>`'s — the engine's: whether it is complete and whether it is broken, the URL it was made for, the
 // decoded image's size, whether it taints a canvas it is drawn into, the EXIF turn the decode applied, and which load is
 // the current one — a later one supersedes what an earlier one has in flight or queued — with the (URL, CORS mode) it was
-// made for, which a relevant mutation that changes neither does not restart. The bindings fetch the resource (through a
-// service worker or the host), keep the decoded bitmap and fire the events (dom-nodes.js `_loadImageResource`). Kept per
-// element in the arena (`RealmArena::images`), from its first load.
+// made for, which a relevant mutation that changes neither does not restart — and the decoded bitmap, which a canvas
+// draws and the painter paints (`imageBitmap`). The bindings fetch the resource (through a service worker or the host)
+// and fire the events (dom-nodes.js `_loadImageResource`). Kept per element in the arena (`RealmArena::images`), from
+// its first load.
 
 use crate::dom::{NodeId, RealmArena};
 
@@ -24,6 +25,43 @@ pub(crate) struct ImageRequest {
     load: u32,
     // (…the key a hash: a `data:` URL is the whole image)
     key: Option<u64>,
+    // Its decoded image's pixels, none where it has none (unavailable, pending, broken, no area).
+    bitmap: Option<Bitmap>,
+}
+
+// A decoded image's pixels: its RGBA bytes in sRGB — and, for a wide-gamut source (Adobe RGB, CMYK), in Display P3 as
+// well, which a P3 canvas draws — and the colour space drawImage converts it from. Each a span of a backing store the
+// engine holds (the host's transfer buffer, zero-copy), handed to a draw as a view on it.
+#[derive(Clone)]
+struct Bitmap {
+    srgb: Pixels,
+    p3: Option<Pixels>,
+    display_p3: bool,
+}
+#[derive(Clone)]
+struct Pixels {
+    store: v8::SharedRef<v8::BackingStore>,
+    offset: usize,
+    len: usize,
+}
+
+impl Pixels {
+    fn of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Pixels> {
+        let view = v8::Local::<v8::Uint8ClampedArray>::try_from(value).ok()?;
+        let store = view.buffer(scope)?.get_backing_store();
+        Some(Pixels { store, offset: view.byte_offset(), len: view.byte_length() })
+    }
+    fn view<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+        let buffer = v8::ArrayBuffer::with_backing_store(scope, &self.store);
+        v8::Uint8ClampedArray::new(scope, buffer, self.offset, self.len).map_or_else(|| v8::null(scope).into(), Into::into)
+    }
+}
+
+impl ImageRequest {
+    // What its bitmap weighs as V8 is told (`RealmArena::external`): a store only the engine holds is none of V8's own.
+    pub(crate) fn weight(&self) -> i64 {
+        self.bitmap.as_ref().map_or(0, |b| (b.srgb.len + b.p3.as_ref().map_or(0, |p| p.len)) as i64)
+    }
 }
 
 // What a load's result is.
@@ -44,6 +82,13 @@ impl RealmArena {
     pub(crate) fn image_pending(&self, id: NodeId) -> bool {
         self.image(id).is_some_and(|r| r.url.is_some() && !r.complete)
     }
+    // `id`'s decoded bitmap becomes `bitmap`, what it weighs told V8 as it changes.
+    fn set_image_bitmap(&mut self, id: NodeId, bitmap: Option<Bitmap>) {
+        let r = self.images.entry(id).or_default();
+        let before = r.weight();
+        r.bitmap = bitmap;
+        self.external += r.weight() - before;
+    }
     // …and the pixel density its current request's source has (1 for none).
     pub(crate) fn image_density(&self, id: NodeId) -> f64 {
         self.image(id).map(|r| r.density).filter(|&d| d > 0.0 && d.is_finite()).unwrap_or(1.0)
@@ -58,6 +103,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
     crate::dom::register(scope, ns, "imageUrl", url, context_id);
     crate::dom::register(scope, ns, "imageLoad", current_load, context_id);
+    crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
 }
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
@@ -92,29 +138,40 @@ fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // flight superseded, and a later source of any URL a new load.
 fn load_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let r = crate::dom::dom(scope).arena.image_mut(id);
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.set_image_bitmap(id, None);
+    let r = arena.image_mut(id);
     *r = ImageRequest { complete: true, load: r.load + 1, ..ImageRequest::default() };
 }
 // __dom.imagePending(img): the current request pending — not complete, its image data discarded until the response
 // comes.
 fn pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let r = crate::dom::dom(scope).arena.image_mut(id);
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.set_image_bitmap(id, None);
+    let r = arena.image_mut(id);
     r.complete = false;
     r.broken = false;
     r.size = [0, 0];
 }
-// __dom.imageApply(img, load, result, width, height, orientation, tainted) -> whether the result applies: load `load`'s
-// (`RESULT_IMAGE` …), none where a later load superseded it. Complete either way; broken for `RESULT_BROKEN`.
+// __dom.imageApply(img, load, result, width, height, orientation, tainted, pixels, pixelsP3, displayP3) -> whether the
+// result applies: load `load`'s (`RESULT_IMAGE` …), none where a later load superseded it. Complete either way; broken
+// for `RESULT_BROKEN`; an image's decoded pixels (`pixels`, and `pixelsP3` for a wide-gamut source, Uint8ClampedArrays;
+// `displayP3` the space they are in) its bitmap.
 fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_bool(false) };
     let number = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).uint32_value(scope).unwrap_or(0);
     let (load, result, width, height, orientation) = (number(scope, 1), number(scope, 2), number(scope, 3), number(scope, 4), number(scope, 5));
     let tainted = args.get(6).is_true();
-    let r = crate::dom::dom(scope).arena.image_mut(id);
-    if load != r.load {
+    let bitmap = Pixels::of(scope, args.get(7))
+        .filter(|_| result == RESULT_IMAGE)
+        .map(|srgb| Bitmap { srgb, p3: Pixels::of(scope, args.get(8)), display_p3: args.get(9).is_true() });
+    let arena = &mut crate::dom::dom(scope).arena;
+    if load != arena.image_mut(id).load {
         return rv.set_bool(false);
     }
+    arena.set_image_bitmap(id, bitmap);
+    let r = arena.image_mut(id);
     r.complete = true;
     r.broken = result == RESULT_BROKEN;
     let image = matches!(result, RESULT_IMAGE | RESULT_NO_PIXELS);
@@ -141,6 +198,21 @@ fn info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_
         v8::Boolean::new(scope, tainted).into(),
         v8::Integer::new_from_unsigned(scope, u32::from(orientation)).into(),
         v8::Number::new(scope, density).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.imageBitmap(img) -> [pixels, pixelsP3 | null, displayP3] — views on the current request's decoded bitmap — or
+// null where it has none.
+fn bitmap_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
+    let Some(b) = crate::dom::dom(scope).arena.image(id).and_then(|r| r.bitmap.clone()) else { return rv.set_null() };
+    let items = [
+        b.srgb.view(scope),
+        match &b.p3 {
+            Some(p) => p.view(scope),
+            None => v8::null(scope).into(),
+        },
+        v8::Boolean::new(scope, b.display_p3).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

@@ -1336,7 +1336,14 @@ impl RealmArena {
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
-        self.images.retain(|id, _| live(slots, id));
+        let external = &mut self.external;
+        self.images.retain(|id, r| {
+            let keep = live(slots, id);
+            if !keep {
+                *external -= r.weight();
+            }
+            keep
+        });
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.pointerdown_targets.retain(|doc, _| live(slots, doc));
         self.popovers_changing.retain(|id| live(slots, id));
@@ -1552,8 +1559,8 @@ impl RealmArena {
                 past.retain(|&(_, el)| el != id);
             }
         }
-        if !self.images.is_empty() {
-            self.images.remove(&id);
+        if let Some(r) = self.images.remove(&id) {
+            self.external -= r.weight();
         }
         if !self.showing_popovers.is_empty() {
             self.showing_popovers.remove(&id);
