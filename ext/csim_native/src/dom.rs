@@ -2914,6 +2914,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::idb_databases::install(scope, ns, context_id);
     crate::web_locks::install(scope, ns, context_id);
     crate::abort_signal::install(scope, ns, context_id);
+    crate::message_ports::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);

@@ -7,6 +7,7 @@
 // engine itself stays a pure V8 binding with no DOM knowledge.
 
 // The Web Animations model: the timeline, animations and their effects' timing; and the ops a JS handle asks it with.
+mod abort_signal;
 mod adopt;
 mod agents;
 mod animation_ops;
@@ -109,6 +110,7 @@ mod keyframes;
 mod layout;
 mod legacy;
 mod media;
+mod message_ports;
 mod mime;
 mod multipart;
 mod mutation;
@@ -174,7 +176,6 @@ mod video;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
-mod abort_signal;
 mod web_locks;
 mod xml_parse;
 mod xpath;
