@@ -39,23 +39,31 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // The document timeline at the realm's clock (`RealmState::clock`), before an op reads or moves an animation.
 fn at_time(engine: &mut StyleEngine, arena: &RealmArena) {
-    let now = arena.clock;
+    at_clock(engine, arena.clock);
+}
+fn at_clock(engine: &mut StyleEngine, now: f64) {
     if engine.web_animations.timeline_time != Some(now) {
         engine.web_animations_op(|model| model.set_timeline_time(now));
     }
 }
 
-// Whether an animation the style engine of realm `realm` runs needs frames: one waiting on one to start (its `ready`), or
-// running to an end its events and its finished state fall at — none for a realm the engine styles nothing of.
-pub(crate) fn frames_due(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
-    let mut due = false;
+// The time to the next frame an animation the style engine of realm `realm` runs is due one at — waiting on a frame (0),
+// or running to an end its events and its finished state fall at — on that realm's clock; none for none, and for a realm
+// the engine styles nothing of.
+pub(crate) fn next_frame_delay_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> Option<f64> {
+    let mut delay = None;
     style_op(scope, realm, |scope| {
         let d = dom(scope);
-        let (Some(engine), Some(arena)) = (d.styles.get_mut(&realm), d.arena.enter_known(realm)) else { return };
-        at_time(engine, arena);
-        due = engine.web_animations.next_frame_delay().is_some_and(|delay| delay >= 0.0);
+        let Some(now) = d.arena.realm_state(realm).map(|s| s.clock) else { return };
+        let Some(engine) = d.styles.get_mut(&realm) else { return };
+        at_clock(engine, now);
+        delay = engine.web_animations.next_frame_delay();
     });
-    due
+    delay
+}
+// …whether it needs frames at all: what keeps the driver stepping the page.
+pub(crate) fn frames_due(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
+    next_frame_delay_of(scope, realm).is_some()
 }
 
 // The realm's style engine, for an op to work on, and its arena (none: the page is not styled by the engine, and the
@@ -473,29 +481,10 @@ fn resolved_matrix_css(transform: &style::values::computed::Transform, width: f3
     Some(style::values::generics::transform::Transform(vec![op].into()).to_css_string())
 }
 
-// __dom.animNextFrameDelay() -> ms until an animation next needs a frame, or -1 (none runs).
-// The time to the next frame an animation the style engine of realm `cid` runs is due one at — waiting on a frame (0),
-// or running to an end its events and its finished state fall at — on that realm's clock; none for none.
-pub(crate) fn next_frame_delay_of(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> Option<f64> {
-    let mut delay = None;
-    crate::dom::style_op(scope, cid, |scope| {
-        let d = dom(scope);
-        let Some(now) = d.arena.realm_state(cid).map(|s| s.clock) else { return };
-        let Some(engine) = d.styles.get_mut(&cid) else { return };
-        if engine.web_animations.timeline_time != Some(now) {
-            engine.web_animations_op(|model| model.set_timeline_time(now));
-        }
-        delay = engine.web_animations.next_frame_delay();
-    });
-    delay
-}
+// __dom.animNextFrameDelay() -> ms until an animation of the calling realm next needs a frame, or -1 (none runs).
 fn anim_next_frame_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set(v8::Number::new(scope, -1.0).into());
-    with_engine(scope, &args, |scope, engine, arena| {
-        at_time(engine, arena);
-        let delay = engine.web_animations.next_frame_delay().unwrap_or(-1.0);
-        rv.set(v8::Number::new(scope, delay).into());
-    });
+    let realm = realm_id(scope, &args);
+    rv.set_double(next_frame_delay_of(scope, realm).unwrap_or(-1.0));
 }
 
 fn optional_number<'s>(scope: &mut v8::PinScope<'s, '_>, value: Option<f64>) -> v8::Local<'s, v8::Value> {

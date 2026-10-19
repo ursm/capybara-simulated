@@ -532,7 +532,6 @@ fn pending(scope: &mut v8::PinScope<'_, '_>, realm: i32, subtree: bool) -> bool 
     subtree && dom(scope).arena.child_realms(realm).into_iter().any(|child| pending(scope, child, true))
 }
 
-// __dom.timerNextDue() -> when the calling realm's next timer falls due, or undefined for none.
 // __dom.nextTimerDelay() -> the time, on its clock, to the next work the calling realm's event loop has due — 0 for an
 // animation frame callback requested, else its earliest timer's, or a frame an animation its style engine runs is due —
 // and its frames', whose steps its own run (`drainChildRealms`), the earliest of them; -1 for none. What the host's
@@ -543,6 +542,9 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let mut min = f64::INFINITY;
     while let Some(realm) = pending.pop() {
         let arena = &dom(scope).arena;
+        if arena.is_dropped(realm) {
+            continue;
+        }
         let Some(state) = arena.realm_state(realm) else { continue };
         if !state.timers.frames.is_empty() {
             return rv.set_double(0.0);
@@ -551,13 +553,14 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
             min = min.min(due - state.clock);
         }
         pending.extend(arena.child_realms(realm));
-        if let Some(delay) = crate::animation_ops::next_frame_delay_of(scope, realm).filter(|d| *d >= 0.0) {
+        if let Some(delay) = crate::animation_ops::next_frame_delay_of(scope, realm) {
             min = min.min(delay);
         }
     }
     rv.set_double(if min == f64::INFINITY { -1.0 } else { min.max(0.0) });
 }
 
+// __dom.timerNextDue() -> when the calling realm's next timer falls due, or undefined for none.
 fn timer_next_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     if let Some(&(Due(due), _, _)) = dom(scope).arena.enter(cid).timers.order.first() {
