@@ -40,16 +40,15 @@ impl Direction {
     }
 }
 
-// What typing into a control changed (`type_text`): its value, its selection — and, above `TYPED_LENGTH_SHIFT`, how many
-// code units of the text went in.
+// What typing into a control changed (`type_text`): its value, its selection.
 pub(crate) const TYPED_VALUE: u32 = 1;
 pub(crate) const TYPED_SELECTION: u32 = 2;
-const TYPED_LENGTH_SHIFT: u32 = 2;
 // Where typed text goes (`type_text`): at the selection, the caret at the value's end where none was ever set (the
 // user's keystrokes); over the whole value (a driver's fill); at the selection a script reads, its start where none was
-// set (execCommand, the clipboard: any other, 2 as the bindings number it).
+// set (execCommand, the clipboard).
 pub(crate) const TYPE_AT_CARET: u32 = 0;
 pub(crate) const TYPE_WHOLE: u32 = 1;
+pub(crate) const TYPE_AT_SELECTION: u32 = 2;
 // The editing keys a text control takes (`edit_control`) — the moves extending the selection with `EDIT_EXTEND` (Shift).
 const EDIT_BACKSPACE: u32 = 0;
 const EDIT_DELETE: u32 = 1;
@@ -128,9 +127,9 @@ impl RealmArena {
     // (a textarea, a text-like input): what the value keeps besides the selection is left whole, and a surrogate pair
     // goes in whole or not at all (Chrome: "abcde" at maxlength 5 takes no "X"; a script's longer value takes nothing,
     // and loses nothing). What it changed (`TYPED_*`); the value written is the engine's, the string the bindings held
-    // of it forgotten by the caller — and how much of the text went in.
-    pub(crate) fn type_text(&mut self, id: NodeId, text: &[u16], at: u32) -> u32 {
-        let Some(n) = self.get(id) else { return 0 };
+    // of it forgotten by the caller — and the text that went in.
+    pub(crate) fn type_text(&mut self, id: NodeId, text: &[u16], at: u32) -> (u32, Vec<u16>) {
+        let Some(n) = self.get(id) else { return (0, Vec::new()) };
         let current = self.relevant_value(n);
         let number = n.is_html_named("input") && n.input_type() == "number";
         let textarea = n.is_html_named("textarea");
@@ -143,7 +142,10 @@ impl RealmArena {
             _ => (sel.start as usize, sel.end as usize),
         };
         let (start, end) = (start.min(current.len()), end.min(current.len()));
-        let normalized = textarea_text(textarea, text);
+        // (…text inserted at the selection — an editing command's, a paste's — into a single-line control each line break
+        // a space: Chrome and Firefox, `insertText('a\r\nb')` into `<input>` → `a b`; keys and a whole value typed keep
+        // what the value takes, which strips them)
+        let normalized = if !textarea && at == TYPE_AT_SELECTION { single_line_text(text) } else { textarea_text(textarea, text) };
         let mut text = &normalized[..];
         if let Some(max) = max {
             let mut room = (max as usize).saturating_sub(current.len() - (end - start)).min(text.len());
@@ -157,7 +159,7 @@ impl RealmArena {
         next.extend_from_slice(text);
         next.extend_from_slice(&current[end..]);
         if number && !number_being_entered(&next) {
-            return 0;
+            return (0, Vec::new());
         }
         let caret = (start + text.len()) as u32;
         let mut changed = 0;
@@ -167,7 +169,7 @@ impl RealmArena {
         if self.set_text_selection(id, caret, caret, Direction::None) {
             changed |= TYPED_SELECTION;
         }
-        changed | (text.len() as u32) << TYPED_LENGTH_SHIFT
+        (changed, text.to_vec())
     }
 
     // An editing key pressed in the control `id`, as Chrome takes it: Backspace / Delete remove the selection, or what
@@ -585,6 +587,14 @@ fn range_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // What goes into a control's value of `text`: a textarea's with its newlines normalized (CR LF and CR a LF) — its value
 // is never anything else (HTML: its API value is its raw value so normalized; Chrome and Firefox: `setRangeText('1\r\n2')`
 // leaves `1\n2`) — any other's as it is.
+// …and of text inserted into a single-line control: each line break — CR LF, CR, LF — one space.
+fn single_line_text(text: &[u16]) -> std::borrow::Cow<'_, [u16]> {
+    if !text.iter().any(|&u| u == 0x0A || u == 0x0D) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let lines = crate::validity::normalize_newlines(text.iter().copied());
+    std::borrow::Cow::Owned(lines.into_iter().map(|u| if u == 0x0A { 0x20 } else { u }).collect())
+}
 fn textarea_text(textarea: bool, text: &[u16]) -> std::borrow::Cow<'_, [u16]> {
     if textarea && text.contains(&0x0D) {
         std::borrow::Cow::Owned(crate::validity::normalize_newlines(text.iter().copied()))
@@ -631,20 +641,22 @@ mod tests {
     }
 }
 
-// __dom.typeText(control, text, at) -> what typing `text` into the control where `at` (`TYPE_*`) says changed, and how
-// much went in (`type_text`'s `TYPED_*` bits, the length above them).
+// __dom.typeText(control, text, at) -> [what typing `text` into the control where `at` (`TYPE_*`) says changed (`TYPED_*`
+// bits), the text that went in] (`type_text`), null for no control.
 fn type_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let control = args.get(0);
-    let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_uint32(0) };
+    let Some(id) = crate::node_handle::nid_of(scope, control) else { return rv.set_null() };
     let text = crate::dom::utf16_arg(scope, args.get(1));
     let at = args.get(2).uint32_value(scope).unwrap_or(TYPE_AT_CARET);
     // (…in the control's realm, whatever realm's code asks: its style state is what the value moves)
-    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_uint32(0) };
-    let changed = crate::dom::realm(scope, cid).type_text(id, &text, at);
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_null() };
+    let (changed, typed) = crate::dom::realm(scope, cid).type_text(id, &text, at);
     if changed & TYPED_VALUE != 0 {
         crate::node_handle::forget_live_value(scope, control);
     }
-    rv.set_uint32(changed);
+    let changed = v8::Integer::new_from_unsigned(scope, changed).into();
+    let typed = v8::String::new_from_two_byte(scope, &typed, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    rv.set(v8::Array::new_with_elements(scope, &[changed, typed]).into());
 }
 
 // __dom.editControl(control, edit) -> what the editing key `edit` (`EDIT_*`) pressed in the control changed

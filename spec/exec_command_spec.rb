@@ -193,4 +193,26 @@ RSpec.describe 'execCommand in an editing host' do
     JS
     expect(got).to eq(['axyd', '', nil, 'axyd', 'insertText', 'xy'])
   end
+
+  # Text inserted into a single-line control takes each line break as a space — the value and the `input`'s data alike
+  # (Chrome and Firefox: `aa bbcd`) — and an `insertHTML` that puts nothing in at a caret fires no `input` (Chrome).
+  it 'inserts line breaks into an input as spaces, and fires nothing for nothing inserted' do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><input id=i value=abcd>']]
+    }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const el = document.getElementById('i'), seen = [];
+        el.addEventListener('input', (e) => seen.push(e.data));
+        el.focus();
+        el.setSelectionRange(1, 1);
+        document.execCommand('insertText', false, 'a\\r\\nb');
+        const value = el.value;
+        el.setSelectionRange(1, 1);
+        document.execCommand('insertHTML', false, '<b></b>');
+        return [value, ...seen];
+      })()
+    JS
+    expect(got).to eq(['aa bbcd', 'a b'])
+  end
 end
