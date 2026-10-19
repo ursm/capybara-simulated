@@ -14,6 +14,7 @@ const PAD_LIMIT: u32 = 100_000;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "optionsPad", options_pad, context_id);
     crate::dom::register(scope, ns, "optionsRemove", options_remove, context_id);
+    crate::dom::register(scope, ns, "optionsSetLength", options_set_length, context_id);
 }
 
 // __dom.optionsPad(select, count, steps) -> [null, changes…]: `count` new blank options — HTML elements of the select's
@@ -23,22 +24,32 @@ fn options_pad(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let Some(select) = nid_arg(scope, &args, 0) else { return };
     let count = args.get(1).uint32_value(scope).unwrap_or(0);
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
-    if count == 0 || count > PAD_LIMIT {
-        return;
+    if let Some(out) = pad(scope, &args, select, count, steps) {
+        rv.set(out);
     }
-    let caller = realm_id(scope, &args);
-    let Some(cid) = crate::dom::dom(scope).arena.get(select).map(|n| n.realm) else { return };
+}
+fn pad<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    select: NodeId,
+    count: u32,
+    steps: v8::Local<'_, v8::Array>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    if count == 0 || count > PAD_LIMIT {
+        return None;
+    }
+    let caller = realm_id(scope, args);
+    let cid = crate::dom::dom(scope).arena.get(select).map(|n| n.realm)?;
     let (mut made, mut held) = (Vec::new(), Vec::new());
     for _ in 0..count {
         let (option, handle) = crate::editing::make_element(scope, cid, caller, select, "option");
         made.push(option);
         held.push(handle);
     }
-    let Some(change) = crate::mutation::insert(scope, cid, caller, select, &made, None, steps) else { return };
-    if let Some(out) = crate::tables::answer(scope, cid, None, &[change]) {
-        rv.set(out);
-    }
+    let change = crate::mutation::insert(scope, cid, caller, select, &made, None, steps)?;
+    let out = crate::tables::answer(scope, cid, None, &[change]);
     drop(held);
+    out
 }
 
 // __dom.optionsRemove(select, from, to, steps) -> [null, changes…]: the options of the select's list at `from`..`to`
@@ -49,16 +60,44 @@ fn options_remove(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let from = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
     let to = args.get(2).uint32_value(scope).unwrap_or(0) as usize;
     let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(3)) else { return };
-    let caller = realm_id(scope, &args);
-    let Some(cid) = crate::dom::dom(scope).arena.get(select).map(|n| n.realm) else { return };
+    if let Some(out) = remove(scope, &args, select, from, to, steps) {
+        rv.set(out);
+    }
+}
+fn remove<'s>(
+    scope: &mut v8::PinScope<'s, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    select: NodeId,
+    from: usize,
+    to: usize,
+    steps: v8::Local<'_, v8::Array>,
+) -> Option<v8::Local<'s, v8::Value>> {
+    let caller = realm_id(scope, args);
+    let cid = crate::dom::dom(scope).arena.get(select).map(|n| n.realm)?;
     let options: Vec<NodeId> = realm(scope, cid).list_of_options(select);
     let gone: Vec<NodeId> = options.get(from..to.min(options.len())).map(<[NodeId]>::to_vec).unwrap_or_default();
     let mut changes = Vec::new();
     for &option in gone.iter().rev() {
-        let Some(change) = crate::mutation::remove(scope, cid, caller, option, steps) else { return };
-        changes.push(change);
+        changes.push(crate::mutation::remove(scope, cid, caller, option, steps)?);
     }
-    if let Some(out) = crate::tables::answer(scope, cid, None, &changes) {
+    crate::tables::answer(scope, cid, None, &changes)
+}
+
+// __dom.optionsSetLength(select, length, steps) -> [null, changes…]: HTMLOptionsCollection's `length` set — the list
+// grown by blank options appended where `length` is no more than `PAD_LIMIT` (a greater one changes nothing), or shrunk
+// by the options past it removed, the last first; nothing where it is that long already.
+fn options_set_length(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(select) = nid_arg(scope, &args, 0) else { return };
+    let length = args.get(1).uint32_value(scope).unwrap_or(0);
+    let Ok(steps) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
+    let Some(cid) = crate::dom::dom(scope).arena.get(select).map(|n| n.realm) else { return };
+    let current = realm(scope, cid).list_of_options(select).len();
+    let out = match (length as usize).cmp(&current) {
+        std::cmp::Ordering::Greater if length <= PAD_LIMIT => pad(scope, &args, select, length - current as u32, steps),
+        std::cmp::Ordering::Less => remove(scope, &args, select, length as usize, current, steps),
+        _ => None,
+    };
+    if let Some(out) = out {
         rv.set(out);
     }
 }
