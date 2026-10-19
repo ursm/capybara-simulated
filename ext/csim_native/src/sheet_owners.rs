@@ -190,6 +190,62 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "sheetSet", sheet_set_op, context_id);
     crate::dom::register(scope, ns, "cascadeRekey", cascade_rekey_op, context_id);
     crate::dom::register(scope, ns, "forgetCascadeKey", forget_cascade_key_op, context_id);
+    crate::dom::register(scope, ns, "styleImports", style_imports_op, context_id);
+}
+
+// The URLs a style sheet's `@import` rules name, as written (CSS Cascade 5 §2.1): the rules that may import — before
+// any other but `@charset` and the `@layer` statement — read as the parser reads them, so an `@import` in a comment, a
+// string or a later rule is none. What a `<style>` waits for before its `load` (bridge.entry.js `maybeFireStyleLoad`).
+pub(crate) fn style_imports(css: &str) -> Vec<String> {
+    use cssparser::{Delimiter, ParseError, Parser, ParserInput, Token};
+    let mut input = ParserInput::new(css);
+    let mut parser = Parser::new(&mut input);
+    let mut urls = Vec::new();
+    let rest = |p: &mut Parser<'_, '_>| {
+        let _ = p.parse_until_after(Delimiter::Semicolon, |p| {
+            while p.next().is_ok() {}
+            Ok::<_, ParseError<'_, ()>>(())
+        });
+    };
+    while let Ok(token) = parser.next() {
+        let name = match token {
+            Token::CDO | Token::CDC => continue,
+            Token::AtKeyword(name) => name.clone(),
+            _ => break,
+        };
+        if name.eq_ignore_ascii_case("import") {
+            let url = match parser.next() {
+                Ok(Token::QuotedString(s) | Token::UnquotedUrl(s)) => Some(s.as_ref().to_owned()),
+                Ok(Token::Function(f)) if f.eq_ignore_ascii_case("url") => {
+                    parser.parse_nested_block(|p| p.expect_string().map(|s| s.as_ref().to_owned()).map_err(ParseError::<'_, ()>::from)).ok()
+                }
+                _ => None,
+            };
+            urls.extend(url);
+            rest(&mut parser);
+        } else if name.eq_ignore_ascii_case("charset") || name.eq_ignore_ascii_case("layer") {
+            // (…a `@layer` statement, which may come first; a `@layer` block is a rule after which none imports)
+            let statement = parser.try_parse(|p| {
+                p.parse_until_before(Delimiter::Semicolon | Delimiter::CurlyBracketBlock, |p| {
+                    while p.next().is_ok() {}
+                    Ok::<_, ParseError<'_, ()>>(())
+                })?;
+                p.expect_semicolon().map_err(ParseError::<'_, ()>::from)
+            });
+            if statement.is_err() {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+    urls
+}
+// __dom.styleImports(css) -> the URLs its `@import` rules name (`style_imports`).
+fn style_imports_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let css = args.get(0).to_rust_string_lossy(scope);
+    let urls: Vec<v8::Local<v8::Value>> = style_imports(&css).iter().filter_map(|u| v8::String::new(scope, u)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &urls).into());
 }
 
 // What a document's cascade is made of, as the realm last handed it to its style engine (cascade.js `rebuildCascade`):
@@ -492,4 +548,18 @@ fn sheet_response_accepted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let origin = crate::dom::realm(scope, cid).location.origin().to_owned();
     let accepted = sheet_response_accepted(&content_type, quirks, || ada_url::Url::parse(&url, None).is_ok_and(|u| u.origin() == origin));
     rv.set_bool(accepted);
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::style_imports;
+
+    #[test]
+    fn a_sheet_imports_by_its_leading_rules_alone() {
+        assert_eq!(style_imports("@charset \"utf-8\"; @layer a, b; @import 'x.css'; @import url(y.css) screen;"), ["x.css", "y.css"]);
+        assert_eq!(style_imports("@import url('z.css') layer(l);"), ["z.css"]);
+        assert!(style_imports("/* @import 'no.css'; */ p { content: '@import' }").is_empty());
+        assert!(style_imports("p {} @import 'late.css';").is_empty());
+        assert!(style_imports("@layer a {} @import 'after-block.css';").is_empty());
+    }
 }
