@@ -211,9 +211,18 @@ impl RealmArena {
         found
     }
     // …and those of its ancestor navigables: its container's document's, up.
+    pub(crate) fn ancestor_realms(&self, realm: i32) -> Vec<i32> {
+        let mut found = Vec::new();
+        let mut at = realm;
+        while let Some(parent) = self.live_container(at).and_then(|c| self.get(c)).map(|n| n.realm) {
+            found.push(parent);
+            at = parent;
+        }
+        found
+    }
     // The origin of the host realm `realm`'s document was served from (`RealmLocation::url_origin`) — for a document of
-    // no URL of its own (an about:srcdoc one, an about:blank one that inherited no origin), its container's document's,
-    // up: whatever a sandbox made of any of their origins.
+    // no URL of its own (an about:srcdoc one, an about:blank one that inherited no origin, a data: one), its container's
+    // document's, up: whatever a sandbox made of any of their origins.
     pub(crate) fn served_origin(&self, realm: i32) -> String {
         for r in std::iter::once(realm).chain(self.ancestor_realms(realm)) {
             let Some(state) = self.realm_state(r) else { break };
@@ -223,15 +232,6 @@ impl RealmArena {
             }
         }
         "null".to_owned()
-    }
-    pub(crate) fn ancestor_realms(&self, realm: i32) -> Vec<i32> {
-        let mut found = Vec::new();
-        let mut at = realm;
-        while let Some(parent) = self.live_container(at).and_then(|c| self.get(c)).map(|n| n.realm) {
-            found.push(parent);
-            at = parent;
-        }
-        found
     }
     // A window `window.open` made in this isolate (realm `realm`) the page's event loop steps now (`on`), or no more.
     pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool) {
