@@ -523,15 +523,15 @@ module Capybara
           # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
           # isolate — load the document directly from a click-time snapshot (a
           # deferred target=_blank nav may revoke the URL first) or, failing that,
-          # the opener's blob store.
-          elsif !(url.to_s.start_with?('blob:') && load_blob_into_window(aux, url, source, snapshot: blob_snapshot))
+          # the opener's blob store; one neither resolves is a network error.
+          elsif url.to_s.start_with?('blob:')
+            aux.fail_blob_document(url) unless load_blob_into_window(aux, url, source, snapshot: blob_snapshot)
+          else
             # A form submission carries a referrer (the opener's URL) unless the
-            # form opted out via rel=noreferrer (referrer: '').
-            # The OPENER's document is the navigation initiator — it seeds the popup
-            # load's Sec-Fetch-Site (the SameSite cookie gate reads it).
-            # The OPENER's document is the navigation initiator — it seeds the popup
-            # load's Sec-Fetch-Site (the SameSite cookie gate reads it). raw_current_url:
-            # the ticking `current_url` must not run re-entrantly inside window.open.
+            # form opted out via rel=noreferrer (referrer: ''). The OPENER's document
+            # is the navigation initiator — it seeds the popup load's Sec-Fetch-Site
+            # (the SameSite cookie gate reads it). raw_current_url: the ticking
+            # `current_url` must not run re-entrantly inside window.open.
             aux.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
           end
         end
@@ -769,8 +769,9 @@ module Capybara
         # A blob: navigation loads directly from the opener's blob bytes (not
         # rack-navigable, cross-isolate). Only when the target isn't the active
         # window (boot rebuilds its ctx — unsafe mid-call on the running window).
-        if url.to_s.start_with?('blob:') && !browser.equal?(current_browser) &&
-           load_blob_into_window(browser, url, source)
+        # (…one no store resolves a network error, as a new window's is)
+        if url.to_s.start_with?('blob:') && !browser.equal?(current_browser)
+          browser.fail_blob_document(url) unless load_blob_into_window(browser, url, source)
           return
         end
         if browser.equal?(current_browser)

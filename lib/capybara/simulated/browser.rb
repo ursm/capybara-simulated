@@ -8460,6 +8460,11 @@ module Capybara
         @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
       end
 
+      # …and a blob: URL loaded as THIS window's top-level document that no store resolves (revoked before it was taken):
+      # a network error — its error document committed at the URL, as Chrome's failed load is — never a path on the
+      # app's server.
+      def fail_blob_document(url) = commit_error_document(url.to_s)
+
       # A user-initiated `URL.revokeObjectURL`. Storage-partitioned + cross-isolate:
       # the Driver vetoes a cross-partition revoke (a same-origin but cross-top-level-
       # site context can't revoke the blob — cross-partition.https) and, for a

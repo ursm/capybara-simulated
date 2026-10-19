@@ -54,4 +54,27 @@ RSpec.describe 'the blob URL store' do
     s.switch_to_window(opened)
     expect(s.evaluate_script('[location.protocol, location.hash, document.title]')).to eq(['blob:', '#x', 'made'])
   end
+
+  # A blob: link opened in a new window after its URL was revoked — before the click's activation could take its bytes —
+  # loads nothing (a network error: Chrome shows the failed load at the URL), never the URL as a path on the app's server.
+  it 'opens a revoked blob URL in a new window as a failed load' do
+    paths = []
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><a id=l target=_blank>go</a>
+      <script>
+        const u = URL.createObjectURL(new Blob(['<p>x</p>'], {type: 'text/html'}));
+        l.href = u;
+        document.addEventListener('click', () => queueMicrotask(() => URL.revokeObjectURL(u)));
+      </script>
+    HTML
+    s = simulated_session(->(env) { paths << env['PATH_INFO']; [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    href = s.evaluate_script('l.href')
+    popup = s.window_opened_by { s.click_link 'go' }
+    s.within_window(popup) do
+      expect(s.current_url).to eq(href)
+      expect(s.evaluate_script('document.body ? document.body.textContent : ""')).to eq('')
+    end
+    expect(paths).to eq(['/'])
+  end
 end
