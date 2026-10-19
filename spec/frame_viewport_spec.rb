@@ -83,6 +83,15 @@ RSpec.describe 'frame viewport' do
     expect(got).to eq([[300, 150], [0, 0]])
   end
 
+  # …but one a navigation of the frame replaced keeps its size: a held `contentWindow` follows the navigable in Chrome
+  # (its WindowProxy, `[300, 300, true]`), where here it is the old Window — which answers the container's size still.
+  it "keeps a navigated frame's held window's size" do
+    s = framed
+    s.execute_script("window.w = document.querySelector('iframe').contentWindow; document.querySelector('iframe').src = '/child?2'")
+    s.within_frame(0) { expect(s).to have_css('#r') }
+    expect(s.evaluate_script("[w.innerWidth, w.outerWidth, w.matchMedia('(min-width: 100px)').matches]")).to eq([300, 300, true])
+  end
+
   it 'follows a window resize' do
     s = framed('width:50%;height:200px;border:0')
     s.within_frame(0) { expect(s.evaluate_script('innerWidth')).to eq(512) }

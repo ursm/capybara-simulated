@@ -51,9 +51,11 @@ pub(crate) struct Navigables {
 }
 
 impl Navigables {
-    // Whether realm `cid`'s context is disposed (`forget_navigables_of`), its realm not yet dropped.
-    pub(crate) fn is_discarded(&self, cid: i32) -> bool {
-        self.discarded.contains(&cid)
+    // Whether realm `cid` is a frame's whose NAVIGABLE is gone — its container left its document, the context disposed
+    // (`forget_navigables_of`), its container kept — not one a navigation of the frame replaced, whose navigable (and
+    // the WindowProxy a page holds of it) goes on in another realm.
+    pub(crate) fn lost_navigable(&self, cid: i32) -> bool {
+        self.discarded.contains(&cid) && self.containers.contains_key(&cid)
     }
 }
 
