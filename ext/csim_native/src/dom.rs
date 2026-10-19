@@ -2421,6 +2421,8 @@ pub(crate) struct Dom {
     pub(crate) image_bitmap_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) crypto_key_template: Option<v8::Global<v8::ObjectTemplate>>,
     pub(crate) blob_data_template: Option<v8::Global<v8::ObjectTemplate>>,
+    // The mouse pointer's PREVENT MOUSE EVENT flag (pointer.rs `mouse_prevented`).
+    pub(crate) mouse_events_prevented: bool,
     // …and a header list's (headers.rs).
     pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and an XMLHttpRequest's state's (xhr_state.rs).

@@ -1,7 +1,9 @@
 // A pointer's orientation (Pointer Events §4.1.3, "converting between tiltX / tiltY and altitudeAngle / azimuthAngle"):
 // given either way — its tilts in degrees, or its altitude and azimuth in radians — the other pair converted from it,
 // and, given neither, a pointer perpendicular to the surface (no tilt, an altitude of π/2, an azimuth of 0). A
-// PointerEvent's constructor takes what its init gives (the bindings read the members).
+// PointerEvent's constructor takes what its init gives (the bindings read the members). And the mouse pointer's
+// PREVENT MOUSE EVENT flag (§11.1, "preventing compatibility mouse events"), which every gesture the driver plays —
+// a click, a right click, a drag — sets and reads.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
@@ -53,6 +55,29 @@ pub(crate) fn orientation(tilt_x: Option<f64>, tilt_y: Option<f64>, altitude: Op
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "pointerOrientation", orientation_op, context_id);
+    crate::dom::register(scope, ns, "mousePrevented", mouse_prevented_op, context_id);
+}
+
+// The steps of a gesture that read or write the flag.
+const PRESS: u32 = 0;
+const MOVE: u32 = 1;
+const RELEASE: u32 = 2;
+// Whether the compatibility mouse event of a pointer event the gesture fired is NOT fired: at a press, the flag set where
+// its `pointerdown` was `canceled`; while pressed, the flag; at the release, the flag, cleared (§11.1: "the flag is
+// cleared on pointerup").
+fn mouse_prevented(flag: &mut bool, step: u32, canceled: bool) -> bool {
+    match step {
+        PRESS => *flag = canceled,
+        RELEASE => return std::mem::take(flag),
+        _ => {}
+    }
+    *flag
+}
+// __dom.mousePrevented(step, canceled) -> `mouse_prevented` of the page's mouse pointer, `step` PRESS, MOVE or RELEASE.
+fn mouse_prevented_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let step = args.get(0).uint32_value(scope).unwrap_or(MOVE);
+    let canceled = args.get(1).is_true();
+    rv.set_bool(mouse_prevented(&mut crate::dom::dom(scope).mouse_events_prevented, step, canceled));
 }
 // __dom.pointerOrientation(tiltX, tiltY, altitudeAngle, azimuthAngle) -> Float64Array [tiltX, tiltY, altitudeAngle,
 // azimuthAngle] (`orientation`; undefined for a member not given).

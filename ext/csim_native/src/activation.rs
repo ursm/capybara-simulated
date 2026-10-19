@@ -14,9 +14,26 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "activation", activation, context_id);
     crate::dom::register(scope, ns, "invokerAction", invoker_action, context_id);
     crate::dom::register(scope, ns, "buttonCommand", button_command_op, context_id);
+    crate::dom::register(scope, ns, "clickWithheld", click_withheld_op, context_id);
 }
 
 impl RealmArena {
+    // Whether a user's click at `id` is dispatched no `click`: at a form control that is actually disabled (HTML: one
+    // "must prevent any click events that are queued on the user interaction task source from being dispatched on the
+    // element"), and at what a disabled `<button>` holds — its nearest button ancestor deciding (Chrome).
+    pub(crate) fn click_withheld(&self, id: NodeId) -> bool {
+        if self.is_actually_disabled(id) {
+            return true;
+        }
+        let mut at = self.parent_of(id);
+        while let Some(p) = at.filter(|&p| self.get(p).is_some_and(|n| n.kind == crate::dom::NodeKind::Element)) {
+            if self.get(p).is_some_and(|n| n.is_html_named("button")) {
+                return self.is_actually_disabled(p);
+            }
+            at = self.parent_of(p);
+        }
+        false
+    }
     // A checkbox's or a radio button's checkedness set — dirty from now on — a radio checked unchecking the rest of its
     // group (HTML "set the checkedness"), as every writer of it does.
     pub(crate) fn set_checkedness(&mut self, id: NodeId, on: bool) {
@@ -269,4 +286,11 @@ fn invoker_action(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let (Some(command), Some(action)) = (v8::String::new(scope, &command), v8::String::new(scope, &action)) else { return };
     let values = [v8::Integer::new_from_unsigned(scope, kind).into(), target, command.into(), action.into()];
     rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.clickWithheld(nid) -> `click_withheld`.
+fn click_withheld_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_bool(false) };
+    let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) else { return rv.set_bool(false) };
+    rv.set_bool(realm(scope, cid).click_withheld(id));
 }

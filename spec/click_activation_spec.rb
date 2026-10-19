@@ -165,4 +165,26 @@ RSpec.describe 'click activation' do
     s.find('#d').drag_to(s.find('#t'))
     expect(s.evaluate_script('[L, document.activeElement.tagName]')).to eq([%w[i:contextmenu i:auxclick], 'BODY'])
   end
+
+  # The flag a canceled `pointerdown` sets is the page's mouse pointer's, cleared at its release, whichever gesture set it:
+  # a right click's canceled press withholds its own `mouseup`, and the next click fires both of its mouse events.
+  it "clears a canceled press's flag at the release, for the next gesture" do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body><div id="a">a</div><div id="b">b</div>
+        <script>
+          window.L = [];
+          for (const id of ['a', 'b']) {
+            const el = document.getElementById(id);
+            for (const t of ['mousedown', 'mouseup']) el.addEventListener(t, () => L.push(`${id}:${t}`));
+          }
+          document.getElementById('a').addEventListener('pointerdown', (e) => e.preventDefault());
+        </script>
+      HTML
+    })
+    s.visit '/'
+    s.find('#a').right_click
+    s.find('#b').click
+    expect(s.evaluate_script('L')).to eq(%w[b:mousedown b:mouseup])
+  end
 end
