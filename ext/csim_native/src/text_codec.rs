@@ -16,6 +16,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "textDecoderClose", text_decoder_close, context_id);
     register(scope, ns, "utf8Encode", utf8_encode, context_id);
     register(scope, ns, "utf8EncodeInto", utf8_encode_into, context_id);
+    register(scope, ns, "utf8EncodeChunk", utf8_encode_chunk, context_id);
     register(scope, ns, "legacyEncode", legacy_encode, context_id);
     register(scope, ns, "formEncode", form_encode_op, context_id);
 }
@@ -229,6 +230,51 @@ fn utf8_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(array);
 }
 
+// __dom.utf8EncodeChunk(chunk, leadingSurrogate, last) -> [bytes, leadingSurrogate]: a TextEncoderStream's "encode and
+// enqueue a chunk" (Encoding §5.4.3), its leading surrogate (0 for none) the one an earlier chunk ended with — a lead
+// this one ends with held as the next's, so a pair split across two encodes as its one code point; one no trail
+// follows, or a trail no lead goes before, U+FFFD — and, `last` (its "encode and flush"), one still held U+FFFD too.
+fn utf8_encode_chunk(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let chunk = match args.get(0).to_string(scope) {
+        Some(s) => {
+            let mut units = vec![0u16; s.length()];
+            s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
+            units
+        }
+        None => Vec::new(),
+    };
+    let leading = args.get(1).uint32_value(scope).unwrap_or(0) as u16;
+    let last = args.get(2).is_true();
+    let (bytes, leading) = encode_chunk(leading, &chunk, last);
+    let bytes = crate::dom::u8_array(scope, bytes);
+    let leading = v8::Integer::new_from_unsigned(scope, u32::from(leading));
+    rv.set(v8::Array::new_with_elements(scope, &[bytes.into(), leading.into()]).into());
+}
+fn encode_chunk(mut leading: u16, chunk: &[u16], last: bool) -> (Vec<u8>, u16) {
+    let mut out = Vec::with_capacity(chunk.len());
+    let mut push = |c: char| out.extend_from_slice(c.encode_utf8(&mut [0u8; 4]).as_bytes());
+    for &unit in chunk {
+        if leading != 0 {
+            let lead = std::mem::take(&mut leading);
+            if (0xDC00..=0xDFFF).contains(&unit) {
+                let c = 0x10000 + ((u32::from(lead) - 0xD800) << 10) + (u32::from(unit) - 0xDC00);
+                push(char::from_u32(c).expect("a surrogate pair is a scalar value"));
+                continue;
+            }
+            push(char::REPLACEMENT_CHARACTER);
+        }
+        match unit {
+            0xD800..=0xDBFF => leading = unit,
+            0xDC00..=0xDFFF => push(char::REPLACEMENT_CHARACTER),
+            _ => push(char::from_u32(u32::from(unit)).expect("a non-surrogate unit is a scalar value")),
+        }
+    }
+    if last && std::mem::take(&mut leading) != 0 {
+        push(char::REPLACEMENT_CHARACTER);
+    }
+    (out, leading)
+}
+
 // __dom.utf8EncodeInto(string, destination) -> [read, written]: `TextEncoder.encodeInto` — as many whole code points as
 // fit, `read` counted in UTF-16 code units.
 fn utf8_encode_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -333,5 +379,25 @@ fn legacy_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let bytes = form_bytes(Some(encoding), &text);
     if let Some(s) = v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal) {
         rv.set(s.into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::encode_chunk;
+
+    #[test]
+    fn a_chunk_keeps_a_lead_it_ends_with_for_the_next() {
+        let fffd = "\u{FFFD}".as_bytes();
+        // (…a pair split across two chunks one code point)
+        assert_eq!(encode_chunk(0, &[0x61, 0xD83D], false), (b"a".to_vec(), 0xD83D));
+        assert_eq!(encode_chunk(0xD83D, &[0xDE00], false), ("\u{1F600}".as_bytes().to_vec(), 0));
+        // (…a held lead no trail follows U+FFFD, the unit after it still itself)
+        assert_eq!(encode_chunk(0xD83D, &[0x62], false), ([fffd, b"b"].concat(), 0));
+        assert_eq!(encode_chunk(0xD83D, &[0xD83D], false), (fffd.to_vec(), 0xD83D));
+        // (…a lone trail U+FFFD; a lead held as the stream closes U+FFFD)
+        assert_eq!(encode_chunk(0, &[0xDC00], false), (fffd.to_vec(), 0));
+        assert_eq!(encode_chunk(0xD800, &[], true), (fffd.to_vec(), 0));
+        assert_eq!(encode_chunk(0, &[0xD800], true), (fffd.to_vec(), 0));
     }
 }
