@@ -2420,6 +2420,7 @@ pub(crate) struct Dom {
     pub(crate) canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) image_bitmap_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) crypto_key_template: Option<v8::Global<v8::ObjectTemplate>>,
+    pub(crate) blob_data_template: Option<v8::Global<v8::ObjectTemplate>>,
     // …and a header list's (headers.rs).
     pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and an XMLHttpRequest's state's (xhr_state.rs).
@@ -2954,6 +2955,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::broadcast_channels::install(scope, ns, context_id);
     crate::media_query_lists::install(scope, ns, context_id);
     crate::image_bitmaps::install(scope, ns, context_id);
+    crate::blob_data::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);

@@ -14,6 +14,7 @@ mod animation_ops;
 mod animations;
 mod autofocus;
 mod av1;
+mod blob_data;
 mod blob_rules;
 mod blob_urls;
 mod broadcast_channels;
