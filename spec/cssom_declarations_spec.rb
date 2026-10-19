@@ -28,6 +28,26 @@ RSpec.describe 'CSSOM declaration blocks' do
     expect(got).to eq(['width: 123.457px;', '123.4568px', '123.457px', '123.4568px'])
   end
 
+  # A property name is ASCII-lowercased (CSSOM `setProperty` step 2): `font-\u212Aerning`, a Kelvin sign for its K,
+  # names no property — no write, no read, no removal — and a priority is ASCII case-insensitive (Chrome:
+  # `["","","","font-kerning: none; width: 1px !important;"]`).
+  it 'names a property by its ASCII-lowercased name alone' do
+    got = page.evaluate_script(<<~JS)
+      (() => {
+        const d = document.createElement('div'), K = 'font-\\u212Aerning';
+        document.body.append(d);
+        d.style.setProperty(K, 'none');
+        const a = d.style.cssText;
+        d.style.setProperty('font-kerning', 'none');
+        const b = [d.style.getPropertyValue(K), getComputedStyle(d).getPropertyValue(K)];
+        d.style.removeProperty(K);
+        d.style.setProperty('width', '1px', 'IMPORTANT');
+        return [a, ...b, d.style.cssText];
+      })()
+    JS
+    expect(got).to eq(['', '', '', 'font-kerning: none; width: 1px !important;'])
+  end
+
   # A rule's own text and its `style` are one block, as the engine parses it: what the engine does not implement is in
   # neither (Chrome: identical text for both).
   it 'serializes a rule and its style alike' do
