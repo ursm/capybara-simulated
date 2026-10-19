@@ -905,10 +905,10 @@ fn stops_of(flat: &[f64]) -> Vec<Stop> {
 const FILL_COLOR: u32 = 0;
 const STROKE_COLOR: u32 = 1;
 
-// __dom.canvasDraw(state, w, h, p3, plain, shape, mask, paint, pixels): one drawing operation on the context's `w` × `h`
-// bitmap (`Draw::run`; `canvasBitmap`), in Display P3 where `p3`, under the context's `state` (canvas_state.rs) — its clip, CTM,
-// `globalAlpha`, compositing operator and shadow — or, `plain`, opaque and source-over with no shadow, as a focus ring
-// is drawn, the clip still applying.
+// __dom.canvasDraw(state, w, h, p3, plain, shape, mask, paint, pixels): one drawing operation on the context's `w` ×
+// `h` bitmap (`Draw::run`; `canvasBitmap`), in Display P3 where `p3`, under the context's `state` (canvas_state.rs) —
+// its clip, CTM, `globalAlpha`, compositing operator and shadow — or, `plain`, opaque and source-over with no shadow, as
+// a focus ring is drawn, the clip still applying.
 //   shape: `[0, x0, y0, x1, y1]` a device box; `[1, evenOdd, …path]` a path filled, `[3, …pen, …path]` a path
 //          stroked (`rings_of`); `[2, w, h, x, y]` the glyph mask `mask`.
 //   paint: `FILL_COLOR` / `STROKE_COLOR`, the state's; `[0, r, g, b, a]` a solid sRGB colour; `[1]` clearRect;

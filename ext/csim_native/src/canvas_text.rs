@@ -163,10 +163,10 @@ struct TextDraw<'s> {
 }
 
 // __dom.canvasDrawText(state, w, h, p3, text, x, y, maxWidth, paint, pixels, face, inheritedRtl, rootFontSize):
-// `fillText()` / `strokeText()` on the context's `w` × `h` bitmap (`canvasBitmap`) — `paint` as `canvasDraw` takes it, the fill style's or the stroke
-// style's — the line placed at (x, y) through the CTM by `textAlign` and `textBaseline`, condensed to `maxWidth` (one
-// given that is not above 0 drawing nothing, undefined none), spaced a character at a time where letter or word spacing
-// opens gaps a line's single mask has no room for.
+// `fillText()` / `strokeText()` on the context's `w` × `h` bitmap (`canvasBitmap`) — `paint` as `canvasDraw` takes it,
+// the fill style's or the stroke style's — the line placed at (x, y) through the CTM by `textAlign` and `textBaseline`,
+// condensed to `maxWidth` (one given that is not above 0 drawing nothing, undefined none), spaced a character at a time
+// where letter or word spacing opens gaps a line's single mask has no room for.
 fn canvas_draw_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     let size = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));

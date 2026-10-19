@@ -903,6 +903,9 @@ pub(crate) struct RealmArena {
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
     // Each image element's current request, from its first load (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
+    // The video elements' decoded frames (media.rs `mediaFrame`): each one's first, which a canvas draws — none until a
+    // video decodes, and none again once a load fails.
+    pub(crate) video_frames: std::collections::HashMap<NodeId, crate::image_requests::Pixels>,
     // Every node's registered observer list, and each mutation observer's nodes (mutation_observers.rs).
     pub(crate) observers: crate::mutation_observers::Observers,
     // Each frame container's child navigable, each top-level one's target name, each realm's document (navigables.rs).
@@ -1335,21 +1338,9 @@ impl RealmArena {
         self.owner_sheets.retain(|id, _| live(slots, id));
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
-        let external = &mut self.external;
-        self.media.retain(|id, m| {
-            let keep = live(slots, id);
-            if !keep {
-                *external -= m.weight();
-            }
-            keep
-        });
-        self.images.retain(|id, r| {
-            let keep = live(slots, id);
-            if !keep {
-                *external -= r.weight();
-            }
-            keep
-        });
+        self.media.retain(|id, _| live(slots, id));
+        self.video_frames.retain(|id, _| live(slots, id));
+        self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.pointerdown_targets.retain(|doc, _| live(slots, doc));
         self.popovers_changing.retain(|id| live(slots, id));
@@ -1556,8 +1547,9 @@ impl RealmArena {
         if !self.dialog_requests.is_empty() {
             self.dialog_requests.remove(&id);
         }
-        if let Some(m) = self.media.remove(&id) {
-            self.external -= m.weight();
+        if !self.media.is_empty() {
+            self.media.remove(&id);
+            self.video_frames.remove(&id);
         }
         if !self.form_past_names.is_empty() {
             self.form_past_names.remove(&id);
@@ -1565,8 +1557,8 @@ impl RealmArena {
                 past.retain(|&(_, el)| el != id);
             }
         }
-        if let Some(r) = self.images.remove(&id) {
-            self.external -= r.weight();
+        if !self.images.is_empty() {
+            self.images.remove(&id);
         }
         if !self.showing_popovers.is_empty() {
             self.showing_popovers.remove(&id);
@@ -2426,6 +2418,7 @@ pub(crate) struct Dom {
     pub(crate) clone_exception: Option<v8::Global<v8::Value>>,
     // The template a canvas context's state object is made from (canvas_state.rs), once per isolate.
     pub(crate) canvas_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    pub(crate) image_bitmap_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a header list's (headers.rs).
     pub(crate) headers_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and an XMLHttpRequest's state's (xhr_state.rs).
@@ -2474,7 +2467,6 @@ pub(crate) struct Dom {
     pub(crate) message_ports: crate::message_ports::Ports,
     pub(crate) broadcast_channels: crate::broadcast_channels::BroadcastChannels,
     pub(crate) media_query_lists: crate::media_query_lists::MediaQueryLists,
-    pub(crate) image_bitmaps: crate::image_bitmaps::ImageBitmaps,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2492,7 +2484,7 @@ impl Drop for Dom {
 }
 
 impl Dom {
-    // A realm's MessagePorts, BroadcastChannels, MediaQueryLists and ImageBitmaps let go of with its context — a frame's removed or
+    // A realm's MessagePorts, BroadcastChannels and MediaQueryLists let go of with its context — a frame's removed or
     // disposed, the main realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and the channel names it
     // makes again, never reaches one of the context before. Not as its arena resets: a load into the same realm (a
     // `javascript:` URL's result) keeps the Window, and what its script made with it.
@@ -2500,7 +2492,6 @@ impl Dom {
         self.message_ports.drop_realm(cid);
         self.broadcast_channels.drop_realm(cid);
         self.media_query_lists.drop_realm(cid);
-        self.forget_image_bitmaps(cid);
     }
 }
 

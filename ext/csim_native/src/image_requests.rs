@@ -30,39 +30,25 @@ pub(crate) struct ImageRequest {
 }
 
 // A decoded image's pixels: its RGBA bytes in sRGB — and, for a wide-gamut source (Adobe RGB, CMYK), in Display P3 as
-// well, which a P3 canvas draws — and the colour space drawImage converts it from. Each a span of a backing store the
-// engine holds (the host's transfer buffer, zero-copy), handed to a draw as a view on it.
+// well, which a P3 canvas draws — and the colour space drawImage converts it from.
 #[derive(Clone)]
 struct Bitmap {
     srgb: Pixels,
     p3: Option<Pixels>,
     display_p3: bool,
 }
-// (…and a video's decoded frame: media.rs)
+// …each the byte view it was given (the host's transfer, a decode's), held: the same array handed to every draw, never
+// copied for one, and counted by the collector as any array is. (…and a video's decoded frame: media.rs)
 #[derive(Clone)]
-pub(crate) struct Pixels {
-    store: v8::SharedRef<v8::BackingStore>,
-    offset: usize,
-    pub(crate) len: usize,
-}
+pub(crate) struct Pixels(v8::Global<v8::Object>);
 
 impl Pixels {
     pub(crate) fn of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Pixels> {
-        // (…any byte view: a host transfer's Uint8ClampedArray, a decode's, a clone's copy)
         let view = v8::Local::<v8::ArrayBufferView>::try_from(value).ok()?;
-        let store = view.buffer(scope)?.get_backing_store();
-        Some(Pixels { store, offset: view.byte_offset(), len: view.byte_length() })
+        Some(Pixels(v8::Global::new(scope, v8::Local::<v8::Object>::from(view))))
     }
     pub(crate) fn view<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
-        let buffer = v8::ArrayBuffer::with_backing_store(scope, &self.store);
-        v8::Uint8ClampedArray::new(scope, buffer, self.offset, self.len).map_or_else(|| v8::null(scope).into(), Into::into)
-    }
-}
-
-impl ImageRequest {
-    // What its bitmap weighs as V8 is told (`RealmArena::external`): a store only the engine holds is none of V8's own.
-    pub(crate) fn weight(&self) -> i64 {
-        self.bitmap.as_ref().map_or(0, |b| (b.srgb.len + b.p3.as_ref().map_or(0, |p| p.len)) as i64)
+        v8::Local::new(scope, &self.0).into()
     }
 }
 
@@ -84,12 +70,9 @@ impl RealmArena {
     pub(crate) fn image_pending(&self, id: NodeId) -> bool {
         self.image(id).is_some_and(|r| r.url.is_some() && !r.complete)
     }
-    // `id`'s decoded bitmap becomes `bitmap`, what it weighs told V8 as it changes.
+    // `id`'s decoded bitmap becomes `bitmap`.
     fn set_image_bitmap(&mut self, id: NodeId, bitmap: Option<Bitmap>) {
-        let r = self.images.entry(id).or_default();
-        let before = r.weight();
-        r.bitmap = bitmap;
-        self.external += r.weight() - before;
+        self.images.entry(id).or_default().bitmap = bitmap;
     }
     // …and the pixel density its current request's source has (1 for none).
     pub(crate) fn image_density(&self, id: NodeId) -> f64 {

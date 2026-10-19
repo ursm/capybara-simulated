@@ -2845,4 +2845,28 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     expect(parsed['ctxType']).to eq('CanvasRenderingContext2D')
     expect(parsed['sample']).to eq([1,2,3,4, 5,6,7,8, 9,10,11,12, 13,14,15,16])
   end
+
+  # An ImageBitmap's state is on a handle its object holds (image_bitmaps.rs), so it lives as long as the object, wherever
+  # a script took it: one a frame made outlives the frame. Chrome: its width, its pixels drawn, a bitmap and a clone of
+  # it made. (A registry entry dropped with the frame's realm left the parent's object reading null.)
+  it 'keeps an ImageBitmap a removed frame made' do
+    session = simulated_session(app)
+    session.visit('/')
+    session.execute_script(<<~JS)
+      window.got = null;
+      const frame = document.body.appendChild(document.createElement('iframe'));
+      frame.onload = async () => {
+        const data = new ImageData(new Uint8ClampedArray([255, 0, 0, 255, 0, 255, 0, 255]), 2, 1);
+        const bm = await frame.contentWindow.createImageBitmap(data);
+        frame.remove();
+        const ctx = new OffscreenCanvas(2, 1).getContext('2d');
+        ctx.drawImage(bm, 0, 0);
+        const again = await createImageBitmap(bm);
+        window.got = [bm.width, Array.from(ctx.getImageData(0, 0, 2, 1).data), again.width, structuredClone(bm).height];
+      };
+      frame.src = '/';
+    JS
+    got = Timeout.timeout(5) { sleep 0.05 until (v = session.evaluate_script('window.got')); v }
+    expect(got).to eq([2, [255, 0, 0, 255, 0, 255, 0, 255], 2, 1])
+  end
 end
