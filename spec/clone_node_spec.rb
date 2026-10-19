@@ -156,4 +156,21 @@ RSpec.describe 'cloneNode' do
       })()
     JS
   end
+
+  # A clonable shadow root's copy is attached as the source was by the engine's flags — never the members a page may
+  # replace: a `mode` redefined on the root to read 'closed' keeps the copy open. Chrome: the copy's shadowRoot is there.
+  it "clones a shadow root by its flags, not its page-replaceable members" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><div id=h></div>']] }).tap {|session| session.visit '/' }
+    expect(s.evaluate_script(<<~JS)).to eq([true, 'open', 'manual', true])
+      (() => {
+        const h = document.getElementById('h');
+        const sr = h.attachShadow({mode: 'open', clonable: true, slotAssignment: 'manual', delegatesFocus: true});
+        Object.defineProperty(sr, 'mode', {value: 'closed'});
+        Object.defineProperty(sr, 'slotAssignment', {value: 'named'});
+        Object.defineProperty(sr, 'delegatesFocus', {value: false});
+        const copy = h.cloneNode(true).shadowRoot;
+        return [copy !== null, copy.mode, copy.slotAssignment, copy.delegatesFocus];
+      })()
+    JS
+  end
 end
