@@ -343,8 +343,20 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 }
 
 // ── For the bindings ──
+// The headers a fetch's request has where its author set none of the name (Fetch §4.1 "main fetch": `Accept: */*`
+// for one with no destination, which XHR's and fetch()'s are — not a document navigation's richer Accept, which the
+// host fills in — and the user agent's `Accept-Language`).
+const DEFAULT_REQUEST_HEADERS: [(&str, &str); 2] = [("Accept", "*/*"), ("Accept-Language", "en-US,en;q=0.9")];
+// __dom.defaultRequestHeaders() -> [name, value, …]: `DEFAULT_REQUEST_HEADERS`.
+fn default_request_headers_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let items: Vec<v8::Local<v8::Value>> =
+        DEFAULT_REQUEST_HEADERS.iter().flat_map(|(n, v)| [n, v]).filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
+    crate::dom::register(scope, ns, "defaultRequestHeaders", default_request_headers_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
     crate::dom::register(scope, ns, "corsRequest", cors_request_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
