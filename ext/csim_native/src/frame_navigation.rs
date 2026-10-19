@@ -423,11 +423,12 @@ const CONTENT_NAV: usize = 0;
 // __dom.frameBuildsEagerly(container, allHostsLocal) -> whether a frame container's document is built as it connects,
 // not when its `contentWindow` is first read: one a navigation carries a response for, a `srcdoc` one, and one whose URL
 // — the one its navigation started with, else its `src` — is a document of its own to run: a data:, blob: or
-// javascript: URL (whose script may call back into its parent unasked), or a URL of the document's own origin. An
-// about: URL, an empty one and one that does not parse are an empty document, lazy. One of another origin genuinely
-// loads in a browser and runs its scripts — which can post its parent a message the parent never asked for — but is
-// built eagerly only where every host is served in-process (`allHostsLocal`, the WPT runner's): an app's external
-// embed is not run as the app's own page in the frame.
+// javascript: URL (whose script may call back into its parent unasked), or a URL of the origin the document was served
+// from (its location's — a sandboxed document's opaque origin makes its own host no other one). An about: URL, an empty
+// one and one that does not parse are an empty document, lazy. One of another origin genuinely loads in a browser and
+// runs its scripts — which can post its parent a message the parent never asked for — but is built eagerly only where
+// every host is served in-process (`allHostsLocal`, the WPT runner's): an app's external embed is not run as the app's
+// own page in the frame.
 fn frame_builds_eagerly(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(false);
     let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
@@ -464,7 +465,7 @@ fn frame_builds_eagerly(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     // as it is connected)
     let root = arena.root_of(container);
     let Some(doc) = doc.or_else(|| arena.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return };
-    let origin = arena.location.origin().to_owned();
+    let origin = arena.location.url_origin().to_owned();
     let Some(url) = arena.parse_document_url(doc, s) else { return };
     rv.set_bool(url.origin() == origin || all_hosts_local);
 }

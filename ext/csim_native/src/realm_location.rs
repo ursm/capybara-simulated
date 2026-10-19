@@ -65,7 +65,12 @@ impl RealmLocation {
     // The serialization of its document's origin: its own where it was given one, else its location's — "null" for an
     // opaque one.
     pub(crate) fn origin(&self) -> &str {
-        self.document_origin.as_deref().or(self.origin_override.as_deref()).unwrap_or(&self.parts[ORIGIN])
+        self.document_origin.as_deref().unwrap_or(self.url_origin())
+    }
+    // …and its location's: its URL's origin — a creator's, where it inherited one (about:blank) — whatever a sandbox
+    // made of its document's: the host it was served from.
+    pub(crate) fn url_origin(&self) -> &str {
+        self.origin_override.as_deref().unwrap_or(&self.parts[ORIGIN])
     }
     // Its document's origin is `text`: an origin's serialization, "null" a new opaque one (sandboxed), `null|<key>` an
     // opaque one inherited with its key (a sandboxed creator's frame's) — none: its location's.
