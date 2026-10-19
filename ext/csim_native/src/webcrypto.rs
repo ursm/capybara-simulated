@@ -1833,8 +1833,13 @@ fn base64url_decode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 
+// A member of a dictionary the bindings made — its own, never one a page's `Object.prototype` holds (an
+// `Object.prototype.public` read as every algorithm's ECDH public key refused them all) — none where it is undefined.
 fn get<'s>(scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'_, v8::Object>, name: &str) -> Option<v8::Local<'s, v8::Value>> {
     let key = v8::String::new(scope, name)?;
+    if !object.has_own_property(scope, key.into())? {
+        return None;
+    }
     object.get(scope, key.into()).filter(|v| !v.is_undefined())
 }
 fn set(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Object>, name: &str, value: v8::Local<'_, v8::Value>) {
