@@ -112,6 +112,8 @@ module Capybara
         @viewport        = viewport
         @user_agent      = user_agent
         @touch           = touch
+        # …and how many windows it has made: each mints its contexts' ids in a space of its own (Browser#client_space).
+        @client_spaces   = 0
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
         @aux_windows     = []  # [{handle:, browser:, name:, opener:}, …]
@@ -142,7 +144,8 @@ module Capybara
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     session_partition: @session_partition,
-                    all_hosts_local: @all_hosts_local).tap do |b|
+                    all_hosts_local: @all_hosts_local,
+                    client_space:    (@client_spaces += 1) == 1 ? '' : "w#{@client_spaces}-").tap do |b|
           b.touch_input        = @touch
           b.default_viewport   = @viewport   if @viewport
           b.default_user_agent = @user_agent if @user_agent

@@ -208,7 +208,7 @@ module Capybara
         Rack::Mime.mime_type(File.extname(path.to_s), '')
       end
 
-      def initialize(app, driver: nil, cookie_jar: nil, auth_cache: nil, local_storage: nil, session_partition: nil, all_hosts_local: nil)
+      def initialize(app, driver: nil, cookie_jar: nil, auth_cache: nil, local_storage: nil, session_partition: nil, all_hosts_local: nil, client_space: '')
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -263,6 +263,10 @@ module Capybara
         # registries (idb_databases.rs, cache_storage.rs, system_clipboard.rs), every window's and worker's.
         @session_partition            = session_partition || Native.session_partition_new
         @session_partition_owned      = session_partition.nil?
+        # …and the space this window's environment ids are minted in (`sw_client_id`, sw-client.js `clientId`): '' for
+        # the session's first window, `w<n>-` for each one after — a context's id unique in the session, whose lock
+        # managers (web_locks.rs) every window's realms share.
+        @client_space                 = client_space
         @session_storage              = Native.storage_partition_new
         @sticky_headers               = {}
         @timers_active                = false
@@ -1132,14 +1136,21 @@ module Capybara
       def deliver_agent_notices
         return 0 unless Native.agent_notices_pending(@session_partition)
 
-        agent_windows.sum(&:deliver_own_agent_notices)
+        agent_windows.sum {|b| b.deliver_own_agent_notices(background: !b.equal?(self)) }
       end
 
-      def deliver_own_agent_notices
+      # …and, for a window that is not the active one, the tasks they queue that are due — a lock granted it, whose
+      # callback is a task of its own — run here (`maxMs: 0`), as a background tab's would: what its callback releases
+      # reaches the window waiting for it, which the active window's loop does not otherwise step.
+      def deliver_own_agent_notices(background: false)
         return 0 unless @runtime.call('__csimAgentsPending')
 
         @runtime.call('__csimAgentDeliver')
         @runtime.frame_realm_ids.each {|rid| @runtime.realm_call(rid, '__csimAgentDeliver') }
+        if background
+          r = @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+          @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+        end
         1
       end
 
@@ -2191,7 +2202,7 @@ module Capybara
       # default. The user-agent also flows into `navigator.userAgent`
       # on every VM rebuild so JS-side UA branches (Discourse's
       # `viewport_based_mobile_mode = false` path) resolve correctly.
-      attr_reader :default_viewport, :default_user_agent, :session_partition
+      attr_reader :default_viewport, :default_user_agent, :session_partition, :client_space
       # Whether the session's pointer is a touchscreen (the driver's `touch:`), told every document as it boots.
       attr_accessor :touch_input
 
@@ -6505,32 +6516,32 @@ module Capybara
 
       # A worker's service-worker Client id. Distinct from the realm ids below so the
       # client-message router can tell a worker client from a browsing context.
-      def sw_worker_client_id(handle) = "client-worker-#{handle.to_i}"
+      def sw_worker_client_id(handle) = "client-#{@client_space}worker-#{handle.to_i}"
 
-      # A realm's service-worker Client id. The MAIN realm (id 0) is 'client-window'; a realm
-      # that ADOPTED a navigation's reserved client id reports that id; every other realm is
-      # `client-<realm>`. The same spellings are produced JS-side by sw-client.js's clientId()
+      # A realm's service-worker Client id, in this window's space (`@client_space`: none for the
+      # session's first window). The MAIN realm (id 0) is 'client-window'; a realm that ADOPTED
+      # a navigation's reserved client id reports that id; every other realm is `client-<realm>`. The same spellings are produced JS-side by sw-client.js's clientId()
       # (which prefers the injected `__csimClientId`) and the FetchEvent clientKey
       # (js/src/workers.js), and read back by the client-message router below — so they must
       # be minted in exactly one place.
       def sw_client_id(realm_id)
-        return 'client-window' if realm_id.to_i.zero?
+        return "client-#{@client_space}window" if realm_id.to_i.zero?
 
-        @sw_realm_aliases[realm_id.to_i] || "client-#{realm_id.to_i}"
+        @sw_realm_aliases[realm_id.to_i] || "client-#{@client_space}#{realm_id.to_i}"
       end
 
       # The realm a client id names — the inverse of `sw_client_id`, nil for an unrecognized id.
       def sw_client_realm(client_id)
         id = client_id.to_s
-        return 0 if id == 'client-window'
+        return 0 if id == "client-#{@client_space}window"
         return @sw_client_aliases[id] if @sw_client_aliases.key?(id)
 
-        (m = /\Aclient-(\d+)\z/.match(id)) ? m[1].to_i : nil
+        (m = /\Aclient-#{Regexp.escape(@client_space)}(\d+)\z/.match(id)) ? m[1].to_i : nil
       end
 
       # One fresh reserved-client id (Service Workers "create a new environment settings
       # object" for a navigation) — see the @sw_resulting_seq comment.
-      def mint_resulting_client_id = "client-nav#{@sw_resulting_seq += 1}"
+      def mint_resulting_client_id = "client-#{@client_space}nav#{@sw_resulting_seq += 1}"
 
       # The committed document's realm ADOPTS the navigation's reserved client id (the
       # reserved client BECOMES the document's client). A rebuild of the same frame re-adopts
@@ -6549,7 +6560,7 @@ module Capybara
 
       # The worker handle a client id names, or nil when the id is not a worker client's.
       def sw_client_worker(client_id)
-        (m = /\Aclient-worker-(\d+)\z/.match(client_id.to_s)) ? m[1].to_i : nil
+        (m = /\Aclient-#{Regexp.escape(@client_space)}worker-(\d+)\z/.match(client_id.to_s)) ? m[1].to_i : nil
       end
 
       # ── Cross-isolate MessagePort channels ──

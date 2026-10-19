@@ -123,6 +123,8 @@ module Capybara
         # The session's partition of the storage registries — IndexedDB's, which every realm and worker of it is an agent
         # of, and Cache Storage's (idb_databases.rs, cache_storage.rs).
         '__csimSessionPartition'     => ->(b, *_a) { b.session_partition },
+        # …and the space the window's environment ids are minted in (Browser#client_space).
+        '__csimClientSpace'          => ->(b, *_a) { b.client_space },
         '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
         '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to
