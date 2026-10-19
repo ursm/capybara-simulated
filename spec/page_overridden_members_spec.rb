@@ -213,4 +213,27 @@ RSpec.describe 'members a page overrides' do
     JS
     expect(got).to include('text-align: center').and include('color: red')
   end
+
+  # …and the platform's own microtasks and tasks — a MutationObserver's delivery, a frame's postMessage — are queued by
+  # the realm's intrinsics, whatever a page (a polyfill, a fake-timer library) made of `Promise`, its `then`,
+  # `queueMicrotask` or `setTimeout`.
+  it 'delivers mutations and messages whatever a page made of Promise, queueMicrotask and setTimeout' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = [];
+      const frame = document.createElement('iframe');
+      document.body.append(frame);
+      addEventListener('message', (e) => got.push('message:' + e.data));
+      new MutationObserver((records) => got.push('mutations:' + records.length)).observe(document.body, { childList: true });
+      const boom = () => { throw new Error('page member'); };
+      Promise.prototype.then = boom;
+      window.Promise = function () { throw new Error('page Promise'); };
+      window.queueMicrotask = boom;
+      window.setTimeout = boom;
+      document.body.append(document.createElement('p'));
+      frame.contentWindow.eval("parent.postMessage('hi', '*')");
+    JS
+    expect(s.evaluate_script('got')).to eq(['mutations:1', 'message:hi'])
+  end
 end
