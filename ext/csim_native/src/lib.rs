@@ -78,6 +78,7 @@ mod fetch_rules;
 mod headers;
 mod idb;
 mod idb_databases;
+mod image_bitmaps;
 mod image_decode;
 mod image_encode;
 mod image_requests;

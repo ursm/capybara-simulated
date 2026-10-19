@@ -48,7 +48,8 @@ pub(crate) struct Pixels {
 
 impl Pixels {
     pub(crate) fn of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Pixels> {
-        let view = v8::Local::<v8::Uint8ClampedArray>::try_from(value).ok()?;
+        // (…any byte view: a host transfer's Uint8ClampedArray, a decode's, a clone's copy)
+        let view = v8::Local::<v8::ArrayBufferView>::try_from(value).ok()?;
         let store = view.buffer(scope)?.get_backing_store();
         Some(Pixels { store, offset: view.byte_offset(), len: view.byte_length() })
     }

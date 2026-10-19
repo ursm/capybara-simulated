@@ -2474,6 +2474,7 @@ pub(crate) struct Dom {
     pub(crate) message_ports: crate::message_ports::Ports,
     pub(crate) broadcast_channels: crate::broadcast_channels::BroadcastChannels,
     pub(crate) media_query_lists: crate::media_query_lists::MediaQueryLists,
+    pub(crate) image_bitmaps: crate::image_bitmaps::ImageBitmaps,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2491,7 +2492,7 @@ impl Drop for Dom {
 }
 
 impl Dom {
-    // A realm's MessagePorts, BroadcastChannels and MediaQueryLists let go of with its context — a frame's removed or
+    // A realm's MessagePorts, BroadcastChannels, MediaQueryLists and ImageBitmaps let go of with its context — a frame's removed or
     // disposed, the main realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and the channel names it
     // makes again, never reaches one of the context before. Not as its arena resets: a load into the same realm (a
     // `javascript:` URL's result) keeps the Window, and what its script made with it.
@@ -2499,6 +2500,7 @@ impl Dom {
         self.message_ports.drop_realm(cid);
         self.broadcast_channels.drop_realm(cid);
         self.media_query_lists.drop_realm(cid);
+        self.forget_image_bitmaps(cid);
     }
 }
 
@@ -2958,6 +2960,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::message_ports::install(scope, ns, context_id);
     crate::broadcast_channels::install(scope, ns, context_id);
     crate::media_query_lists::install(scope, ns, context_id);
+    crate::image_bitmaps::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);
