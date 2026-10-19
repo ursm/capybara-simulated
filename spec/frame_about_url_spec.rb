@@ -19,4 +19,28 @@ RSpec.describe 'a frame at an about: URL' do
     expect(got).to eq([['about:blank#x', 0], ['about:blank', 0]])
     expect(requests).to eq(['/'])
   end
+
+  # …and a frame whose only `src` is of another namespace has none: about:blank, at its insertion and as its `srcdoc` is
+  # removed alike (HTML reads the no-namespace attribute).
+  it 'takes an src of another namespace for none, however it comes to navigate' do
+    requests = []
+    s = simulated_session(->(env) { requests << env['PATH_INFO']; [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const make = (srcdoc) => {
+          const frame = document.createElement('iframe');
+          frame.setAttributeNS('urn:x', 'src', '/a');
+          if (srcdoc) frame.srcdoc = '<p>s</p>';
+          document.body.append(frame);
+          frame.contentWindow;
+          if (srcdoc) frame.removeAttribute('srcdoc');
+          return frame.contentDocument.URL;
+        };
+        return [make(false), make(true)];
+      })()
+    JS
+    expect(got).to eq(%w[about:blank about:blank])
+    expect(requests).to eq(['/'])
+  end
 end

@@ -447,7 +447,12 @@ const SOURCE_FETCH: i32 = 7;
 //   its `src` — none (SOURCE_NONE) where that is none, empty or about:blank, refused as its attributes were last
 //   processed, or no URL its document parses; else by its scheme.
 fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    // (…a node the engine holds no slot for none: the initial about:blank)
+    let none = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, reload: bool| {
+        let (kind, reload, url) = (v8::Integer::new(scope, SOURCE_NONE).into(), v8::Boolean::new(scope, reload).into(), v8::String::empty(scope).into());
+        rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url]).into());
+    };
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return none(scope, rv, false) };
     let doc = crate::node_handle::handle_of(scope, args.get(0))
         // SAFETY: the handle lives while the object, an argument, does.
         .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
@@ -469,7 +474,7 @@ fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
     let started = nav.src.clone();
     let refused = nav.flags & SRC_REFUSED != 0;
-    let Some(node) = arena.get(container) else { return rv.set_null() };
+    let Some(node) = arena.get(container) else { return none(scope, rv, reload) };
     if let Some(srcdoc) = node.plain_attr("srcdoc").map(str::to_owned) {
         let (kind, reload) = (v8::Integer::new(scope, SOURCE_SRCDOC).into(), v8::Boolean::new(scope, reload).into());
         let srcdoc = v8::String::new(scope, &srcdoc).map_or_else(|| v8::undefined(scope).into(), Into::into);
