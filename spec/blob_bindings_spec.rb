@@ -60,4 +60,21 @@ RSpec.describe 'Blob and File bindings' do
       [true, 'named', 'f.txt'], -1, -86_400_000, '[object Object]', '[object Object]', [true, false], [0, 0], 'TypeError', 'TypeError'
     ])
   end
+
+  # A blob's byte stream answers a BYOB read as any byte stream does: an empty one's done with an empty view (Chrome:
+  # `{done: true, value: Uint8Array(0)}`), and one of bytes the bytes it holds, then done.
+  it 'answers a BYOB read of an empty blob done' do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const byob = (blob) => blob.stream().getReader({ mode: 'byob' });
+      (async () => {
+        const empty = await byob(new Blob([])).read(new Uint8Array(2));
+        const reader = byob(new Blob(['ab']));
+        const first = await reader.read(new Uint8Array(4)), last = await reader.read(new Uint8Array(4));
+        done([empty.done, empty.value.length, [...first.value], last.done]);
+      })();
+    JS
+    expect(got).to eq([true, 0, [97, 98], true])
+  end
 end

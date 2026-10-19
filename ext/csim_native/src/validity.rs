@@ -531,10 +531,18 @@ impl RealmArena {
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
     }
     // Whether a change of `nodes` under `parent` touches a select's options — an option or an optgroup among them, or a
-    // select or an optgroup the parent — so that its select is asked for a reset.
+    // select or an optgroup the parent; or, the parent in a select, an option one of them holds (a customizable select's
+    // wrapper of one: its insertion steps run for every inclusive descendant) — so that its select is asked for a reset.
+    // (…the tags first, as the overwhelming majority of a page's changes are of none, into none: rule 3)
     pub(crate) fn affects_selectedness(&self, parent: NodeId, nodes: &[NodeId]) -> bool {
         let named = |id: NodeId, names: &[&str]| self.get(id).is_some_and(|n| names.iter().any(|&name| n.is_html_named(name)));
-        named(parent, &["select", "optgroup"]) || nodes.iter().any(|&n| named(n, &["option", "optgroup"]))
+        if named(parent, &["select", "optgroup"]) || nodes.iter().any(|&n| named(n, &["option", "optgroup"])) {
+            return true;
+        }
+        let holder = |n: &&NodeId| self.get(**n).is_some_and(|d| d.kind == NodeKind::Element && !d.children.is_empty());
+        nodes.iter().any(|n| holder(&n))
+            && self.element_ancestor(parent, &web_atoms::ns!(html), "select", true).is_some()
+            && nodes.iter().filter(holder).any(|&n| self.find_in_tree(n, |_, d| d.is_html_named("option")).is_some())
     }
     // HTML's "ask for a reset" (§4.10.7) of a tree change: `nodes` inserted into `parent` (`inserted`), or removed from
     // it. Where one of them is an option or an optgroup, or `parent` is a select or an optgroup, the select they are (or

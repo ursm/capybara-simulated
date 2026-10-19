@@ -378,7 +378,7 @@ pub(crate) fn replace_all(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i3
     let removed = change_children(scope, cid, caller, parent, Removing::All, nodes, empty, None, false, steps)?.ok()?;
     Some((parent, nodes.to_vec(), removed, connected))
 }
-// …and the changes as the page has them: their count, then each `[parent, added, removed, connected]` — cut short where
+// …and the changes as the page has them: their count, then each `[parent, added, removed, flags]` (`CHANGE_*`) — cut short where
 // a node factory threw (`factory_threw`, which the caller asks).
 pub(crate) fn changes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, changes: &[Change]) -> Vec<v8::Local<'s, v8::Value>> {
     let mut out: Vec<v8::Local<'s, v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, changes.len() as u32).into()];

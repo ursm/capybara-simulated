@@ -128,4 +128,21 @@ RSpec.describe 'customizable-select content model' do
     JS
     expect(got).to eq(['button', false, 'submit', true, ['deep']])
   end
+
+  # An option inserted in a wrapper into a customizable select's wrapper is inserted into its select all the same (its
+  # insertion steps run for every inclusive descendant): a selected one wins the select's selectedness over the
+  # incumbent (Chrome: `[1, "0d1"]`).
+  it 'asks a select for a reset of an option a wrapper holds' do
+    visit_html('<!DOCTYPE html><select id=s><div><option selected>a</option></div></select>')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const s = document.getElementById('s'), d = document.createElement('div'), o = document.createElement('option');
+        o.selected = true;
+        d.append(o);
+        s.firstElementChild.append(d);
+        return [s.selectedIndex, [...s.options].map((x) => x.selected ? 1 : 0).join('d')];
+      })()
+    JS
+    expect(got).to eq([1, '0d1'])
+  end
 end

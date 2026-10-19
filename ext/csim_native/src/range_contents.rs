@@ -207,7 +207,7 @@ impl<'s> Run<'s> {
 // __dom.processRangeContents(startNode, startOffset, endNode, endOffset, mode, steps) -> [fragment, collapseNode,
 // collapseOffset, changes, …], `DOCTYPE_CONTAINED`, or undefined where making the answer threw: the contents cloned
 // (`mode` 0), extracted (1) or deleted (2) — the fragment null for a deletion, the collapse point null where the range
-// collapses to its start; then the count of changes and each one as `[parent, added, removed, connected]`, for the
+// collapses to its start; then the count of changes and each one as `[parent, added, removed, flags]`, for the
 // bindings to finish in order; then the copies whose cloning steps are the bindings' too, as `cloneTree` answers them.
 fn process_range_contents(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(sc), Some(ec)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 2)) else { return };
