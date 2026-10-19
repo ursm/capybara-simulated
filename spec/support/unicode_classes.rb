@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# The Unicode general categories native layout asks a regex for, held to the JS ENGINE's answer — `\p{M}` for
-# `font::zero_width`, `\p{L}` / `\p{N}` for `layout::hyphen_breaks_after`, whose classes are `HYPHEN_BREAK_RE`'s.
+# The Unicode classes native asks a regex for, held to the JS ENGINE's answer — `\p{M}` for `font::zero_width`,
+# `\p{L}` / `\p{N}` for `layout::hyphen_breaks_after`, whose classes are `HYPHEN_BREAK_RE`'s, and `\p{ID_Start}` /
+# `\p{ID_Continue}` for an IndexedDB key path's identifiers (`idb::KeyPath::is_valid`), which ECMAScript spells so.
 #
 # Native answers them from regex-syntax, which bakes in a UCD snapshot of its own; the page's script answers them
 # from the JS ENGINE's tables. Those are two of the FOUR Unicode versions in this process — Ruby's and Rust
@@ -10,7 +11,7 @@
 # own engine, and `native_layout_text_spec` compares every range against what
 # `Capybara::Simulated::Native.unicode_class_ranges` compiled in.
 module UnicodeClasses
-  CLASSES = %w[M L N].freeze
+  CLASSES = %w[M L N ID_Start ID_Continue].freeze
 
   # Every range of `\p{klass}`, asked of the session's own engine. ONE crossing walks the whole code space in
   # ~0.02s, so there is no reason to sample boundaries — and sampling was actively wrong here: probes derived

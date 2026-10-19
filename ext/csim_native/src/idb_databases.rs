@@ -13,7 +13,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use crate::agents::{agent_of, tell};
 use crate::dom::register;
-use crate::idb::{name_arg, name_value, Store};
+use crate::idb::{name_arg, name_value, KeyPath, Store};
 
 pub(crate) type Name = Vec<u16>;
 
@@ -855,17 +855,35 @@ fn close_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let conn = u32_arg(scope, &args, 0);
     rv.set_bool(lock().connections.get(&conn).is_none_or(|c| c.close_pending || c.closed));
 }
-// __dom.idbStoreCreate(transaction, name, keyPath, autoIncrement) -> a new store's number, in the upgrade's database (0
-// where it has one of the name).
+// What `createObjectStore()` refuses (§4.4), in the order its steps check: a key path that is not valid (SyntaxError), a
+// store of the name (ConstraintError), a key generator with an empty or a list key path (InvalidAccessError).
+const STORE_BAD_KEY_PATH: i32 = -1;
+const STORE_EXISTS: i32 = -2;
+const STORE_AUTO_INCREMENT_PATH: i32 = -3;
+
+// __dom.idbStoreCreate(transaction, name, keyPath, autoIncrement) -> a new store's number, in the upgrade's database, or
+// what refuses it (`STORE_*`, negative).
 fn store_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let tx = u32_arg(scope, &args, 0);
-    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_uint32(0) };
+    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_int32(STORE_EXISTS) };
     let key_path = crate::idb::key_path_arg(scope, args.get(2));
     let auto_increment = args.get(3).is_true();
+    if key_path != KeyPath::None && !key_path.is_valid() {
+        return rv.set_int32(STORE_BAD_KEY_PATH);
+    }
     let mut reg = lock();
-    let Some((key, conn)) = reg.transactions.get(&tx).map(|t| (t.db.clone(), t.conn)) else { return rv.set_uint32(0) };
+    let Some((key, conn)) = reg.transactions.get(&tx).map(|t| (t.db.clone(), t.conn)) else { return rv.set_int32(STORE_EXISTS) };
     if reg.databases.get(&key).is_none_or(|db| db.stores.contains_key(&name)) {
-        return rv.set_uint32(0);
+        return rv.set_int32(STORE_EXISTS);
+    }
+    // (…a key generator's key put where the key path points: an empty one points nowhere, a list at no one place)
+    let points_nowhere = match &key_path {
+        KeyPath::Path(path) => path.is_empty(),
+        KeyPath::List(_) => true,
+        KeyPath::None => false,
+    };
+    if auto_increment && points_nowhere {
+        return rv.set_int32(STORE_AUTO_INCREMENT_PATH);
     }
     let id = reg.next_id();
     reg.stores.insert(id, Store::new(key.clone(), name.clone(), key_path, auto_increment));

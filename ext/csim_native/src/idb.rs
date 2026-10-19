@@ -124,6 +124,26 @@ pub(crate) enum KeyPath {
     List(Vec<Name>),
 }
 
+impl KeyPath {
+    // "A valid key path" (§2.5): an empty string, identifiers joined by `.` — each an ECMAScript IdentifierName, its
+    // escapes aside — or a non-empty list of those. (None is no key path, which no caller asks of.)
+    pub(crate) fn is_valid(&self) -> bool {
+        match self {
+            KeyPath::None => false,
+            KeyPath::Path(path) => path.is_empty() || path.split(|&u| u == u16::from(b'.')).all(is_identifier),
+            KeyPath::List(paths) => !paths.is_empty() && paths.iter().all(|p| KeyPath::Path(p.clone()).is_valid()),
+        }
+    }
+}
+// An IdentifierName (ECMAScript §12.7): an ID_Start, `$` or `_`, then ID_Continue, `$`, ZWNJ or ZWJ — a lone surrogate
+// none of them.
+fn is_identifier(units: &[u16]) -> bool {
+    let mut chars = char::decode_utf16(units.iter().copied());
+    let start = |c: char| c == '$' || c == '_' || crate::unicode::is_id_start(c.into());
+    let part = |c: char| matches!(c, '$' | '\u{200C}' | '\u{200D}') || crate::unicode::is_id_continue(c.into());
+    chars.next().is_some_and(|c| c.is_ok_and(start)) && chars.all(|c| c.is_ok_and(part))
+}
+
 // An object store: its database, name and key path, its records, its key generator's current number (none without one;
 // infinite past 2^53), its indexes — those it has by name, and those deleted whose deletion has yet to run in their
 // transaction's order (a write before it still kept to them) — and the journal of the transaction writing it.
@@ -466,24 +486,39 @@ fn store_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let store = id_arg(scope, &args, 0);
     rv.set_bool(with(|s| s.store_live(store)));
 }
-// __dom.idbIndexCreate(store, name, keyPath, unique, multiEntry) -> a new index's number, empty until `idbPopulate` (0
-// where the store has one of the name).
+// What `createIndex()` refuses (§4.5), in the order its steps check: an index of the name (ConstraintError), a key path
+// that is not valid (SyntaxError), a list key path that is multiEntry (InvalidAccessError).
+const INDEX_EXISTS: i32 = -1;
+const INDEX_BAD_KEY_PATH: i32 = -2;
+const INDEX_MULTI_ENTRY_LIST: i32 = -3;
+
+// __dom.idbIndexCreate(store, name, keyPath, unique, multiEntry) -> a new index's number, empty until `idbPopulate`, or
+// what refuses it (`INDEX_*`, negative).
 fn index_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let store = id_arg(scope, &args, 0);
-    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_uint32(0) };
+    let Some(name) = name_arg(scope, args.get(1)) else { return rv.set_int32(INDEX_EXISTS) };
     let key_path = key_path_arg(scope, args.get(2));
     let (unique, multi_entry) = (args.get(3).is_true(), args.get(4).is_true());
     let id = with(|s| {
         if s.stores.get(&store).is_none_or(|st| st.index_names.contains_key(&name)) {
-            return 0;
+            return Err(INDEX_EXISTS);
+        }
+        if !key_path.is_valid() {
+            return Err(INDEX_BAD_KEY_PATH);
+        }
+        if multi_entry && matches!(key_path, KeyPath::List(_)) {
+            return Err(INDEX_MULTI_ENTRY_LIST);
         }
         let id = s.next_id();
         let st = s.stores.get_mut(&store).expect("looked up");
         st.index_names.insert(name.clone(), id);
         st.indexes.insert(id, Index { name, key_path, unique, multi_entry, populated: false, entries: BTreeSet::new() });
-        id
+        Ok(id)
     });
-    rv.set_uint32(id);
+    match id {
+        Ok(id) => rv.set_uint32(id),
+        Err(code) => rv.set_int32(code),
+    }
 }
 // __dom.idbIndexDelete(store, name) -> the number of the index of the name deleted (0 for none): the store has it no
 // more, but a write before its deletion runs in the transaction's order still keeps to it (`idbIndexRetire`).
@@ -1167,6 +1202,21 @@ pub(crate) fn undo_transaction(reg: &mut Registry, tx: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // "A valid key path": identifiers by ID_Start / ID_Continue joined by dots, the empty string, a non-empty list.
+    #[test]
+    fn key_paths_are_identifiers_joined_by_dots() {
+        let p = |t: &str| KeyPath::Path(t.encode_utf16().collect());
+        for valid in ["", "a", "a.b", "$x._y", "é.ü1", "a\u{200C}b"] {
+            assert!(p(valid).is_valid(), "{valid:?}");
+        }
+        for invalid in ["1a", "a.", ".a", "a..b", "a b", "a-b", "\u{200C}a"] {
+            assert!(!p(invalid).is_valid(), "{invalid:?}");
+        }
+        assert!(!KeyPath::Path(vec![0xD800]).is_valid());
+        assert!(KeyPath::List(vec!["a".encode_utf16().collect(), Vec::new()]).is_valid());
+        assert!(!KeyPath::List(vec![]).is_valid() && !KeyPath::List(vec!["1".encode_utf16().collect()]).is_valid());
+    }
 
     // "Compare two keys": array > binary > string > date > number, then by value.
     #[test]

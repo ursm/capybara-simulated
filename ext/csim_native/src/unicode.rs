@@ -1,4 +1,5 @@
-// The Unicode general categories layout asks of a character, as a regex spells them: `\p{M}`, which
+// The Unicode classes native asks of a character, as a regex spells them — IndexedDB's key paths `\p{ID_Start}` /
+// `\p{ID_Continue}`, and the general categories layout asks: `\p{M}`, which
 // `font::zero_width` needs to decide whether a character at or above U+0300 is zero-width (the JS text metrics
 // ask the engine's own `/^\p{M}$/u` the same question), and `\p{L}` / `\p{N}`, which `layout::hyphen_breaks_after`
 // reads a hyphen's neighbours by.
@@ -27,6 +28,9 @@ use std::sync::LazyLock;
 static MARKS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{M}"));
 static LETTERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{L}"));
 static NUMBERS: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{N}"));
+// (…and the two an ECMAScript identifier is spelled by, which IndexedDB's key paths are: `idb::KeyPath::is_valid`)
+static ID_START: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{ID_Start}"));
+static ID_CONTINUE: LazyLock<Vec<(u32, u32)>> = LazyLock::new(|| ranges(r"\p{ID_Continue}"));
 
 // A class's code-point ranges: ascending and disjoint, which is what `in_ranges`' binary search needs, and
 // non-adjacent besides — regex-syntax canonicalises a `ClassUnicode` on construction (`Interval::canonicalize`
@@ -50,10 +54,18 @@ pub(crate) fn init() {
     LazyLock::force(&MARKS);
     LazyLock::force(&LETTERS);
     LazyLock::force(&NUMBERS);
+    LazyLock::force(&ID_START);
+    LazyLock::force(&ID_CONTINUE);
 }
 
 pub(crate) fn is_combining_mark(cp: u32) -> bool {
     in_ranges(&MARKS, cp)
+}
+pub(crate) fn is_id_start(cp: u32) -> bool {
+    in_ranges(&ID_START, cp)
+}
+pub(crate) fn is_id_continue(cp: u32) -> bool {
+    in_ranges(&ID_CONTINUE, cp)
 }
 pub(crate) fn is_letter(cp: u32) -> bool {
     in_ranges(&LETTERS, cp)
@@ -162,10 +174,12 @@ pub(crate) fn class_ranges(ruby: &magnus::Ruby, klass: String) -> Result<Vec<(u3
         "M" => &MARKS,
         "L" => &LETTERS,
         "N" => &NUMBERS,
+        "ID_Start" => &ID_START,
+        "ID_Continue" => &ID_CONTINUE,
         other => {
             return Err(magnus::Error::new(
                 ruby.exception_arg_error(),
-                format!("unknown general category {other:?} (M, L or N)"),
+                format!("unknown class {other:?} (M, L, N, ID_Start or ID_Continue)"),
             ));
         }
     };
