@@ -103,6 +103,10 @@ RSpec.describe 'Service Worker bindings' do
             });
           JS
         when '/hit', '/named' then [200, {'content-type' => 'text/plain'}, ["network #{env['PATH_INFO']}"]]
+        # (…a page that reports, as its own script runs, whether a service worker controls it)
+        when '/controlled'
+          [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><script>window.__early = !!navigator.serviceWorker.controller;</script>']]
+        when '/plain.js' then [200, {'content-type' => 'text/javascript'}, ["self.addEventListener('fetch', () => {});"]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -238,5 +242,24 @@ RSpec.describe 'Service Worker bindings' do
     JS
     poll_until { session.evaluate_script('globalThis.__out !== null') }
     expect(session.evaluate_script('globalThis.__out')).to eq([true, 'made', 'cached', 'network /named', ['filled'], 'streamed'])
+  end
+
+  # A top-level navigation a registration's scope covers is controlled by its active worker (HTML "create and initialize
+  # a Document": the reserved client is the one the worker controls) — from before the document's first script runs.
+  it 'controls a document its top-level navigation made' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__out = null;
+      (async () => {
+        const reg = await navigator.serviceWorker.register('/plain.js', {scope: '/'});
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        globalThis.__out = 'ready';
+      })().catch((e) => { globalThis.__out = String(e); });
+    JS
+    poll_until { session.evaluate_script('globalThis.__out !== null') }
+    session.visit '/controlled'
+    expect(session.evaluate_script('[window.__early, navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL.replace(location.origin, "")]')).to eq([true, '/plain.js'])
   end
 end

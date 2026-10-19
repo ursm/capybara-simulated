@@ -11564,6 +11564,8 @@ module Capybara
         end
         opts['touch'] = true if @touch_input
         opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
+        controller = sw_client_controller_for(@current_url.to_s) if @current_url.to_s.match?(%r{\Ahttps?://}i)
+        opts['controller'] = controller if controller
         creator, @creator = @creator, nil
         if creator && @current_url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
           opts['creatorOrigin'] = creator[:origin]
