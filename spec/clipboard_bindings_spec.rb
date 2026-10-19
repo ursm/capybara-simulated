@@ -103,7 +103,8 @@ RSpec.describe 'Clipboard bindings' do
 
   # A custom format read back as written; data converted to `(DOMString or Blob)` — a number its string; a rejected data
   # promise a NotFoundError; a Blob whose type carries parameters taken by its essence; `write([])` writes nothing;
-  # a custom format no paste event's file.
+  # a custom format no paste event's file, nor markup — an image one, named by its kind and extension, and a type the
+  # driver's copy wrote that has no known extension a `.bin`.
   it 'converts, keys and keeps what it writes as the spec says' do
     session.execute_script(<<~JS)
       window.got = [];
@@ -112,6 +113,10 @@ RSpec.describe 'Clipboard bindings' do
         await navigator.clipboard.write([new ClipboardItem({'web text/custom': 'c', 'text/plain': 'p'})]);
         got.push((await navigator.clipboard.read())[0].types);
         got.push(__csimClipboardFiles().length);
+        await navigator.clipboard.write([new ClipboardItem({'text/html': 'h', 'image/svg+xml': '<svg/>', 'image/png': new Blob(['p'], {type: 'image/png'})})]);
+        got.push(__csimClipboardFiles().map((f) => [f instanceof File, f.name, f.type, f.size]));
+        __csimClipboardSetData({'image/jpeg': 'j', 'font/woff2': 'w'});
+        got.push(__csimClipboardFiles().map((f) => f.name));
         const five = await new ClipboardItem({'text/plain': 5}).getType('text/plain');
         got.push([five instanceof Blob, await five.text()]);
         got.push(await settle(new ClipboardItem({'text/plain': Promise.reject(new Error('boom'))}).getType('text/plain')));
@@ -125,6 +130,8 @@ RSpec.describe 'Clipboard bindings' do
     expect(poll_until { session.evaluate_script("window.got.at(-1) === 'done' && window.got") }).to eq([
       ['web text/custom', 'text/plain'],
       0,
+      [[true, 'image.png', 'image/png', 1]],
+      ['image.jpg', 'font.bin'],
       [true, '5'],
       'NotFoundError',
       ['text/html'],

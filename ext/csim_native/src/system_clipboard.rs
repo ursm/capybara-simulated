@@ -33,6 +33,49 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clipboardCount", count_op, context_id);
     register(scope, ns, "clipboardRead", read_op, context_id);
     register(scope, ns, "clipboardWrite", write_op, context_id);
+    register(scope, ns, "clipboardKey", key_op, context_id);
+    register(scope, ns, "clipboardFiles", files_op, context_id);
+}
+
+// The data types a page may write and read (§6.4, §6.5): the mandatory ones, and the optional ones this clipboard
+// recognises — text/uri-list, image/svg+xml, and a web custom format ("web " and a MIME type) — by a type's essence, as
+// writeText's own "text/plain;charset=utf-8" Blob has it.
+const KNOWN_TYPES: [&str; 5] = ["text/plain", "text/html", "image/png", "text/uri-list", "image/svg+xml"];
+const WEB: &str = "web ";
+
+// The key a representation of `ty` is held under: its essence, or "web " and its essence — none for one no page may
+// write.
+fn key(ty: &str) -> Option<String> {
+    let custom = ty.strip_prefix(WEB);
+    let mime = crate::mime::parse(custom.unwrap_or(ty))?;
+    match custom {
+        Some(_) => Some(format!("{WEB}{}", mime.essence)),
+        None => KNOWN_TYPES.contains(&mime.essence.as_str()).then_some(mime.essence),
+    }
+}
+
+// What a paste event's `clipboardData.files` holds of a representation held under `key`: a File named by its kind and
+// extension ("image.png") — none for text, markup (text/html, text/uri-list, image/svg+xml: Chrome) or a web custom
+// format, which no paste event sees.
+fn file_name(key: &str) -> Option<String> {
+    if key.starts_with(WEB) || matches!(key, "text/plain" | "text/html" | "text/uri-list" | "image/svg+xml") {
+        return None;
+    }
+    let ext = match key {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "application/pdf" => "pdf",
+        "application/zip" => "zip",
+        "audio/mpeg" => "mp3",
+        "audio/wav" => "wav",
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        _ => "bin",
+    };
+    let kind = key.split('/').next().filter(|k| !k.is_empty()).unwrap_or("file");
+    Some(format!("{kind}.{ext}"))
 }
 
 fn partition(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> u64 {
@@ -56,6 +99,27 @@ fn read_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         items.push(ty.into());
         items.push(crate::dom::u8_array(scope, bytes));
     }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.clipboardKey(type) -> the key a representation of `type` is held under, or null for a type no page may write.
+fn key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ty = args.get(0).to_rust_string_lossy(scope);
+    match key(&ty).and_then(|k| v8::String::new(scope, &k)) {
+        Some(k) => rv.set(k.into()),
+        None => rv.set_null(),
+    }
+}
+
+// __dom.clipboardFiles(partition) -> `[type, name, …]`: the session's clipboard's representations a paste event hands
+// over as Files, in order, each its type and the name its File takes.
+fn files_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let partition = partition(scope, &args);
+    let files: Vec<String> = lock()
+        .get(&partition)
+        .map(|c| c.entries.iter().filter_map(|(ty, _)| Some([ty.clone(), file_name(ty)?])).flatten().collect())
+        .unwrap_or_default();
+    let items: Vec<v8::Local<v8::Value>> = files.iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
