@@ -1025,6 +1025,8 @@ pub(crate) struct RealmState {
     pub(crate) window_viewport: crate::viewport::Viewport,
     // What its navigator says of the user agent (navigator.rs).
     pub(crate) navigator: crate::navigator::Navigator,
+    // What its document planned for its navigable, for the host to take (navigation_plan.rs).
+    pub(crate) navigation_plan: crate::navigation_plan::NavigationPlan,
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
@@ -1643,6 +1645,8 @@ impl RealmArena {
         // (…nor is a list of scripts to execute after the old page's parse, one it left before its end, the new one's)
         self.parser_list.clear();
         self.parser_sources.clear();
+        // (…nor what the old page planned for its navigable, which the host took or let go: a form it kept alive with it)
+        self.navigation_plan = Default::default();
         self.laid_out_at = None;
         self.form_facts.get_mut().clear();
         self.directionality.get_mut().1.clear();
@@ -2940,6 +2944,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::pointer::install(scope, ns, context_id);
     crate::viewport::install(scope, ns, context_id);
     crate::navigator::install(scope, ns, context_id);
+    crate::navigation_plan::install(scope, ns, context_id);
     crate::import_map::install(scope, ns, context_id);
     crate::canvas_path::install(scope, ns, context_id);
     crate::text::install(scope, ns, context_id);

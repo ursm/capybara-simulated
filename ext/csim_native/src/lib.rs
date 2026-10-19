@@ -124,6 +124,7 @@ mod frame_navigation;
 mod navigables;
 mod observation_list;
 mod namespaces;
+mod navigation_plan;
 mod navigator;
 mod node_handle;
 mod numbers;

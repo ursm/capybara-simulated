@@ -1307,7 +1307,7 @@ module Capybara
           # turbo-stream → `StreamActions.download` → file-saver's
           # `saveAs` → `setTimeout(() => click(<a download>), 0)` →
           # our dispatchEvent default-action sets
-          # `__csimPendingDownload`. Settle bails on the first
+          # its planned download (navigation_plan.rs). Settle bails on the first
           # observable change (the stream-render mutation), so the
           # await-chain inside the stream's `connectedCallback`
           # (`await nextRepaint(); await performAction()` →
@@ -2065,8 +2065,8 @@ module Capybara
 
       # `<a download>` clicked synthetically (file-saver's saveAs ships
       # a freshly-created anchor through `dispatchEvent(MouseEvent
-      # 'click')`). The bridge queues `{url, filename}` on
-      # __csimPendingDownload during the click default-action; we drain
+      # 'click')`). The click's default action plans `{url, filename}` as a
+      # download (navigation_plan.rs); we drain
       # here at every tick so the file lands in `downloads_directory`
       # before Capybara's `wait_for_download` polls.
       def consume_pending_download
@@ -10202,7 +10202,7 @@ module Capybara
 
       # Defer the navigation: doing it from inside the running V8 call
       # would dispose the Context mid-call. tick_real_time drains
-      # after the call returns. Same pattern as `__csimPendingFormSubmit`.
+      # after the call returns. Same pattern as a planned submission (navigation_plan.rs).
       # (…`replace`: a `location.replace`, whose navigation replaces the current history entry rather than adding one)
       def location_assign(url, replace: false)
         @pending_location         = resolve_against_current(url.to_s)
