@@ -109,7 +109,12 @@ impl RealmArena {
             return PREPARE_NONE;
         }
         let src = n.plain_attr("src").map(str::is_empty);
-        let has_text = n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty()));
+        // (…one out of the lists its text as its end tag found it: HTML takes the source text there)
+        let listed = if by == BY_PARSER_LIST { self.realm_state(n.realm).and_then(|s| s.parser_sources.get(&id)) } else { None };
+        let has_text = match listed {
+            Some(text) => !text.is_empty(),
+            None => n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty())),
+        };
         if (src.is_none() && !has_text) || (by != BY_PARSER_LIST && !self.is_connected(id)) {
             return PREPARE_NONE;
         }
@@ -143,14 +148,21 @@ fn blocks_parser(n: &crate::dom::NodeData) -> bool {
 impl RealmArena {
     // The parser at a deferred, async or module script's end tag (`listParserScript`): one connected then goes on the
     // list of scripts to execute after parsing — where "the end" finds it, whatever an earlier script did to it since
-    // (HTML §13.2.7: the lists are kept, not the tree walked again) — and one in a subtree a script removed does not.
+    // (HTML §13.2.7: the lists are kept, not the tree walked again), an inline one with the source text it has now —
+    // and one in a subtree a script removed does not.
     pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId) {
         let Some(n) = self.get_mut_quietly(id) else { return };
         n.script_flags |= SCRIPT_END_TAG;
         let runs = n.script_flags & SCRIPT_RUN == 0 && matches!(script_type(n), CLASSIC | MODULE);
-        if runs && self.is_connected(id) {
-            if let Some(state) = self.realm_state_mut(cid) {
-                state.parser_list.push(id);
+        let inline = n.plain_attr("src").is_none();
+        if !runs || !self.is_connected(id) {
+            return;
+        }
+        let text = inline.then(|| self.child_text(id));
+        if let Some(state) = self.realm_state_mut(cid) {
+            state.parser_list.push(id);
+            if let Some(text) = text {
+                state.parser_sources.insert(id, text);
             }
         }
     }
@@ -177,6 +189,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
     crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);
+    crate::dom::register(scope, ns, "takeParserSource", take_parser_source_op, context_id);
     crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
@@ -300,6 +313,17 @@ fn list_parser_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     crate::dom::realm(scope, cid).list_parser_script(cid, id);
+}
+
+// __dom.takeParserSource(nid) -> the source text a listed inline script had at its end tag, or null for none — taken.
+fn take_parser_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let cid = crate::dom::realm_id(scope, &args);
+    let text = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.parser_sources.remove(&id));
+    match text.and_then(|t| v8::String::new_from_two_byte(scope, &t, v8::NewStringType::Normal)) {
+        Some(t) => rv.set(t.into()),
+        None => rv.set_null(),
+    }
 }
 
 // __dom.takeParserList() -> the realm's list of scripts to execute after parsing, in the order their end tags put them

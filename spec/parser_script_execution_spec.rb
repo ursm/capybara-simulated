@@ -170,6 +170,33 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[1 b])
   end
 
+  # …but one moved into another document since does not run ("execute the script element": its node document is no
+  # longer its preparation-time one), and an inline module runs the source its end tag found, whatever an earlier
+  # script did to its text. Chrome: i, a, mod-in.
+  it 'runs no listed script moved into another document, and a module as its end tag found it' do
+    app = lambda do |env|
+      case env['PATH_INFO']
+      when '/a.js', '/c.js'
+        [200, {'content-type' => 'text/javascript'}, ["L.push('#{env['PATH_INFO'][1...-3]}')"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><script>window.L = []</script><iframe></iframe>
+          <script defer src="a.js"></script>
+          <script id="m" type="module">L.push('mod-in')</script>
+          <script id="c" defer src="c.js"></script>
+          <script>
+            const fd = document.querySelector('iframe').contentDocument;
+            fd.body.appendChild(fd.adoptNode(document.getElementById('c')));
+            document.getElementById('m').firstChild.remove();
+            L.push('i');
+          </script>
+        HTML
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L')).to eq(%w[i a mod-in])
+  end
+
   # The XML parser stops at no end tag, so the after-parse pass stands in for each in tree order: a script in a subtree
   # an earlier one removed is decided at its turn — not connected, it runs nothing, a deferred one goes on no list.
   # Chrome: 1, 3.
