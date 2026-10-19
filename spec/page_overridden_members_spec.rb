@@ -445,6 +445,16 @@ RSpec.describe 'members a page overrides' do
     expect(got).to eq([true, true, []])
   end
 
+  # …and a page's own later scripts run whatever it put in `eval`: Chrome compiles a classic script without calling it.
+  it "runs a page's later scripts whatever it put in eval" do
+    html = '<!DOCTYPE html><meta charset="utf-8"><body><script>window.seen = []; window.eval = (code) => seen.push(code);</script>' \
+           '<script>window.ran = [1];</script><script>ran.push(2);</script>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    s.execute_script("const el = document.createElement('script'); el.textContent = 'ran.push(3)'; document.body.append(el)")
+    expect(s.evaluate_script('[window.ran, window.seen]')).to eq([[1, 2, 3], []])
+  end
+
   # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that
   # replaced `Date.now` moves no `performance.now()`, and one that replaced DOMRect, DOMMatrix, TextDecoder or Blob gets
   # the platform's objects from the platform all the same.

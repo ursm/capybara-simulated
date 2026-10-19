@@ -1531,6 +1531,9 @@ module Capybara
             const cached    = globalThis.__csim_runScriptCached;
             const runEval   = globalThis.__csim_runScriptEval;
             const threshold = #{SCRIPT_CACHE_MIN_BYTES};
+            // (…the realm's own eval, taken as the realm is built: a page that replaced `window.eval` stops none of
+            // its later scripts, as Chrome compiles them without calling it)
+            const indirectEval = eval;
             // Leading top-level lexical declaration, after optional BOM /
             // whitespace / line+block comments / a "use strict" prologue.
             const LEADS_LEXICAL = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*(?:["']use strict["'];?\\s*)?(?:export\\s+)?(?:const|let|class)[\\s{\\[]/;
@@ -1558,7 +1561,7 @@ module Capybara
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
               if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
-              (0, eval)(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
+              indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
           })();
         JS

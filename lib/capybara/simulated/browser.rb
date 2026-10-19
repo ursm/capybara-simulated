@@ -3447,9 +3447,13 @@ module Capybara
       # Anything escaping the body — a fire-and-forget thread has nowhere to report
       # it — is contained here so a later `join` can't re-raise it into `reset!`.
       private def spawn_app_request_thread(&body)
+        # (…a request a worker's thread spawned still the worker's: judged by its record, as on its own thread — a
+        # keepalive fetch's cookies by its site for cookies)
+        worker_record = Thread.current[:csim_worker_record]
         @app_request_lock.synchronize do
           thread = Thread.new do
             begin
+              Thread.current[:csim_worker_record] = worker_record
               body.call
             rescue Exception => e
               warn "[capybara-simulated] background app request thread died: #{e.class}: #{e.message}"
