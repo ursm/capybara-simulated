@@ -61,4 +61,18 @@ RSpec.describe 'input value algorithms' do
       })()
     JS
   end
+
+  # Capybara reads a field's value as Selenium does, by its `value` IDL — so the driver's answer is the sanitized one a
+  # page's script reads, not the raw live value: an email typed with spaces around it read them back. Chrome: "x@y",
+  # "a@b", "", "on", and a text input's as it is.
+  it 'reads a field the way its value IDL does' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [<<~HTML]] })
+      <!DOCTYPE html><meta charset="utf-8"><body>
+      <input id="typed" type="email"><input id="e" type="email" value=" a@b "><input id="n" type="number" value="abc">
+      <input id="c" type="checkbox"><input id="t" value="kept as is ">
+    HTML
+    s.visit '/'
+    s.find('#typed').set(' x@y ')
+    expect(%w[typed e n c t].map {|id| s.find("##{id}").value }).to eq(['x@y', 'a@b', '', 'on', 'kept as is '])
+  end
 end
