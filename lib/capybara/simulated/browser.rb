@@ -8647,6 +8647,9 @@ module Capybara
         # Tag this thread so blob URLs created by the worker's script are owned by
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
+        # …and with its record, which its fetches are judged by (worker_cross_site?): a navigation removes the registry's
+        # entry without waiting for the thread, and a fetch still in flight is the worker's all the same.
+        Thread.current[:csim_worker_record] = record
         rt = nil
         # The worker's clock follows the window's (one agent cluster's time): a tick with a timer pending advances it a
         # poll interval, or as far as the window's clock has moved since the last tick, whichever is more — a window
@@ -12039,8 +12042,7 @@ module Capybara
       # …and whether a request to `hop` a dedicated worker makes — on its own thread — is cross-site for cookies by the one
       # it was made with: false for none (not a worker's thread, a service worker).
       private def worker_cross_site?(hop)
-        handle = Thread.current[:csim_worker_handle] or return false
-        record = @workers[handle]
+        record = Thread.current[:csim_worker_record]
         return false unless record&.key?(:site_for_cookies)
 
         site = record[:site_for_cookies]

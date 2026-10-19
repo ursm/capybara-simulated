@@ -417,6 +417,34 @@ RSpec.describe 'members a page overrides' do
     expect(got).to eq(['SyntaxError', 'NotSupportedError', 'SyntaxError', 'SyntaxError', 'SyntaxError', 'SyntaxError', 'IndexSizeError', 'loadend', 3])
   end
 
+  # …nor what a page put in HTMLElement, eval or console.error: custom-elements-es5-adapter's HTMLElement constructs
+  # through the real one, a string timer handler is the platform's to compile, and the platform's report of an uncaught
+  # exception is no call of a page's `console.error` (Chrome's goes to its devtools).
+  it "defines elements, runs string timers and reports exceptions whatever a page put in HTMLElement, eval and console" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const Own = HTMLElement;
+      window.HTMLElement = function HTMLElement() { return Reflect.construct(Own, [], this.constructor); };
+      HTMLElement.prototype = Own.prototype;
+      HTMLElement.prototype.constructor = HTMLElement;
+      Object.setPrototypeOf(HTMLElement, Own);
+      function MyEl() { return HTMLElement.call(this) || this; }
+      MyEl.prototype = Object.create(HTMLElement.prototype, { constructor: { value: MyEl } });
+      Object.setPrototypeOf(MyEl, HTMLElement);
+      customElements.define('my-el', MyEl);
+      const seen = [];
+      window.eval = (code) => seen.push('page eval');
+      console.error = () => seen.push('page console.error');
+      addEventListener('error', (e) => e.preventDefault());
+      setTimeout('window.ran = true', 0);
+      setTimeout(() => { throw new Error('uncaught'); }, 0);
+      setTimeout(() => done([document.createElement('my-el') instanceof MyEl, window.ran === true, seen]), 10);
+    JS
+    expect(got).to eq([true, true, []])
+  end
+
   # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that
   # replaced `Date.now` moves no `performance.now()`, and one that replaced DOMRect, DOMMatrix, TextDecoder or Blob gets
   # the platform's objects from the platform all the same.
