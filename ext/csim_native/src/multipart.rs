@@ -165,9 +165,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "multipartFormData", multipart_op, context_id);
     crate::dom::register(scope, ns, "multipartEncode", encode_op, context_id);
 }
-// __dom.multipartEncode(entries, encoding, boundary) -> the body (`encode`) as a byte string: `entries` a flat array, each
-// entry `name, value` for a field or `name, [filename, type, bytes]` for a file (its bytes a byte string); `encoding` the
-// form's (null: UTF-8).
+// __dom.multipartEncode(entries, encoding, boundary) -> the body (`encode`) as a Uint8Array: `entries` a flat array,
+// each entry `name, value` for a field or `name, [filename, type, bytes]` for a file (its bytes a blob's bytes object, or
+// a picked file's: blob_data.rs `bytes_arg`); `encoding` the form's (null: UTF-8).
 fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
     let label = args.get(1);
@@ -184,12 +184,8 @@ fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
                 let part = |i: u32| file.get_index(scope, i);
                 let filename = part(0).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
                 let kind = part(1).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
-                let bytes = part(2).and_then(|v| v8::Local::<v8::String>::try_from(v).ok()).map(|s| {
-                    let mut units = vec![0u16; s.length()];
-                    s.write_v2(scope, 0, &mut units, v8::WriteFlags::empty());
-                    units.into_iter().map(|u| u as u8).collect::<Vec<u8>>()
-                });
-                Err((filename, kind, bytes.unwrap_or_default()))
+                let bytes = part(2).map_or_else(Vec::new, |v| crate::blob_data::bytes_arg(scope, v));
+                Err((filename, kind, bytes))
             }
             None => Ok(value.map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()),
         };
@@ -207,7 +203,7 @@ fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         })
         .collect();
     let body = encode(&entries, encoding, &boundary);
-    rv.set(v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into));
+    rv.set(crate::blob_data::byte_array(scope, body));
 }
 // __dom.multipartFormData(bytes, contentType) -> [name, filename (null for a field), type, value, …] — a field's value
 // UTF-8 decoded (a BOM kept), a file's a byte string — or null where the body is no `multipart/form-data` of the type's

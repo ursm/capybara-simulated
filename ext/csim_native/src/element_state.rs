@@ -126,20 +126,21 @@ impl RealmArena {
         if n.is_html_named("input") {
             return matches!(n.input_type(), "submit" | "image");
         }
-        n.is_html_named("button") && self.button_type(id) == "submit"
+        n.is_html_named("button") && self.button_type(id) == Some("submit")
     }
     // A `<button>`'s type, as its `type` IDL attribute answers it: the state its `type` names — `submit`, `reset` or
     // `button`, ASCII case-insensitively (reflect_keywords.rs `BUTTON_TYPE`) — else, in the Auto state (a missing or
     // invalid one), `submit` for a submit button — one no `command` / `commandfor` makes a command button, whose parent
-    // is no `select` (a customizable select's button: HTML, over Chrome's `submit`) — and `button` for any other.
-    pub(crate) fn button_type(&self, id: NodeId) -> &'static str {
-        let Some(n) = self.get(id) else { return "submit" };
+    // is no `select` (a customizable select's button: HTML, over Chrome's `submit`) — and `button` for any other. None for
+    // no node.
+    pub(crate) fn button_type(&self, id: NodeId) -> Option<&'static str> {
+        let n = self.get(id)?;
         if let Some(state) = TABLES[BUTTON_TYPE].state(n.plain_attr("type")) {
-            return state;
+            return Some(state);
         }
         let command = n.plain_attr("command").is_some() || n.plain_attr("commandfor").is_some();
         let in_select = n.parent.and_then(|p| self.get(p)).is_some_and(|p| p.is_html_named("select"));
-        if command || in_select { "button" } else { "submit" }
+        Some(if command || in_select { "button" } else { "submit" })
     }
     // The parent, or — for a shadow root — its host.
     fn shadow_including_parent(&self, id: NodeId) -> Option<NodeId> {

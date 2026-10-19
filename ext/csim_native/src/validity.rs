@@ -1153,12 +1153,11 @@ fn is_submit_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set_bool(crate::dom::realm(scope, cid).is_submit_button(id));
 }
 
-// __dom.buttonType(nid) -> a `<button>`'s type state, what its `type` IDL attribute reflects (`button_type`).
+// __dom.buttonType(nid) -> what a `<button>`'s `type` IDL attribute answers (element_state.rs `button_type`).
 fn button_type(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let arena = crate::dom::realm(scope, cid);
-    let Some(state) = arena.get(id).is_some().then(|| arena.button_type(id)) else { return };
+    let Some(state) = crate::dom::realm(scope, cid).button_type(id) else { return };
     if let Some(state) = v8::String::new(scope, state) {
         rv.set(state.into());
     }

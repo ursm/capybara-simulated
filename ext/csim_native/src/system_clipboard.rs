@@ -124,7 +124,7 @@ fn files_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 }
 
 // __dom.clipboardWrite(partition, entries): the session's clipboard holds `entries` — `[type, bytes, …]`, each's bytes a
-// byte string — from now on, its change count moved on.
+// blob's (blob_data.rs `bytes_arg`) — from now on, its change count moved on.
 fn write_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let partition = partition(scope, &args);
     let mut entries = Vec::new();
@@ -132,7 +132,7 @@ fn write_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         let mut k = 0;
         while k + 1 < list.length() {
             let ty = list.get_index(scope, k).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
-            let bytes = list.get_index(scope, k + 1).map(|v| crate::fetch_rules::byte_string(scope, v)).unwrap_or_default();
+            let bytes = list.get_index(scope, k + 1).map_or_else(Vec::new, |v| crate::blob_data::bytes_arg(scope, v));
             entries.push((ty, bytes));
             k += 2;
         }

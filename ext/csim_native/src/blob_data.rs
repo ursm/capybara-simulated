@@ -83,6 +83,27 @@ fn handle<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>)
     Some(unsafe { &*(ptr.as_ref() as *const BlobHandle) })
 }
 
+// The bytes `value` gives an op that takes a blob's: a blob's bytes object's, or a view's (a picked file's, read for it)
+// — none for anything else.
+pub(crate) fn bytes_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<u8> {
+    if let Some(h) = handle(scope, value) {
+        return h.bytes(scope);
+    }
+    let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) else { return Vec::new() };
+    let mut run = vec![0; view.byte_length()];
+    let copied = view.copy_contents(&mut run);
+    run.truncate(copied);
+    run
+}
+
+// A Uint8Array of `bytes`, a script's to keep.
+pub(crate) fn byte_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
+    let len = bytes.len();
+    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
+    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
+    v8::Uint8Array::new(scope, buffer, 0, len).map_or_else(|| v8::undefined(scope).into(), Into::into)
+}
+
 // A blob's bytes object holding `bytes`, in a buffer of their own.
 fn owning<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
     let len = bytes.len();
@@ -115,12 +136,8 @@ fn make_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         let Some(part) = parts.get_index(scope, i) else { continue };
         if part.is_string() {
             bytes.extend(crate::blob_rules::blob_text(&crate::dom::utf16_arg(scope, part), native));
-        } else if let Some(h) = handle(scope, part) {
-            bytes.extend(h.bytes(scope));
-        } else if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(part) {
-            let mut run = vec![0; view.byte_length()];
-            let copied = view.copy_contents(&mut run);
-            bytes.extend(&run[..copied]);
+        } else if handle(scope, part).is_some() || part.is_array_buffer_view() {
+            bytes.extend(bytes_arg(scope, part));
         } else if let Ok(buffer) = v8::Local::<v8::ArrayBuffer>::try_from(part) {
             let store = buffer.get_backing_store();
             bytes.extend(store.iter().take(buffer.byte_length()).map(std::cell::Cell::get));
@@ -148,12 +165,7 @@ fn size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
 // __dom.blobBytes(bytes) -> a Uint8Array of a copy of them, a script's to keep.
 fn bytes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let bytes = handle(scope, args.get(0)).map_or_else(Vec::new, |h| h.bytes(scope));
-    let len = bytes.len();
-    let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
-    let buffer = v8::ArrayBuffer::with_backing_store(scope, &store);
-    if let Some(array) = v8::Uint8Array::new(scope, buffer, 0, len) {
-        rv.set(array.into());
-    }
+    rv.set(byte_array(scope, bytes));
 }
 
 // __dom.blobLatin1(bytes) -> them as a byte string (each byte a code unit), for the modules that take one; a RangeError
