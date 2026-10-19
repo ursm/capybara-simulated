@@ -147,11 +147,12 @@ impl Timers {
         self.idle_began = now;
         !self.runnable.is_empty()
     }
-    // §5.4 what is left of the idle period at `now`, as it stands: 50 ms from its start at the most, a frame's interval
-    // where an animation frame callback waits for the rendering update — one requested during it too — and never past
-    // the timer due first. (Each a span less what has gone of it, so a period just begun has its cap exactly.)
-    fn idle_remaining(&self, now: f64) -> f64 {
-        let gone = now - self.idle_began;
+    // §5.4 what is left at `now` of the idle period that began at `began`, as it stands: 50 ms from its start at the
+    // most, a frame's interval where an animation frame callback waits for the rendering update — one requested during
+    // it too — and never past the timer due first. (Each a span less what has gone of it, so a period just begun has its
+    // cap exactly.)
+    fn idle_remaining(&self, began: f64, now: f64) -> f64 {
+        let gone = now - began;
         let cap = if self.frames.is_empty() { IDLE_PERIOD_MAX_MS } else { FRAME_INTERVAL_MS };
         let timer = self.order.first().map_or(f64::INFINITY, |&(Due(due), _, _)| due - now);
         (cap - gone).min(timer).max(0.0)
@@ -356,28 +357,32 @@ fn idle_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let now = state.clock;
     rv.set_bool(state.timers.begin_idle(now));
 }
-// __dom.idleNext() -> [handle, callback]: the idle period's next runnable callback, taken — undefined once there is none,
-// or its deadline has passed (§5.5 "invoke idle callbacks": the rest wait for the next).
+// __dom.idleNext() -> [handle, callback, when the period began]: the idle period's next runnable callback, taken —
+// undefined once there is none, or its deadline has passed (§5.5 "invoke idle callbacks": the rest wait for the next).
 fn idle_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let state = arena.enter(cid);
-    if state.timers.idle_remaining(state.clock) <= 0.0 {
+    if state.timers.idle_remaining(state.timers.idle_began, state.clock) <= 0.0 {
         return;
     }
     let Some(request) = state.timers.runnable.pop_front() else { return };
     let handle = request.handle;
     let callback = taken_idle(arena, cid, request);
+    let began = dom(scope).arena.enter(cid).timers.idle_began;
     let handle = v8::Integer::new_from_unsigned(scope, handle).into();
     let callback = v8::Local::new(scope, callback);
-    rv.set(v8::Array::new_with_elements(scope, &[handle, callback]).into());
+    let began = v8::Number::new(scope, began).into();
+    rv.set(v8::Array::new_with_elements(scope, &[handle, callback, began]).into());
 }
-// __dom.idleRemaining() -> what is left of the calling realm's idle period, as it stands (`Timers::idle_remaining`).
+// __dom.idleRemaining(began) -> what is left of the calling realm's idle period that began then, as it stands
+// (`Timers::idle_remaining`).
 fn idle_remaining(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let began = args.get(0).number_value(scope).unwrap_or(f64::NEG_INFINITY);
     let cid = realm_id(scope, &args);
     let state = dom(scope).arena.enter(cid);
     let now = state.clock;
-    rv.set_double(state.timers.idle_remaining(now));
+    rv.set_double(state.timers.idle_remaining(began, now));
 }
 
 // __dom.timerStep(begins) — an event loop step of the calling realm's begins, or ends: one ending in a realm whose
