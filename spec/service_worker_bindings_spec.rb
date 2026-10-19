@@ -76,7 +76,7 @@ RSpec.describe 'Service Worker bindings' do
             });
           JS
         # (…a router that answers `/hit` from the cache it filled while installing and `/named` from a cache that does
-        # not exist; once active, the members a script may replace replaced)
+        # not exist; the members a script may replace replaced as it handles its first fetch)
         when '/router.js'
           [200, {'content-type' => 'text/javascript'}, [<<~JS]]
             self.addEventListener('install', (e) => {
@@ -86,12 +86,21 @@ RSpec.describe 'Service Worker bindings' do
                 { condition: { urlPattern: new URLPattern({ pathname: '/named' }) }, source: { cacheName: 'absent' } }
               ]);
             });
-            self.addEventListener('activate', () => {
-              const boom = () => { throw new Error('page member'); };
+            // (…a response made here, and a streamed one read with a `then` the script replaced)
+            const boom = () => { throw new Error('page member'); };
+            self.addEventListener('fetch', (e) => {
+              const path = new URL(e.request.url).pathname;
               Object.defineProperty(self, 'caches', { get: boom, configurable: true });
               CacheStorage.prototype.match = CacheStorage.prototype.open = Cache.prototype.match = boom;
+              Uint8Array.prototype.toBase64 = boom;
+              if (path === '/made') e.respondWith(new Response('made'));
+              if (path === '/streamed') {
+                e.respondWith(new Response(new ReadableStream({
+                  start(c) { c.enqueue(new TextEncoder().encode('streamed')); c.close(); }
+                })));
+                Promise.prototype.then = () => { throw new Error('page member'); };
+              }
             });
-            self.addEventListener('fetch', () => {});
           JS
         when '/hit', '/named' then [200, {'content-type' => 'text/plain'}, ["network #{env['PATH_INFO']}"]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
@@ -202,7 +211,8 @@ RSpec.describe 'Service Worker bindings' do
 
   # A router's `cache` source is the worker's cache storage itself ("Get Router Source Response"), not the members its
   # script may have replaced: `/hit` comes from the cache filled while installing, `/named` — whose cache does not
-  # exist — from the network, and asking for it made no cache of that name.
+  # exist — from the network, and asking for it made no cache of that name. A response the fetch handler makes, and one
+  # it streams, reach the client whatever the script made of `toBase64` or `then`.
   it "answers a router's cache source from the storage, not the script's members" do
     session = simulated_session(app)
     session.visit '/'
@@ -220,10 +230,13 @@ RSpec.describe 'Service Worker bindings' do
         });
         const win = frame.contentWindow;
         const text = async (path) => (await win.fetch(path)).text();
-        globalThis.__out = [!!win.navigator.serviceWorker.controller, await text('/hit'), await text('/named'), await caches.keys()];
+        globalThis.__out = [
+          !!win.navigator.serviceWorker.controller, await text('/made'), await text('/hit'), await text('/named'), await caches.keys(),
+          await text('/streamed')
+        ];
       })().catch((e) => { globalThis.__out = String(e); });
     JS
     poll_until { session.evaluate_script('globalThis.__out !== null') }
-    expect(session.evaluate_script('globalThis.__out')).to eq([true, 'cached', 'network /named', ['filled']])
+    expect(session.evaluate_script('globalThis.__out')).to eq([true, 'made', 'cached', 'network /named', ['filled'], 'streamed'])
   end
 end

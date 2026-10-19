@@ -15,6 +15,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "dataUrl", data_url_op, context_id);
     crate::dom::register(scope, ns, "base64Encode", base64_encode_op, context_id);
     crate::dom::register(scope, ns, "base64Decode", base64_decode_op, context_id);
+    crate::dom::register(scope, ns, "bytesBase64", bytes_base64_op, context_id);
 }
 // __dom.dataUrl(url) -> [mime type, body as a byte string (each byte a code unit)], or null for a failure.
 fn data_url_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -43,6 +44,12 @@ fn base64_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let units = crate::dom::utf16_arg(scope, args.get(0));
     let Some(bytes) = units.iter().map(|&u| u8::try_from(u).ok()).collect::<Option<Vec<u8>>>() else { return rv.set_null() };
     let out = base64_encode(&bytes);
+    rv.set(v8::String::new_from_one_byte(scope, out.as_bytes(), v8::NewStringType::Normal).map_or_else(|| v8::null(scope).into(), Into::into));
+}
+// __dom.bytesBase64(source) -> a BufferSource's bytes, base64-encoded: what `Uint8Array.prototype.toBase64` answers, for
+// the bindings, through no member a page may replace.
+fn bytes_base64_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let out = base64_encode(&crate::webcrypto::buffer_bytes(args.get(0)).unwrap_or_default());
     rv.set(v8::String::new_from_one_byte(scope, out.as_bytes(), v8::NewStringType::Normal).map_or_else(|| v8::null(scope).into(), Into::into));
 }
 // __dom.base64Decode(data) -> `atob`'s answer: Infra's forgiving-base64 decode of `data`, its bytes a byte string — null

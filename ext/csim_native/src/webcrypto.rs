@@ -1846,7 +1846,7 @@ fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Va
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 // A BufferSource's bytes (a detached one's none), or None for a value that is none.
-fn buffer_bytes(value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+pub(crate) fn buffer_bytes(value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
     if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
         let mut bytes = vec![0u8; view.byte_length()];
         view.copy_contents(&mut bytes);
