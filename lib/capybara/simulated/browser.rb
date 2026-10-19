@@ -7750,7 +7750,9 @@ module Capybara
       # the MessageEvent.origin the same-isolate delivery exposes; `origin_key` (e.g. "opaque:…") the SCOPING token
       # workers / other windows match on.
       def bc_post(name, targets, origin_key, data, origin)
-        targets.each_slice(2) {|rid, id| @bc_queue << {realm_id: rid.to_i, id: id, data: data, origin: origin} }
+        targets.each_slice(2) do |rid, id|
+          @bc_queue << {realm_id: rid.to_i, id: id, data: data, origin: origin}
+        end
         broadcast_external(name.to_s, data, origin_key)
         nil
       end

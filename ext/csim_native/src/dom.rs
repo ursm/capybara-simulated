@@ -2468,6 +2468,15 @@ impl Drop for Dom {
     }
 }
 
+impl Dom {
+    // A realm's AbortSignals, MessagePorts and BroadcastChannels let go of with it.
+    pub(crate) fn forget_realm_objects(&mut self, cid: i32) {
+        self.abort_signals.drop_realm(cid);
+        self.message_ports.drop_realm(cid);
+        self.broadcast_channels.drop_realm(cid);
+    }
+}
+
 // Borrow the isolate's Dom, lazily creating the slot on first touch. rusty_v8
 // stores slots in a TypeId->value map, so this `Dom` coexists with rusty_racer's
 // own IsolateState slot without either knowing about the other. Used in SHORT
@@ -5534,6 +5543,7 @@ fn reset_arena(
     dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     crate::agents::drop_realm(scope, cid);   // (…and the agent it was: its IndexedDB connections closed, its locks let go)
+    dom(scope).forget_realm_objects(cid);   // (…and its signals, ports and channels, which a page reusing the id never reaches)
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).caret_moves.remove(&cid);
     dom(scope).sw_router_rules.remove(&cid);   // (…a service worker's static router rules, which a new script registers anew)
@@ -5574,6 +5584,10 @@ fn handle_edges_mismatch(
 fn discard_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if let Some(cid) = args.get(0).int32_value(scope) {
         dom(scope).arena.discard_realm(cid);
+        // (…its channels and ports, which a document no longer fully active delivers nothing to — its signals stay: a
+        // removed frame's script, which its parent may still call, aborts what it made as before)
+        dom(scope).broadcast_channels.drop_realm(cid);
+        dom(scope).message_ports.drop_realm(cid);
         crate::agents::drop_realm(scope, cid);   // (…and the agent it was: nothing of it can run any more)
     }
 }
@@ -5592,6 +5606,7 @@ fn drop_realm(
         d.sw_router_rules.remove(&id); // (…and its static router rules)
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
+        d.forget_realm_objects(id);         // (…and its signals, ports and channels)
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
         crate::agents::drop_realm(scope, id);   // (…and the agent it was)
     }

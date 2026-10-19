@@ -65,4 +65,43 @@ RSpec.describe 'BroadcastChannel delivery' do
     session.click_button('ping')
     expect(session.evaluate_script('window.reply')).to eq('re:x')
   end
+
+  # A channel goes with its realm: the page it was made in left — a visit, a session reset — reaches it with nothing a
+  # later page of the same realm posts (Chrome: a page navigated away from receives nothing).
+  it "reaches no channel of a page left behind" do
+    session.execute_script(<<~JS)
+      localStorage.clear();
+      window.keep = new BroadcastChannel('x');
+      keep.onmessage = (e) => localStorage.setItem('ghost', 'page one got ' + e.data);
+    JS
+    session.visit('/two')
+    session.execute_script(<<~JS)
+      window.got = [];
+      new BroadcastChannel('x').onmessage = (e) => got.push(e.data);
+      new BroadcastChannel('x').postMessage('hi');
+    JS
+    poll_until { session.evaluate_script('window.got.length') == 1 }
+    session.execute_script("window.keep = new BroadcastChannel('q'); keep.onmessage = (e) => localStorage.setItem('ghost', 'reset got ' + e.data);")
+    session.reset_session!
+    session.visit('/three')
+    session.execute_script("window.got = []; new BroadcastChannel('q').onmessage = (e) => got.push(e.data); new BroadcastChannel('q').postMessage('hey')")
+    poll_until { session.evaluate_script('window.got.length') == 1 }
+    expect(session.evaluate_script("localStorage.getItem('ghost')")).to be_nil
+  end
+
+  # …and a post reaches every channel but the one it was posted on, whichever realm's method posted it.
+  it "delivers a frame's channel's post to the others alone, through another realm's method" do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const frame = document.createElement('iframe');
+      document.body.append(frame);
+      window.mine = new frame.contentWindow.BroadcastChannel('c');
+      mine.onmessage = (e) => got.push('self:' + e.data);
+      new BroadcastChannel('c').onmessage = (e) => got.push('other:' + e.data);
+      BroadcastChannel.prototype.postMessage.call(mine, 'm');
+    JS
+    poll_until { session.evaluate_script('window.got.length') > 0 }
+    session.evaluate_script('1')
+    expect(session.evaluate_script('window.got')).to eq(['other:m'])
+  end
 end

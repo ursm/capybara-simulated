@@ -12,10 +12,12 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::dom::{dom, register};
+use crate::dom::{dom, realm_id, register};
 
 #[derive(Default)]
 struct Port {
+    // The realm that made it, which takes it with it.
+    realm: i32,
     object: Option<v8::Weak<v8::Value>>,
     peer: Option<u64>,
     enabled: bool,
@@ -42,7 +44,7 @@ pub(crate) struct Ports {
 }
 
 impl Ports {
-    fn make(&mut self, object: Option<v8::Weak<v8::Value>>) -> u64 {
+    fn make(&mut self, realm: i32, object: Option<v8::Weak<v8::Value>>) -> u64 {
         // (…the ports no object names any more let go of as the registry doubles: collected ones)
         if self.of.len() >= self.sweep_at.max(64) {
             let gone: Vec<u64> = self.of.iter().filter(|(_, p)| p.object.as_ref().is_some_and(v8::Weak::is_empty)).map(|(id, _)| *id).collect();
@@ -52,13 +54,22 @@ impl Ports {
             self.sweep_at = self.of.len() * 2;
         }
         self.next += 1;
-        self.of.insert(self.next, Port { object, ..Port::default() });
+        self.of.insert(self.next, Port { realm, object, ..Port::default() });
         self.next
     }
     // The isolate's slots go after V8 has disposed it, and a weak handle's drop resets its node, freed memory by then:
     // let go of whole (as the Dom's other weak handles are).
     pub(crate) fn leak_weak_handles(&mut self) {
         std::mem::forget(std::mem::take(&mut self.of));
+    }
+    // A realm's ports, gone with it — its page left, the session reset, its frame removed: their entanglements and the
+    // ends they held let go of, so a page that reuses its realm (the main one's), and the channel names it makes again,
+    // never reaches a port of the one before.
+    pub(crate) fn drop_realm(&mut self, cid: i32) {
+        let gone: Vec<u64> = self.of.iter().filter(|(_, p)| p.realm == cid).map(|(id, _)| *id).collect();
+        for id in gone {
+            self.forget(id);
+        }
     }
     fn forget(&mut self, id: u64) {
         let Some(port) = self.of.remove(&id) else { return };
@@ -246,7 +257,8 @@ fn messages_value<'s>(scope: &mut v8::PinScope<'s, '_>, list: &VecDeque<u64>) ->
 // __dom.portNew(port) -> the number of `port`, a new one entangled with none, disabled.
 fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let weak = v8::Weak::new(scope, args.get(0));
-    rv.set_double(dom(scope).message_ports.make(Some(weak)) as f64);
+    let realm = realm_id(scope, &args);
+    rv.set_double(dom(scope).message_ports.make(realm, Some(weak)) as f64);
 }
 // __dom.portEntangle(a, b): two new ports entangled — a MessageChannel's.
 fn entangle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -348,14 +360,14 @@ mod tests {
     #[test]
     fn moves_an_entanglement_and_an_end_onto_the_port_a_transfer_makes() {
         let mut p = Ports::default();
-        let (a, b, moved) = (p.make(None), p.make(None), p.make(None));
+        let (a, b, moved) = (p.make(0, None), p.make(0, None), p.make(0, None));
         p.of.get_mut(&a).unwrap().peer = Some(b);
         p.of.get_mut(&b).unwrap().peer = Some(a);
         assert_eq!(p.transfer(a, moved), None);
         assert!(p.of[&a].detached && p.of[&a].peer.is_none());
         assert_eq!((p.of[&moved].peer, p.of[&b].peer), (Some(b), Some(moved)));
         // (…a remote one's end goes with it, no longer one this isolate gave up)
-        let (r, r2) = (p.make(None), p.make(None));
+        let (r, r2) = (p.make(0, None), p.make(0, None));
         p.of.get_mut(&r).unwrap().remote_end = Some("c/0".into());
         p.ends.insert("c/0".into(), r);
         p.given.insert("c/0".into());
@@ -366,7 +378,7 @@ mod tests {
     #[test]
     fn closes_a_port_leaving_its_peer_open_and_its_end_let_go_of() {
         let mut p = Ports::default();
-        let (a, b) = (p.make(None), p.make(None));
+        let (a, b) = (p.make(0, None), p.make(0, None));
         p.of.get_mut(&a).unwrap().peer = Some(b);
         p.of.get_mut(&b).unwrap().peer = Some(a);
         p.of.get_mut(&a).unwrap().remote_end = Some("c/1".into());

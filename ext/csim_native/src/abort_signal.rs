@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use crate::dom::{dom, register, register_fast};
+use crate::dom::{dom, realm_id, register, register_fast};
 
 #[derive(Default)]
 struct Signal {
@@ -109,21 +109,35 @@ impl Graph {
 pub(crate) struct AbortSignals {
     graph: Graph,
     objects: HashMap<u64, v8::Weak<v8::Value>>,
+    // The realm each signal is of, which takes it with it.
+    realms: HashMap<u64, i32>,
     // The size at which the next sweep lets go of the collected signals: twice what the last one left.
     sweep_at: usize,
 }
 
 impl AbortSignals {
-    fn make(&mut self, scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Value>, made: impl FnOnce(&mut Graph) -> u64) -> u64 {
+    fn make(&mut self, scope: &mut v8::PinScope<'_, '_>, realm: i32, object: v8::Local<'_, v8::Value>, made: impl FnOnce(&mut Graph) -> u64) -> u64 {
         if self.objects.len() >= self.sweep_at.max(64) {
             self.objects.retain(|_, w| !w.is_empty());
-            let objects = &self.objects;
-            self.graph.sweep(|id| objects.contains_key(&id));
+            self.sweep();
             self.sweep_at = self.objects.len() * 2;
         }
         let id = made(&mut self.graph);
         self.objects.insert(id, v8::Weak::new(scope, object));
+        self.realms.insert(id, realm);
         id
+    }
+    // (…the graph and the realms let go of the signals no object names any more)
+    fn sweep(&mut self) {
+        let objects = &self.objects;
+        self.graph.sweep(|id| objects.contains_key(&id));
+        self.realms.retain(|id, _| objects.contains_key(id));
+    }
+    // A realm's signals, gone with it — its page left, the session reset, its frame removed.
+    pub(crate) fn drop_realm(&mut self, cid: i32) {
+        let realms = &self.realms;
+        self.objects.retain(|id, _| realms.get(id) != Some(&cid));
+        self.sweep();
     }
     // The isolate's slots go after V8 has disposed it, and a weak handle's drop resets its node, freed memory by then:
     // let go of whole (as the Dom's other weak handles are).
@@ -157,17 +171,19 @@ fn objects_of<'s>(scope: &mut v8::PinScope<'s, '_>, ids: &[u64]) -> v8::Local<'s
     v8::Array::new_with_elements(scope, &live)
 }
 // A new signal of `object`, made in the graph by `made`.
-fn make_signal(scope: &mut v8::PinScope<'_, '_>, object: v8::Local<'_, v8::Value>, made: impl FnOnce(&mut Graph) -> u64) -> u64 {
+fn make_signal(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, made: impl FnOnce(&mut Graph) -> u64) -> u64 {
+    let object = args.get(0);
     // (…the registry out of the Dom for the weak handle's making, which needs the scope)
+    let realm = realm_id(scope, args);
     let mut signals = std::mem::take(&mut dom(scope).abort_signals);
-    let id = signals.make(scope, object, made);
+    let id = signals.make(scope, realm, object, made);
     dom(scope).abort_signals = signals;
     id
 }
 
 // __dom.abortSignalNew(signal) -> the number of `signal`, a new one not aborted and of no source.
 fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_double(make_signal(scope, args.get(0), Graph::make) as f64);
+    rv.set_double(make_signal(scope, &args, Graph::make) as f64);
 }
 // __dom.abortSignalFirstAborted(sources) -> the index of the first of the sources (their numbers) aborted already, or
 // -1 for none.
@@ -179,7 +195,7 @@ fn first_aborted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 // none of them aborted.
 fn any_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let sources = ids_arg(scope, args.get(1));
-    rv.set_double(make_signal(scope, args.get(0), |graph| graph.any(&sources)) as f64);
+    rv.set_double(make_signal(scope, &args, |graph| graph.any(&sources)) as f64);
 }
 // __dom.abortSignalAbort(id) -> the signals depending on it that abort with it, in the order their abort steps run after
 // its own — or null where it is aborted already and nothing aborts.
