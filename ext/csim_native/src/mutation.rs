@@ -197,10 +197,13 @@ const STEP_REMOVED_FROM: u32 = 3;
 const STEP_SOURCE_INSERTED: u32 = 4;
 
 // What a change of children says of itself as it returns, in the flags every realm's bindings read with no call
-// (`changeFlags`): whether the parent was connected as it began, and whether it was refused — a replacement whose
-// reference child the removal's own steps took out (a frame's unload): its removal stands, and it throws.
+// (`changeFlags`): whether the parent was connected as it began, whether it was refused — a replacement whose reference
+// child the removal's own steps took out (a frame's unload): its removal stands, and it throws — and whether what it
+// inserted asks a select for a reset (validity.rs `affects_selectedness`), which the bindings do once its connection steps ran.
+// An engine algorithm's changes say the first and the last of each (`changes_value`).
 const CHANGE_CONNECTED: u32 = 1;
 const CHANGE_REFUSED: u32 = 1 << 1;
+const CHANGE_ASKS_RESET: u32 = 1 << 2;
 
 // What `removing` names: no child (an insertion), every child (replace all), or the one.
 #[derive(Clone, Copy)]
@@ -223,13 +226,6 @@ fn step(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Array>, which
     let f = v8::Local::<v8::Function>::try_from(steps.get_index(scope, which)?).ok()?;
     let undefined = v8::undefined(scope).into();
     f.call(scope, undefined, args).map(|_| ())
-}
-
-// Does a change of `nodes` under `parent` touch a select's options — an option or an optgroup among them, or a select or
-// an optgroup the parent — so that its select is asked for a reset? (A gate: no other change calls the step.)
-fn affects_selectedness(arena: &RealmArena, parent: NodeId, nodes: &[NodeId]) -> bool {
-    let named = |id: NodeId, names: &[&str]| arena.get(id).is_some_and(|n| names.iter().any(|&name| n.is_html_named(name)));
-    named(parent, &["select", "optgroup"]) || nodes.iter().any(|&n| named(n, &["option", "optgroup"]))
 }
 
 // A removed subtree's removing steps: its frames' browsing contexts discarded (the bindings'), then the engine's — a
@@ -292,14 +288,14 @@ fn change_children(
         realm(scope, cid).parser_form_owners_removed(r);
         removing_steps(scope, steps, r)?;
     }
-    if !removed.is_empty() && affects_selectedness(realm(scope, cid), parent, &removed) {
-        let parent_object = node_value(scope, Some(parent));
+    // (…the select the removal asked for a reset, where any, and the options it changed — the bindings tell them)
+    if let Some((select, changed)) = realm(scope, cid).ask_for_reset(parent, &removed, false) {
+        let select = node_value(scope, Some(select));
         if crate::dom::factory_threw(scope) {
             return None;
         }
-        let list = nodes_value(scope, cid, &removed);
-        let all = v8::Boolean::new(scope, matches!(removing, Removing::All)).into();
-        step(scope, steps, STEP_REMOVED_FROM, &[parent_object, list, all])?;
+        let changed = nodes_value(scope, cid, &changed);
+        step(scope, steps, STEP_REMOVED_FROM, &[select, changed])?;
     }
     if adopt_all {
         let parent_object = node_value(scope, Some(parent));
@@ -334,7 +330,8 @@ fn change_children(
     if (!removed.is_empty() || !added.is_empty()) && !record_child_list(scope, caller, parent, added, &removed, siblings, Some(renewals)) {
         return None;
     }
-    let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 });
+    let asks = realm(scope, cid).affects_selectedness(parent, added);
+    let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 }) | (if asks { CHANGE_ASKS_RESET } else { 0 });
     crate::dom::dom(scope).arena.change_flags.set(flags);
     Some(Ok(removed))
 }
@@ -396,7 +393,9 @@ pub(crate) fn changes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, chan
         if crate::dom::factory_threw(scope) {
             return out;
         }
-        out.push(v8::Boolean::new(scope, *connected).into());
+        let asks = realm(scope, cid).affects_selectedness(*parent, added);
+        let flags = (if *connected { CHANGE_CONNECTED } else { 0 }) | (if asks { CHANGE_ASKS_RESET } else { 0 });
+        out.push(v8::Integer::new_from_unsigned(scope, flags).into());
     }
     out
 }

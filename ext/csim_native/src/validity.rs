@@ -530,6 +530,12 @@ impl RealmArena {
         }
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
     }
+    // Whether a change of `nodes` under `parent` touches a select's options — an option or an optgroup among them, or a
+    // select or an optgroup the parent — so that its select is asked for a reset.
+    pub(crate) fn affects_selectedness(&self, parent: NodeId, nodes: &[NodeId]) -> bool {
+        let named = |id: NodeId, names: &[&str]| self.get(id).is_some_and(|n| names.iter().any(|&name| n.is_html_named(name)));
+        named(parent, &["select", "optgroup"]) || nodes.iter().any(|&n| named(n, &["option", "optgroup"]))
+    }
     // HTML's "ask for a reset" (§4.10.7) of a tree change: `nodes` inserted into `parent` (`inserted`), or removed from
     // it. Where one of them is an option or an optgroup, or `parent` is a select or an optgroup, the select they are (or
     // were) in runs the selectedness setting algorithm — a just-inserted selected option winning over the incumbent: the
@@ -537,11 +543,7 @@ impl RealmArena {
     // `selected` attribute first.
     // The select, and the options whose selectedness changed; None where no select is affected.
     pub(crate) fn ask_for_reset(&mut self, parent: NodeId, nodes: &[NodeId], inserted: bool) -> Option<(NodeId, Vec<NodeId>)> {
-        let named = |a: &Self, id: NodeId, name: &str| a.get(id).is_some_and(|n| n.is_html_named(name));
-        let affects = named(self, parent, "select")
-            || named(self, parent, "optgroup")
-            || nodes.iter().any(|&n| named(self, n, "option") || named(self, n, "optgroup"));
-        if !affects {
+        if !self.affects_selectedness(parent, nodes) {
             return None;
         }
         let mut at = Some(parent);
