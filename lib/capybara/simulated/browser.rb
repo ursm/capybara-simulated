@@ -11564,8 +11564,15 @@ module Capybara
         end
         opts['touch'] = true if @touch_input
         opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
-        controller = sw_client_controller_for(@current_url.to_s) if @current_url.to_s.match?(%r{\Ahttps?://}i)
-        opts['controller'] = controller if controller
+        csp = (@last_response_headers || {}).select {|k, _| k.to_s.casecmp?('content-security-policy') }.map {|_, v| header_text(v) }
+        opts['csp'] = csp.join(',') unless csp.empty?
+        # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
+        # navigation went to the network, as a navigation does not yet wait for its activation)
+        if @current_url.to_s.match?(%r{\Ahttps?://}i)
+          controller = sw_client_controller_for(@current_url.to_s)
+          controller = nil if controller && controller[1] && !@worker_init_lock.synchronize { @workers[controller[0]]&.dig(:sw_activated) }
+          opts['controller'] = controller if controller
+        end
         creator, @creator = @creator, nil
         if creator && @current_url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
           opts['creatorOrigin'] = creator[:origin]

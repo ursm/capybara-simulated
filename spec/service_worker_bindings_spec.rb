@@ -107,6 +107,9 @@ RSpec.describe 'Service Worker bindings' do
         when '/controlled'
           [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><script>window.__early = !!navigator.serviceWorker.controller;</script>']]
         when '/plain.js' then [200, {'content-type' => 'text/javascript'}, ["self.addEventListener('fetch', () => {});"]]
+        # (…and one its response's Content-Security-Policy sandboxes, an opaque origin's document)
+        when '/sandboxed'
+          [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts'}, ['<!doctype html><meta charset="utf-8"><p>s']]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -261,5 +264,9 @@ RSpec.describe 'Service Worker bindings' do
     poll_until { session.evaluate_script('globalThis.__out !== null') }
     session.visit '/controlled'
     expect(session.evaluate_script('[window.__early, navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL.replace(location.origin, "")]')).to eq([true, '/plain.js'])
+    # …but not one its response sandboxes: its origin is an opaque one (Chrome: `self.origin` "null"), which no
+    # registration's scope is of.
+    session.visit '/sandboxed'
+    expect(session.evaluate_script('[self.origin, navigator.serviceWorker.controller]')).to eq(['null', nil])
   end
 end

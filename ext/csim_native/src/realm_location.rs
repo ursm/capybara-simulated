@@ -128,6 +128,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setTargetHash", set_target_hash, context_id);
     register(scope, ns, "documentOrigin", document_origin, context_id);
     register(scope, ns, "frameOrigins", frame_origins_op, context_id);
+    register(scope, ns, "cspSandboxesOrigin", csp_sandboxes_origin, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
     register(scope, ns, "realmOrigin", realm_origin, context_id);
@@ -170,6 +171,12 @@ pub(crate) fn frame_origins(arena: &mut RealmArena, cid: i32, url: &str, sandbox
         None
     };
     (document, opaque_url.then_some("null"))
+}
+// __dom.cspSandboxesOrigin(csp) -> whether a document whose response's Content-Security-Policy is `csp` has an opaque
+// origin (`sandbox::opaque_origin`) — a top-level document's, which no container sandboxes.
+fn csp_sandboxes_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let csp = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(crate::sandbox::opaque_origin(Some(&csp), None));
 }
 // __dom.frameOrigins(url, sandbox, csp) -> `[document, location]` of `frame_origins`, each null for its URL's.
 fn frame_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
