@@ -97,7 +97,7 @@ impl RealmLocation {
         if origin != "null" {
             return origin.to_owned();
         }
-        self.origin_key.insert(format!("opaque:realm{cid}")).clone()
+        self.origin_key.insert(format!("{OPAQUE_KEY}realm{cid}")).clone()
     }
     // The fragments to look for the target element by: the target fragment as it stands, then percent-decoded and UTF-8
     // decoded (the one when they say the same) — none for an empty fragment.
@@ -136,6 +136,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "cspSandboxesOrigin", csp_sandboxes_origin, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
+    register(scope, ns, "originStorageKey", origin_storage_key, context_id);
+    register(scope, ns, "keyOrigin", key_origin, context_id);
     register(scope, ns, "realmOrigin", realm_origin, context_id);
     register(scope, ns, "realmOriginKey", realm_origin_key, context_id);
     register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
@@ -212,6 +214,29 @@ fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let cid = realm_id(scope, &args);
     let key = realm(scope, cid).location.origin_key(cid);
     rv.set(v8::String::new(scope, &key).unwrap().into());
+}
+
+// What an opaque origin's key begins with.
+const OPAQUE_KEY: &str = "opaque:";
+
+// __dom.originStorageKey() -> the realm's storage key ("obtain a storage key"): its origin's key — null for an opaque
+// origin (a sandboxed frame's, a data: worker's), whose every storage request (IndexedDB, Cache Storage, Web Locks) is
+// a SecurityError.
+fn origin_storage_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let key = realm(scope, cid).location.origin_key(cid);
+    if key.starts_with(OPAQUE_KEY) {
+        return rv.set_null();
+    }
+    rv.set(v8::String::new(scope, &key).unwrap().into());
+}
+
+// __dom.keyOrigin(key) -> the origin an origin key serializes (what MessageEvent.origin exposes): "null" for an opaque
+// one's, a tuple origin's itself, '' for none.
+fn key_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = if args.get(0).is_string() { args.get(0).to_rust_string_lossy(scope) } else { String::new() };
+    let origin = if key.starts_with(OPAQUE_KEY) { "null" } else { &key };
+    rv.set(v8::String::new(scope, origin).unwrap().into());
 }
 
 // …and realm `realm`'s, whichever realm asks — what a WindowProxy of another realm's window and a postMessage across

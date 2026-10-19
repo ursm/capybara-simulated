@@ -529,6 +529,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretWordStep", caret_word_step, context_id);
     crate::dom::register(scope, ns, "caretWord", caret_word, context_id);
     crate::dom::register(scope, ns, "caretEdge", caret_edge, context_id);
+    crate::dom::register(scope, ns, "caretAtom", caret_atom, context_id);
+}
+
+// __dom.caretAtom(nid) -> whether the element is an atom a caret is placed beside, never in (`CARET_VOID_TAGS`): what a
+// press on one sets no caret inside.
+fn caret_atom(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let atom = crate::dom::realm(scope, cid).get(id).is_some_and(|n| n.kind == NodeKind::Element && CARET_VOID_TAGS.contains(&&*n.local_name));
+    rv.set_bool(atom);
 }
 
 // [nodes, offsets…] for points of `nodes` — the nodes as `nodes_value` answers them.
