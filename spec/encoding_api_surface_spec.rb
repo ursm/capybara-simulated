@@ -122,7 +122,7 @@ RSpec.describe 'Encoding API surface' do
   # Whether a SharedArrayBuffer serializes is the realm's capability, not the page's `crossOriginIsolated`: one it
   # redefined does not make a shared WebAssembly.Memory's buffer clonable (HTML StructuredSerializeInternal: a
   # DataCloneError where the realm is not cross-origin isolated).
-  it "refuses to clone a shared buffer however the page redefines crossOriginIsolated" do
+  it 'refuses to clone a shared buffer however the page redefines crossOriginIsolated' do
     got = session.evaluate_script(<<~JS)
       (() => {
         Object.defineProperty(window, 'crossOriginIsolated', {value: true});

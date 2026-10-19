@@ -11,6 +11,7 @@ use crate::dom::{
     STATE_FOCUSED, STATE_FORM_ASSOCIATED, STATE_INDETERMINATE, STATE_IS_VALUE, STATE_MODAL, STATE_POPOVER_OPEN,
     STATE_SELECTED,
 };
+use crate::reflect_keywords::{BUTTON_TYPE, TABLES};
 
 const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
 
@@ -107,24 +108,6 @@ fn dir_keyword(raw: &str) -> Option<Dir> {
     [("ltr", Dir::Ltr), ("rtl", Dir::Rtl), ("auto", Dir::Auto)].into_iter().find(|(k, _)| raw.eq_ignore_ascii_case(k)).map(|(_, d)| d)
 }
 impl NodeData {
-    // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
-    // state (`button_type`).
-    pub(crate) fn is_submit_button(&self) -> bool {
-        if self.is_html_named("input") {
-            return matches!(self.input_type(), "submit" | "image");
-        }
-        self.is_html_named("button") && self.button_type() == "submit"
-    }
-    // A `<button>`'s type state: the one its `type` names — `submit`, `reset` or `button`, ASCII case-insensitively —
-    // else the Auto state's (a missing or invalid one): `button` for a button `command` / `commandfor` makes a command
-    // button, `submit` for any other.
-    pub(crate) fn button_type(&self) -> &'static str {
-        let ty = self.plain_attr("type").unwrap_or("");
-        if let Some(state) = ["submit", "reset", "button"].into_iter().find(|k| ty.eq_ignore_ascii_case(k)) {
-            return state;
-        }
-        if self.plain_attr("command").is_some() || self.plain_attr("commandfor").is_some() { "button" } else { "submit" }
-    }
     // An `<input>`'s type state: its `type` attribute, ASCII-lowercased, when that names one; else Text.
     pub(crate) fn input_type(&self) -> &'static str {
         crate::input_types::state(self.plain_attr("type"))
@@ -136,6 +119,28 @@ impl NodeData {
 }
 
 impl RealmArena {
+    // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` whose type
+    // is `submit` (`button_type`).
+    pub(crate) fn is_submit_button(&self, id: NodeId) -> bool {
+        let Some(n) = self.get(id) else { return false };
+        if n.is_html_named("input") {
+            return matches!(n.input_type(), "submit" | "image");
+        }
+        n.is_html_named("button") && self.button_type(id) == "submit"
+    }
+    // A `<button>`'s type, as its `type` IDL attribute answers it: the state its `type` names — `submit`, `reset` or
+    // `button`, ASCII case-insensitively (reflect_keywords.rs `BUTTON_TYPE`) — else, in the Auto state (a missing or
+    // invalid one), `submit` for a submit button — one no `command` / `commandfor` makes a command button, whose parent
+    // is no `select` (a customizable select's button: HTML, over Chrome's `submit`) — and `button` for any other.
+    pub(crate) fn button_type(&self, id: NodeId) -> &'static str {
+        let Some(n) = self.get(id) else { return "submit" };
+        if let Some(state) = TABLES[BUTTON_TYPE].state(n.plain_attr("type")) {
+            return state;
+        }
+        let command = n.plain_attr("command").is_some() || n.plain_attr("commandfor").is_some();
+        let in_select = n.parent.and_then(|p| self.get(p)).is_some_and(|p| p.is_html_named("select"));
+        if command || in_select { "button" } else { "submit" }
+    }
     // The parent, or — for a shadow root — its host.
     fn shadow_including_parent(&self, id: NodeId) -> Option<NodeId> {
         let node = self.get(id)?;
@@ -361,7 +366,7 @@ impl RealmArena {
                 }
             }
 
-            if n.is_submit_button() && !self.in_select(c) {
+            if self.is_submit_button(c) && !self.in_select(c) {
                 if let Some(form) = self.form_owner(c) {
                     facts.defaults.entry(form).or_insert(c);
                 }
@@ -1303,7 +1308,7 @@ impl RealmArena {
         if n.local_name == local_name!("input") && matches!(n.input_type(), "checkbox" | "radio") {
             return n.plain_attr("checked").is_some();
         }
-        n.is_submit_button() && self.form_owner(id).is_some_and(|f| self.default_button_of(f) == Some(id))
+        self.is_submit_button(id) && self.form_owner(id).is_some_and(|f| self.default_button_of(f) == Some(id))
     }
 }
 

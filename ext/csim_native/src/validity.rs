@@ -197,7 +197,7 @@ impl RealmArena {
         let candidate = face
             || match &*n.local_name {
                 "input" => !matches!(n.input_type(), "hidden" | "reset" | "button"),
-                "button" => n.is_submit_button(),
+                "button" => self.is_submit_button(id),
                 "select" | "textarea" => true,
                 _ => false,
             };
@@ -1146,18 +1146,19 @@ fn initialise_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set(crate::dom::nodes_value(scope, cid, &changed));
 }
 
-// __dom.isSubmitButton(nid) -> whether the element is a submit button (`element_state::is_submit_button`).
+// __dom.isSubmitButton(nid) -> whether the element is a submit button (element_state.rs `is_submit_button`).
 fn is_submit_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    rv.set_bool(crate::dom::realm(scope, cid).get(id).is_some_and(|n| n.is_submit_button()));
+    rv.set_bool(crate::dom::realm(scope, cid).is_submit_button(id));
 }
 
 // __dom.buttonType(nid) -> a `<button>`'s type state, what its `type` IDL attribute reflects (`button_type`).
 fn button_type(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let Some(state) = crate::dom::realm(scope, cid).get(id).map(|n| n.button_type()) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let Some(state) = arena.get(id).is_some().then(|| arena.button_type(id)) else { return };
     if let Some(state) = v8::String::new(scope, state) {
         rv.set(state.into());
     }

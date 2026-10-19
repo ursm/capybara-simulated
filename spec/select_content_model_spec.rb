@@ -110,4 +110,22 @@ RSpec.describe 'customizable-select content model' do
     expect(session.find('#od', visible: :all).disabled?).to be(true)
     expect(session.find('#oe', visible: :all).disabled?).to be(false)
   end
+
+  # A `<button>` whose parent is a `<select>` — a customizable select's — is no submit button in the Auto state (HTML: "and
+  # the parent node is not a select element"): its `type` is `button`, it is barred from constraint validation, and a
+  # click submits nothing. One deeper in the select is a submit button as any is. (Chrome 155 still answers
+  # `["submit", true]` and submits — the spec wins.)
+  it "takes a select's own button for no submit button" do
+    visit_html('<!DOCTYPE html><form><select><button id=own>x</button><div><button id=deep>y</button></div><option>a</select></form>')
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const own = document.getElementById('own'), deep = document.getElementById('deep'), submits = [];
+        document.forms[0].addEventListener('submit', (e) => { e.preventDefault(); submits.push(e.submitter.id); });
+        own.click();
+        deep.click();
+        return [own.type, own.willValidate, deep.type, deep.willValidate, submits];
+      })()
+    JS
+    expect(got).to eq(['button', false, 'submit', true, ['deep']])
+  end
 end

@@ -136,8 +136,8 @@ fn activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         if n.is_html_named("input") && n.input_type() == "image" {
             steps |= IMAGE;
         }
-        let reset = if n.is_html_named("button") { n.button_type() == "reset" } else { n.is_html_named("input") && n.input_type() == "reset" };
-        if connected && !arena.is_actually_disabled(act) && (n.is_submit_button() || reset) {
+        let reset = if n.is_html_named("button") { arena.button_type(act) == "reset" } else { n.is_html_named("input") && n.input_type() == "reset" };
+        if connected && !arena.is_actually_disabled(act) && (arena.is_submit_button(act) || reset) {
             form = arena.form_owner(act);
             if form.is_some() {
                 steps |= if reset { RESET } else { SUBMIT };
@@ -203,7 +203,7 @@ pub(crate) fn invoked_popover(arena: &RealmArena, id: NodeId) -> Option<NodeId> 
     if !button && !(n.is_html_named("input") && n.input_has(crate::input_types::BUTTON)) {
         return None;
     }
-    if arena.is_actually_disabled(id) || (n.is_submit_button() && arena.form_owner(id).is_some()) {
+    if arena.is_actually_disabled(id) || (arena.is_submit_button(id) && arena.form_owner(id).is_some()) {
         return None;
     }
     let popover = |p: NodeId| arena.get(p).is_some_and(crate::popovers::is_popover);
