@@ -88,7 +88,8 @@ fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let origin_key = args.get(2).to_rust_string_lossy(scope);
     let channels = &mut dom(scope).broadcast_channels;
     if channels.of.len() >= channels.sweep_at.max(64) {
-        channels.retain(|c| !c.closed && !c.object.is_empty());
+        // (…the collected ones: a closed one whose object lives on is still closed, its post a throw)
+        channels.retain(|c| !c.object.is_empty());
         channels.sweep_at = channels.of.len() * 2;
     }
     channels.next += 1;

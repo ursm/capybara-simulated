@@ -104,4 +104,40 @@ RSpec.describe 'BroadcastChannel delivery' do
     session.evaluate_script('1')
     expect(session.evaluate_script('window.got')).to eq(['other:m'])
   end
+
+  # A closed channel's post throws however many channels were made and closed since — the registry letting go of the
+  # collected ones keeps a closed one closed.
+  it "throws for a closed channel's post after many others came and went" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const c = new BroadcastChannel('n');
+        c.close();
+        for (let i = 0; i < 300; i++) new BroadcastChannel('m' + i).close();
+        try { c.postMessage('x'); return 'none'; } catch (e) { return e.name; }
+      })()
+    JS
+    expect(got).to eq('InvalidStateError')
+  end
+
+  # A load into the same realm — a `javascript:` URL frame's result — keeps its Window, and the channel, the port and the
+  # signal its script made: they go with the context, not with the document it loads.
+  it "keeps what a javascript: URL frame's script made as its result loads" do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const frame = document.createElement('iframe');
+      frame.src = "javascript:window.bc = new BroadcastChannel('j'); bc.onmessage = (e) => parent.got.push('bc:' + e.data); " +
+        "window.ac = new AbortController(); ac.signal.onabort = () => parent.got.push('abort'); " +
+        "window.mc = new MessageChannel(); mc.port2.onmessage = (e) => parent.got.push('port:' + e.data); '<p>loaded</p>'";
+      document.body.append(frame);
+    JS
+    poll_until { session.evaluate_script("typeof document.querySelector('iframe').contentWindow.ac") == 'object' }
+    session.execute_script(<<~JS)
+      const w = document.querySelector('iframe').contentWindow;
+      new BroadcastChannel('j').postMessage('hi');
+      w.ac.abort();
+      w.mc.port1.postMessage('pm');
+    JS
+    poll_until { session.evaluate_script('window.got.length') >= 3 }
+    expect(session.evaluate_script('window.got').sort).to eq(%w[abort bc:hi port:pm])
+  end
 end

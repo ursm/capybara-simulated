@@ -2469,9 +2469,11 @@ impl Drop for Dom {
 }
 
 impl Dom {
-    // A realm's AbortSignals, MessagePorts and BroadcastChannels let go of with it.
+    // A realm's MessagePorts and BroadcastChannels let go of with its context — a frame's removed or disposed, the main
+    // realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and the channel names it makes again, never
+    // reaches one of the context before. Not as its arena resets: a load into the same realm (a `javascript:` URL's
+    // result) keeps the Window, and what its script made with it.
     pub(crate) fn forget_realm_objects(&mut self, cid: i32) {
-        self.abort_signals.drop_realm(cid);
         self.message_ports.drop_realm(cid);
         self.broadcast_channels.drop_realm(cid);
     }
@@ -2967,6 +2969,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // reuses id 0). Takes an explicit id (the realm being dropped), not the caller's own.
     register(scope, ns, "dropRealm", drop_realm, context_id);
     register(scope, ns, "discardRealm", discard_realm, context_id);
+    register(scope, ns, "forgetRealmObjects", forget_realm_objects, context_id);
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
     // Native text metrics (fontations) for inline layout: register a font (fontconfig path or in-memory
@@ -5543,7 +5546,6 @@ fn reset_arena(
     dom(scope).arena.forget_reactions_of(cid);
     crate::text_codec::drop_realm(scope, cid);   // (…a page's stream decoders die with it)
     crate::agents::drop_realm(scope, cid);   // (…and the agent it was: its IndexedDB connections closed, its locks let go)
-    dom(scope).forget_realm_objects(cid);   // (…and its signals, ports and channels, which a page reusing the id never reaches)
     dom(scope).walk_reuse.remove(&cid);
     dom(scope).caret_moves.remove(&cid);
     dom(scope).sw_router_rules.remove(&cid);   // (…a service worker's static router rules, which a new script registers anew)
@@ -5581,13 +5583,19 @@ fn handle_edges_mismatch(
 // disposes a frame realm, so a page's frames don't accumulate across visits. Main (id 0) is not dropped — it reuses
 // its id across resets, cleared per page by resetArena.
 // __dom.discardRealm(cid) — realm `cid`'s context is disposed (`RealmArena::discard_realm`).
+// __dom.forgetRealmObjects(cid) — realm `cid`'s context retired (the main realm's, as the host resets it for the next
+// page): its ports and channels let go of (`Dom::forget_realm_objects`).
+fn forget_realm_objects(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(cid) = args.get(0).int32_value(scope) {
+        dom(scope).forget_realm_objects(cid);
+    }
+}
 fn discard_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if let Some(cid) = args.get(0).int32_value(scope) {
         dom(scope).arena.discard_realm(cid);
         // (…its channels and ports, which a document no longer fully active delivers nothing to — its signals stay: a
         // removed frame's script, which its parent may still call, aborts what it made as before)
-        dom(scope).broadcast_channels.drop_realm(cid);
-        dom(scope).message_ports.drop_realm(cid);
+        dom(scope).forget_realm_objects(cid);
         crate::agents::drop_realm(scope, cid);   // (…and the agent it was: nothing of it can run any more)
     }
 }
@@ -5606,7 +5614,8 @@ fn drop_realm(
         d.sw_router_rules.remove(&id); // (…and its static router rules)
         d.arenas.remove(&id);          // (…and its arena object, which holds its global's `__dom`)
         d.clone_shadow_hooks.remove(&id);   // (…and its shadow root cloning hook)
-        d.forget_realm_objects(id);         // (…and its signals, ports and channels)
+        d.forget_realm_objects(id);         // (…and its ports and channels, and its signals)
+        d.abort_signals.drop_realm(id);
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
         crate::agents::drop_realm(scope, id);   // (…and the agent it was)
     }
