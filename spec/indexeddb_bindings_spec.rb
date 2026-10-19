@@ -176,11 +176,13 @@ RSpec.describe 'IndexedDB bindings' do
     session.visit '/'
     out = probe(session, <<~JS)
       const db = await open('messages', (db) => db.createObjectStore('s'));
-      let tx;
+      // (…its store taken in the task that made it: a put on it is refused for the transaction's not being active,
+      // whether or not it has also committed by the second message — the worker's thread decides when that one lands)
+      let store;
       return new Promise((resolve) => {
         new Worker('/worker.js').onmessage = (e) => {
-          if (e.data === 1) tx = db.transaction('s', 'readwrite');
-          else resolve(err(() => tx.objectStore('s').put(1, 1)));
+          if (e.data === 1) store = db.transaction('s', 'readwrite').objectStore('s');
+          else resolve(err(() => store.put(1, 1)));
         };
       });
     JS
