@@ -844,6 +844,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "canvasDraw", canvas_draw, context_id);
     crate::dom::register(scope, ns, "canvasClip", canvas_clip, context_id);
     crate::dom::register(scope, ns, "canvasConvert", canvas_convert, context_id);
+    crate::dom::register(scope, ns, "pixelsUnorm8", pixels_unorm8, context_id);
+    crate::dom::register(scope, ns, "pixelsFloat16", pixels_float16, context_id);
     crate::dom::register(scope, ns, "canvasBlit", canvas_blit, context_id);
     crate::dom::register(scope, ns, "bitmapPixels", bitmap_pixels_op, context_id);
 }
@@ -1136,6 +1138,63 @@ fn canvas_clip(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // "srgb" and "display-p3" by the matrix between them (a wide colour clipped into sRGB, as a browser reads one back), each
 // one's linear counterpart ("srgb-linear", "display-p3-linear") through the sRGB transfer function both share, decoded
 // to its base space first and encoded from it last; its alpha untouched, nothing done where they match.
+// An ImageData's components between its two pixel formats (HTML §4.12.5.1.15): "rgba-float16" ones — IEEE half-precision,
+// as a Float16Array holds them (little-endian) — and "rgba-unorm8" ones, a byte each.
+// A half's value.
+fn half_value(bits: u16) -> f64 {
+    let sign = if bits & 0x8000 != 0 { -1.0 } else { 1.0 };
+    let exponent = i32::from((bits >> 10) & 0x1f);
+    let fraction = f64::from(bits & 0x3ff);
+    sign * match exponent {
+        0 => fraction * 2f64.powi(-24),
+        0x1f if fraction == 0.0 => f64::INFINITY,
+        0x1f => f64::NAN,
+        _ => (1024.0 + fraction) * 2f64.powi(exponent - 25),
+    }
+}
+// …and a value's half, rounded to the nearest, ties to even (ECMA-262 ToFloat16 — what writing to a Float16Array does).
+fn half_bits(value: f64) -> u16 {
+    let sign: u16 = if value.is_sign_negative() { 0x8000 } else { 0 };
+    let a = value.abs();
+    if a.is_nan() {
+        return 0x7e00;
+    }
+    if a < 2f64.powi(-14) {
+        // (…a subnormal, its step 2^-24: one that rounds up to 1024 steps is the least normal half, which those bits are)
+        return sign | (a * 2f64.powi(24)).round_ties_even() as u16;
+    }
+    let mut exponent = a.log2().floor() as i32;
+    // (…log2's rounding on the edge of a power of two put right)
+    if 2f64.powi(exponent) > a {
+        exponent -= 1;
+    } else if 2f64.powi(exponent + 1) <= a {
+        exponent += 1;
+    }
+    let mut significand = (a * 2f64.powi(10 - exponent)).round_ties_even();
+    if significand >= 2048.0 {
+        significand /= 2.0;
+        exponent += 1;
+    }
+    if exponent > 15 {
+        return sign | 0x7c00;
+    }
+    sign | (((exponent + 15) as u16) << 10) | (significand as u16 - 1024)
+}
+// __dom.pixelsUnorm8(float16Components) -> a new ArrayBuffer of each component scaled to a byte (`byte(v * 255)`) — what
+// `Uint8ClampedArray.from(data, (v) => v * 255)` makes, at no call per component.
+fn pixels_unorm8(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let halves = bytes_read(args.get(0), None).unwrap_or_default();
+    let bytes: Vec<u8> = halves.chunks_exact(2).map(|h| byte(half_value(u16::from_le_bytes([h[0], h[1]])) * 255.0)).collect();
+    rv.set(crate::webcrypto::array_buffer(scope, bytes));
+}
+// __dom.pixelsFloat16(bytes) -> a new ArrayBuffer of each byte over 255 as a half (`half_bits(v / 255)`) — what
+// `Float16Array.from(bytes, (v) => v / 255)` makes.
+fn pixels_float16(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let bytes = bytes_read(args.get(0), None).unwrap_or_default();
+    let halves: Vec<u8> = bytes.iter().flat_map(|&b| half_bits(f64::from(b) / 255.0).to_le_bytes()).collect();
+    rv.set(crate::webcrypto::array_buffer(scope, halves));
+}
+
 fn canvas_convert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (from, to) = (args.get(1).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
     if from == to {
@@ -1256,6 +1315,20 @@ fn bitmap_pixels_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A half: 1, a half, the largest, past it infinity, the least subnormal; ties to even; every byte over 255 back to
+    // itself through a half, as a float16 ImageData keeps an 8-bit canvas's pixels.
+    #[test]
+    fn halves_round_to_the_nearest_even_and_keep_every_byte() {
+        assert_eq!((half_bits(1.0), half_bits(0.5), half_bits(65504.0), half_bits(65520.0)), (0x3c00, 0x3800, 0x7bff, 0x7c00));
+        assert_eq!((half_bits(2f64.powi(-24)), half_bits(-0.0), half_bits(f64::NAN) & 0x7c00), (1, 0x8000, 0x7c00));
+        assert_eq!(half_bits(1.0 + 2f64.powi(-11)), 0x3c00);
+        assert_eq!(half_bits(1.0 + 3.0 * 2f64.powi(-11)), 0x3c02);
+        assert_eq!((half_value(0x3c00), half_value(0x0001), half_value(0xfc00)), (1.0, 2f64.powi(-24), f64::NEG_INFINITY));
+        for b in 0..=255u8 {
+            assert_eq!(byte(half_value(half_bits(f64::from(b) / 255.0)) * 255.0), b);
+        }
+    }
 
     #[test]
     fn stores_as_a_clamped_array() {

@@ -183,4 +183,18 @@ RSpec.describe 'ImageData bindings' do
     JS
     expect(got).to eq(['TypeError', 'TypeError', 'TypeError', 'InvalidStateError', [0, 0, 0, 0]])
   end
+
+  # A float16 ImageData's components go into the canvas as bytes — each scaled by 255 and rounded to the nearest even,
+  # as a Uint8ClampedArray stores it — and come out of an 8-bit canvas each byte over 255, rounded to the nearest half.
+  it "converts a float16 ImageData's components to a canvas's bytes and back" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const ctx = Object.assign(document.createElement('canvas'), { width: 2, height: 1 }).getContext('2d');
+        ctx.putImageData(new ImageData(new Float16Array([1, 0.5, 0, 1, 0.2, 0.4, 0.6, 0.8]), 2, 1, { pixelFormat: 'rgba-float16' }), 0, 0);
+        const halves = ctx.getImageData(0, 0, 2, 1, { pixelFormat: 'rgba-float16' }).data;
+        return [Array.from(ctx.getImageData(0, 0, 2, 1).data), Array.from(halves.subarray(0, 2)), halves.constructor.name];
+      })()
+    JS
+    expect(got).to eq([[255, 128, 0, 255, 51, 102, 153, 204], [1, 0.501953125], 'Float16Array'])
+  end
 end

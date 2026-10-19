@@ -2001,7 +2001,7 @@ fn key_value<'s>(scope: &mut v8::PinScope<'s, '_>, key: &Key) -> v8::Local<'s, v
     set(scope, slots, "material", material);
     slots.into()
 }
-fn array_buffer<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
+pub(crate) fn array_buffer<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
     v8::ArrayBuffer::with_backing_store(scope, &store).into()
 }
