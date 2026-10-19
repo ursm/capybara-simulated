@@ -4,19 +4,15 @@
 // isolate's (its `Dom`), every realm of it: a frame's port may be entangled with the page's, and an end the host routes
 // to is found whichever realm asks.
 //
-// A message is what the bindings cloned (its data and the ports it transferred, held here till its event) and whether
-// it could not be read back here (a `messageerror`). What stays with the bindings (message-port.js) is what is a call:
-// the realm's task its delivery is, the event, the serializer and the host the ends go through.
+// A message is a number here, its place in the queue: what it is — the data and the ports the bindings cloned, and
+// whether it could not be read back (a `messageerror`) — is the receiving port's to hold, in its slots, so a message
+// that reaches back to its port is a cycle the collector takes as any other. What stays with the bindings
+// (message-port.js) is that and what is a call: the realm's task a delivery is, the event, the serializer and the host
+// the ends go through.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::dom::{dom, register};
-
-struct Message {
-    data: v8::Global<v8::Value>,
-    ports: v8::Global<v8::Value>,
-    failed: bool,
-}
 
 #[derive(Default)]
 struct Port {
@@ -25,9 +21,9 @@ struct Port {
     enabled: bool,
     detached: bool,
     // The messages held while the queue is not enabled…
-    held: VecDeque<Message>,
+    held: VecDeque<u64>,
     // …and those whose delivery tasks are queued, in order.
-    inflight: VecDeque<Message>,
+    inflight: VecDeque<u64>,
     // A remote port's end; and the end a port transferred to another isolate went as.
     remote_end: Option<String>,
     transferred_as: Option<String>,
@@ -36,6 +32,7 @@ struct Port {
 #[derive(Default)]
 pub(crate) struct Ports {
     next: u64,
+    next_message: u64,
     of: HashMap<u64, Port>,
     // The ends this isolate holds, and those it gave up (a message on its way to one goes back to the host).
     ends: HashMap<String, u64>,
@@ -76,7 +73,7 @@ impl Ports {
         self.of.get_mut(&id)
     }
     // (…every message it has that its handler has not had, in order — a transfer's to take on)
-    fn take_pending(&mut self, id: u64) -> VecDeque<Message> {
+    fn take_pending(&mut self, id: u64) -> VecDeque<u64> {
         let Some(p) = self.port(id) else { return VecDeque::new() };
         let mut pending = std::mem::take(&mut p.inflight);
         pending.append(&mut p.held);
@@ -127,16 +124,18 @@ impl Ports {
             p.peer = Some(a);
         }
     }
-    // A message arriving at the port: whether its delivery is a task to queue now — held where its queue is not
-    // enabled.
-    fn accept(&mut self, id: u64, message: Message) -> bool {
-        let Some(p) = self.port(id) else { return false };
+    // A message arriving at the port: its number, and whether its delivery is a task to queue now — held where its
+    // queue is not enabled.
+    fn accept(&mut self, id: u64) -> (u64, bool) {
+        self.next_message += 1;
+        let message = self.next_message;
+        let Some(p) = self.port(id) else { return (message, false) };
         if p.enabled {
             p.inflight.push_back(message);
         } else {
             p.held.push_back(message);
         }
-        p.enabled
+        (message, p.enabled)
     }
     // `start()` — and an `onmessage` set — enabling its queue, what it held now on its way, in order; once. How many
     // delivery tasks that makes.
@@ -195,8 +194,8 @@ impl Ports {
 // not delivered; or as end 1 of a new channel whose end 0 the port it was entangled with keeps.
 enum Went {
     Already(String),
-    Remote(String, VecDeque<Message>),
-    Kept(String, VecDeque<Message>, u64, String),
+    Remote(String, VecDeque<u64>),
+    Kept(String, VecDeque<u64>, u64, String),
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -231,19 +230,17 @@ fn end_value<'s>(scope: &mut v8::PinScope<'s, '_>, end: Option<String>) -> v8::L
     }
 }
 fn object_of<'s>(scope: &mut v8::PinScope<'s, '_>, id: Option<u64>) -> v8::Local<'s, v8::Value> {
-    let weak = id.and_then(|id| dom(scope).message_ports.of.get(&id)?.object.clone());
-    weak.and_then(|w| w.to_local(scope)).unwrap_or_else(|| v8::null(scope).into())
+    // (…the registry out of the Dom while the weak handle is read, which needs the scope: a cloned one would be a
+    // handle made and freed for the read)
+    let ports = std::mem::take(&mut dom(scope).message_ports);
+    let object = id.and_then(|id| ports.of.get(&id)?.object.as_ref()?.to_local(scope));
+    dom(scope).message_ports = ports;
+    object.unwrap_or_else(|| v8::null(scope).into())
 }
-// A message as the bindings take it: [data, ports, failed].
-fn message_value<'s>(scope: &mut v8::PinScope<'s, '_>, m: &Message) -> v8::Local<'s, v8::Value> {
-    let data = v8::Local::new(scope, &m.data);
-    let ports = v8::Local::new(scope, &m.ports);
-    let failed = v8::Boolean::new(scope, m.failed).into();
-    v8::Array::new_with_elements(scope, &[data, ports, failed]).into()
-}
-fn messages_value<'s>(scope: &mut v8::PinScope<'s, '_>, list: &VecDeque<Message>) -> v8::Local<'s, v8::Value> {
-    let values: Vec<v8::Local<'s, v8::Value>> = list.iter().map(|m| message_value(scope, m)).collect();
-    v8::Array::new_with_elements(scope, &values).into()
+// The numbers of `list`, in order.
+fn messages_value<'s>(scope: &mut v8::PinScope<'s, '_>, list: &VecDeque<u64>) -> v8::Local<'s, v8::Value> {
+    let values: Vec<f64> = list.iter().map(|&m| m as f64).collect();
+    crate::dom::f64_array(scope, &values).into()
 }
 
 // __dom.portNew(port) -> the number of `port`, a new one entangled with none, disabled.
@@ -273,22 +270,19 @@ fn remote_end_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let end = dom(scope).message_ports.of.get(&id).and_then(|p| p.remote_end.clone());
     rv.set(end_value(scope, end));
 }
-// __dom.portAccept(id, data, ports, failed) -> whether its delivery is a task to queue now: a message arriving at the
-// port, held where its queue is not enabled.
+// __dom.portAccept(id) -> the number of a message arriving at the port: positive where its delivery is a task to
+// queue now, negative where it is held, its queue not enabled.
 fn accept_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = id_arg(scope, args.get(0));
-    let message = Message { data: v8::Global::new(scope, args.get(1)), ports: v8::Global::new(scope, args.get(2)), failed: args.get(3).boolean_value(scope) };
-    rv.set_bool(dom(scope).message_ports.accept(id, message));
+    let (message, now) = dom(scope).message_ports.accept(id);
+    rv.set_double(if now { message as f64 } else { -(message as f64) });
 }
-// __dom.portNext(id) -> the message a delivery task queued for the port runs with, [data, ports, failed] — or null
-// where a transfer took it on with the port, or the port is detached since.
+// __dom.portNext(id) -> the number of the message a delivery task queued for the port runs with — or -1 where a
+// transfer took it on with the port, or the port is detached since.
 fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = id_arg(scope, args.get(0));
     let message = dom(scope).message_ports.port(id).and_then(|p| p.inflight.pop_front().filter(|_| !p.detached));
-    match message {
-        Some(m) => rv.set(message_value(scope, &m)),
-        None => rv.set_null(),
-    }
+    rv.set_double(message.map_or(-1.0, |m| m as f64));
 }
 // __dom.portEnable(id) -> how many delivery tasks to queue: `start()` — and an `onmessage` set — enabling its queue.
 fn enable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -309,8 +303,8 @@ fn transfer_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 // __dom.portToEnd(id, channel, lone) -> how the port goes to another isolate, neutered:
 // - [end] where it went already: a message names it twice (its data and its transfer list);
-// - [end, messages] for a remote one, which gives its end up — the messages it had received and not delivered, for the
-//   end's next holder;
+// - [end, messages] for a remote one, which gives its end up — the numbers of the messages it had received and not
+//   delivered, for the end's next holder;
 // - [end, messages, kept, keptEnd] for one of this isolate, its entanglement made a channel: `channel`'s end 1 the one it
 //   goes as, end 0 taken by the port it was entangled with — or by `lone` (a new port) where it was none's — which posts
 //   what it held on to it, first.

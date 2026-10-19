@@ -76,12 +76,12 @@ impl Graph {
             // (…its dependents marked in the order they were added, depth first, as a recursion would)
             pending.extend(std::mem::take(&mut s.dependents).into_iter().rev());
         }
-        for &aborted in &order {
-            let roots = self.of.get(&aborted).map_or_else(Vec::new, |s| s.roots.clone());
-            for root in roots {
-                if let Some(r) = self.of.get_mut(&root) {
-                    r.dependents.retain(|d| *d != aborted);
-                }
+        // (…each root they follow swept of them once, however many of its dependents abort)
+        let aborted: std::collections::HashSet<u64> = order.iter().copied().collect();
+        let roots: std::collections::HashSet<u64> = order.iter().filter_map(|id| self.of.get(id)).flat_map(|s| s.roots.iter().copied()).collect();
+        for root in roots {
+            if let Some(r) = self.of.get_mut(&root) {
+                r.dependents.retain(|d| !aborted.contains(d));
             }
         }
         order
@@ -144,10 +144,12 @@ fn ids_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Vec
     let Ok(list) = v8::Local::<v8::Array>::try_from(v) else { return Vec::new() };
     (0..list.length()).map(|i| list.get_index(scope, i).map_or(0, |v| id_arg(scope, v))).collect()
 }
-// The objects of `ids` still alive, in order.
+// The objects of `ids` still alive, in order. (…the registry out of the Dom while its weak handles are read, which needs
+// the scope: a handle cloned to be read would be a new one made and freed for each)
 fn objects_of<'s>(scope: &mut v8::PinScope<'s, '_>, ids: &[u64]) -> v8::Local<'s, v8::Array> {
-    let weak: Vec<v8::Weak<v8::Value>> = ids.iter().filter_map(|id| dom(scope).abort_signals.objects.get(id).cloned()).collect();
-    let live: Vec<v8::Local<'s, v8::Value>> = weak.iter().filter_map(|w| w.to_local(scope)).collect();
+    let signals = std::mem::take(&mut dom(scope).abort_signals);
+    let live: Vec<v8::Local<'s, v8::Value>> = ids.iter().filter_map(|id| signals.objects.get(id)?.to_local(scope)).collect();
+    dom(scope).abort_signals = signals;
     v8::Array::new_with_elements(scope, &live)
 }
 // A new signal of `object`, made in the graph by `made`.
