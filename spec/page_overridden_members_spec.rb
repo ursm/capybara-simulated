@@ -256,4 +256,29 @@ RSpec.describe 'members a page overrides' do
     JS
     expect(got).to eq([true] * 6)
   end
+
+  # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that
+  # replaced `Date.now` moves no `performance.now()`, and one that replaced DOMRect, DOMMatrix, TextDecoder or Blob gets
+  # the platform's objects from the platform all the same.
+  it "keeps its own clock, rects, matrices and codecs whatever a page made of the globals" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p id="p">x</p>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const Rect = DOMRect, Matrix = DOMMatrix;
+        const before = performance.now();
+        Date.now = () => 1e15;
+        const boom = function () { throw new Error('page global'); };
+        window.DOMRect = window.DOMMatrix = window.TextDecoder = window.TextEncoder = window.Blob = boom;
+        const ctx = document.createElement('canvas').getContext('2d');
+        ctx.setTransform({ a: 2, d: 3 });
+        return [
+          performance.now() - before < 1e6,
+          document.getElementById('p').getBoundingClientRect() instanceof Rect,
+          ctx.getTransform() instanceof Matrix && ctx.getTransform().d === 3
+        ];
+      })()
+    JS
+    expect(got).to eq([true, true, true])
+  end
 end
