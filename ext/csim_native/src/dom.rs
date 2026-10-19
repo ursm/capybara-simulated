@@ -2449,6 +2449,9 @@ pub(crate) struct Dom {
     pub(crate) wrap_pending: Option<v8::cppgc::Persistent<crate::node_handle::NodeHandle>>,
     // Whether a factory threw (at the stack's limit, say) since `nodes_value` / `node_value` began asking for objects.
     pub(crate) factory_threw: bool,
+    // The AbortSignals' state and graph (abort_signal.rs) and the MessagePorts' (message_ports.rs), every realm's.
+    pub(crate) abort_signals: crate::abort_signal::AbortSignals,
+    pub(crate) message_ports: crate::message_ports::Ports,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2458,6 +2461,8 @@ impl Drop for Dom {
         std::mem::forget(std::mem::take(&mut self.arenas));
         std::mem::forget(std::mem::take(&mut self.factories));
         self.arena.ce_reactions.leak_weak_handles();
+        self.abort_signals.leak_weak_handles();
+        self.message_ports.leak_weak_handles();
     }
 }
 
