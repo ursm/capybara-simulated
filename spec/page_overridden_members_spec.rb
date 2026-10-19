@@ -310,6 +310,53 @@ RSpec.describe 'members a page overrides' do
     expect(got).to eq('EncodingError')
   end
 
+  # …and what the platform reads off its own objects is theirs: a canvas's size, a parsed document's root namespace, a
+  # Blob's size on an IndexedDB key path, and the report of a callback's exception, whatever a page put on the
+  # prototypes or the global — Chrome reads none of these members.
+  it "reads its canvases, documents and Blobs, and reports exceptions, whatever a page made of their members" do
+    app = lambda {|env|
+      if env['PATH_INFO'] == '/doc.xml'
+        [200, {'content-type' => 'application/xml'}, ['<root xmlns="urn:x"/>']]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const got = [];
+      const boom = { get() { throw new Error('page member'); } };
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 10;
+      const ctx = canvas.getContext('2d');
+      Object.defineProperty(HTMLCanvasElement.prototype, 'width', boom);
+      Object.defineProperty(HTMLCanvasElement.prototype, 'height', boom);
+      ctx.fillRect(0, 0, 10, 10);
+      got.push(ctx.getImageData(5, 5, 1, 1).data[3]);
+      Object.defineProperty(Element.prototype, 'namespaceURI', boom);
+      Object.defineProperty(Blob.prototype, 'size', boom);
+      window.reportError = () => got.push('page reportError');
+      addEventListener('error', (e) => { e.preventDefault(); got.push('error:' + e.error.message); });
+      setTimeout(() => { throw new Error('thrown'); }, 0);
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', '/doc.xml');
+      xhr.onload = () => {
+        got.push(xhr.responseXML !== null);
+        const open = indexedDB.open('page-members');
+        open.onupgradeneeded = () => open.result.createObjectStore('s', { keyPath: 'b.size' });
+        open.onsuccess = () => {
+          const store = open.result.transaction('s', 'readwrite').objectStore('s');
+          const put = store.put({ b: new Blob(['abc']) });
+          put.onsuccess = () => { got.push(put.result); done(got); };
+          put.onerror = () => done(got.concat('put failed'));
+        };
+      };
+      xhr.send();
+    JS
+    expect(got).to eq([255, 'error:thrown', true, 3])
+  end
+
   # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that
   # replaced `Date.now` moves no `performance.now()`, and one that replaced DOMRect, DOMMatrix, TextDecoder or Blob gets
   # the platform's objects from the platform all the same.
