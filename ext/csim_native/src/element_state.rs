@@ -108,23 +108,22 @@ fn dir_keyword(raw: &str) -> Option<Dir> {
 }
 impl NodeData {
     // A submit button (form-helpers.js `isSubmitButton`): an `<input type=submit|image>`, or a `<button>` in the Submit
-    // state — its `type` `submit`, or the Auto state (a missing or invalid one) of a button no `command` / `commandfor`
-    // makes a command button.
+    // state (`button_type`).
     pub(crate) fn is_submit_button(&self) -> bool {
         if self.is_html_named("input") {
             return matches!(self.input_type(), "submit" | "image");
         }
-        if !self.is_html_named("button") {
-            return false;
-        }
+        self.is_html_named("button") && self.button_type() == "submit"
+    }
+    // A `<button>`'s type state: the one its `type` names — `submit`, `reset` or `button`, ASCII case-insensitively —
+    // else the Auto state's (a missing or invalid one): `button` for a button `command` / `commandfor` makes a command
+    // button, `submit` for any other.
+    pub(crate) fn button_type(&self) -> &'static str {
         let ty = self.plain_attr("type").unwrap_or("");
-        if ty.eq_ignore_ascii_case("submit") {
-            return true;
+        if let Some(state) = ["submit", "reset", "button"].into_iter().find(|k| ty.eq_ignore_ascii_case(k)) {
+            return state;
         }
-        if ty.eq_ignore_ascii_case("reset") || ty.eq_ignore_ascii_case("button") {
-            return false;
-        }
-        self.plain_attr("command").is_none() && self.plain_attr("commandfor").is_none()
+        if self.plain_attr("command").is_some() || self.plain_attr("commandfor").is_some() { "button" } else { "submit" }
     }
     // An `<input>`'s type state: its `type` attribute, ASCII-lowercased, when that names one; else Text.
     pub(crate) fn input_type(&self) -> &'static str {

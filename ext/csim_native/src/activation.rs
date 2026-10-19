@@ -136,7 +136,7 @@ fn activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         if n.is_html_named("input") && n.input_type() == "image" {
             steps |= IMAGE;
         }
-        let reset = (n.is_html_named("button") || n.is_html_named("input")) && n.plain_attr("type").is_some_and(|t| t.eq_ignore_ascii_case("reset"));
+        let reset = if n.is_html_named("button") { n.button_type() == "reset" } else { n.is_html_named("input") && n.input_type() == "reset" };
         if connected && !arena.is_actually_disabled(act) && (n.is_submit_button() || reset) {
             form = arena.form_owner(act);
             if form.is_some() {

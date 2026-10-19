@@ -722,6 +722,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "selectValue", select_value, context_id);
     crate::dom::register(scope, ns, "isListBox", is_list_box, context_id);
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
+    crate::dom::register(scope, ns, "buttonType", button_type, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
     crate::dom::register(scope, ns, "askForReset", ask_for_reset, context_id);
     crate::dom::register(scope, ns, "optionSelect", option_select, context_id);
@@ -1150,6 +1151,16 @@ fn is_submit_button(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     rv.set_bool(crate::dom::realm(scope, cid).get(id).is_some_and(|n| n.is_submit_button()));
+}
+
+// __dom.buttonType(nid) -> a `<button>`'s type state, what its `type` IDL attribute reflects (`button_type`).
+fn button_type(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let Some(state) = crate::dom::realm(scope, cid).get(id).map(|n| n.button_type()) else { return };
+    if let Some(state) = v8::String::new(scope, state) {
+        rv.set(state.into());
+    }
 }
 
 // __dom.isListBox(nid) -> whether a `<select>` shows as a list box, its display size above 1 (`is_list_box`) — else a
