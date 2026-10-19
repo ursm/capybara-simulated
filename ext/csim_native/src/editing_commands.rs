@@ -14,52 +14,97 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "editCommand", edit_command, context_id);
     crate::dom::register(scope, ns, "commandSupport", command_support_op, context_id);
     crate::dom::register(scope, ns, "commandInputType", command_input_type_op, context_id);
+    crate::dom::register(scope, ns, "commandAction", command_action_op, context_id);
+    crate::dom::register(scope, ns, "commandStyle", command_style_op, context_id);
+}
+
+// What the bindings do to carry a command out, beyond `inputType`'s `input` (codes as `commandAction` hands them): the
+// engine's edit of it alone (`editCommand`); text inserted (the selection deleted, for none); the selection's deletion,
+// backward or forward; a line break, a paragraph; a span carrying a CSS property (`commandStyle`); the block aligned
+// (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste; markup's text into a control.
+#[derive(Clone, Copy)]
+enum Action {
+    Edit,
+    Text,
+    Delete,
+    ForwardDelete,
+    LineBreak,
+    Paragraph,
+    Style(&'static str),
+    Align(&'static str),
+    RemoveFormat,
+    Link,
+    Cut,
+    Copy,
+    Paste,
+    Html,
+}
+impl Action {
+    fn code(self) -> (u32, &'static str) {
+        match self {
+            Action::Edit => (0, ""),
+            Action::Text => (1, ""),
+            Action::Delete => (2, ""),
+            Action::ForwardDelete => (3, ""),
+            Action::LineBreak => (4, ""),
+            Action::Paragraph => (5, ""),
+            Action::Style(property) => (6, property),
+            Action::Align(value) => (7, value),
+            Action::RemoveFormat => (8, ""),
+            Action::Link => (9, ""),
+            Action::Cut => (10, ""),
+            Action::Copy => (11, ""),
+            Action::Paste => (12, ""),
+            Action::Html => (13, ""),
+        }
+    }
 }
 
 // The commands `execCommand` carries out, by name (matched ASCII case-insensitively), each with whether it is one a
 // focused text control takes as well as an editing host (Chrome's `queryCommandEnabled` with a selection in one), and
 // the `inputType` of the `input` event it fires (Input Events §5.1, as Chrome names each; '' for none: `unlink`'s
-// `input` carries none, `copy` fires no `input`). (…`paste` among them, the driver's clipboard read: Chrome refuses a page that)
-const COMMANDS: [(&str, bool, &str); 31] = [
-    ("bold", false, "formatBold"),
-    ("italic", false, "formatItalic"),
-    ("underline", false, "formatUnderline"),
-    ("strikethrough", false, "formatStrikeThrough"),
-    ("superscript", false, "formatSuperscript"),
-    ("subscript", false, "formatSubscript"),
-    ("forecolor", false, "formatFontColor"),
-    ("backcolor", false, "formatBackColor"),
-    ("hilitecolor", false, "formatBackColor"),
-    ("fontname", false, "formatFontName"),
-    ("justifycenter", false, "formatJustifyCenter"),
-    ("justifyfull", false, "formatJustifyFull"),
-    ("justifyright", false, "formatJustifyRight"),
-    ("justifyleft", false, "formatJustifyLeft"),
-    ("removeformat", false, "formatRemove"),
-    ("indent", false, "formatIndent"),
-    ("outdent", false, "formatOutdent"),
-    ("createlink", false, "insertLink"),
-    ("unlink", false, ""),
-    ("inserthorizontalrule", false, "insertHorizontalRule"),
-    ("insertorderedlist", false, "insertOrderedList"),
-    ("insertunorderedlist", false, "insertUnorderedList"),
-    ("inserttext", true, "insertText"),
-    ("inserthtml", true, ""),
-    ("insertlinebreak", true, "insertLineBreak"),
-    ("insertparagraph", true, "insertParagraph"),
-    ("delete", true, "deleteContentBackward"),
-    ("forwarddelete", true, "deleteContentForward"),
-    ("cut", true, "deleteByCut"),
-    ("copy", true, ""),
-    ("paste", true, "insertFromPaste"),
+// `input` carries none, `copy` fires no `input`), and what the bindings do for it (`Action`). (…`paste` among them, the
+// driver's clipboard read: Chrome refuses a page that)
+const COMMANDS: [(&str, bool, &str, Action); 31] = [
+    ("bold", false, "formatBold", Action::Edit),
+    ("italic", false, "formatItalic", Action::Edit),
+    ("underline", false, "formatUnderline", Action::Edit),
+    ("strikethrough", false, "formatStrikeThrough", Action::Edit),
+    ("superscript", false, "formatSuperscript", Action::Edit),
+    ("subscript", false, "formatSubscript", Action::Edit),
+    ("forecolor", false, "formatFontColor", Action::Style("color")),
+    ("backcolor", false, "formatBackColor", Action::Style("background-color")),
+    ("hilitecolor", false, "formatBackColor", Action::Style("background-color")),
+    ("fontname", false, "formatFontName", Action::Style("font-family")),
+    ("justifycenter", false, "formatJustifyCenter", Action::Align("center")),
+    ("justifyfull", false, "formatJustifyFull", Action::Align("justify")),
+    ("justifyright", false, "formatJustifyRight", Action::Align("right")),
+    ("justifyleft", false, "formatJustifyLeft", Action::Align("left")),
+    ("removeformat", false, "formatRemove", Action::RemoveFormat),
+    ("indent", false, "formatIndent", Action::Edit),
+    ("outdent", false, "formatOutdent", Action::Edit),
+    ("createlink", false, "insertLink", Action::Link),
+    ("unlink", false, "", Action::Edit),
+    ("inserthorizontalrule", false, "insertHorizontalRule", Action::Edit),
+    ("insertorderedlist", false, "insertOrderedList", Action::Edit),
+    ("insertunorderedlist", false, "insertUnorderedList", Action::Edit),
+    ("inserttext", true, "insertText", Action::Text),
+    ("inserthtml", true, "", Action::Html),
+    ("insertlinebreak", true, "insertLineBreak", Action::LineBreak),
+    ("insertparagraph", true, "insertParagraph", Action::Paragraph),
+    ("delete", true, "deleteContentBackward", Action::Delete),
+    ("forwarddelete", true, "deleteContentForward", Action::ForwardDelete),
+    ("cut", true, "deleteByCut", Action::Cut),
+    ("copy", true, "", Action::Copy),
+    ("paste", true, "insertFromPaste", Action::Paste),
 ];
-fn command(name: &str) -> Option<&'static (&'static str, bool, &'static str)> {
-    COMMANDS.iter().find(|(c, _, _)| c.eq_ignore_ascii_case(name))
+fn command(name: &str) -> Option<&'static (&'static str, bool, &'static str, Action)> {
+    COMMANDS.iter().find(|(c, _, _, _)| c.eq_ignore_ascii_case(name))
 }
 // What `queryCommandSupported` / `queryCommandEnabled` answer of `command`: None for one not carried out — 1 where a
 // text control's selection takes it as well as an editing host's, 0 where only an editing host's.
 pub(crate) fn command_support(name: &str) -> Option<u32> {
-    command(name).map(|&(_, text, _)| u32::from(text))
+    command(name).map(|&(_, text, _, _)| u32::from(text))
 }
 // __dom.commandSupport(command) -> `command_support`, -1 for none.
 fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -69,8 +114,52 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // __dom.commandInputType(command) -> the `inputType` of the `input` it fires ('' for none, or for no command).
 fn command_input_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
-    let input_type = command(&name).map_or("", |&(_, _, t)| t);
+    let input_type = command(&name).map_or("", |&(_, _, t, _)| t);
     rv.set(v8::String::new(scope, input_type).map_or_else(|| v8::undefined(scope).into(), Into::into));
+}
+
+// __dom.commandAction(command) -> [what the bindings do for it, its argument] (`Action::code`), undefined for no command.
+fn command_action_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let Some(&(_, _, _, action)) = command(&name) else { return };
+    let (code, arg) = action.code();
+    let code = v8::Integer::new_from_unsigned(scope, code).into();
+    let arg = v8::String::new(scope, arg).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    rv.set(v8::Array::new_with_elements(scope, &[code, arg]).into());
+}
+// __dom.commandStyle(property, value) -> [the style attribute a styling command's span carries, the `input` event's
+// `data`]: `property: value` as an inline style serializes it ('' for a value that does not parse); the data a colour
+// as the value's CSS serialization — a legacy-syntax one's (a name, a hex, rgb()), lowercased where it is a bare word,
+// `currentcolor` and the CSS-wide keywords so; the string itself where it does not parse — Chrome's report; a font name
+// as given.
+fn command_style_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let property = args.get(0).to_rust_string_lossy(scope);
+    let value = args.get(1).to_rust_string_lossy(scope);
+    let key = crate::cssom_decl::Key::new("", crate::cssom_decl::Kind::Style, false, "about:blank");
+    let text = crate::cssom_decl::set(&key, None, &property, &value, false).map(|w| w.text).unwrap_or_default();
+    let data = if property.ends_with("color") {
+        let trimmed = value.trim_matches(|c: char| c.is_ascii_whitespace());
+        let cid = crate::dom::realm_id(scope, &args);
+        let d = crate::dom::dom(scope);
+        let arena = d.arena.enter(cid);
+        let parsed = crate::style::parse_color(d.styles.get(&cid), arena, trimmed, "").filter(|c| c.is_legacy_syntax());
+        if trimmed.eq_ignore_ascii_case("currentcolor") {
+            "currentcolor".to_owned()
+        } else if let Some(color) = parsed {
+            style_traits::ToCss::to_css_string(&color)
+        } else if !trimmed.is_empty() && trimmed.bytes().all(|b| b.is_ascii_alphabetic()) {
+            trimmed.to_ascii_lowercase()
+        } else {
+            trimmed.to_owned()
+        }
+    } else {
+        value
+    };
+    let items: Vec<v8::Local<v8::Value>> = [text, data]
+        .iter()
+        .map(|t| v8::String::new(scope, t).map_or_else(|| v8::undefined(scope).into(), Into::into))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // (…an element of the local name `tag`, ASCII case-insensitively, in any namespace: the tags the commands compare)
