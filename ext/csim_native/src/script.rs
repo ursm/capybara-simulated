@@ -85,7 +85,9 @@ impl RealmArena {
     // map with any, there being no external import maps — and else runs, or registers its import map.
     // (…and, `scripting` false — its node document has no browsing context — "already started" and nothing more: step 19)
     // (…the `parser`'s script is "already started" here from its creation, as the insertion the parser makes prepares
-    // nothing, so what says it has been prepared is its having run)
+    // nothing, so what says it has been prepared is its having run — and it runs connected or not: the parser prepared
+    // it at its end tag, connected, and one an earlier script removed since is still in the list of scripts to execute
+    // after parsing, which "execute the script element" checks against its preparation-time document alone)
     pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool, parser: bool) -> u32 {
         let Some(n) = self.get(id) else { return PREPARE_NONE };
         if n.script_flags & if parser { SCRIPT_RUN } else { SCRIPT_ALREADY_STARTED } != 0 {
@@ -93,7 +95,7 @@ impl RealmArena {
         }
         let src = n.plain_attr("src").map(str::is_empty);
         let has_text = n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty()));
-        if (src.is_none() && !has_text) || !self.is_connected(id) {
+        if (src.is_none() && !has_text) || (!parser && !self.is_connected(id)) {
             return PREPARE_NONE;
         }
         let Some(n) = self.get(id) else { return PREPARE_NONE };

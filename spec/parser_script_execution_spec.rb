@@ -109,6 +109,31 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[inline-dyn blk blk-load])
   end
 
+  # The parser prepared its deferred, async and module scripts at their end tags, connected, and they stay in the lists
+  # of scripts to execute — "execute the script element" asks only that their document is the one they were prepared
+  # in — so one an earlier script removes still runs. Chrome: a, as, b, m (the async one's place is the network's; what
+  # is held here is that all four run).
+  it 'runs the deferred, async and module scripts an earlier one removed' do
+    app = lambda do |env|
+      case env['PATH_INFO']
+      when '/a.js'
+        [200, {'content-type' => 'text/javascript'}, ["['b', 'm', 'as'].forEach((id) => document.getElementById(id).remove()); L.push('a')"]]
+      when '/b.js', '/as.js'
+        [200, {'content-type' => 'text/javascript'}, ["L.push('#{env['PATH_INFO'][1...-3]}')"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><script>window.L = []</script>
+          <script defer src="a.js"></script>
+          <script id="b" defer src="b.js"></script>
+          <script id="m" type="module">L.push('m')</script>
+          <script id="as" async src="as.js"></script>
+        HTML
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L').sort).to eq(%w[a as b m])
+  end
+
   # …and "the end" is for the PARSER's scripts alone: a script an innerHTML fragment made (already started, never
   # runs) or a clone of a started one (the flag is copied) stays inert even when inserted mid-parse — swept up after the
   # parse, both ran. Chrome: neither runs, and the original runs once.
