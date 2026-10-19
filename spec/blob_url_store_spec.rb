@@ -77,4 +77,23 @@ RSpec.describe 'the blob URL store' do
     end
     expect(paths).to eq(['/'])
   end
+
+  # The window's own location set to a blob: URL loads its blob's document — and to one revoked, a failed load at the
+  # URL — never sending the URL to the app's server (Rack took it for a path, and raised).
+  it "navigates the window's own location to a blob URL, live or revoked" do
+    paths = []
+    page = '<!DOCTYPE html><meta charset=utf-8><p>start</p>'
+    s = simulated_session(->(env) { paths << env['PATH_INFO']; [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    live = s.evaluate_script("URL.createObjectURL(new Blob(['<p id=b>blob</p>'], {type: 'text/html'}))")
+    s.execute_script("location.href = #{live.to_json}")
+    expect(s).to have_css('#b', text: 'blob')
+    expect(s.current_url).to eq(live)
+    s.visit '/'
+    gone = s.evaluate_script("(() => { const u = URL.createObjectURL(new Blob(['x'])); URL.revokeObjectURL(u); return u; })()")
+    s.execute_script("location.href = #{gone.to_json}")
+    expect(s).to have_current_path(gone, url: true)
+    expect(s.evaluate_script('document.body ? document.body.textContent : ""')).to eq('')
+    expect(paths).to eq(['/', '/'])
+  end
 end

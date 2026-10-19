@@ -10233,6 +10233,11 @@ module Capybara
           # A page navigating its top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the
           # URL's document would run with no origin of its own).
           nil
+        elsif !@current_realm_id && url.match?(/\Ablob:/i)
+          # …and to a `blob:` URL, which no server answers: its blob's document — wherever the window that made it is
+          # (its partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`).
+          blob = @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
+          blob ? boot_blob_document(url, blob[:bytes], blob[:type]) : fail_blob_document(url)
         elsif @current_realm_id
           # A JS-driven `location.*` from inside a `within_frame` block
           # navigates the FRAME, not the top page (same as a self-targeted
