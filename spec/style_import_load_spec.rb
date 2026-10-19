@@ -37,6 +37,7 @@ RSpec.describe 'a style block waiting on its @imports' do
   it 'waits for an @import after a rule the parser drops' do
     expect(load_after("@foo; @import '/b.css?pipe=trickle(d1)';")).to be >= 1000
     expect(load_after("!!! {} @import '/c.css?pipe=trickle(d1)';")).to be >= 1000
+    expect(load_after("@\\69mport '/k.css?pipe=trickle(d1)';")).to be >= 1000
   end
 
   it 'waits for none past the rules that may import, nor in a comment' do
