@@ -167,6 +167,27 @@ RSpec.describe 'execCommand in an editing host' do
     expect(got).to eq([true, false, false, false, false])
   end
 
+  # A frame past the nesting limit shares its parent's realm, and still has a selection of its own: its commands go by
+  # that one, and its parent's stays as it was.
+  it "answers a frame's commands past the nesting limit by its own selection" do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable>hello</div>']]
+    }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        let dd = document;
+        for (let i = 0; i < 17; i++) { const f = dd.createElement('iframe'); dd.body.append(f); dd = f.contentDocument; }
+        const out = [dd.queryCommandEnabled('bold'), dd.queryCommandEnabled('nope'), dd.getSelection() === getSelection()];
+        dd.body.innerHTML = '<div contenteditable>frame</div>';
+        dd.getSelection().selectAllChildren(dd.body.firstChild);
+        out.push(dd.queryCommandEnabled('bold'), document.queryCommandEnabled('bold'), dd.execCommand('bold'));
+        out.push(dd.body.firstChild.innerHTML, getSelection().rangeCount, e.innerHTML);
+        return out;
+      })()
+    JS
+    expect(got).to eq([false, false, false, true, false, true, '<b>frame</b>', 0, 'hello'])
+  end
+
   # A colour or a font the style attribute refuses styles nothing: no span, the `input` alone where a selection was —
   # the DOM as it was (Chrome: true, `hi`), and no `input` at a caret. A quirks document parses the colour in its mode: a hashless hex is one there.
   it "makes no span of a value that styles nothing, and takes a quirks document's hashless colour" do

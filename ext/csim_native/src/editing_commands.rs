@@ -114,14 +114,13 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_int32(command_support(&command).map_or(-1, |s| s as i32));
 }
 // What a command of a document acts on (execCommand's, queryCommandEnabled's): none for a command it does not carry
-// out; a focused text control — one text
-// is typed into, a number or an email field too — first, as focusing one moves the selection into it: for a text
-// command (`command_support` 1), one not `readonly` nor disabled (`TARGET_CONTROL`), and for a cut one with something
-// selected (Blink's needs a range), else none; else the root editable element the selection's anchor is in (its own
-// range's, a shadow tree's too — the anchor, which the engine's edits go by: element_state.rs `editing_root` — a
-// `contenteditable=true` nested in an editable element no root of its own, the body in design mode), its kind
-// deciding — a `plaintext-only` one takes the text commands alone (`TARGET_HOST`). None for no range at all, and for
-// `unlink` with one that selects nothing.
+// out; a focused text control — one text is typed into, a number or an email field too — first, as focusing one moves
+// the selection into it: for a text command (`command_support` 1), one not `readonly` nor disabled (`TARGET_CONTROL`),
+// and for a cut one with something selected (Blink's needs a range), else none; else the root editable element the
+// selection's anchor is in (its own range's, a shadow tree's too — the anchor, which the engine's edits go by:
+// element_state.rs `editing_root` — a `contenteditable=true` nested in an editable element no root of its own, the
+// body in design mode), its kind deciding — a `plaintext-only` one takes the text commands alone (`TARGET_HOST`). None
+// for no range at all, and for `unlink` with one that selects nothing.
 const TARGET_NONE: u32 = 0;
 const TARGET_CONTROL: u32 = 1;
 const TARGET_HOST: u32 = 2;
