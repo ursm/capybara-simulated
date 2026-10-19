@@ -1796,6 +1796,9 @@ fn kdf_derive(p: &Params, key: &Key, length: Option<u32>) -> Outcome<Vec<u8>> {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "cryptoRegistered", registered_op, context_id);
+    crate::dom::register(scope, ns, "cryptoKeyInfo", key_info_op, context_id);
+    crate::dom::register(scope, ns, "cryptoKeyRecord", key_record_op, context_id);
+    crate::dom::register(scope, ns, "cryptoKeyFromRecord", key_from_record_op, context_id);
     crate::dom::register(scope, ns, "cryptoDigest", digest_op, context_id);
     crate::dom::register(scope, ns, "cryptoImportKey", import_op, context_id);
     crate::dom::register(scope, ns, "cryptoExportKey", export_op, context_id);
@@ -1907,8 +1910,68 @@ fn params_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     }
     Ok(p)
 }
-// A CryptoKey's slots, as the bindings hold them.
+// ── A CryptoKey's state: the engine's, on a handle the key's object holds ──
+// Its key — type, extractable, algorithm, usages and the keying material page script never sees — kept on V8's C++ heap
+// as long as the object the bindings keep it by (`state`): what every operation reads (`key_of`), and what a key the
+// engine makes is handed out as (`key_object`). The material leaves it only as a serialization's record
+// (`cryptoKeyRecord`), for a structured clone or a message to another agent.
+struct KeyHandle {
+    key: Key,
+}
+unsafe impl v8::cppgc::GarbageCollected for KeyHandle {
+    fn trace(&self, _visitor: &mut v8::cppgc::Visitor) {}
+    fn get_name(&self) -> &'static std::ffi::CStr {
+        c"KeyHandle"
+    }
+}
+// The wrapper tag `Object::wrap` / `unwrap` file the handle under (image_bitmaps.rs' 16), and what marks an object as a
+// key state's (its internal field 0).
+const KEY_TAG: u16 = 17;
+static KEY_BRAND: u8 = 0;
+
+// A key's state object: a fresh wrapper of a handle owning `key`.
+fn key_object<'s>(scope: &mut v8::PinScope<'s, '_>, key: Key) -> v8::Local<'s, v8::Value> {
+    let kept = crate::dom::dom(scope).crypto_key_template.clone();
+    let template = match kept {
+        Some(t) => v8::Local::new(scope, t),
+        None => {
+            let t = v8::ObjectTemplate::new(scope);
+            t.set_internal_field_count(1);
+            let global = v8::Global::new(scope, t);
+            crate::dom::dom(scope).crypto_key_template = Some(global);
+            t
+        }
+    };
+    let Some(obj) = template.new_instance(scope) else { return v8::undefined(scope).into() };
+    let brand = v8::External::new(scope, std::ptr::addr_of!(KEY_BRAND) as *mut std::ffi::c_void);
+    obj.set_internal_field(0, brand.into());
+    let heap = scope.get_cpp_heap().expect("a CryptoKey is made only on an isolate with a C++ heap");
+    // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
+    unsafe {
+        let ptr = v8::cppgc::make_garbage_collected(heap, KeyHandle { key });
+        v8::Object::wrap::<KEY_TAG, KeyHandle>(scope, obj, &ptr);
+    }
+    obj.into()
+}
+// The key a state object holds, or None for anything that is none (the brand first: `unwrap` reads garbage from an
+// object it never wrapped).
 fn key_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Outcome<Key> {
+    let not_a_key = || fail("TypeError", "not a CryptoKey");
+    let Some(obj) = v8::Local::<v8::Object>::try_from(value).ok().filter(|o| o.internal_field_count() == 1) else { return not_a_key() };
+    let brand = obj.get_internal_field(scope, 0).and_then(|f| v8::Local::<v8::Value>::try_from(f).ok());
+    let branded = brand.and_then(|b| v8::Local::<v8::External>::try_from(b).ok()).is_some_and(|b| b.value() as *const u8 == std::ptr::addr_of!(KEY_BRAND));
+    if !branded {
+        return not_a_key();
+    }
+    // SAFETY: a branded object was made by `key_object`, which wrapped a KeyHandle under KEY_TAG; the handle lives while
+    // its object, the argument, does — through this op.
+    match unsafe { v8::Object::unwrap::<KEY_TAG, KeyHandle>(scope, obj) } {
+        Some(ptr) => Ok(unsafe { &*(ptr.as_ref() as *const KeyHandle) }.key.clone()),
+        None => not_a_key(),
+    }
+}
+// A key of the slots a serialization's record carries (`cryptoKeyRecord`'s, another agent's).
+fn key_from_slots(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Outcome<Key> {
     let Ok(slots) = v8::Local::<v8::Object>::try_from(value) else { return fail("TypeError", "not a CryptoKey") };
     let kind = { let v = get(scope, slots, "type"); text(scope, v) }.and_then(|k| Kind::named(&k));
     let extractable = get(scope, slots, "extractable").is_some_and(|v| v.is_true());
@@ -1961,9 +2024,10 @@ fn jwk_value<'s>(scope: &mut v8::PinScope<'s, '_>, jwk: &Jwk) -> v8::Local<'s, v
     }
     object.into()
 }
-// A key's slots for the bindings to make a CryptoKey of: its algorithm the dictionary a key of it reports (each
-// dictionary's members in their order, its inherited ones first).
-fn key_value<'s>(scope: &mut v8::PinScope<'s, '_>, key: &Key) -> v8::Local<'s, v8::Value> {
+// A key's slots, as its serialization's record carries them — `material` included where `with_material` — or its
+// attributes read them (type, extractable, the algorithm dictionary a key of it reports — each dictionary's members in
+// their order, its inherited ones first — and usages).
+fn key_slots<'s>(scope: &mut v8::PinScope<'s, '_>, key: &Key, with_material: bool) -> v8::Local<'s, v8::Object> {
     let algorithm = v8::Object::new(scope);
     let name = string(scope, key.alg.name());
     set(scope, algorithm, "name", name);
@@ -1997,9 +2061,26 @@ fn key_value<'s>(scope: &mut v8::PinScope<'s, '_>, key: &Key) -> v8::Local<'s, v
     let usages: Vec<v8::Local<v8::Value>> = key.usages.names().map(|u| string(scope, u)).collect();
     let usages = v8::Array::new_with_elements(scope, &usages).into();
     set(scope, slots, "usages", usages);
-    let material = crate::dom::u8_array(scope, key.material.clone());
-    set(scope, slots, "material", material);
-    slots.into()
+    if with_material {
+        let material = crate::dom::u8_array(scope, key.material.clone());
+        set(scope, slots, "material", material);
+    }
+    slots
+}
+// __dom.cryptoKeyInfo(state) -> {type, extractable, algorithm, usages}: what the key's attributes read (`key_slots`).
+fn key_info_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let outcome = key_of(scope, args.get(0));
+    answer(scope, &mut rv, outcome, |scope, key| key_slots(scope, &key, false).into());
+}
+// __dom.cryptoKeyRecord(state) -> the key's slots, its material among them: its serialization's record.
+fn key_record_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let outcome = key_of(scope, args.get(0));
+    answer(scope, &mut rv, outcome, |scope, key| key_slots(scope, &key, true).into());
+}
+// __dom.cryptoKeyFromRecord(slots) -> the state of the key a serialization's record describes.
+fn key_from_record_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let outcome = key_from_slots(scope, args.get(0));
+    answer(scope, &mut rv, outcome, key_object);
 }
 pub(crate) fn array_buffer<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
     let store = v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared();
@@ -2042,7 +2123,7 @@ fn digest_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let outcome = params_of(scope, args.get(0)).and_then(|p| digest(&p, &data));
     answer(scope, &mut rv, outcome, array_buffer);
 }
-// __dom.cryptoImportKey(format, keyData, algorithm, extractable, usages) -> key slots: `keyData` a BufferSource's copy or
+// __dom.cryptoImportKey(format, keyData, algorithm, extractable, usages) -> a key's state: `keyData` a BufferSource's copy or
 // a converted JsonWebKey.
 fn import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let format = args.get(0).to_rust_string_lossy(scope);
@@ -2052,9 +2133,9 @@ fn import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     };
     let (extractable, usages) = (args.get(3).is_true(), usages_of(scope, args.get(4)));
     let outcome = params_of(scope, args.get(2)).and_then(|p| import_key(&format, data, &p, extractable, usages));
-    answer(scope, &mut rv, outcome, |scope, key| key_value(scope, &key));
+    answer(scope, &mut rv, outcome, key_object);
 }
-// __dom.cryptoExportKey(format, key slots) -> ArrayBuffer, or a JWK object.
+// __dom.cryptoExportKey(format, key) -> ArrayBuffer, or a JWK object.
 fn export_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let format = args.get(0).to_rust_string_lossy(scope);
     let outcome = key_of(scope, args.get(1)).and_then(|k| export_key(&format, &k));
@@ -2063,34 +2144,34 @@ fn export_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         Exported::Jwk(jwk) => jwk_value(scope, &jwk),
     });
 }
-// __dom.cryptoGenerateKey(algorithm, extractable, usages) -> key slots, or {publicKey, privateKey} of them.
+// __dom.cryptoGenerateKey(algorithm, extractable, usages) -> a key's state, or {publicKey, privateKey} of them.
 fn generate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (extractable, usages) = (args.get(1).is_true(), usages_of(scope, args.get(2)));
     let outcome = params_of(scope, args.get(0)).and_then(|p| generate_key(&p, extractable, usages));
     answer(scope, &mut rv, outcome, |scope, made| match made {
-        Generated::One(key) => key_value(scope, &key),
+        Generated::One(key) => key_object(scope, key),
         Generated::Pair(public, private) => {
             let pair = v8::Object::new(scope);
-            let (public, private) = (key_value(scope, &public), key_value(scope, &private));
+            let (public, private) = (key_object(scope, public), key_object(scope, private));
             set(scope, pair, "publicKey", public);
             set(scope, pair, "privateKey", private);
             pair.into()
         }
     });
 }
-// __dom.cryptoSign(algorithm, key slots, data) -> ArrayBuffer.
+// __dom.cryptoSign(algorithm, key, data) -> ArrayBuffer.
 fn sign_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let data = buffer_bytes(args.get(2)).unwrap_or_default();
     let outcome = params_of(scope, args.get(0)).and_then(|p| key_of(scope, args.get(1)).and_then(|k| sign(&p, &k, &data)));
     answer(scope, &mut rv, outcome, array_buffer);
 }
-// __dom.cryptoVerify(algorithm, key slots, signature, data) -> boolean.
+// __dom.cryptoVerify(algorithm, key, signature, data) -> boolean.
 fn verify_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (signature, data) = (buffer_bytes(args.get(2)).unwrap_or_default(), buffer_bytes(args.get(3)).unwrap_or_default());
     let outcome = params_of(scope, args.get(0)).and_then(|p| key_of(scope, args.get(1)).and_then(|k| verify(&p, &k, &signature, &data)));
     answer(scope, &mut rv, outcome, |scope, ok| v8::Boolean::new(scope, ok).into());
 }
-// __dom.cryptoEncrypt / cryptoDecrypt(algorithm, key slots, data) -> ArrayBuffer.
+// __dom.cryptoEncrypt / cryptoDecrypt(algorithm, key, data) -> ArrayBuffer.
 fn encrypt_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let data = buffer_bytes(args.get(2)).unwrap_or_default();
     let outcome = params_of(scope, args.get(0)).and_then(|p| key_of(scope, args.get(1)).and_then(|k| encrypt(&p, &k, &data)));
@@ -2101,13 +2182,13 @@ fn decrypt_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let outcome = params_of(scope, args.get(0)).and_then(|p| key_of(scope, args.get(1)).and_then(|k| decrypt(&p, &k, &data)));
     answer(scope, &mut rv, outcome, array_buffer);
 }
-// __dom.cryptoDeriveBits(algorithm, key slots, length | null) -> ArrayBuffer.
+// __dom.cryptoDeriveBits(algorithm, key, length | null) -> ArrayBuffer.
 fn derive_bits_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let length = (!args.get(2).is_null_or_undefined()).then(|| number(scope, Some(args.get(2)))).flatten();
     let outcome = params_of(scope, args.get(0)).and_then(|p| key_of(scope, args.get(1)).and_then(|k| derive_bits(&p, &k, length)));
     answer(scope, &mut rv, outcome, array_buffer);
 }
-// __dom.cryptoDeriveKey(algorithm, base key slots, import algorithm, length algorithm, extractable, usages) -> key slots.
+// __dom.cryptoDeriveKey(algorithm, base key, import algorithm, length algorithm, extractable, usages) -> a key's state.
 fn derive_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (extractable, usages) = (args.get(4).is_true(), usages_of(scope, args.get(5)));
     let outcome = (|| {
@@ -2115,9 +2196,9 @@ fn derive_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let (import, length) = (params_of(scope, args.get(2))?, params_of(scope, args.get(3))?);
         derive_key(&p, &key, &import, &length, extractable, usages)
     })();
-    answer(scope, &mut rv, outcome, |scope, key| key_value(scope, &key));
+    answer(scope, &mut rv, outcome, key_object);
 }
-// __dom.cryptoWrapKey(format, key slots, wrapping key slots, algorithm) -> ArrayBuffer.
+// __dom.cryptoWrapKey(format, key, wrapping key, algorithm) -> ArrayBuffer.
 fn wrap_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let format = args.get(0).to_rust_string_lossy(scope);
     let outcome = (|| {
@@ -2126,7 +2207,7 @@ fn wrap_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     })();
     answer(scope, &mut rv, outcome, array_buffer);
 }
-// __dom.cryptoUnwrapBytes(algorithm, unwrapping key slots, wrapped) -> Uint8Array: what the key is imported from.
+// __dom.cryptoUnwrapBytes(algorithm, unwrapping key, wrapped) -> Uint8Array: what the key is imported from.
 fn unwrap_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let wrapped = buffer_bytes(args.get(2)).unwrap_or_default();
     let outcome = params_of(scope, args.get(0)).and_then(|p| key_of(scope, args.get(1)).and_then(|k| unwrap_bytes(&p, &k, &wrapped)));
