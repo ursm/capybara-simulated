@@ -18,6 +18,9 @@ pub(crate) const SCRIPT_ALREADY_STARTED: u8 = 1;
 pub(crate) const SCRIPT_PARSER_INSERTED: u8 = 1 << 1;
 pub(crate) const SCRIPT_NOT_FORCE_ASYNC: u8 = 1 << 2;
 pub(crate) const SCRIPT_RUN: u8 = 1 << 3;
+// …and that the parser reached its end tag — or the XML parser's after-parse pass, which stands in for it — and decided
+// it then: run it, put it on the list of scripts to execute after parsing (`list_parser_script`), or neither.
+pub(crate) const SCRIPT_END_TAG: u8 = 1 << 4;
 
 // The JavaScript MIME type essences (MIME Sniffing §4.6), each matched ASCII case-insensitively.
 const JAVASCRIPT_MIME_TYPES: [&str; 16] = [
@@ -96,6 +99,11 @@ impl RealmArena {
     // still in the list of scripts to execute after parsing, which "execute the script element" checks against its
     // preparation-time document alone — where at its end tag one the parser put in a removed subtree is not connected)
     pub(crate) fn prepare_script(&mut self, id: NodeId, scripting: bool, by: u32) -> u32 {
+        if by == BY_PARSER {
+            if let Some(n) = self.get_mut_quietly(id) {
+                n.script_flags |= SCRIPT_END_TAG;
+            }
+        }
         let Some(n) = self.get(id) else { return PREPARE_NONE };
         if n.script_flags & if by == BY_SCRIPT { SCRIPT_ALREADY_STARTED } else { SCRIPT_RUN } != 0 {
             return PREPARE_NONE;
@@ -133,16 +141,29 @@ fn blocks_parser(n: &crate::dom::NodeData) -> bool {
 }
 
 impl RealmArena {
-    // The scripts of `root`'s tree (not a shadow tree's, nor a template's contents) its parser inserted and no pass has
-    // run yet, in tree order: what "the end" of a parse runs (HTML §13.2.7) — first, for a parse that ran none of them at
-    // their end tags (the XML parser's), the ones that block the parser (`blocks_parser`) or are import maps.
+    // The parser at a deferred, async or module script's end tag (`listParserScript`): one connected then goes on the
+    // list of scripts to execute after parsing — where "the end" finds it, whatever an earlier script did to it since
+    // (HTML §13.2.7: the lists are kept, not the tree walked again) — and one in a subtree a script removed does not.
+    pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId) {
+        let Some(n) = self.get_mut_quietly(id) else { return };
+        n.script_flags |= SCRIPT_END_TAG;
+        let runs = n.script_flags & SCRIPT_RUN == 0 && matches!(script_type(n), CLASSIC | MODULE);
+        if runs && self.is_connected(id) {
+            if let Some(state) = self.realm_state_mut(cid) {
+                state.parser_list.push(id);
+            }
+        }
+    }
+    // The scripts of `root`'s tree (not a shadow tree's, nor a template's contents) its parser inserted and no end tag
+    // decided — none of a parse that stopped at each (HTML's), every one of one that stopped at none (the XML parser's),
+    // which the after-parse pass then decides as their end tags would, in tree order (HTML §13.2.7).
     pub(crate) fn parser_scripts(&self, root: NodeId) -> Vec<NodeId> {
         let mut found = Vec::new();
         let mut stack: Vec<NodeId> = self.get(root).map_or_else(Vec::new, |n| n.children.iter().rev().copied().collect());
         while let Some(id) = stack.pop() {
             let Some(n) = self.get(id) else { continue };
             if n.kind == NodeKind::Element && &*n.local_name == "script"
-                && n.script_flags & (SCRIPT_PARSER_INSERTED | SCRIPT_RUN) == SCRIPT_PARSER_INSERTED
+                && n.script_flags & (SCRIPT_PARSER_INSERTED | SCRIPT_RUN | SCRIPT_END_TAG) == SCRIPT_PARSER_INSERTED
             {
                 found.push(id);
             }
@@ -154,6 +175,8 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
+    crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
+    crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);
     crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
@@ -270,6 +293,21 @@ fn parser_scripts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = crate::dom::realm_id(scope, &args);
     let found = crate::dom::dom(scope).arena.parser_scripts(root);
     rv.set(crate::dom::nodes_value(scope, cid, &found));
+}
+
+// __dom.listParserScript(nid) — the parser at the script's end tag, a deferred, async or module one (`list_parser_script`).
+fn list_parser_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    crate::dom::realm(scope, cid).list_parser_script(cid, id);
+}
+
+// __dom.takeParserList() -> the realm's list of scripts to execute after parsing, in the order their end tags put them
+// on it, as `nodes_value` answers them — the list emptied.
+fn take_parser_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let list = crate::dom::realm(scope, cid).realm_state_mut(cid).map(|s| std::mem::take(&mut s.parser_list)).unwrap_or_default();
+    rv.set(crate::dom::nodes_value(scope, cid, &list));
 }
 
 // __dom.scriptBlocksParser(nid) -> whether the script element blocks the parser (`blocks_parser`).

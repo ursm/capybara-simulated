@@ -152,6 +152,43 @@ RSpec.describe 'scripts the parser runs' do
     expect(s.evaluate_script('L')).to eq(%w[1 3 unmapped])
   end
 
+  # The lists are what the end tags put on them, not the tree walked again at the end: a deferred script a LATER
+  # parser-blocking one removed runs all the same. Chrome: 1, b.
+  it 'runs a deferred script a later one removed' do
+    app = lambda do |env|
+      if env['PATH_INFO'] == '/b.js'
+        [200, {'content-type' => 'text/javascript'}, ["L.push('b')"]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><script>window.L = []</script>
+          <script id="b" defer src="b.js"></script>
+          <script>document.getElementById('b').remove(); L.push('1')</script>
+        HTML
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L')).to eq(%w[1 b])
+  end
+
+  # The XML parser stops at no end tag, so the after-parse pass stands in for each in tree order: a script in a subtree
+  # an earlier one removed is decided at its turn — not connected, it runs nothing, a deferred one goes on no list.
+  # Chrome: 1, 3.
+  it "runs nothing an XHTML document's parser put in a subtree an earlier script removed" do
+    app = lambda do |env|
+      if env['PATH_INFO'] == '/b.js'
+        [200, {'content-type' => 'text/javascript'}, ["L.push('b')"]]
+      else
+        [200, {'content-type' => 'application/xhtml+xml'}, [<<~XHTML]]
+          <html xmlns="http://www.w3.org/1999/xhtml"><head><script>window.L = [];</script></head><body>
+          <div id="d"><script>document.getElementById('d').remove(); L.push('1');</script><script>L.push('2');</script><script defer="" src="b.js"></script></div>
+          <script>L.push('3');</script></body></html>
+        XHTML
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('L')).to eq(%w[1 3])
+  end
+
   # …and "the end" is for the PARSER's scripts alone: a script an innerHTML fragment made (already started, never
   # runs) or a clone of a started one (the flag is copied) stays inert even when inserted mid-parse — swept up after the
   # parse, both ran. Chrome: neither runs, and the original runs once.

@@ -1018,6 +1018,8 @@ pub(crate) struct RealmArena {
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
+    // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it.
+    pub(crate) parser_list: Vec<NodeId>,
     // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascadeRekey`).
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
     // The parents its document's parse changed since its last layout pass began (mutation_observers.rs `noteParsed`).
@@ -1627,6 +1629,8 @@ impl RealmArena {
         self.target = None;
         // (…what the old page's parse changed has no pass left to correct: the next page's are kept from its first)
         self.parsed = Default::default();
+        // (…nor is a list of scripts to execute after the old page's parse, one it left before its end, the new one's)
+        self.parser_list.clear();
         self.laid_out_at = None;
         self.form_facts.get_mut().clear();
         self.directionality.get_mut().1.clear();
