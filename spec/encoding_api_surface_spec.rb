@@ -119,6 +119,20 @@ RSpec.describe 'Encoding API surface' do
     expect(session.evaluate_script('window.got')).to eq([false, 'undefined', 'undefined', 'undefined'])
   end
 
+  # Whether a SharedArrayBuffer serializes is the realm's capability, not the page's `crossOriginIsolated`: one it
+  # redefined does not make a shared WebAssembly.Memory's buffer clonable (HTML StructuredSerializeInternal: a
+  # DataCloneError where the realm is not cross-origin isolated).
+  it "refuses to clone a shared buffer however the page redefines crossOriginIsolated" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        Object.defineProperty(window, 'crossOriginIsolated', {value: true});
+        const shared = new WebAssembly.Memory({initial: 1, maximum: 1, shared: true}).buffer;
+        try { structuredClone(shared); return [crossOriginIsolated, 'cloned']; } catch (e) { return [crossOriginIsolated, e.name]; }
+      })()
+    JS
+    expect(got).to eq([true, 'DataCloneError'])
+  end
+
   # …and one whose top-level document is served COOP same-origin + COEP require-corp is: `crossOriginIsolated`, and its
   # SharedArrayBuffer — its frames' and its dedicated workers' too.
   it 'is cross-origin isolated, SharedArrayBuffer and all, where its document is served COOP and COEP' do
