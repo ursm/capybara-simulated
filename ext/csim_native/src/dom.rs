@@ -1335,8 +1335,14 @@ impl RealmArena {
         self.owner_sheets.retain(|id, _| live(slots, id));
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
-        self.media.retain(|id, _| live(slots, id));
         let external = &mut self.external;
+        self.media.retain(|id, m| {
+            let keep = live(slots, id);
+            if !keep {
+                *external -= m.weight();
+            }
+            keep
+        });
         self.images.retain(|id, r| {
             let keep = live(slots, id);
             if !keep {
@@ -1550,8 +1556,8 @@ impl RealmArena {
         if !self.dialog_requests.is_empty() {
             self.dialog_requests.remove(&id);
         }
-        if !self.media.is_empty() {
-            self.media.remove(&id);
+        if let Some(m) = self.media.remove(&id) {
+            self.external -= m.weight();
         }
         if !self.form_past_names.is_empty() {
             self.form_past_names.remove(&id);

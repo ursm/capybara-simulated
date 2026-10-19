@@ -38,20 +38,21 @@ struct Bitmap {
     p3: Option<Pixels>,
     display_p3: bool,
 }
+// (…and a video's decoded frame: media.rs)
 #[derive(Clone)]
-struct Pixels {
+pub(crate) struct Pixels {
     store: v8::SharedRef<v8::BackingStore>,
     offset: usize,
-    len: usize,
+    pub(crate) len: usize,
 }
 
 impl Pixels {
-    fn of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Pixels> {
+    pub(crate) fn of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Pixels> {
         let view = v8::Local::<v8::Uint8ClampedArray>::try_from(value).ok()?;
         let store = view.buffer(scope)?.get_backing_store();
         Some(Pixels { store, offset: view.byte_offset(), len: view.byte_length() })
     }
-    fn view<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
+    pub(crate) fn view<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Value> {
         let buffer = v8::ArrayBuffer::with_backing_store(scope, &self.store);
         v8::Uint8ClampedArray::new(scope, buffer, self.offset, self.len).map_or_else(|| v8::null(scope).into(), Into::into)
     }

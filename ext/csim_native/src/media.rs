@@ -44,8 +44,18 @@ pub(crate) struct Media {
     // Whether the decoded frame taints a canvas it is drawn into (clears its origin-clean flag): its resource an opaque
     // response — a no-cors cross-origin one — which a failed load discards with the frame.
     tainted: bool,
+    // Its decoded frame's RGBA pixels (the first: no playback is modelled), which a canvas draws (`mediaFrame`) — none
+    // until a video decodes, and none again once a load fails.
+    frame: Option<crate::image_requests::Pixels>,
     // Which load is the current one: a later load supersedes what an earlier one had queued.
     load: u32,
+}
+
+impl Media {
+    // What its frame weighs as V8 is told (`RealmArena::external`).
+    pub(crate) fn weight(&self) -> i64 {
+        self.frame.as_ref().map_or(0, |f| f.len as i64)
+    }
 }
 
 // An element's state before its first use.
@@ -66,6 +76,7 @@ static INITIAL: Media = Media {
     failures: 0,
     video_size: [0, 0],
     tainted: false,
+    frame: None,
     load: 0,
 };
 
@@ -108,6 +119,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mediaLoad", media_load, context_id);
     crate::dom::register(scope, ns, "mediaSelect", media_select, context_id);
     crate::dom::register(scope, ns, "mediaResource", media_resource, context_id);
+    crate::dom::register(scope, ns, "mediaFrame", media_frame, context_id);
     crate::dom::register(scope, ns, "mediaCurrent", media_current, context_id);
     crate::dom::register(scope, ns, "mediaSourceInserted", media_source_inserted, context_id);
     crate::dom::register(scope, ns, "canPlayType", can_play_type_op, context_id);
@@ -350,19 +362,36 @@ const RESOURCE_FAILED: u32 = 0;
 const VIDEO_DECODED: u32 = 1;
 const AUDIO_USABLE: u32 = 2;
 
-// __dom.mediaResource(media, outcome, width, height, duration, tainted): the resource's outcome — a failure the dedicated
-// media source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no longer
-// there, its frame's taint with it); a decoded video all its data (HAVE_ENOUGH_DATA), its size, duration and taint,
+// __dom.mediaResource(media, outcome, width, height, duration, tainted, frame): the resource's outcome — a failure the
+// dedicated media source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no
+// longer there, its frame and the frame's taint with it); a decoded video all its data (HAVE_ENOUGH_DATA), its size,
+// duration, taint and frame (`frame`, its RGBA pixels: a Uint8ClampedArray),
 // IDLE — a seek to the default playback start position where that is past 0 (within the duration), which then is 0
 // whatever it was; a usable audio IDLE. -> the events the media data processing steps owe, in order
 // (`resource_events`): none for a failure.
+// __dom.mediaFrame(video) -> [pixels, width, height] — a view on its decoded frame's RGBA pixels, and its size — or null
+// where it has none.
+fn media_frame(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
+    let m = crate::dom::dom(scope).arena.media(id);
+    let (Some(frame), [w, h]) = (m.frame.clone(), m.video_size) else { return rv.set_null() };
+    let items = [frame.view(scope), v8::Integer::new_from_unsigned(scope, w).into(), v8::Integer::new_from_unsigned(scope, h).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
 fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
     let [w, h, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
     let tainted = args.get(5).boolean_value(scope);
+    let frame = (outcome == VIDEO_DECODED).then(|| crate::image_requests::Pixels::of(scope, args.get(6))).flatten();
     let autoplay = crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.plain_attr("autoplay").is_some());
-    let m = crate::dom::dom(scope).arena.media_mut(id);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let before = arena.media(id).weight();
+    let m = arena.media_mut(id);
+    m.frame = frame;
+    let after = m.weight();
+    arena.external += after - before;
+    let m = arena.media_mut(id);
     let events = match outcome {
         VIDEO_DECODED => {
             let had_duration = m.duration;
