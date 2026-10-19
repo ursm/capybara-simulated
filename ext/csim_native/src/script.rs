@@ -192,6 +192,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeParserSource", take_parser_source_op, context_id);
     crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
+    crate::dom::register(scope, ns, "scriptSupports", script_supports_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
     crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
     crate::dom::register(scope, ns, "classicScriptEncoding", classic_script_encoding_op, context_id);
@@ -275,6 +276,17 @@ fn classic_script_encoding_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let [content_type, charset] = [0, 1].map(|i| args.get(i).to_rust_string_lossy(scope));
     let name = v8::String::new(scope, classic_script_encoding(&content_type, &charset)).map_or_else(|| v8::undefined(scope).into(), Into::into);
     rv.set(name);
+}
+
+// `HTMLScriptElement.supports(type)` (HTML §4.12.1.1): whether `type` names a script type this UA runs — what
+// `prepare_script` runs: a classic script, a module and an import map; speculation rules, a type it knows, it does not.
+fn supports(ty: &str) -> bool {
+    matches!(ty, "classic" | "module" | "importmap")
+}
+// __dom.scriptSupports(type) -> `supports`.
+fn script_supports_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let ty = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(supports(&ty));
 }
 
 // __dom.scriptType(nid) -> what the script element's type is (`script_type`: `DATA_BLOCK`, `CLASSIC`, …).

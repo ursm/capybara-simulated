@@ -60,4 +60,14 @@ RSpec.describe 'script element types' do
     JS
     expect(got).to eq(%w[moving moved])
   end
+
+  # HTMLScriptElement.supports() answers for the types this UA runs (HTML §4.12.1.1) — the engine's, what it prepares:
+  # speculation rules it knows (a script of that type runs nothing) but does not run, so false, where Chrome, which
+  # runs them, says true.
+  it 'supports the script types it runs' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!doctype html><body>']] })
+    s.visit '/'
+    got = s.evaluate_script("['classic', 'module', 'importmap', 'speculationrules', 'text/javascript'].map((t) => HTMLScriptElement.supports(t))")
+    expect(got).to eq([true, true, true, false, false])
+  end
 end
