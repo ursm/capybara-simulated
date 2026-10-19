@@ -111,4 +111,19 @@ RSpec.describe 'the blob URL store' do
     s.go_forward
     expect(s).to have_current_path(u, url: true)
   end
+
+  # A redirect to a blob: URL is a network error (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme),
+  # never the blob's document.
+  it 'takes a redirect to a blob URL for a network error' do
+    s = simulated_session(lambda {|env|
+      req = Rack::Request.new(env)
+      next [302, {'location' => req.params['to']}, []] if req.path == '/r'
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><p>home</p>']]
+    })
+    s.visit '/'
+    u = s.evaluate_script("URL.createObjectURL(new Blob(['<p id=b>from blob</p>'], {type: 'text/html'}))")
+    s.execute_script("location.href = '/r?to=' + encodeURIComponent(#{u.to_json})")
+    expect(s).to have_no_css('p', text: 'home')
+    expect(s).to have_no_css('#b')
+  end
 end

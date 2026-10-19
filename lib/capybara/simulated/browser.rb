@@ -8429,9 +8429,10 @@ module Capybara
       # Load a blob: document (bytes from the opener) as THIS window's top-level
       # document — for `window.open(blobURL)` / a blob: aux-window navigation,
       # where the blob isn't rack-navigable and lives in the opener's isolate.
-      def boot_blob_document(url, bytes, content_type)
+      # (…`flushed` where its caller flushed the outgoing page already: `navigate`, before the history entry it records)
+      def boot_blob_document(url, bytes, content_type, flushed: false)
         # Before the URL below lands (see `flush_outgoing_page_init`).
-        flush_outgoing_page_init if @timers_active
+        flush_outgoing_page_init if @timers_active && !flushed
         @current_url = url.to_s
         ct = content_type.to_s.empty? ? 'text/html' : content_type.to_s
         # Blob string parts are UTF-8-encoded; when the Blob type carries no
@@ -11370,10 +11371,12 @@ module Capybara
           end
           # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
-          # the one above, which a traversal or a reload replays here.
+          # the one above, which a traversal or a reload replays here. A redirect to one is a network error (Fetch's
+          # HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
           if url.to_s.match?(/\Ablob:/i)
+            return commit_error_document(url.to_s) unless depth.zero?
             blob = @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
-            return blob ? boot_blob_document(url, blob[:bytes], blob[:type]) : fail_blob_document(url)
+            return blob ? boot_blob_document(url, blob[:bytes], blob[:type], flushed: true) : fail_blob_document(url)
           end
           # A controlled top-level navigation goes to the controlling SW's fetch event
           # first (mode 'navigate', dest 'document') — the registration may live in ANY
