@@ -7094,6 +7094,8 @@ module Capybara
         # realms at all. Same outbox pattern as sw_try_activate.
         flush_sw_deferred_fetches(handle, record: w, fallthrough: true)
         @worker_outbox << {handle: handle.to_i, kind: 'sw_reaped'} if w[:service]
+        # Its agents gone: the locks it held let go, its IndexedDB connections closed (agents.rs `drop_owner`).
+        Native.agents_drop_owner(w[:agent_owner]) if w[:agent_owner]
         # Hand back every plain postMessage this worker still owes a reply for — queued OR already
         # consumed by a listen-only handler that will never answer. Only a reply releases these,
         # and a dead worker sends none; leaving them counted pins `worker_pending?` (and so
@@ -8783,6 +8785,12 @@ module Capybara
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
         rt.eval_void("globalThis.__csimWorkerHandle = #{handle.to_i};")
+        # …and the token its realm's agent of the engine's registries is made with (agents.rs), whose locks and
+        # connections go as it is reaped — not only once its isolate is gone, which a terminated one may outlive.
+        if record
+          record[:agent_owner] = Native.agent_owner_new
+          rt.eval_void("globalThis.__csimAgentOwner = #{record[:agent_owner]};")
+        end
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
         # the SAME id as this isolate's client identity (clientId() prefers __csimClientId), so

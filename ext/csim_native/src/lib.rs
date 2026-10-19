@@ -174,6 +174,7 @@ mod video;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
+mod web_locks;
 mod xml_parse;
 mod xpath;
 mod yuv;
@@ -291,12 +292,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("content_type_essence", magnus::function!(mime::content_type_essence_for_ruby, 1))?;
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
-    // A driver session's IndexedDB, Cache Storage and system clipboard: a new partition of their registries
-    // (idb_databases.rs, cache_storage.rs, system_clipboard.rs), cleared as the session resets — and whether an agent
+    // A driver session's IndexedDB, Cache Storage, Web Locks and system clipboard: a new partition of their registries
+    // (idb_databases.rs, cache_storage.rs, web_locks.rs, system_clipboard.rs), cleared as the session resets — and whether an agent
     // of it has notices to take (agents.rs), its event loop work.
     native.define_module_function("session_partition_new", magnus::function!(session_partition_new, 0))?;
     native.define_module_function("session_partition_clear", magnus::function!(session_partition_clear, 1))?;
     native.define_module_function("agent_notices_pending", magnus::function!(agents::pending, 1))?;
+    // (…and a worker's token, its agents' owner, and its agents gone as it is reaped)
+    native.define_module_function("agent_owner_new", magnus::function!(agents::owner_new, 0))?;
+    native.define_module_function("agents_drop_owner", magnus::function!(agents::drop_owner, 1))?;
     native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
     native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;
     Ok(())
@@ -307,9 +311,10 @@ fn session_partition_new() -> u64 {
     static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
-// …and its IndexedDB databases, its caches and its clipboard deleted.
+// …and its IndexedDB databases, its caches, its lock managers and its clipboard deleted.
 fn session_partition_clear(partition: u64) {
     idb_databases::clear(partition);
     cache_storage::clear(partition);
+    web_locks::clear(partition);
     system_clipboard::clear(partition);
 }

@@ -223,6 +223,10 @@ const TREES = [
                                        // the transaction lifetime rules, on the in-process store idb.js keeps:
                                        // the client-side database an offline-capable app keeps. Data API, no
                                        // layout.
+  'web-locks',                         // Web Locks — navigator.locks: named shared / exclusive locks every realm
+                                       // and worker of an origin contends for, held across their event loops
+                                       // (the engine's lock managers, web_locks.rs) — the coordination tabs of
+                                       // one app (a sync engine, a leader election) rely on. No layout.
   'css/geometry',                      // DOMMatrix / DOMPoint / DOMRect / DOMQuad — the geometry interfaces
                                        // canvas transforms, Path2D.addPath and app code build on, and the
                                        // CSS transform list `new DOMMatrix(string)` parses.

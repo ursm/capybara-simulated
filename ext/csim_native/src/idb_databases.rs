@@ -879,7 +879,7 @@ mod tests {
         DbKey { partition: 1, storage: "o".into(), name: name(s) }
     }
     fn agent() -> u64 {
-        crate::agents::new_agent(1)
+        crate::agents::new_agent(1, 0)
     }
     fn taken(agent: u64) -> Vec<(u32, [f64; 4])> {
         crate::agents::take(agent).into_iter().map(|n| (n.kind, n.args)).collect()

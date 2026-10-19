@@ -410,6 +410,8 @@ const INTERFACES = [
   ['webcrypto', 'Crypto', { install: true }],
   ['service-workers', 'Cache', { install: true }],
   ['service-workers', 'CacheStorage', { install: true }],
+  ['web-locks', 'LockManager', { install: true }],
+  ['web-locks', 'Lock', { install: true }],
   ['service-workers', 'ServiceWorker', { install: true }],
   ['service-workers', 'ServiceWorkerRegistration', {
     install: true,

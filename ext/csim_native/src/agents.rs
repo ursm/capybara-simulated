@@ -2,7 +2,7 @@
 // Locks (web_locks.rs): who asks, and what a registry owes each. An agent is a realm of an isolate (a window's, a
 // frame's, a worker's) of a driver session's partition, made as the realm first uses one of them and gone with its realm
 // (`drop_realm`) or its isolate, every registry told (`agent_gone`) so that what it held — a connection, a lock — goes
-// with it.
+// with it — or, a worker's, as the host reaps the worker (`drop_owner`): a terminated worker's isolate may outlive it.
 //
 // What a registry owes an agent for another agent's call — an event to fire, a request answered, a lock granted — waits
 // in the agent's notices until it takes them (`agentTake`): at once, by the bindings after each of their own calls, and
@@ -22,8 +22,11 @@ pub(crate) struct Notice {
     pub(crate) later: bool,
 }
 
+// An agent: its session, the worker it is of (the host's token for it, `owner_new`; 0 for a window's realm), and its
+// notices.
 struct Agent {
     partition: u64,
+    owner: u64,
     notices: Vec<Notice>,
 }
 
@@ -35,10 +38,10 @@ fn agents() -> MutexGuard<'static, HashMap<u64, Agent>> {
     AGENTS.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-// A new agent of session `partition`.
-pub(crate) fn new_agent(partition: u64) -> u64 {
+// A new agent of session `partition`, of worker `owner` (0: none).
+pub(crate) fn new_agent(partition: u64, owner: u64) -> u64 {
     let agent = NEXT.fetch_add(1, Ordering::Relaxed) + 1;
-    agents().insert(agent, Agent { partition, notices: Vec::new() });
+    agents().insert(agent, Agent { partition, owner, notices: Vec::new() });
     agent
 }
 // Agent `agent`'s session, while it lives.
@@ -62,6 +65,7 @@ pub(crate) fn take(agent: u64) -> Vec<Notice> {
 fn agent_gone(agent: u64) {
     agents().remove(&agent);
     crate::idb_databases::agent_gone(agent);
+    crate::web_locks::agent_gone(agent);
 }
 
 // ── The agents of an isolate ─────────────────────────────────────────────────────────────────────────────────────────
@@ -92,6 +96,18 @@ pub(crate) fn drop_realm(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
 pub(crate) fn pending(partition: u64) -> bool {
     agents().values().any(|a| a.partition == partition && !a.notices.is_empty())
 }
+// A token for a worker the host spawns, which its realm's agent is made with — the process's, never one before.
+pub(crate) fn owner_new() -> u64 {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    LAST.fetch_add(1, Ordering::Relaxed) + 1
+}
+// Worker `owner` reaped: every agent of it gone, whatever its isolate's fate.
+pub(crate) fn drop_owner(owner: u64) {
+    let gone: Vec<u64> = agents().iter().filter(|(_, a)| a.owner == owner).map(|(id, _)| *id).collect();
+    for agent in gone {
+        agent_gone(agent);
+    }
+}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "agentJoin", join, context_id);
@@ -100,14 +116,16 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "agentsDrop", drop_all, context_id);
 }
 
-// __dom.agentJoin(partition): this realm an agent of session `partition`'s, where it is not yet one.
+// __dom.agentJoin(partition, owner): this realm an agent of session `partition`'s — of worker `owner`, 0 for none —
+// where it is not yet one.
 fn join(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if agent_of(scope, &args).is_some() {
         return;
     }
     let partition = args.get(0).integer_value(scope).unwrap_or(0) as u64;
+    let owner = args.get(1).integer_value(scope).unwrap_or(0) as u64;
     let realm = realm_id(scope, &args);
-    let agent = new_agent(partition);
+    let agent = new_agent(partition, owner);
     if scope.get_slot::<RealmAgents>().is_none() {
         scope.set_slot(RealmAgents::default());
     }
