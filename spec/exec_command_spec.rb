@@ -147,8 +147,8 @@ RSpec.describe 'execCommand in an editing host' do
     expect(got).to eq(['bold,BOLD,insertText,delete,copy,paste', '', 'bold,BOLD,insertText,delete,copy,paste', 'insertText,delete,copy,paste'])
   end
 
-  # A colour or a font the style attribute refuses styles nothing: no span, the `input` alone — the selection's DOM as
-  # it was (Chrome: true, `hi`). A quirks document parses the colour in its mode: a hashless hex is one there.
+  # A colour or a font the style attribute refuses styles nothing: no span, the `input` alone where a selection was —
+  # the DOM as it was (Chrome: true, `hi`), and no `input` at a caret. A quirks document parses the colour in its mode: a hashless hex is one there.
   it "makes no span of a value that styles nothing, and takes a quirks document's hashless colour" do
     pick = lambda {|doctype|
       session = simulated_session(lambda {|_env|
@@ -164,11 +164,33 @@ RSpec.describe 'execCommand in an editing host' do
             getSelection().selectAllChildren(e);
             got.push(String(document.execCommand(command, false, value)), e.innerHTML);
           }
+          // (…and at a caret, none: an `input` no more than a value that styles would fire)
+          getSelection().collapse(e, 0);
+          got.push(String(document.execCommand('foreColor', false, 'not a color')));
           return got;
         })()
       JS
     }
-    expect(pick.call('<!DOCTYPE html>')).to eq(['not a color', 'true', 'hi', 'a;color:red', 'true', 'hi', 'ff0000', 'true', 'hi'])
-    expect(pick.call('').last(2)).to eq(['true', '<span style="color: rgb(255, 0, 0);">hi</span>'])
+    expect(pick.call('<!DOCTYPE html>')).to eq(['not a color', 'true', 'hi', 'a;color:red', 'true', 'hi', 'ff0000', 'true', 'hi', 'true'])
+    expect(pick.call('').last(3)).to eq(['true', '<span style="color: rgb(255, 0, 0);">hi</span>', 'true'])
+  end
+
+  # `insertHTML` into a text control types the markup's text — an input's `input` an insertText's, its data what went
+  # in, a textarea's of no inputType nor data (Chrome; Firefox inserts nothing).
+  it "types markup's text into a text control, its input as Chrome fires each" do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><textarea id=t>abcd</textarea><input id=i value=abcd>']]
+    }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      ['t', 'i'].flatMap((id) => {
+        const el = document.getElementById(id), seen = [];
+        el.addEventListener('input', (e) => seen.push(e.inputType, e.data));
+        el.focus();
+        el.setSelectionRange(1, 3);
+        document.execCommand('insertHTML', false, 'x<b>y</b>');
+        return [el.value, ...seen];
+      })
+    JS
+    expect(got).to eq(['axyd', '', nil, 'axyd', 'insertText', 'xy'])
   end
 end
