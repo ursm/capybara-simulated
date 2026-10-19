@@ -2453,6 +2453,7 @@ pub(crate) struct Dom {
     pub(crate) abort_signals: crate::abort_signal::AbortSignals,
     pub(crate) message_ports: crate::message_ports::Ports,
     pub(crate) broadcast_channels: crate::broadcast_channels::BroadcastChannels,
+    pub(crate) media_query_lists: crate::media_query_lists::MediaQueryLists,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2465,17 +2466,19 @@ impl Drop for Dom {
         self.abort_signals.leak_weak_handles();
         self.message_ports.leak_weak_handles();
         self.broadcast_channels.leak_weak_handles();
+        self.media_query_lists.leak_handles();
     }
 }
 
 impl Dom {
-    // A realm's MessagePorts and BroadcastChannels let go of with its context — a frame's removed or disposed, the main
-    // realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and the channel names it makes again, never
-    // reaches one of the context before. Not as its arena resets: a load into the same realm (a `javascript:` URL's
+    // A realm's MessagePorts, BroadcastChannels and MediaQueryLists let go of with its context — a frame's removed or
+    // disposed, the main realm's retired (`forgetRealmObjects`) — so a page that reuses its id, and the channel names it
+    // makes again, never reaches one of the context before. Not as its arena resets: a load into the same realm (a `javascript:` URL's
     // result) keeps the Window, and what its script made with it.
     pub(crate) fn forget_realm_objects(&mut self, cid: i32) {
         self.message_ports.drop_realm(cid);
         self.broadcast_channels.drop_realm(cid);
+        self.media_query_lists.drop_realm(cid);
     }
 }
 
@@ -2934,6 +2937,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::abort_signal::install(scope, ns, context_id);
     crate::message_ports::install(scope, ns, context_id);
     crate::broadcast_channels::install(scope, ns, context_id);
+    crate::media_query_lists::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);
@@ -5277,12 +5281,9 @@ fn easing_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // (`style::media_matches`).
 fn media_matches(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let text = args.get(0).to_rust_string_lossy(scope);
-    let viewport = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
+    let viewport = crate::media_query_lists::viewport_args(scope, &args, 1);
     let cid = realm_id(scope, &args);
-    let d = dom(scope);
-    let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
-    let Some(arena) = d.arena.enter_known(cid) else { return rv.set_bool(false) };
-    rv.set_bool(crate::style::media_matches(d.styles.get(&cid), arena, screen, &text));
+    rv.set_bool(crate::media_query_lists::matches(scope, cid, &text, viewport));
 }
 
 // CSSOM's "serialize an identifier" (§2.1), over UTF-16 units — a lone surrogate kept as it is, as any unit past U+007F:

@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/garbage'
 
 # Media queries are matched by ONE evaluator, the style engine's (style.rs `media_matches`): the `@media` rules the
 # cascade applies, `matchMedia`, a `<style media>` / `<link media>`, and a `<picture>`'s `<source media>` all ask it, so a
@@ -68,5 +69,35 @@ RSpec.describe 'media queries' do
   it 'serializes a MediaQueryList\'s media' do
     s = session
     expect(s.evaluate_script("matchMedia('(MIN-WIDTH:100px)').media")).to eq('(min-width: 100px)')
+  end
+
+  # "Evaluate media queries and report changes" (CSSOM View §4.2) tells each list whose answer flipped, oldest first,
+  # once a flip. The engine holds a list weakly but for while it has a `change` listener: one the page keeps only through
+  # its listener still hears, one it dropped is let go of — where every list `matchMedia` ever made was kept.
+  it 'tells a list of each flip, kept by its `change` listener alone, and lets go of one nothing holds' do
+    s = session
+    s.execute_script(<<~JS)
+      window.__heard = [];
+      matchMedia('(max-width: 300px)').addEventListener('change', (e) => __heard.push(['narrow', e.matches, e.media]));
+      matchMedia('(min-width: 400px)').onchange = (e) => __heard.push(['wide', e.matches]);
+      matchMedia('(max-width: 300px)').addEventListener('change', (e) => __heard.push(['once', e.matches]), {once: true});
+      window.__dropped = new WeakRef(matchMedia('(max-width: 300px)'));
+    JS
+    collect_garbage(s) { s.evaluate_script('__dropped.deref() === undefined') }
+    s.current_window.resize_to(280, 600)
+    s.current_window.resize_to(290, 600)
+    s.current_window.resize_to(1024, 768)
+    expect(s.evaluate_script('[__heard, __dropped.deref() === undefined]')).to eq(
+      [
+        [
+          ['narrow', true, '(max-width: 300px)'],
+          ['wide', false],
+          ['once', true],
+          ['narrow', false, '(max-width: 300px)'],
+          ['wide', true]
+        ],
+        true
+      ]
+    )
   end
 end
