@@ -236,4 +236,24 @@ RSpec.describe 'members a page overrides' do
     JS
     expect(s.evaluate_script('got')).to eq(['mutations:1', 'message:hi'])
   end
+
+  # …and the promises the platform hands back are the realm's own, whatever a page (Zone.js) put in `Promise`.
+  it "hands back the realm's own promises whatever a page put in Promise" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const Own = Promise;
+        window.Promise = function () { throw new Error('page Promise'); };
+        window.Promise.resolve = window.Promise.reject = window.Promise.all = () => { throw new Error('page Promise'); };
+        const made = [
+          fetch('/'), document.fonts.ready, new Image().decode(), navigator.permissions.query({ name: 'geolocation' }),
+          navigator.mediaDevices.enumerateDevices(), navigator.serviceWorker.getRegistrations()
+        ];
+        for (const p of made) Own.prototype.then.call(p, undefined, () => {});
+        return made.map((p) => p instanceof Own);
+      })()
+    JS
+    expect(got).to eq([true] * 6)
+  end
 end
