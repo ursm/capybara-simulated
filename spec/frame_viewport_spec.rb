@@ -69,6 +69,20 @@ RSpec.describe 'frame viewport' do
     expect(s.evaluate_script("(w => [w.innerWidth, w.innerHeight])(document.querySelector('iframe').contentWindow)")).to eq([0, 0])
   end
 
+  # …and a removed frame's window, held on to, as none: its browsing context discarded, it has no viewport (Chrome:
+  # `[0, 0]`).
+  it 'reports a removed frame\'s window as a zero viewport' do
+    s = framed
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const f = document.querySelector('iframe'), w = f.contentWindow, before = [w.innerWidth, w.innerHeight];
+        f.remove();
+        return [before, [w.innerWidth, w.innerHeight]];
+      })()
+    JS
+    expect(got).to eq([[300, 150], [0, 0]])
+  end
+
   it 'follows a window resize' do
     s = framed('width:50%;height:200px;border:0')
     s.within_frame(0) { expect(s.evaluate_script('innerWidth')).to eq(512) }

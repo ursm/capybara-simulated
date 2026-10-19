@@ -71,9 +71,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "resizeSteps", resize_steps_op, context_id);
 }
 
-// A realm's viewport, `cid`'s — none for one dropped (a removed frame's window: Chrome's 0).
+// A realm's viewport, `cid`'s — none for one whose browsing context is discarded or that is dropped (a removed frame's
+// window, held on to: Chrome's 0).
 pub(crate) fn of(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> [f64; 2] {
-    if crate::dom::dom(scope).arena.is_dropped(cid) {
+    let arena = &crate::dom::dom(scope).arena;
+    if arena.is_dropped(cid) || arena.navigables.is_discarded(cid) {
         return [0.0, 0.0];
     }
     crate::dom::realm(scope, cid).window_viewport.size()

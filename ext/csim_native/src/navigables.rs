@@ -50,6 +50,13 @@ pub(crate) struct Navigables {
     pub(crate) linked: crate::dom::SharedWord,
 }
 
+impl Navigables {
+    // Whether realm `cid`'s context is disposed (`forget_navigables_of`), its realm not yet dropped.
+    pub(crate) fn is_discarded(&self, cid: i32) -> bool {
+        self.discarded.contains(&cid)
+    }
+}
+
 impl RealmArena {
     // The realm `child`'s navigable has its active document in, where some realm's event loop steps it: the child's
     // container in a live realm's document, its own realm live.
