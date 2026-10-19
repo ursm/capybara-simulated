@@ -147,6 +147,26 @@ RSpec.describe 'execCommand in an editing host' do
     expect(got).to eq(['bold,BOLD,insertText,delete,copy,paste', '', 'bold,BOLD,insertText,delete,copy,paste', 'insertText,delete,copy,paste'])
   end
 
+  # A command acts on its OWN document's selection — a frame document's asked from the parent its frame's, not the
+  # parent's — and on nothing in a document with no browsing context: one whose frame was removed answers false, it
+  # does not throw.
+  it "answers a document's commands by its own selection, and none without a window" do
+    session = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable>hello</div><iframe></iframe>']]
+    }).tap {|s| s.visit '/' }
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const frame = document.querySelector('iframe'), fd = frame.contentDocument;
+        getSelection().selectAllChildren(e);
+        const out = [document.queryCommandEnabled('bold'), Document.prototype.queryCommandEnabled.call(fd, 'bold')];
+        frame.remove();
+        out.push(fd.queryCommandEnabled('bold'), fd.execCommand('insertText', false, 'x'), fd.queryCommandEnabled('nope'));
+        return out;
+      })()
+    JS
+    expect(got).to eq([true, false, false, false, false])
+  end
+
   # A colour or a font the style attribute refuses styles nothing: no span, the `input` alone where a selection was —
   # the DOM as it was (Chrome: true, `hi`), and no `input` at a caret. A quirks document parses the colour in its mode: a hashless hex is one there.
   it "makes no span of a value that styles nothing, and takes a quirks document's hashless colour" do

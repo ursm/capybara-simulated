@@ -114,7 +114,7 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_int32(command_support(&command).map_or(-1, |s| s as i32));
 }
 // What a command of a document acts on (execCommand's, queryCommandEnabled's): none for a command it does not carry
-// out, nor in a document with no browsing context, whose selection is no window's; a focused text control — one text
+// out; a focused text control — one text
 // is typed into, a number or an email field too — first, as focusing one moves the selection into it: for a text
 // command (`command_support` 1), one not `readonly` nor disabled (`TARGET_CONTROL`), and for a cut one with something
 // selected (Blink's needs a range), else none; else the root editable element the selection's anchor is in (its own
@@ -129,7 +129,7 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
     let Some(support) = command_support(name) else { return (TARGET_NONE, None) };
     let arena = realm(scope, cid);
     let control = active.filter(|&a| {
-        arena.get(a).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && crate::input_types::facts(n.input_type()) & crate::input_types::TYPED != 0))
+        arena.get(a).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TYPED)))
     });
     if let Some(control) = control {
         let n = arena.get(control).expect("filtered above");
@@ -144,18 +144,19 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
     if name.eq_ignore_ascii_case("unlink") && collapsed {
         return (TARGET_NONE, None);
     }
+    // (…the arena again: reading the selection needed the scope it was borrowed from)
     let arena = realm(scope, cid);
     let Some(host) = arena.editing_root(anchor) else { return (TARGET_NONE, None) };
     let plaintext = arena.get(host).and_then(|n| n.plain_attr("contenteditable")).is_some_and(|v| v.eq_ignore_ascii_case("plaintext-only"));
     if support != 1 && plaintext { (TARGET_NONE, None) } else { (TARGET_HOST, Some(host)) }
 }
-// __dom.commandTarget(command, activeNid | -1, selection, hasWindow) -> [kind, node | null]: what the command acts on
-// (`command_target`, `TARGET_*`), the document's active element and selection given — none without a window.
+// __dom.commandTarget(command, activeNid | -1, selection | null) -> [kind, node | null]: what the command acts on
+// (`command_target`, `TARGET_*`), the document's active element and its selection's state given.
 fn command_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
     let active = crate::dom::nid_arg(scope, &args, 1);
     let cid = crate::dom::realm_id(scope, &args);
-    let (kind, node) = if args.get(3).is_true() { command_target(scope, cid, &name, active, args.get(2)) } else { (TARGET_NONE, None) };
+    let (kind, node) = command_target(scope, cid, &name, active, args.get(2));
     let items = [v8::Integer::new_from_unsigned(scope, kind).into(), crate::dom::node_value(scope, node)];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
