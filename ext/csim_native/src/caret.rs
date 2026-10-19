@@ -534,7 +534,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // __dom.caretAtom(nid) -> whether the element is in an atom a caret is placed beside, never in (`CARET_VOID_TAGS`: it,
 // or an element holding it — a press on an `<svg>`'s `<rect>` is one on the `<svg>`): what a press on it sets no caret
-// inside.
+// inside. HTML a `<foreignObject>` holds is no atom's: its text takes a caret as any does (Chrome).
 fn caret_atom(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
@@ -543,6 +543,9 @@ fn caret_atom(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     while let Some(n) = at.and_then(|a| arena.get(a)).filter(|n| n.kind == NodeKind::Element) {
         if CARET_VOID_TAGS.contains(&&*n.local_name) {
             return rv.set_bool(true);
+        }
+        if n.ns == web_atoms::ns!(svg) && &*n.local_name == "foreignObject" {
+            break;
         }
         at = n.parent;
     }
