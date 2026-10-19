@@ -593,7 +593,7 @@ module Capybara
         @browser.forget_blob_copies rescue nil
         # …and the main realm's ports and channels let go of in the isolate's registries, which outlive the context: the
         # next page reuses realm 0 (a channel of this page would otherwise hear its posts).
-        @ctx&.eval('globalThis.__dom && globalThis.__dom.forgetRealmObjects(0)') rescue nil
+        @ctx&.eval_void('globalThis.__dom && globalThis.__dom.forgetRealmObjects(0)') rescue nil
         # Warm path: per rusty's reset contract the snapshot is REPLAYED —
         # including its precompiled code cache — so re-visited app modules
         # compile at in-memory-hit cost (~3.3× cheaper than a cold
