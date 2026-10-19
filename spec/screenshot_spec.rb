@@ -555,15 +555,7 @@ RSpec.describe 'save_screenshot' do
   # P2), as CSS Writing Modes says: an RLI…PDI around Latin text, then Hebrew, is a right-to-left paragraph.
   it "takes a plaintext paragraph's direction past its isolates" do
     s = page_with('<p dir=ltr style="unicode-bidi:plaintext">&#x2067;abc&#x2069;&#x5e9;&#x5dc;</p>')
-    got = s.evaluate_script(<<~JS)
-      (() => {
-        const seen = [];
-        const d = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'direction');
-        Object.defineProperty(CanvasRenderingContext2D.prototype, 'direction', { configurable: true, get: d.get, set(v) { seen.push(v); d.set.call(this, v); } });
-        try { __csimScreenshot(false); } finally { Object.defineProperty(CanvasRenderingContext2D.prototype, 'direction', d); }
-        return seen;
-      })()
-    JS
+    got = s.evaluate_script('__csimPaintTexts().map((t) => t.direction)').uniq
     expect(got).to eq(['rtl'])
   end
 end

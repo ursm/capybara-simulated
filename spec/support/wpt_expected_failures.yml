@@ -4286,6 +4286,8 @@ html/rendering/replaced-elements/images/img-sizes-auto.html:
 - <img sizes="auto"> - contain-intrinsic-size
 - <img sizes="auto,xyz"> - contain
 - <img sizes="auto,xyz"> - contain-intrinsic-size
+html/rendering/replaced-elements/images/input-image-content.html:
+- "== html/rendering/replaced-elements/images/input-image-content-ref.html"
 html/rendering/replaced-elements/svg-embedded-sizing/svg-in-object-auto.html:
 - "[harness] TIMEOUT"
 - 'placeholder: ''object'', '

@@ -357,6 +357,62 @@ RSpec.describe 'members a page overrides' do
     expect(got).to eq([255, 'error:thrown', true, 3])
   end
 
+  # …a canvas drawn from, a screenshot's surface and a file's name and type likewise: a canvas shim (fingerprinting) that
+  # wraps `getContext` or the size, or a page that replaced `createElement`, still gets its screenshot.
+  it "draws, paints and names files whatever a page made of the canvas and file members" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p>x</p><input type=file id=f>']] })
+    s.visit '/'
+    s.find('#f').set(__FILE__)
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const a = document.createElement('canvas'), b = document.createElement('canvas');
+        a.width = a.height = b.width = b.height = 10;
+        a.getContext('2d').fillRect(0, 0, 10, 10);
+        const bx = b.getContext('2d');
+        const one = { configurable: true, get: () => 1, set() { throw new Error('page size'); } };
+        Object.defineProperty(HTMLCanvasElement.prototype, 'width', one);
+        Object.defineProperty(HTMLCanvasElement.prototype, 'height', one);
+        HTMLCanvasElement.prototype.getContext = () => null;
+        Document.prototype.createElement = () => null;
+        Object.defineProperty(File.prototype, 'name', { get: () => 'PAGE' });
+        Object.defineProperty(Blob.prototype, 'type', { get: () => 'page/type' });
+        bx.drawImage(a, 0, 0);
+        const dt = new DataTransfer();
+        dt.items.add(new File(['x'], 'own.txt', { type: 'text/plain' }));
+        return [
+          bx.getImageData(5, 5, 1, 1).data[3],
+          __csimScreenshot(false) !== null,
+          document.getElementById('f').value.endsWith('page_overridden_members_spec.rb'),
+          dt.items[0].type
+        ];
+      })()
+    JS
+    expect(got).to eq([255, true, true, 'text/plain'])
+  end
+
+  # …and what it throws and fires is its own: a page (a core-js polyfill) that replaced DOMException, TypeError, Map or
+  # ProgressEvent gets the platform's exceptions and events all the same.
+  it "throws and fires its own exceptions and events whatever a page put in the globals" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const Own = { DOMException, TypeError };
+      const page = function () { this.name = 'PAGE'; };
+      window.DOMException = window.TypeError = window.ProgressEvent = window.Map = window.Set = page;
+      const caught = (f) => { try { f(); return 'none'; } catch (e) { return e instanceof Own.DOMException ? e.name : e instanceof Own.TypeError ? 'TypeError' : e.name; } };
+      const got = [
+        caught(() => document.querySelector('!!')),
+        caught(() => { const host = document.createElement('div'); host.attachShadow({ mode: 'open' }); host.attachShadow({ mode: 'open' }); }),
+        caught(() => document.createElement('canvas').getContext('2d').createPattern(document.createElement('canvas'), 'nope'))
+      ];
+      const reader = new FileReader();
+      reader.onloadend = (e) => { got.push(e.type, e.loaded); done(got); };
+      reader.readAsText(new Blob(['abc']));
+    JS
+    expect(got).to eq(['SyntaxError', 'NotSupportedError', 'SyntaxError', 'loadend', 3])
+  end
+
   # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that
   # replaced `Date.now` moves no `performance.now()`, and one that replaced DOMRect, DOMMatrix, TextDecoder or Blob gets
   # the platform's objects from the platform all the same.
