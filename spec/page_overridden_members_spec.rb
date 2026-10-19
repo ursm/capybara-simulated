@@ -252,6 +252,26 @@ RSpec.describe 'members a page overrides' do
     expect(s.evaluate_script('got')).to eq(['microtask', 'mutations'])
   end
 
+  # …the rejection a page left unhandled is reported likewise, and the one the getter was in place for blocks none after.
+  it "reports unhandled rejections whatever a page made of Promise.prototype.constructor" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const got = [];
+      addEventListener('unhandledrejection', (e) => { e.preventDefault(); got.push(e.reason); });
+      const own = Object.getOwnPropertyDescriptor(Promise.prototype, 'constructor');
+      Object.defineProperty(Promise.prototype, 'constructor', { configurable: true, get() { throw new Error('page species'); } });
+      Promise.reject('r1');
+      Object.defineProperty(Promise.prototype, 'constructor', own);
+      setTimeout(() => {
+        Promise.reject('r2');
+        setTimeout(() => done(got), 10);
+      }, 10);
+    JS
+    expect(got).to eq(%w[r1 r2])
+  end
+
   # …and the promises the platform hands back are the realm's own, whatever a page (Zone.js) put in `Promise`.
   it "hands back the realm's own promises whatever a page put in Promise" do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
