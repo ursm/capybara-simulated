@@ -135,4 +135,30 @@ RSpec.describe 'Form submission states' do
     s.click_on 'go'
     expect(s).to have_current_path('/dir/rel', wait: 1)
   end
+
+  # A planned submission holds its form and its submitter as the page's objects (navigation_plan.rs): a form submitted,
+  # removed and dropped before the host takes the plan — a collection between the task and its drain — submits all the
+  # same, its submitter's value with it.
+  it 'submits a form the page dropped before the plan was taken' do
+    received = []
+    s = simulated_session(app(received, '<p>x</p>'))
+    s.visit '/'
+    runtime = s.driver.browser.instance_variable_get(:@runtime)
+    runtime.eval_void(<<~JS)
+      (() => {
+        const f = document.createElement('form');
+        f.method = 'post';
+        f.action = '/gc';
+        f.innerHTML = '<input name=k value=v><button name=b value=1>go</button>';
+        document.body.append(f);
+        f.requestSubmit(f.querySelector('button'));
+        f.remove();
+      })();
+    JS
+    3.times { runtime.ctx.low_memory_notification }
+    runtime.eval_void('for (let i = 0; i < 100; i++) document.createElement("span");')
+    s.evaluate_script('1')
+    expect(received.map {|r| r.first(2) }).to eq([%w[POST /gc]])
+    expect(s).to have_current_path('/gc', wait: 1)
+  end
 end

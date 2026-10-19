@@ -1856,12 +1856,12 @@ module Capybara
       # `form.submit()` / `form.requestSubmit()`. Called by user-action
       # entry points (click is the primary, but a `<select onchange="$
       # ('#form').submit()">` pattern reaches here through
-      # select_option). Without this hop the intent sits on the slot
-      # forever and the form never actually navigates / POSTs.
+      # select_option). Without this hop the planned submission (navigation_plan.rs)
+      # is never taken and the form never actually navigates / POSTs.
       def consume_pending_form_submit
         pending = @runtime.call('__csimTakePendingFormSubmit')
-        return unless pending.is_a?(Hash) && pending['formHandle']
-        # (…the main document's slot, which a frame's submission is routed past: its form submitted as that document's)
+        return unless pending.is_a?(Hash) && pending['formHandle'].to_i.positive?
+        # (…the main document's plan, which a frame's submission is routed past: its form submitted as that document's)
         in_top_context { submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'], pending['entryList']) }
       end
 
@@ -2022,7 +2022,7 @@ module Capybara
       def consume_pending_navigation
         pending = @runtime.call('__csimTakePendingNavigation')
         return unless pending.is_a?(Hash) && pending['url']
-        # (…the main document's slot: its hyperlink's href resolved against it, whichever frame `within_frame` entered)
+        # (…the main document's plan: its hyperlink's href resolved against it, whichever frame `within_frame` entered)
         in_top_context { follow_pending_hyperlink(pending) }
       end
       # A hyperlink's new window (HTML "follow the hyperlink" with a target that names none): named by its target but
@@ -2804,7 +2804,7 @@ module Capybara
       # its submit, polls for the CSRF meta tag inside `setInterval(…, 1)` and calls `form.submit()` once it is there,
       # long after the click returned), a script the driver ran (`execute_script('form.submit()')` on an idle page, where
       # no step follows to take it), or a synthetic click on an `<a download>` (Avo's action download: file-saver's
-      # `saveAs` dispatches one on a fresh anchor with a blob URL). Otherwise the intent sits on its slot forever.
+      # `saveAs` dispatches one on a fresh anchor with a blob URL). Otherwise what it planned is never taken.
       def drain_task_intents
         drain_pending_navigation
         consume_pending_navigation
@@ -10384,7 +10384,7 @@ module Capybara
       end
       # A <form> submitted from INSIDE a nested browsing context (a frame realm
       # reached via `contentWindow`, not an entered `within_frame` block). The
-      # pending-submit slot lives on the initiating realm's globalThis, which no
+      # planned submission is the initiating realm's (navigation_plan.rs), which no
       # top-page drain reads, so the JS side flags the realm here (mirrors
       # `frame_navigate_self`). Keyed by realm id; deferred + drained from
       # `drain_pending_navigation` so we never serialize/navigate while the

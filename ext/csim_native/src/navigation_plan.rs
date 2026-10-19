@@ -6,7 +6,7 @@
 // to `/b` for `form.submit(); location.href = '/b'`, to the form's for the other order). A frame's are its container's
 // (frame_navigation.rs).
 
-use crate::dom::{realm, realm_id, register, NodeId};
+use crate::dom::{realm, realm_id, register};
 
 pub(crate) struct Navigation {
     url: String,
@@ -16,9 +16,10 @@ pub(crate) struct Navigation {
     blob: Option<v8::Global<v8::Value>>,
 }
 
+// (…its form and its submitter held as the page's objects are, as the page may drop them before the host takes it)
 pub(crate) struct Submission {
-    form: NodeId,
-    submitter: Option<NodeId>,
+    form: v8::Global<v8::Value>,
+    submitter: v8::Global<v8::Value>,
     entries: Option<v8::Global<v8::Value>>,
 }
 
@@ -66,8 +67,10 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 // the FormData its `formdata` event left, null for a submission that built none — after `supersedePlanned` where it
 // navigates the top-level document.
 fn plan_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(form) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
-    let submitter = crate::node_handle::nid_of(scope, args.get(1));
+    if crate::node_handle::nid_of(scope, args.get(0)).is_none() {
+        return;
+    }
+    let (form, submitter) = (v8::Global::new(scope, args.get(0)), v8::Global::new(scope, args.get(1)));
     let entries = (!args.get(2).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(2)));
     plan(scope, &args).submission = Some(Submission { form, submitter, entries });
 }
@@ -113,11 +116,7 @@ fn take_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn take_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(s) = plan(scope, &args).submission.take() else { return };
-    let form = crate::dom::node_value(scope, Some(s.form));
-    let submitter = crate::dom::node_value(scope, s.submitter);
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
+    let (form, submitter) = (v8::Local::new(scope, s.form), v8::Local::new(scope, s.submitter));
     let entries = s.entries.map_or_else(|| v8::null(scope).into(), |e| v8::Local::new(scope, e));
     rv.set(v8::Array::new_with_elements(scope, &[form, submitter, entries]).into());
 }

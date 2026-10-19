@@ -1645,7 +1645,7 @@ impl RealmArena {
         // (…nor is a list of scripts to execute after the old page's parse, one it left before its end, the new one's)
         self.parser_list.clear();
         self.parser_sources.clear();
-        // (…nor what the old page planned for its navigable, which the host took or let go: a form it kept alive with it)
+        // (…nor what the old page planned for its navigable, which the host took or let go — and the form it held with it)
         self.navigation_plan = Default::default();
         self.laid_out_at = None;
         self.form_facts.get_mut().clear();
