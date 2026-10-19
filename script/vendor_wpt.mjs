@@ -223,6 +223,10 @@ const TREES = [
                                        // the transaction lifetime rules, on the in-process store idb.js keeps:
                                        // the client-side database an offline-capable app keeps. Data API, no
                                        // layout.
+  'requestidlecallback',               // requestIdleCallback — idle periods the event loop starts when it has
+                                       // nothing due (their deadline the next timer's, the next frame's, 50 ms
+                                       // at most), and a callback's timeout: what a scheduler (React's, an
+                                       // analytics batcher) defers its work to. No layout.
   'web-locks',                         // Web Locks — navigator.locks: named shared / exclusive locks every realm
                                        // and worker of an origin contends for, held across their event loops
                                        // (the engine's lock managers, web_locks.rs) — the coordination tabs of

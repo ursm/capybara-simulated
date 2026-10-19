@@ -5222,6 +5222,14 @@ input-events/input-events-spin-button-click-on-number-input.html:
 input-events/select-event-drag-remove.html:
 - Drag and remove from the select event doesn't crash
 - "[harness] TIMEOUT"
+requestidlecallback/callback-suspended.html:
+- Dispatching idle callbacks should be able to be suspended and then resumed
+- "[harness] TIMEOUT"
+requestidlecallback/callback-timeout-when-busy.html:
+- requestIdleCallback not scheduled when event loop is busy.
+- requestIdleCallback scheduled with timeout when event loop is busy.
+requestidlecallback/callback-timeout.html:
+- requestIdleCallback callback should time out
 resource-timing/SO-XO-SO-redirect-chain-tao.https.html:
 - Verify that cross origin resources' timings are not exposed when same-origin=>cross-origin=>same-origin
   redirects have `Timing-Allow-Origin:` headers only on some of the responses.

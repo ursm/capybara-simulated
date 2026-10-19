@@ -5,7 +5,8 @@
 // (timers.js `runLoopStepLocal`), moving the realm's clock (`RealmState::clock`) to when it falls due.
 //
 // And its animation frame callbacks (`frames`), which the rendering update runs (timers.js `runRenderPhase`): each a
-// function, run in the order requested, a frame's taken as it begins.
+// function, run in the order requested, a frame's taken as it begins. And its idle request callbacks (`idle`), which
+// an idle period runs (timers.js `runIdlePeriod`), as the event loop has nothing due.
 //
 // A page's timer is named by a positive id, its realm's own, as `setTimeout` returns one; a task the platform queues by
 // a negative key, the isolate's (`TaskKeys`) — no page clearing every id it can count to clears the platform's work,
@@ -54,6 +55,13 @@ pub(crate) struct Timers {
     // …and the repeating timer whose task that is, with when it ran: scheduled again as its task ends (`rearm`), after
     // whatever its handler scheduled.
     repeating: Option<(i64, f64)>,
+    // Its idle request callbacks (requestIdleCallback §5.2), by the handle each was given: those requested since the last
+    // idle period began (its "list of idle request callbacks"), those an idle period made runnable and has yet to run
+    // ("list of runnable idle callbacks"), each in order — and when the idle period running began.
+    idle: std::collections::VecDeque<IdleRequest>,
+    runnable: std::collections::VecDeque<IdleRequest>,
+    last_idle: u32,
+    idle_began: f64,
     // How many of the realm's event loop steps are running (`timerStep`): a step goes on with what is due in it though
     // the realm's context is disposed during it — a frame's script removing its own iframe, mid-step, still has the
     // request it sent fail as the step runs on — and the list goes as it ends.
@@ -118,6 +126,47 @@ impl Timers {
     }
 }
 
+// An idle request callback: its handle, the callback, and the task its `timeout` queued (§5.2 step 6) — cleared as the
+// callback runs or is cancelled, so a long timeout keeps no event loop stepping for nothing.
+struct IdleRequest {
+    handle: u32,
+    callback: v8::Global<v8::Value>,
+    timeout: Option<i64>,
+}
+
+// requestIdleCallback §5.3 "start an idle period": its deadline 50 ms on at the most, and a frame's interval where an
+// animation frame callback is waiting for the rendering update to come.
+const IDLE_PERIOD_MAX_MS: f64 = 50.0;
+const FRAME_INTERVAL_MS: f64 = 1000.0 / 60.0;
+
+impl Timers {
+    // §5.3 "start an idle period", at `now`: every callback requested since the last one runnable after those still
+    // waiting; whether there is one to run.
+    fn begin_idle(&mut self, now: f64) -> bool {
+        self.runnable.extend(self.idle.drain(..));
+        self.idle_began = now;
+        !self.runnable.is_empty()
+    }
+    // §5.4 what is left of the idle period at `now`, as it stands: 50 ms from its start at the most, a frame's interval
+    // where an animation frame callback waits for the rendering update — one requested during it too — and never past
+    // the timer due first. (Each a span less what has gone of it, so a period just begun has its cap exactly.)
+    fn idle_remaining(&self, now: f64) -> f64 {
+        let gone = now - self.idle_began;
+        let cap = if self.frames.is_empty() { IDLE_PERIOD_MAX_MS } else { FRAME_INTERVAL_MS };
+        let timer = self.order.first().map_or(f64::INFINITY, |&(Due(due), _, _)| due - now);
+        (cap - gone).min(timer).max(0.0)
+    }
+    // An idle request callback out of both lists: cancelled, or timed out.
+    fn take_idle(&mut self, handle: u32) -> Option<IdleRequest> {
+        for list in [&mut self.idle, &mut self.runnable] {
+            if let Some(at) = list.iter().position(|r| r.handle == handle) {
+                return list.remove(at);
+            }
+        }
+        None
+    }
+}
+
 impl RealmArena {
     // Realm `cid`'s timers — the one entered, or one parked — none for a realm it has no state of.
     fn timers_of(&mut self, cid: i32) -> Option<&mut Timers> {
@@ -176,6 +225,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "frameNext", frame_next, context_id);
     register(scope, ns, "frameEnd", frame_end, context_id);
     register(scope, ns, "frameCount", frame_count, context_id);
+    register(scope, ns, "idleAdd", idle_add, context_id);
+    register(scope, ns, "idleTake", idle_take, context_id);
+    register(scope, ns, "idleBegin", idle_begin, context_id);
+    register(scope, ns, "idleNext", idle_next, context_id);
+    register(scope, ns, "idleRemaining", idle_remaining, context_id);
 }
 
 // __dom.frameAdd(callback) -> its id: an animation frame callback of the calling realm's — none kept for a realm that
@@ -242,6 +296,88 @@ fn frame_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 fn frame_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     rv.set_uint32(dom(scope).arena.enter(cid).timers.frames.len() as u32);
+}
+
+// __dom.idleAdd(callback, timeout, timedOut) -> its handle: an idle request callback of the calling realm's
+// (requestIdleCallback §5.2) — and, for a timeout, a task queued to run `timedOut(handle)` that long after — none kept
+// for a realm that takes no timers (a removed frame's), which answers with a handle all the same.
+fn idle_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let callback = v8::Global::new(scope, args.get(0));
+    let timeout = args.get(1).number_value(scope).unwrap_or(0.0);
+    let timed_out = v8::Global::new(scope, args.get(2));
+    let cid = realm_id(scope, &args);
+    let handle = {
+        let timers = &mut dom(scope).arena.enter(cid).timers;
+        timers.last_idle += 1;
+        timers.last_idle
+    };
+    let handle_value: v8::Local<v8::Value> = v8::Integer::new_from_unsigned(scope, handle).into();
+    let list: v8::Local<v8::Value> = v8::Array::new_with_elements(scope, &[handle_value]).into();
+    let list = v8::Global::new(scope, list);
+    let arena = &mut dom(scope).arena;
+    if arena.takes_timers(cid) {
+        let timeout = (timeout > 0.0).then(|| {
+            arena.task_keys.last -= 1;
+            let key = arena.task_keys.last;
+            arena.task_keys.realms.insert(key, cid);
+            let state = arena.enter(cid);
+            let due = state.clock + timeout;
+            state.timers.add(key, (timed_out, Some(list)), due, None, 0);
+            key
+        });
+        arena.enter(cid).timers.idle.push_back(IdleRequest { handle, callback, timeout });
+    }
+    rv.set_uint32(handle);
+}
+// An idle request callback taken from its list — run, cancelled or timed out — its timeout's task gone with it.
+fn taken_idle(arena: &mut RealmArena, cid: i32, request: IdleRequest) -> v8::Global<v8::Value> {
+    if let Some(key) = request.timeout {
+        arena.task_keys.realms.remove(&key);
+        arena.enter(cid).timers.clear(key);
+    }
+    request.callback
+}
+// __dom.idleTake(handle) -> the calling realm's idle request callback of that handle, out of whichever list it is in
+// (cancelled, or timed out), or undefined for one that ran or never was.
+fn idle_take(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(handle) = args.get(0).uint32_value(scope) else { return };
+    let cid = realm_id(scope, &args);
+    let arena = &mut dom(scope).arena;
+    let Some(request) = arena.enter(cid).timers.take_idle(handle) else { return };
+    let callback = taken_idle(arena, cid, request);
+    let callback = v8::Local::new(scope, callback);
+    rv.set(callback);
+}
+// __dom.idleBegin() -> whether the idle period the calling realm's event loop begins now has a callback to run
+// (`Timers::begin_idle`).
+fn idle_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let state = dom(scope).arena.enter(cid);
+    let now = state.clock;
+    rv.set_bool(state.timers.begin_idle(now));
+}
+// __dom.idleNext() -> [handle, callback]: the idle period's next runnable callback, taken — undefined once there is none,
+// or its deadline has passed (§5.5 "invoke idle callbacks": the rest wait for the next).
+fn idle_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = &mut dom(scope).arena;
+    let state = arena.enter(cid);
+    if state.timers.idle_remaining(state.clock) <= 0.0 {
+        return;
+    }
+    let Some(request) = state.timers.runnable.pop_front() else { return };
+    let handle = request.handle;
+    let callback = taken_idle(arena, cid, request);
+    let handle = v8::Integer::new_from_unsigned(scope, handle).into();
+    let callback = v8::Local::new(scope, callback);
+    rv.set(v8::Array::new_with_elements(scope, &[handle, callback]).into());
+}
+// __dom.idleRemaining() -> what is left of the calling realm's idle period, as it stands (`Timers::idle_remaining`).
+fn idle_remaining(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let state = dom(scope).arena.enter(cid);
+    let now = state.clock;
+    rv.set_double(state.timers.idle_remaining(now));
 }
 
 // __dom.timerStep(begins) — an event loop step of the calling realm's begins, or ends: one ending in a realm whose
@@ -367,9 +503,9 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 
 // __dom.realmPending(realm, subtree) -> whether realm `realm` (the calling one, for null) has work its event loop is to
-// run — a timer, an animation frame callback, an observation owed at its next rendering update (`GEN_OBSERVATIONS`),
-// an autofocus candidate a flush is owed for, an animation that needs frames (`frames_due`) — and, with `subtree`, any
-// realm of its child navigables does, theirs too: what keeps the driver stepping the page.
+// run — a timer, an animation frame or idle callback, an observation owed at its next rendering update
+// (`GEN_OBSERVATIONS`), an autofocus candidate a flush is owed for, an animation that needs frames (`frames_due`) — and,
+// with `subtree`, any realm of its child navigables does, theirs too: what keeps the driver stepping the page.
 fn realm_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = if args.get(0).is_int32() { args.get(0).int32_value(scope).unwrap_or(0) } else { realm_id(scope, &args) };
     let subtree = args.get(1).is_true();
@@ -381,7 +517,11 @@ fn pending(scope: &mut v8::PinScope<'_, '_>, realm: i32, subtree: bool) -> bool 
         return false;
     }
     let own = arena.realm_state(realm).is_some_and(|st| {
-        !st.timers.frames.is_empty() || !st.timers.by_key.is_empty() || st.generations.get(crate::dom::GEN_OBSERVATIONS) != 0
+        !st.timers.frames.is_empty()
+            || !st.timers.by_key.is_empty()
+            || !st.timers.idle.is_empty()
+            || !st.timers.runnable.is_empty()
+            || st.generations.get(crate::dom::GEN_OBSERVATIONS) != 0
     });
     if own || arena.autofocus.pending_in(arena, realm) || crate::animation_ops::frames_due(scope, realm) {
         return true;
