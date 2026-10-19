@@ -291,6 +291,18 @@ fn check_point(arena: &RealmArena, (nid, offset): (NodeId, u32)) -> Option<u32> 
         crate::range_contents::PointError::PastLength => OFFSET,
     })
 }
+// The anchor of the selection `value` states — its node, and whether its range is collapsed — where its range is in its
+// document (a shadow tree's too, which the Selection's members do not show): what `execCommand` acts by
+// (editing_commands.rs `commandTarget`); none for no such range.
+pub(crate) fn document_anchor(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> Option<(NodeId, bool)> {
+    let sel = handle(scope, value)?;
+    let s = selected(scope, cid, sel)?;
+    if !in_document(realm(scope, cid), sel, s.start.0) {
+        return None;
+    }
+    Some((if s.backward { s.end.0 } else { s.start.0 }, s.start == s.end))
+}
+
 // Whether the document is a shadow-including inclusive ancestor of `nid` — where collapse, extend and setBaseAndExtent
 // take a point at all.
 fn in_document(arena: &RealmArena, sel: &SelectionHandle, nid: NodeId) -> bool {

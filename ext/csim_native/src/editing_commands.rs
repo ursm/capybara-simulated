@@ -13,6 +13,7 @@ use crate::editing_insert::Edit;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "editCommand", edit_command, context_id);
     crate::dom::register(scope, ns, "commandSupport", command_support_op, context_id);
+    crate::dom::register(scope, ns, "commandTarget", command_target_op, context_id);
     crate::dom::register(scope, ns, "commandInputType", command_input_type_op, context_id);
     crate::dom::register(scope, ns, "commandAction", command_action_op, context_id);
     crate::dom::register(scope, ns, "commandStyle", command_style_op, context_id);
@@ -112,6 +113,53 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let command = args.get(0).to_rust_string_lossy(scope);
     rv.set_int32(command_support(&command).map_or(-1, |s| s as i32));
 }
+// What a command of a document acts on (execCommand's, queryCommandEnabled's): none for a command it does not carry
+// out, nor in a document with no browsing context, whose selection is no window's; a focused text control — one text
+// is typed into, a number or an email field too — first, as focusing one moves the selection into it: for a text
+// command (`command_support` 1), one not `readonly` nor disabled (`TARGET_CONTROL`), and for a cut one with something
+// selected (Blink's needs a range), else none; else the root editable element the selection's anchor is in (its own
+// range's, a shadow tree's too — the anchor, which the engine's edits go by: element_state.rs `editing_root` — a
+// `contenteditable=true` nested in an editable element no root of its own, the body in design mode), its kind
+// deciding — a `plaintext-only` one takes the text commands alone (`TARGET_HOST`). None for no range at all, and for
+// `unlink` with one that selects nothing.
+const TARGET_NONE: u32 = 0;
+const TARGET_CONTROL: u32 = 1;
+const TARGET_HOST: u32 = 2;
+fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>) -> (u32, Option<NodeId>) {
+    let Some(support) = command_support(name) else { return (TARGET_NONE, None) };
+    let arena = realm(scope, cid);
+    let control = active.filter(|&a| {
+        arena.get(a).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && crate::input_types::facts(n.input_type()) & crate::input_types::TYPED != 0))
+    });
+    if let Some(control) = control {
+        let n = arena.get(control).expect("filtered above");
+        let refused = support != 1 || n.plain_attr("readonly").is_some() || arena.is_actually_disabled(control);
+        let nothing_cut = name.eq_ignore_ascii_case("cut") && {
+            let (sel, _) = arena.text_selection(control);
+            sel.start == sel.end
+        };
+        return if refused || nothing_cut { (TARGET_NONE, None) } else { (TARGET_CONTROL, Some(control)) };
+    }
+    let Some((anchor, collapsed)) = crate::selection::document_anchor(scope, cid, selection) else { return (TARGET_NONE, None) };
+    if name.eq_ignore_ascii_case("unlink") && collapsed {
+        return (TARGET_NONE, None);
+    }
+    let arena = realm(scope, cid);
+    let Some(host) = arena.editing_root(anchor) else { return (TARGET_NONE, None) };
+    let plaintext = arena.get(host).and_then(|n| n.plain_attr("contenteditable")).is_some_and(|v| v.eq_ignore_ascii_case("plaintext-only"));
+    if support != 1 && plaintext { (TARGET_NONE, None) } else { (TARGET_HOST, Some(host)) }
+}
+// __dom.commandTarget(command, activeNid | -1, selection, hasWindow) -> [kind, node | null]: what the command acts on
+// (`command_target`, `TARGET_*`), the document's active element and selection given — none without a window.
+fn command_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let name = args.get(0).to_rust_string_lossy(scope);
+    let active = crate::dom::nid_arg(scope, &args, 1);
+    let cid = crate::dom::realm_id(scope, &args);
+    let (kind, node) = if args.get(3).is_true() { command_target(scope, cid, &name, active, args.get(2)) } else { (TARGET_NONE, None) };
+    let items = [v8::Integer::new_from_unsigned(scope, kind).into(), crate::dom::node_value(scope, node)];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
 // __dom.commandInputType(command) -> the `inputType` of the `input` it fires ('' for none, or for no command).
 fn command_input_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
