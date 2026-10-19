@@ -154,21 +154,56 @@ impl RealmArena {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "parseMargin", parse_margin_op, context_id);
+    crate::dom::register(scope, ns, "ioOptions", io_options_op, context_id);
     crate::dom::register(scope, ns, "observeIntersections", observe_intersections_op, context_id);
 }
 
-// __dom.parseMargin(text) -> [top, topPercent, right, …] (`parse_margin`: a side's value, and 1 for a percentage), or
-// null for a margin that does not parse.
-fn parse_margin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = args.get(0).to_rust_string_lossy(scope);
-    match parse_margin(&text) {
-        Some(sides) => {
-            let flat: Vec<f64> = sides.iter().flat_map(|m| [m.value, f64::from(u8::from(m.percent))]).collect();
-            rv.set(crate::dom::f64_array(scope, &flat).into());
-        }
-        None => rv.set_null(),
+// A margin as its attribute gives it back: each side's pixels or percentage, top / right / bottom / left.
+fn serialize_margin(sides: &[Margin; 4]) -> String {
+    let side = |m: &Margin| format!("{}{}", crate::numbers::to_js_string(m.value), if m.percent { "%" } else { "px" });
+    sides.iter().map(side).collect::<Vec<_>>().join(" ")
+}
+
+// What `ioOptions` refuses: a margin that does not parse (a SyntaxError), a threshold outside 0-1 (a RangeError).
+const BAD_ROOT_MARGIN: i32 = 1;
+const BAD_SCROLL_MARGIN: i32 = 2;
+const BAD_THRESHOLD: i32 = 3;
+
+// __dom.ioOptions(rootMargin, scrollMargin, threshold, trackVisibility, delay) -> an IntersectionObserver's options as
+// its constructor (§3.2.1 "initialize a new IntersectionObserver") makes them: [margin, rootMargin, scrollMargin,
+// thresholds, delay] — the root margin parsed, [top, topPercent, right, …] (a side's value, and 1 for a percentage), as
+// `observeIntersections` takes it, then both margins serialized; the thresholds (a number or a list) ascending, [0] for
+// none; the delay at least 100 where it tracks visibility. Or what refuses them (`BAD_*`).
+fn io_options_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let margins = [0, 1].map(|i| parse_margin(&args.get(i).to_rust_string_lossy(scope)));
+    let [Some(root_margin), Some(scroll_margin)] = margins else {
+        return rv.set_int32(if margins[0].is_none() { BAD_ROOT_MARGIN } else { BAD_SCROLL_MARGIN });
+    };
+    let threshold = args.get(2);
+    let mut thresholds: Vec<f64> = match v8::Local::<v8::Array>::try_from(threshold) {
+        Ok(list) => (0..list.length()).filter_map(|i| list.get_index(scope, i).and_then(|v| v.number_value(scope))).collect(),
+        Err(_) => threshold.number_value(scope).into_iter().collect(),
+    };
+    if thresholds.iter().any(|t| !(0.0..=1.0).contains(t)) {
+        return rv.set_int32(BAD_THRESHOLD);
     }
+    thresholds.sort_by(f64::total_cmp);
+    if thresholds.is_empty() {
+        thresholds.push(0.0);
+    }
+    let delay = args.get(4).number_value(scope).unwrap_or(0.0);
+    let delay = if args.get(3).is_true() { delay.max(100.0) } else { delay };
+    let flat: Vec<f64> = root_margin.iter().flat_map(|m| [m.value, f64::from(u8::from(m.percent))]).collect();
+    // (…the thresholds a list, which the bindings freeze: the attribute's FrozenArray)
+    let thresholds: Vec<v8::Local<v8::Value>> = thresholds.into_iter().map(|t| v8::Number::new(scope, t).into()).collect();
+    let values: Vec<v8::Local<v8::Value>> = vec![
+        crate::dom::f64_array(scope, &flat).into(),
+        v8::String::new(scope, &serialize_margin(&root_margin)).unwrap().into(),
+        v8::String::new(scope, &serialize_margin(&scroll_margin)).unwrap().into(),
+        v8::Array::new_with_elements(scope, &thresholds).into(),
+        v8::Number::new(scope, delay).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
 }
 
 // __dom.observeIntersections(rootNid | -1, margin, thresholds, targetNid, …) -> Float64Array: the root rectangle (x, y,

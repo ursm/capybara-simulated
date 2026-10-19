@@ -67,7 +67,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ioRecord", io_record, context_id);
 }
 
-// __dom.ioCreate(delay) -> a new IntersectionObserver's number, which orders it among the realm's.
+// __dom.ioCreate() -> a new IntersectionObserver's number, which orders it among the realm's.
 fn io_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let observers = &mut crate::dom::realm(scope, cid).intersection_observers;
