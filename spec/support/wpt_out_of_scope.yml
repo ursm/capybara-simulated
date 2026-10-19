@@ -28909,10 +28909,6 @@ css/css-animations/CSSAnimation-effect.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: Setting animation-composition sets the composite property on the effect
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/Document-getAnimations.tentative.html:
 - name: CSS Animations targetting (pseudo-)elements should have correct order after
     sorting (::marker)

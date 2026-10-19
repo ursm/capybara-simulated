@@ -288,6 +288,9 @@ pub(crate) struct Effect {
     pub(crate) keyframes: Vec<Keyframe>,
     pub(crate) composite: CompositeOperation,
     pub(crate) iteration_composite_accumulate: bool,
+    // Its pseudo-element as a page named it (`KeyframeEffect.pseudoElement`), which its target keeps only where it is one
+    // style generates; none for one style made, whose target's is it.
+    pub(crate) pseudo_element: Option<String>,
     // The easing out of the keyframe standing in at 0 for a property no keyframe there sets: a CSS animation's
     // `animation-timing-function` (css-animations-1 §3), linear for a script's (a neutral keyframe, web-animations
     // §5.3.4).
@@ -437,6 +440,7 @@ impl Animations {
             keyframes: Vec::new(),
             composite: CompositeOperation::Replace,
             iteration_composite_accumulate: false,
+            pseudo_element: None,
             implicit_easing: None,
             computed: None,
             computed_from: None,

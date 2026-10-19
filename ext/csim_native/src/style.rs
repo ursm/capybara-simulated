@@ -1304,15 +1304,10 @@ impl StyleEngine {
         self.web_animations.committed_values(id, Default::default(), &|a, b| tree_order(arena, a, b))
     }
 
-    // What `getAnimations()` reports: the relevant animations targeting `element` itself (not its pseudo-elements) —
-    // with `subtree`, those targeting its pseudo-elements and its descendants too — or anything in the document where
-    // there is no element; in composite order.
-    pub(crate) fn relevant_animations(
-        &self,
-        arena: &RealmArena,
-        element: Option<NodeId>,
-        subtree: bool,
-    ) -> Vec<waapi::AnimationId> {
+    // What `getAnimations()` reports: the relevant animations targeting `node` itself (not its pseudo-elements) — with
+    // `subtree`, those targeting its pseudo-elements and its descendants too, in its own tree — a shadow tree's are its
+    // shadow root's, not its host's document's ("the relevant animations for a subtree") — in composite order.
+    pub(crate) fn relevant_animations(&self, arena: &RealmArena, node: NodeId, subtree: bool) -> Vec<waapi::AnimationId> {
         let order = |a, b| tree_order(arena, a, b);
         let within = |root: NodeId, node: NodeId| {
             let mut cur = Some(node);
@@ -1324,13 +1319,10 @@ impl StyleEngine {
             }
             false
         };
-        match (element, self.doc) {
-            (Some(el), _) if subtree => self.web_animations.relevant_animations(|t| within(el, t.node), &order),
-            (Some(el), _) => self.web_animations.relevant_animations(|t| t.node == el && t.pseudo.is_none(), &order),
-            (None, Some(doc)) => {
-                self.web_animations.relevant_animations(|t| arena.shadow_including_ancestor(doc, t.node), &order)
-            },
-            (None, None) => Vec::new(),
+        if subtree {
+            self.web_animations.relevant_animations(|t| within(node, t.node), &order)
+        } else {
+            self.web_animations.relevant_animations(|t| t.node == node && t.pseudo.is_none(), &order)
         }
     }
 

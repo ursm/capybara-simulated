@@ -31,6 +31,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "keyframeProperty", keyframe_property_op, context_id);
     register(scope, ns, "animAdopt", anim_adopt, context_id);
     register(scope, ns, "animEffectTiming", anim_effect_timing, context_id);
+    register(scope, ns, "animEffectOptions", anim_effect_options, context_id);
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
     register(scope, ns, "animReconcile", anim_reconcile, context_id);
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
@@ -240,12 +241,14 @@ fn anim_effect(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             },
         };
         let target = target_arg(scope, &args, 0, 1);
+        let pseudo = string_arg(scope, args.get(1));
         let id = engine.web_animations_op(|model| {
             let id = model.new_effect(timing);
             let effect = model.effects.get_mut(&id).unwrap();
             effect.composite = composite;
             effect.iteration_composite_accumulate = accumulate;
             effect.keyframes = keyframes;
+            effect.pseudo_element = pseudo;
             model.set_target(id, target);
             id
         });
@@ -298,7 +301,13 @@ fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
             },
             Some("target") => {
                 let target = target_arg(scope, &args, 2, 3);
-                engine.web_animations_op(|model| model.set_target(id, target));
+                let pseudo = string_arg(scope, args.get(3));
+                engine.web_animations_op(|model| {
+                    if let Some(effect) = model.effects.get_mut(&id) {
+                        effect.pseudo_element = pseudo;
+                    }
+                    model.set_target(id, target);
+                });
             },
             Some("keyframes") => {
                 let keyframes = match keyframes_arg(engine, &array_arg(scope, args.get(2))) {
@@ -546,12 +555,21 @@ fn anim_overall_progress(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     });
 }
 // __dom.animTiming(effect) -> [localTime | null, progress | null, currentIteration | null, activeDuration, endTime,
-// phase] — what `getComputedTiming()` adds to the timing.
+// phase, duration, fill] — what `getComputedTiming()` adds to the timing, and what it resolves of it: the iteration
+// duration (`auto` 0) and the fill mode (`auto` none, a keyframe effect's — §4.6 "fill modes").
 fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
         at_time(engine, arena);
         let Some(timing) = engine.web_animations.computed_timing(id) else { return };
+        let Some(given) = engine.web_animations.effects.get(&id).map(|e| &e.timing) else { return };
+        let duration = if given.written.as_ref().is_some_and(|w| w.auto_duration) { 0.0 } else { given.duration };
+        let fill = match given.fill {
+            FillMode::None | FillMode::Auto => "none",
+            FillMode::Forwards => "forwards",
+            FillMode::Backwards => "backwards",
+            FillMode::Both => "both",
+        };
         let phase = match timing.phase {
             Phase::Before => "before",
             Phase::Active => "active",
@@ -565,6 +583,8 @@ fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             v8::Number::new(scope, timing.active_duration).into(),
             v8::Number::new(scope, timing.end_time).into(),
             string_value(scope, phase),
+            v8::Number::new(scope, duration).into(),
+            string_value(scope, fill),
         ];
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
@@ -603,20 +623,20 @@ fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     });
 }
 
-// __dom.animList(nid | -1, subtree) -> [animation, …]: what `element.getAnimations({subtree})` (an element) or
-// `document.getAnimations()` (-1) reports — the relevant animations, in composite order.
+// __dom.animList(nid, subtree) -> [animation, …]: what `element.getAnimations({subtree})` (an element) or a document's
+// or shadow root's `getAnimations()` (subtree) reports — the relevant animations, in composite order.
 fn anim_list(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {
-        let element = nid_arg(scope, &args, 0);
+        let Some(node) = nid_arg(scope, &args, 0) else { return rv.set(v8::Array::new(scope, 0).into()) };
         at_time(engine, arena);
         let subtree = args.get(1).boolean_value(scope);
-        let ids = engine.relevant_animations(arena, element, subtree);
+        let ids = engine.relevant_animations(arena, node, subtree);
         let items: Vec<v8::Local<v8::Value>> = ids.iter().map(|&id| v8::Number::new(scope, id as f64).into()).collect();
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
 }
 
-// __dom.animAdopt(animation) -> [effect | 0, target nid | -1, pseudo | null, name | null, sequence, kind]: a handle is
+// __dom.animAdopt(animation) -> [effect | 0, target nid | -1, name | null, kind]: a handle is
 // made for an animation the engine made — `animation` (a CSS animation, its `animationName` the name) or `transition`
 // (a CSS transition, its `transitionProperty`) — and for its effect: what they signal has somewhere to go from now on.
 fn anim_adopt(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -625,7 +645,7 @@ fn anim_adopt(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let model = &mut engine.web_animations;
         let Some(a) = model.animations.get_mut(&id) else { return };
         a.handled = true;
-        let (effect, sequence) = (a.effect, a.sequence);
+        let effect = a.effect;
         let (name, kind) = match &a.css {
             Some(css) => (Some(css.name()), if css.transition().is_some() { "transition" } else { "animation" }),
             None => (None, "script"),
@@ -637,16 +657,37 @@ fn anim_adopt(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let items = [
             v8::Number::new(scope, effect.unwrap_or(0) as f64).into(),
             v8::Number::new(scope, target.as_ref().map_or(-1.0, |t| t.node.to_f64())).into(),
-            match target.and_then(|t| t.pseudo).as_ref().and_then(pseudo_text) {
-                Some(p) => string_value(scope, p),
-                None => v8::null(scope).into(),
-            },
             match name {
                 Some(n) => string_value(scope, &n),
                 None => v8::null(scope).into(),
             },
-            v8::Number::new(scope, sequence as f64).into(),
             string_value(scope, kind),
+        ];
+        rv.set(v8::Array::new_with_elements(scope, &items).into());
+    });
+}
+
+// __dom.animEffectOptions(effect) -> [pseudoElement | null, composite, iterationComposite]: what a KeyframeEffect's
+// attributes of those names read — its pseudo-element as the page named it, or as style targets it, and its composite
+// operations, a CSS animation's as its style keeps them.
+fn anim_effect_options(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine, _arena| {
+        let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
+        let Some(e) = engine.web_animations.effects.get(&id) else { return };
+        let pseudo = e.pseudo_element.clone().or_else(|| e.target.as_ref()?.pseudo.as_ref().and_then(pseudo_text).map(str::to_owned));
+        let composite = match e.composite {
+            CompositeOperation::Replace => "replace",
+            CompositeOperation::Add => "add",
+            CompositeOperation::Accumulate => "accumulate",
+        };
+        let iteration_composite = if e.iteration_composite_accumulate { "accumulate" } else { "replace" };
+        let items = [
+            match pseudo {
+                Some(p) => string_value(scope, &p),
+                None => v8::null(scope).into(),
+            },
+            string_value(scope, composite),
+            string_value(scope, iteration_composite),
         ];
         rv.set(v8::Array::new_with_elements(scope, &items).into());
     });
