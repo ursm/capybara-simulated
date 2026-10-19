@@ -140,7 +140,48 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "windowNamed", window_named, context_id);
     crate::dom::register(scope, ns, "namedIn", named_in, context_id);
     crate::dom::register(scope, ns, "namesIn", names_in, context_id);
+    crate::dom::register_fast(scope, ns, "namedGates", named_gates_op, NAMED_GATES_FAST, context_id);
 }
+
+// Which named-property lookups an element's `name` (or its `id`) may make it found by — the window's (an id, or the name
+// of an embed, form, img, object, iframe or frame: `window_named`'s, a navigable's container's among them) and the
+// document's (the name of an embed, form, iframe, img or object, the id of an object or an img: `document_names_of`'s,
+// where it is exposed) — which the bindings keep a gate of each by, so a miss is no tree walk. A superset of what the
+// lookups find, never fewer.
+const GATE_WINDOW: u32 = 1;
+const GATE_DOCUMENT: u32 = 2;
+fn named_gates(n: &NodeData, is_name: bool) -> u32 {
+    if n.kind != NodeKind::Element {
+        return 0;
+    }
+    let tag = if n.ns == ns!(html) { &*n.local_name } else { "" };
+    let window = !is_name || matches!(tag, "embed" | "form" | "img" | "object" | "iframe" | "frame");
+    let document = if is_name { matches!(tag, "embed" | "form" | "iframe" | "img" | "object") } else { matches!(tag, "object" | "img") };
+    u32::from(window) * GATE_WINDOW | u32::from(document) * GATE_DOCUMENT
+}
+// __dom.namedGates(nid, isName) -> the gates (`GATE_*`) an element's `name` (isName) or `id` arms.
+fn named_gates_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let is_name = args.get(1).is_true();
+    let gates = nid_arg(scope, &args, 0).and_then(|id| crate::dom::dom(scope).arena.get(id).map(|n| named_gates(n, is_name)));
+    rv.set_uint32(gates.unwrap_or(0));
+}
+fn named_gates_fast(_receiver: v8::Local<v8::Value>, nid: f64, is_name: bool, options: *mut v8::fast_api::FastApiCallbackOptions) -> u32 {
+    let id = if nid >= 0.0 { NodeId::from_i64(nid as i64) } else { None };
+    crate::dom::fast_dom(options).zip(id).and_then(|(d, id)| d.arena.get(id).map(|n| named_gates(n, is_name))).unwrap_or(0)
+}
+const NAMED_GATES_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(
+    named_gates_fast as _,
+    &v8::fast_api::CFunctionInfo::new(
+        v8::fast_api::Type::Uint32.as_info(),
+        &[
+            v8::fast_api::Type::V8Value.as_info(),
+            v8::fast_api::Type::Float64.as_info(),
+            v8::fast_api::Type::Bool.as_info(),
+            v8::fast_api::Type::CallbackOptions.as_info(),
+        ],
+        v8::fast_api::Int64Representation::Number,
+    ),
+)];
 
 // __dom.elementById(rootNid, id) -> `getElementById`: the first element in tree order, the root itself included, whose id
 // is `id` (exactly, as UTF-16) — none or it, as `nodes_value` answers.
