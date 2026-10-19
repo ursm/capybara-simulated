@@ -16,6 +16,7 @@ mod autofocus;
 mod av1;
 mod blob_rules;
 mod blob_urls;
+mod broadcast_channels;
 mod canvas;
 mod canvas_paint;
 mod canvas_path;

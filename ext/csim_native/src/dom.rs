@@ -2452,6 +2452,7 @@ pub(crate) struct Dom {
     // The AbortSignals' state and graph (abort_signal.rs) and the MessagePorts' (message_ports.rs), every realm's.
     pub(crate) abort_signals: crate::abort_signal::AbortSignals,
     pub(crate) message_ports: crate::message_ports::Ports,
+    pub(crate) broadcast_channels: crate::broadcast_channels::BroadcastChannels,
 }
 
 // The isolate's slots go after V8 has disposed it (`OwnedIsolate`'s drop), and a weak handle's drop resets its node,
@@ -2463,6 +2464,7 @@ impl Drop for Dom {
         self.arena.ce_reactions.leak_weak_handles();
         self.abort_signals.leak_weak_handles();
         self.message_ports.leak_weak_handles();
+        self.broadcast_channels.leak_weak_handles();
     }
 }
 
@@ -2920,6 +2922,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::web_locks::install(scope, ns, context_id);
     crate::abort_signal::install(scope, ns, context_id);
     crate::message_ports::install(scope, ns, context_id);
+    crate::broadcast_channels::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);
     crate::selected_content::install(scope, ns, context_id);

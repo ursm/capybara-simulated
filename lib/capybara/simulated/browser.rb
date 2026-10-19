@@ -607,13 +607,9 @@ module Capybara
         # change fires at every one EXCEPT the one that made it), delivered on settle.
         # [{kind, key, old, new, url, area, targets}] (same thread).
         @storage_inbox        = []
-        # BroadcastChannel isolate-wide registry + global ordered delivery queue (the multi-realm
-        # path — see broadcast_to_windows / bc_post). `@bc_registry` is keyed by [realm_id, local_id]
-        # → {seq, name, origin_key, closed}; `@bc_seq` is the isolate-wide creation counter that
-        # orders delivery "oldest channel first"; `@bc_queue` is the FIFO of pending {realm_id,
-        # local_id, data, origin} deliveries drained in order by deliver_window_messages.
-        @bc_seq               = 0
-        @bc_registry          = {}
+        # BroadcastChannel's global ordered delivery queue (the multi-realm path — see bc_post): the FIFO of pending
+        # {realm_id, id, data, origin} deliveries, each to a channel of the isolate's registry (broadcast_channels.rs)
+        # in creation order, drained in order by deliver_window_messages.
         @bc_queue             = []
       end
 
@@ -3565,11 +3561,8 @@ module Capybara
         reset_websockets
         @window_inbox.clear
         @broadcast_inbox.clear
-        # The BroadcastChannel registry + ordered queue are per-page (the rebuilt VM has no live channels
-        # and restarts the realm/local id counters); a stale entry would misroute a later post.
-        @bc_registry.clear
+        # The BroadcastChannel queue is per-page (the rebuilt VM has no live channels); a stale entry would misroute.
         @bc_queue.clear
-        @bc_seq = 0
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
@@ -3612,7 +3605,6 @@ module Capybara
         reset_websockets
         @window_inbox.clear
         @broadcast_inbox.clear
-        @bc_registry.clear
         @bc_queue.clear
         # Dispose the JS runtime/isolate itself — for an auxiliary window this
         # Browser is the isolate's last owner, but dropping the last reference
@@ -7677,8 +7669,8 @@ module Capybara
           # origin — the posting realm's excepted — as one of this isolate's own does: one queue, in creation order
           # (HTML "postMessage" sorts its destinations by creation), which `deliver_broadcast_queue` drains below.
           @broadcast_inbox.slice!(0, @broadcast_inbox.length).each do |event|
-            enqueue_broadcast_targets(event['name'], event['source'], nil, event['origin']) do |rid, lid|
-              {realm_id: rid, local_id: lid, data: event['data'], origin_key: event['origin']}
+            @runtime.call('__csimBcTargets', event['name'], event['origin'], event['source']).each_slice(2) do |rid, id|
+              @bc_queue << {realm_id: rid.to_i, id: id, data: event['data'], origin_key: event['origin']}
             end
             n += 1
           end
@@ -7747,54 +7739,20 @@ module Capybara
       end
 
       # ── BroadcastChannel isolate-wide ordered delivery (multi-realm path) ──
-      # A channel registers on construction with the isolate-wide creation counter, so delivery can be
-      # ordered "oldest channel first" across realms.
-      def bc_register(realm_id, local_id, name, origin_key)
-        @bc_seq += 1
-        @bc_registry[[realm_id.to_i, local_id.to_i]] = {seq: @bc_seq, name: name.to_s, origin_key: origin_key, closed: false}
-        nil
-      end
-
-      def bc_unregister(realm_id, local_id)
-        @bc_registry.delete([realm_id.to_i, local_id.to_i])
-        nil
-      end
-
       # Is another same-isolate realm (a frame / same-isolate window) live? Only then does a post use the
-      # ordered registry; a single-realm page keeps the in-VM microtask path (zero behaviour change).
+      # ordered queue; a single-realm page keeps the in-VM task path (zero behaviour change).
       def bc_siblings_exist? = @runtime.frame_realm_ids.any?
 
-      # A main-thread BroadcastChannel post in multi-realm mode. Snapshot the eligible target channels
-      # (same name + origin, still open, excluding the poster) at POST TIME, ordered by creation seq, and
-      # queue one ordered delivery each — so a channel created AFTER this post (higher seq / not yet
-      # registered) never receives it, and cross-realm targets interleave with same-realm ones by
-      # creation order (broadcastchannel/ordering). Also fans out to workers + other windows.
-      def bc_post(realm_id, local_id, name, origin_key, data, origin)
-        realm_id = realm_id.to_i
-        local_id = local_id.to_i
-        name     = name.to_s
-        # Snapshot ALL matching open channels — do NOT gate on `frame_realm_alive?` here: a channel that
-        # posts SYNCHRONOUSLY during its frame's initial script (opaque-origin's data: iframes) runs in a
-        # realm not yet registered in `frame_realms`, so a same-realm sibling would be wrongly excluded.
-        # `deliver_broadcast_queue` re-checks realm liveness at delivery time (by then it's registered),
-        # and a genuinely-dead realm's stale entry just yields a skipped delivery.
-        # `origin` (serialized, e.g. "null") is the MessageEvent.origin the same-isolate delivery
-        # exposes; `origin_key` (e.g. "opaque:…") is the SCOPING token workers / other windows match on.
-        enqueue_broadcast_targets(name, realm_id, local_id, origin_key) do |rid, lid|
-          {realm_id: rid, local_id: lid, data: data, origin: origin}
-        end
-        broadcast_external(name, data, origin_key)
+      # A main-thread BroadcastChannel post in multi-realm mode: one ordered delivery queued for each channel it reaches
+      # — `targets`, [realm, id, …], the isolate's registry's snapshot at POST TIME in creation order, so a channel
+      # made after the post never receives it and cross-realm targets interleave with same-realm ones by creation order
+      # (broadcastchannel/ordering). Also fans out to workers + other windows. `origin` (serialized, e.g. "null") is
+      # the MessageEvent.origin the same-isolate delivery exposes; `origin_key` (e.g. "opaque:…") the SCOPING token
+      # workers / other windows match on.
+      def bc_post(name, targets, origin_key, data, origin)
+        targets.each_slice(2) {|rid, id| @bc_queue << {realm_id: rid.to_i, id: id, data: data, origin: origin} }
+        broadcast_external(name.to_s, data, origin_key)
         nil
-      end
-
-      # Queue a post to every open channel of `name` and `origin_key` in this isolate — but the posting one
-      # (`realm_id`, `local_id`; a nil `local_id` every channel of that realm, as a realm another window's or a worker's
-      # post came through) — in creation order, each item the block's.
-      def enqueue_broadcast_targets(name, realm_id, local_id, origin_key)
-        @bc_registry.reject {|(rid, lid), e|
-          e[:closed] || e[:name] != name || e[:origin_key] != origin_key ||
-            (rid == realm_id && (local_id.nil? || lid == local_id))
-        }.sort_by {|_k, e| e[:seq] }.each {|(rid, lid), _e| @bc_queue << yield(rid, lid) }
       end
 
       # Drain the ordered BroadcastChannel queue, delivering one message to one channel at a time in
@@ -7809,14 +7767,13 @@ module Capybara
         until @bc_queue.empty?
           break if n >= BROADCAST_DRAIN_CAP
           item = @bc_queue.shift
-          e = @bc_registry[[item[:realm_id], item[:local_id]]]
-          next if e.nil? || e[:closed]   # closed after being queued → gets nothing
+          # (…a channel closed since the post receives nothing: the realm's delivery asks the registry)
           next unless item[:realm_id].zero? || @runtime.frame_realm_alive?(item[:realm_id])
           # (…another window's or a worker's post its origin's KEY, which the receiving realm serializes)
           if item.key?(:origin_key)
-            @runtime.realm_call(item[:realm_id], '__csim_bcDeliverInbound', item[:local_id], item[:data], item[:origin_key])
+            @runtime.realm_call(item[:realm_id], '__csim_bcDeliverInbound', item[:id], item[:data], item[:origin_key])
           else
-            @runtime.realm_call(item[:realm_id], '__csim_bcDeliverOne', item[:local_id], item[:data], item[:origin])
+            @runtime.realm_call(item[:realm_id], '__csim_bcDeliverOne', item[:id], item[:data], item[:origin])
           end
           n += 1
         end

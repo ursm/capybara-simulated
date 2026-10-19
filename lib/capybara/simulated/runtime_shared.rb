@@ -112,13 +112,10 @@ module Capybara
         '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(*a[0, 6]); nil },
         '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2], a[3]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
-        # BroadcastChannel isolate-wide, creation-ordered registry (the multi-realm delivery path). A
-        # channel registers on construction / unregisters on close; `bc_post` snapshots the eligible
-        # targets at post time and queues one ordered delivery per target. Only consulted when a sibling
-        # same-isolate realm exists (`bc_siblings_exist?`); single-window pages never touch it.
-        '__csimBcRegister'           => ->(b, *a) { b.bc_register(a[0], a[1], a[2], a[3]); nil },
-        '__csimBcUnregister'         => ->(b, *a) { b.bc_unregister(a[0], a[1]); nil },
-        '__csimBcPost'               => ->(b, *a) { b.bc_post(a[0], a[1], a[2], a[3], a[4], a[5]); nil },
+        # BroadcastChannel's isolate-wide, creation-ordered delivery (the multi-realm path): `bc_post` queues one ordered
+        # delivery per channel the isolate's registry (broadcast_channels.rs) snapshot at post time. Only taken where a
+        # sibling same-isolate realm exists (`bc_siblings_exist?`); single-window pages never touch it.
+        '__csimBcPost'               => ->(b, *a) { b.bc_post(a[0], a[1], a[2], a[3], a[4]); nil },
         '__csimBcSiblingsExist'      => ->(b, *_a) { b.bc_siblings_exist? },
         # The session's partition of the storage registries — IndexedDB's, which every realm and worker of it is an agent
         # of, and Cache Storage's (idb_databases.rs, cache_storage.rs).
