@@ -14,6 +14,7 @@ RSpec.describe 'node[name]' do
         <ol id="ol" start="5"><li id="li" value=" 7x">a</li></ol>
         <table><tr><td id="zero" colspan="0" rowspan="70000">a</td><td id="plain">b</td></tr></table>
         <input id="input" maxlength="-3" size="20" data-n="4">
+        <constructor id="ctor" name="x" length="7"></constructor>
       HTML
     end
   }
@@ -24,8 +25,9 @@ RSpec.describe 'node[name]' do
     got = [
       session.find('#ol')[:start], session.find('#li')[:value],
       session.find('#zero')[:colspan], session.find('#zero')['rowSpan'], session.find('#plain')[:colspan],
-      session.find('#input')[:maxlength], session.find('#input')[:size], session.find('#input')['data-n']
+      session.find('#input')[:maxlength], session.find('#input')[:size], session.find('#input')['data-n'],
+      session.find('#ctor')[:name], session.find('#ctor')[:length]
     ]
-    expect(got).to eq([5, 7, 1, 65_534, nil, -1, 20, '4'])
+    expect(got).to eq([5, 7, 1, 65_534, nil, -1, 20, '4', 'x', '7'])
   end
 end

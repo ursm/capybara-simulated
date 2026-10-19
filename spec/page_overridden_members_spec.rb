@@ -404,13 +404,17 @@ RSpec.describe 'members a page overrides' do
       const got = [
         caught(() => document.querySelector('!!')),
         caught(() => { const host = document.createElement('div'); host.attachShadow({ mode: 'open' }); host.attachShadow({ mode: 'open' }); }),
-        caught(() => document.createElement('canvas').getContext('2d').createPattern(document.createElement('canvas'), 'nope'))
+        caught(() => document.createElement('canvas').getContext('2d').createPattern(document.createElement('canvas'), 'nope')),
+        caught(() => customElements.define('bad', class extends HTMLElement {})),
+        caught(() => new DOMMatrix('garbage')),
+        caught(() => performance.mark('navigationStart')),
+        caught(() => getSelection().getRangeAt(5))
       ];
       const reader = new FileReader();
       reader.onloadend = (e) => { got.push(e.type, e.loaded); done(got); };
       reader.readAsText(new Blob(['abc']));
     JS
-    expect(got).to eq(['SyntaxError', 'NotSupportedError', 'SyntaxError', 'loadend', 3])
+    expect(got).to eq(['SyntaxError', 'NotSupportedError', 'SyntaxError', 'SyntaxError', 'SyntaxError', 'SyntaxError', 'IndexSizeError', 'loadend', 3])
   end
 
   # …and the platform's own clock, rects, matrices, text codecs and Blobs are its own: a page (a fake-timer library) that

@@ -27,8 +27,6 @@ const SCOPE_VERSION = 2025;
 
 // Globals the bridge installs and then reads WITHOUT the `globalThis.` prefix.
 const BARE_GLOBALS = [
-  // Web platform classes and functions it defines for the page, and uses itself.
-  'URL', 'DOMException', 'queueMicrotask', 'setTimeout', 'structuredClone', 'document',
   // Host functions Ruby attaches to the realm (runtime_shared.rb / v8_runtime.rb).
   '__rackFetch', '__csim_runScript', '__csim_evalEsmEntry', '__csim_asyncIoPending',
   // Bridge internals one module installs for another — and for the Ruby side to call.
@@ -36,14 +34,9 @@ const BARE_GLOBALS = [
   '__csimClickResolve', '__csimNeuterDetachedWindow'
 ];
 
-// esbuild substitutes these at build time, so they resolve to nothing at parse. Read from the build
-// command rather than repeated here, so adding a `--define:` does not fail the build it defines.
-const BUILD = JSON.parse(readFileSync('package.json', 'utf8')).scripts['build:bridge'];
-const DEFINES = [...BUILD.matchAll(/--define:([A-Za-z_$][\w$]*)=/g)].map(([, name]) => name);
-
 // The JS builtins, from a bare VM context — the host's V8, which is the engine the bridge targets.
 const builtins = runInNewContext('Object.getOwnPropertyNames(globalThis)');
-const known    = new Set([...builtins, ...BARE_GLOBALS, ...DEFINES]);
+const known    = new Set([...builtins, ...BARE_GLOBALS]);
 
 // Recursive, so a source moved into a subdirectory keeps being checked rather than quietly dropping
 // out of the walk. The built bundle is generated FROM these and is not itself a source.
