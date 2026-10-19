@@ -1,14 +1,16 @@
 // The numeric IDL attributes that reflect a content attribute (HTML §2.6.1, "reflecting content attributes in IDL
 // attributes"), read off the element as the engine holds it: a `long`'s, an `unsigned long`'s and a `double`'s getter
-// steps, by the kind its [Reflect…] extended attributes make it — and a `<meter>`'s and a `<progress>`'s numbers, which
-// their content attributes make the same way — and a form control's `autocomplete`, the autofill detail tokens its
-// attribute holds. The setters stay the bindings' (reflect.js): writing an attribute runs a page's reactions.
+// and setter steps, by the kind its [Reflect…] extended attributes make it — and a `<meter>`'s and a `<progress>`'s
+// numbers, which their content attributes make the same way — and a form control's `autocomplete`, the autofill
+// detail tokens its attribute holds. The write itself stays the bindings' (reflect.js): writing an attribute runs a
+// page's reactions.
 
 use crate::dom::{nid_arg, realm, realm_id, register};
 use crate::validity::{parse_html_integer, parse_non_negative};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "reflectNumber", reflect_number, context_id);
+    register(scope, ns, "reflectedNumberWrite", reflected_number_write, context_id);
     register(scope, ns, "reflectEnum", reflect_enum, context_id);
     register(scope, ns, "meterValue", meter_value, context_id);
     register(scope, ns, "progressValue", progress_value, context_id);
@@ -199,6 +201,13 @@ const UNSIGNED_POSITIVE: u32 = 3; // `unsigned long`, [ReflectPositive] / [Refle
 const UNSIGNED_RANGE: u32 = 4; // `unsigned long`, [ReflectRange=(min, max)]
 const DOUBLE: u32 = 5; // `double`
 const DOUBLE_POSITIVE: u32 = 6; // `double`, [ReflectPositive]
+const UNSIGNED_POSITIVE_FALLBACK: u32 = 7; // `unsigned long`, [ReflectPositiveWithFallback] (its getter UNSIGNED_POSITIVE's)
+const MARQUEE_LOOP: u32 = 8; // a `<marquee>`'s `loop`: a `long` above zero, else −1 (forever)
+
+// What a setter refuses with an IndexSizeError (reflect.js has the messages): a negative value where none may be, a zero
+// where it must be positive.
+const REFUSED_NEGATIVE: i32 = 1;
+const REFUSED_ZERO: i32 = 2;
 
 const MAX_LONG: i64 = 2_147_483_647;
 
@@ -212,6 +221,7 @@ fn reflected(value: Option<&str>, kind: u32, default: f64, min: f64, max: f64) -
         UNSIGNED_RANGE => parse_non_negative(value).map_or(default, |v| (v as f64).clamp(min, max)),
         DOUBLE => parse_float_value(value).unwrap_or(default),
         DOUBLE_POSITIVE => parse_float_value(value).filter(|&v| v > 0.0).unwrap_or(default),
+        MARQUEE_LOOP => parse_html_integer(value).filter(|v| (1..=MAX_LONG).contains(v)).map_or(-1.0, |v| v as f64),
         _ => default,
     }
 }
@@ -282,6 +292,44 @@ fn reflect_number(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let [default, min, max] = [3, 4, 5].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
     let value = realm(scope, cid).get(id).and_then(|n| n.plain_attr(&name)).map(str::to_owned);
     rv.set_double(reflected(value.as_deref(), kind, default, min, max));
+}
+
+// The setter steps of `value`, converted by its IDL type already, over the attribute's `current` value: the value the
+// content attribute is set to — one past a long's range the default, a zero the default where the kind falls back to
+// it — None where the write leaves it (a double not positive where it must be; a marquee's loop count but one above
+// zero or −1, or the count it has), or a refusal (`REFUSED_*`).
+fn written(current: Option<&str>, kind: u32, default: f64, value: f64) -> Result<Option<f64>, i32> {
+    let past_long = value > MAX_LONG as f64;
+    Ok(Some(match kind {
+        LONG_NON_NEGATIVE if value < 0.0 => return Err(REFUSED_NEGATIVE),
+        UNSIGNED_POSITIVE if value == 0.0 => return Err(REFUSED_ZERO),
+        UNSIGNED_POSITIVE | UNSIGNED | UNSIGNED_RANGE if past_long => default,
+        UNSIGNED_POSITIVE_FALLBACK if value == 0.0 || past_long => default,
+        DOUBLE_POSITIVE if !(value > 0.0) => return Ok(None),
+        MARQUEE_LOOP if !(value > 0.0 || value == -1.0) || value == reflected(current, kind, default, 0.0, 0.0) => return Ok(None),
+        _ => value,
+    }))
+}
+
+// __dom.reflectedNumberWrite(nid, name, kind, default, value) -> what a numeric IDL attribute's setter writes to the
+// element's `name` content attribute (`written`): the value's text, as script writes the number — or null for no write,
+// a refusal code for an IndexSizeError.
+fn reflected_number_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let kind = args.get(2).uint32_value(scope).unwrap_or(LONG);
+    let [default, value] = [3, 4].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
+    let current = realm(scope, cid).get(id).and_then(|n| n.plain_attr(&name)).map(str::to_owned);
+    match written(current.as_deref(), kind, default, value) {
+        Err(code) => rv.set_int32(code),
+        Ok(None) => rv.set_null(),
+        Ok(Some(v)) => {
+            if let Some(text) = v8::String::new(scope, &crate::numbers::to_js_string(v)) {
+                rv.set(text.into());
+            }
+        }
+    }
 }
 
 // A `<meter>`'s values (HTML §4.10.14), by `which` — its actual value, minimum, maximum, low, high and optimum points:
@@ -401,6 +449,19 @@ mod tests {
         assert_eq!(parse_float_value("."), None);
         assert_eq!(parse_float_value("x"), None);
         assert_eq!(parse_float_value("1e400"), None);
+    }
+
+    #[test]
+    fn written_values() {
+        assert_eq!(written(None, LONG_NON_NEGATIVE, 0.0, -1.0), Err(REFUSED_NEGATIVE));
+        assert_eq!(written(None, UNSIGNED_POSITIVE, 1.0, 0.0), Err(REFUSED_ZERO));
+        assert_eq!(written(None, UNSIGNED_POSITIVE_FALLBACK, 2.0, 0.0), Ok(Some(2.0)));
+        assert_eq!(written(None, UNSIGNED, 300.0, 2147483648.0), Ok(Some(300.0)));
+        assert_eq!(written(None, DOUBLE_POSITIVE, 1.0, -0.5), Ok(None));
+        assert_eq!(written(None, DOUBLE, 1.0, -0.5), Ok(Some(-0.5)));
+        assert_eq!(written(Some("3"), MARQUEE_LOOP, -1.0, 3.0), Ok(None));
+        assert_eq!(written(None, MARQUEE_LOOP, -1.0, 0.0), Ok(None));
+        assert_eq!(written(Some("3"), MARQUEE_LOOP, -1.0, -1.0), Ok(Some(-1.0)));
     }
 
     #[test]
