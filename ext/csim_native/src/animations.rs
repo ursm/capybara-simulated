@@ -781,6 +781,22 @@ impl Animations {
             .map_or(0.0, |e| e.timing.end_time())
     }
 
+    // web-animations-2 §4.4.18 "overall progress": its current time over its effect's end, clamped to [0, 1] — 0 or 1 by
+    // the sign of the time for an effect that ends at once, 0 for one that never does — None with no effect or no current
+    // time.
+    pub(crate) fn overall_progress(&self, id: AnimationId) -> Option<f64> {
+        let a = self.animations.get(&id)?;
+        let end = self.effects.get(&a.effect?)?.timing.end_time();
+        let time = self.current_time_of(a, a.hold_time)?;
+        Some(if end == 0.0 {
+            if time < 0.0 { 0.0 } else { 1.0 }
+        } else if end.is_infinite() {
+            0.0
+        } else {
+            (time / end).clamp(0.0, 1.0)
+        })
+    }
+
     // §4.4.4: the current time — the hold time where there is one, else where the timeline's time puts it.
     pub(crate) fn current_time(&self, id: AnimationId) -> Option<f64> {
         let a = self.animations.get(&id)?;
@@ -1516,6 +1532,26 @@ mod tests {
         let id = model.new_animation(Some(effect), Some(0.0));
         model.play(id, true).unwrap();
         id
+    }
+
+    // web-animations-2 §4.4.18: the current time over the effect's end, clamped; by the sign for an effect that ends at
+    // once, 0 for one that never ends, none without a current time.
+    #[test]
+    fn overall_progress_is_the_current_time_over_the_end() {
+        let mut model = Animations::default();
+        let id = playing(&mut model, 1000.0);
+        model.set_current_time(id, Some(250.0)).unwrap();
+        assert_eq!(model.overall_progress(id), Some(0.25));
+        model.set_current_time(id, Some(5000.0)).unwrap();
+        assert_eq!(model.overall_progress(id), Some(1.0));
+        let instant = playing(&mut model, 0.0);
+        model.set_current_time(instant, Some(-10.0)).unwrap();
+        assert_eq!(model.overall_progress(instant), Some(0.0));
+        let endless = playing(&mut model, f64::INFINITY);
+        model.set_current_time(endless, Some(10.0)).unwrap();
+        assert_eq!(model.overall_progress(endless), Some(0.0));
+        let idle = model.new_animation(None, Some(0.0));
+        assert_eq!(model.overall_progress(idle), None);
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animCall", anim_call, context_id);
     register(scope, ns, "animState", anim_state, context_id);
     register(scope, ns, "animTiming", anim_timing, context_id);
+    register(scope, ns, "animOverallProgress", anim_overall_progress, context_id);
     register(scope, ns, "animTimingCheck", anim_timing_check, context_id);
     register(scope, ns, "animSignals", anim_signals, context_id);
     register(scope, ns, "animDrop", anim_drop, context_id);
@@ -529,6 +530,17 @@ fn anim_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     });
 }
 
+// __dom.animOverallProgress(animation) -> its overall progress (`Animations::overall_progress`), null for none.
+fn anim_overall_progress(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine, arena| {
+        let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return rv.set_null() };
+        at_time(engine, arena);
+        match engine.web_animations.overall_progress(id) {
+            Some(progress) => rv.set_double(progress),
+            None => rv.set_null(),
+        }
+    });
+}
 // __dom.animTiming(effect) -> [localTime | null, progress | null, currentIteration | null, activeDuration, endTime,
 // phase] — what `getComputedTiming()` adds to the timing.
 fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
