@@ -57,6 +57,11 @@ impl Navigables {
     pub(crate) fn lost_navigable(&self, cid: i32) -> bool {
         self.discarded.contains(&cid) && self.containers.contains_key(&cid)
     }
+    // …and whether its document is fully active (HTML): its context not disposed — by its frame's removal, or a
+    // navigation that replaced it.
+    fn fully_active(&self, cid: i32) -> bool {
+        !self.discarded.contains(&cid)
+    }
 }
 
 impl RealmArena {
@@ -470,6 +475,9 @@ fn target_keyword_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "targetKeyword", target_keyword_op, context_id);
+    crate::dom::register(scope, ns, "browsingContextDiscarded", browsing_context_discarded, context_id);
+    crate::dom::register(scope, ns, "documentFullyActive", document_fully_active, context_id);
+    crate::dom::register(scope, ns, "neuterRealm", neuter_realm, context_id);
     crate::dom::register(scope, ns, "openFeatures", open_features_op, context_id);
     crate::dom::register(scope, ns, "windowName", window_name, context_id);
     crate::dom::register(scope, ns, "setWindowName", set_window_name, context_id);
@@ -688,4 +696,26 @@ mod tests {
         assert_eq!(open_features("=noopener=no"), 0);
         assert_eq!(open_features("noopenerx"), 0);
     }
+}
+
+// __dom.browsingContextDiscarded() -> whether the realm's window's browsing context is discarded — a removed frame's
+// (`lost_navigable`): its `closed` true, its document's `defaultView` none, through a reference captured before.
+fn browsing_context_discarded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.navigables.lost_navigable(cid));
+}
+
+// __dom.documentFullyActive() -> whether the realm's document is fully active (`fully_active`): what nothing waiting on
+// it — an image's data, a lock request — goes ahead without.
+fn document_fully_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.navigables.fully_active(cid));
+}
+
+// __dom.neuterRealm(realm): realm `realm`'s context is being disposed — its frame removed, or a navigation replacing it —
+// its document fully active no more from now on, before anything of its own runs again on the way (its backup custom
+// element reactions; `discard_realm` marks it so too, after them).
+fn neuter_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(cid) = args.get(0).int32_value(scope) else { return };
+    crate::dom::dom(scope).arena.navigables.discarded.insert(cid);
 }
