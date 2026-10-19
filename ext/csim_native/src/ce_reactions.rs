@@ -67,11 +67,10 @@ struct Registry {
     // (…keyed by `name_key`)
 }
 
-// One callback a custom element is owed: the callback, and its arguments — and whether it is its upgrade.
+// One callback a custom element is owed: the callback, and its arguments.
 struct Reaction {
     callback: v8::Global<v8::Value>,
     args: Vec<v8::Global<v8::Value>>,
-    upgrade: bool,
 }
 
 #[derive(Default)]
@@ -226,10 +225,7 @@ impl Reactions {
     // object), and "enqueue an element on the appropriate element queue" — the current call's, or the backup one: whether
     // the backup element queue's microtask is to be queued.
     fn enqueue(&mut self, id: NodeId, element: v8::Global<v8::Value>, callback: v8::Global<v8::Value>, args: Vec<v8::Global<v8::Value>>) -> bool {
-        self.enqueue_reaction(id, element, Reaction { callback, args, upgrade: false })
-    }
-    fn enqueue_reaction(&mut self, id: NodeId, element: v8::Global<v8::Value>, reaction: Reaction) -> bool {
-        self.queues.entry(id).or_default().push_back(reaction);
+        self.queues.entry(id).or_default().push_back(Reaction { callback, args });
         let depth = self.get(DEPTH).max(0) as usize;
         if depth == 0 {
             self.backup.push((id, element));
@@ -578,18 +574,16 @@ fn ce_hook(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
 
 // __dom.ceEnqueueUpgrade(nid, element, upgrade, args) -> whether the backup element queue's microtask is to be queued: HTML
 // "enqueue a custom element upgrade reaction" — `upgrade`, the bindings' steps that upgrade the element, called on it with
-// `args` (its definition's constructor) as its reactions run — once: an element whose upgrade is queued already (a
-// fragment parse's, then connected by the insertion) is not queued again.
+// `args` (its definition's constructor) as its reactions run — however often it is enqueued: the element joins the
+// element queue of the call that enqueued it each time, and an upgrade it no longer owes returns at once ("upgrade an
+// element" step 1), so a constructor that moves a later element of its own fragment upgrades it before it goes on
+// (Chrome, Firefox).
 fn ce_enqueue_upgrade(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let reactions = &dom(scope).arena.ce_reactions;
-    if reactions.queues.get(&id).is_some_and(|queue| queue.iter().any(|r| r.upgrade)) {
-        return rv.set_bool(false);
-    }
     let element = v8::Global::new(scope, args.get(1));
-    let callback = v8::Global::new(scope, args.get(2));
+    let upgrade = v8::Global::new(scope, args.get(2));
     let list = held_list(scope, args.get(3));
-    rv.set_bool(dom(scope).arena.ce_reactions.enqueue_reaction(id, element, Reaction { callback, args: list, upgrade: true }));
+    rv.set_bool(dom(scope).arena.ce_reactions.enqueue(id, element, upgrade, list));
 }
 
 // __dom.ceSubtreeHook(rootNid, which, args) -> whether the backup element queue's microtask is to be queued: `which`

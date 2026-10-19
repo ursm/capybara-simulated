@@ -213,4 +213,45 @@ RSpec.describe 'custom element reaction timing' do
     s.visit '/'
     expect(s.evaluate_script('L')).to eq(['frame-acb'])
   end
+
+  # An upgrade enqueued again — a constructor moving a later element of its own fragment — puts the element on the moving
+  # call's element queue, which upgrades it as that call returns, before the constructor goes on: HTML enqueues it again,
+  # and an upgrade no longer owed returns at once. Chrome and Firefox: true both, the frame's document the page's too.
+  it "upgrades a later element of a fragment a constructor moves, as the move returns" do
+    page = '<!DOCTYPE html><meta charset="utf-8"><body><div id="host"></div><iframe id="f" srcdoc="<!DOCTYPE html><body>"></iframe>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const log = [];
+        const frame = document.getElementById('f');
+        class XB extends HTMLElement {}
+        class XA extends HTMLElement {
+          constructor() {
+            super();
+            const b = document.getElementById('b');
+            if (b) { document.body.append(b); log.push(b instanceof XB); }
+          }
+        }
+        customElements.define('x-b', XB);
+        customElements.define('x-a', XA);
+        document.getElementById('host').innerHTML = '<x-a></x-a><x-b id="b"></x-b>';
+        class FB extends frame.contentWindow.HTMLElement {}
+        frame.contentWindow.customElements.define('y-b', FB);
+        class YB extends HTMLElement {}
+        class YA extends HTMLElement {
+          constructor() {
+            super();
+            const b = document.getElementById('yb');
+            if (b) { frame.contentDocument.body.append(b); log.push(b instanceof YB); }
+          }
+        }
+        customElements.define('y-b', YB);
+        customElements.define('y-a', YA);
+        document.getElementById('host').innerHTML = '<y-a></y-a><y-b id="yb"></y-b>';
+        return log;
+      })()
+    JS
+    expect(got).to eq([true, true])
+  end
 end
