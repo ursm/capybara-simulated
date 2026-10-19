@@ -71,8 +71,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "resizeSteps", resize_steps_op, context_id);
 }
 
-// A realm's viewport, `cid`'s.
+// A realm's viewport, `cid`'s — none for one dropped (a removed frame's window: Chrome's 0).
 pub(crate) fn of(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> [f64; 2] {
+    if crate::dom::dom(scope).arena.is_dropped(cid) {
+        return [0.0, 0.0];
+    }
     crate::dom::realm(scope, cid).window_viewport.size()
 }
 // …and the one an op works in: its own realm's.

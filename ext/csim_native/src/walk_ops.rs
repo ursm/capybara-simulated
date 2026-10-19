@@ -52,8 +52,9 @@ fn note_scrolled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // and the style engine — its records, runs and tables — and lays out against the realm's viewport (viewport.rs, the
 // root placed natively), its boxes kept in the arena for the geometry (geometry.rs `store_layout`) — `records` 1 or 2
 // recording its text pieces for the text geometry too (text_geometry.rs) — and where `records` is 2, for a pass a
-// painter records, each text piece as it draws it, kept for the painter (paint.rs `Painted`): answered `true`. Or `[family, bucket, …]` — the faces the
-// walk needs first, for the JS side to resolve (`walkFace`) and ask again — or the walk's decline, a string.
+// painter records, each text piece as it draws it, kept for the painter (paint.rs `Painted`): answered `true`. Or
+// `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve (`walkFace`) and ask again — or
+// the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let Some(root) = NodeId::from_i64(args.get(0).number_value(scope).unwrap_or(-1.0) as i64) else { return };

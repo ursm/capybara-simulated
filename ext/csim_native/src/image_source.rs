@@ -143,12 +143,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageSource", image_source, context_id);
 }
 
-// __dom.imageSource(nid, viewportWidth, viewportHeight) -> [the URL the `<img>` fetches, its pixel density] (`select`), a
-// `media` judged on a viewport of that size; undefined where it names none.
+// __dom.imageSource(nid) -> [the URL the `<img>` fetches, its pixel density] (`select`), a `media` judged on its realm's
+// viewport (viewport.rs); undefined where it names none.
 fn image_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
-    let viewport = [1, 2].map(|i| args.get(i).number_value(scope).unwrap_or(0.0) as f32);
+    let viewport = crate::viewport::of(scope, cid).map(|v| v as f32);
     let d = crate::dom::dom(scope);
     let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
     let Some(arena) = d.arena.enter_known(cid) else { return };

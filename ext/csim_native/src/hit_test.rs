@@ -734,13 +734,13 @@ fn hit_test_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(crate::dom::nodes_value(scope, cid, &hits));
 }
 
-// __dom.clickObstructor(nid, x, y, rect, viewport) -> what receives a real pointer click aimed at the element `nid` at the
+// __dom.clickObstructor(nid, x, y, rect) -> what receives a real pointer click aimed at the element `nid` at the
 // viewport point instead of it, or null for none (WebDriver's element click intercepted): where the element is inert,
 // what the point hits — or its parent, the hit test passing over it — as Chrome refuses a click on one (a modal dialog's
 // backdrop, an ancestor); else what the point hits where that is unrelated to it in the FLAT tree (neither an ancestor
 // nor a descendant — a button's icon receives the button's click; a slotted light node is painted inside the shadow
 // wrapper its node-tree parents skip) and an overlay: its box covers the element's `rect` (`[x, y, w, h]`) and at least
-// 80% of the `viewport` (`[w, h]`). Deliberately MUCH narrower than Chrome: the shape of a modal backdrop mid-exit
+// 80% of the realm's viewport (viewport.rs). Deliberately MUCH narrower than Chrome: the shape of a modal backdrop mid-exit
 // animation or a full-page overlay, where Chrome refuses the click and Capybara retries until it is gone. Anything
 // smaller is ignored because the coarse layout produces spurious overlaps Chrome's geometry doesn't have — a
 // neighbouring button's icon straying over the target's centre, a toggle switch's slider fully covering its
@@ -751,7 +751,7 @@ fn click_obstructor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let [x, y] = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
     let Some(&[tx, ty, tw, th]) = crate::dom::f64_arg(args.get(3)).first_chunk::<4>() else { return };
-    let Some(&[vw, vh]) = crate::dom::f64_arg(args.get(4)).first_chunk::<2>() else { return };
+    let [vw, vh] = crate::viewport::here(scope, &args);
     let cid = crate::dom::realm_id(scope, &args);
     let Some(hit) = painting(scope, &args, |p| p.hit(x, y, false)) else { return };
     let hit = hit.first().copied();
