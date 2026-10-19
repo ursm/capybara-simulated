@@ -66,7 +66,7 @@ pub(crate) struct PerfTimeline {
     observers: Vec<Observer>,
     next_observer: u32,
     // Each observer's type, as its first observe() fixed it — whether it observes by `entryTypes` ('multiple') — kept
-    // past a disconnect(), as the observer's own (Performance Timeline §6 "observer type").
+    // past a disconnect(), as the observer's own (Performance Timeline §6 "observer type"), until it is collected.
     observer_types: std::collections::HashMap<u32, bool>,
     // Whether the PerformanceObserver task is queued — one at a time.
     observer_task_queued: bool,
@@ -143,6 +143,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "perfOverflow", perf_overflow, context_id);
     crate::dom::register(scope, ns, "perfCopyOverflow", perf_copy_overflow, context_id);
     crate::dom::register(scope, ns, "poCreate", po_create, context_id);
+    crate::dom::register(scope, ns, "poForget", po_forget, context_id);
     crate::dom::register(scope, ns, "poObserve", po_observe, context_id);
     crate::dom::register(scope, ns, "poDisconnect", po_disconnect, context_id);
     crate::dom::register(scope, ns, "poTask", po_task, context_id);
@@ -353,7 +354,7 @@ fn po_create(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // `bufferedType`, the serials of the entries already buffered of it, for the bindings to queue on it, and the observers'
 // task (`perfRecord`'s 2) where that queues any, and 4 where it is registered. With no supported types, it stays as it
 // was, but for the dropped entries. Null — an InvalidModificationError — where its first observe() was the other of the
-// two, disconnect() or no disconnect() (a bool an observer keeps for as long as the timeline does).
+// two, disconnect() or no disconnect() (a bool an observer keeps until it is collected: `poForget`).
 fn po_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let mut types = 0u8;
@@ -384,6 +385,14 @@ fn po_observe(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let entries = buffered.map(|kind| t.filtered(Some(kind), None)).unwrap_or_default();
     let tasks = OBSERVER_REGISTERED | if entries.is_empty() { 0 } else { t.queue_observer_task() };
     rv.set(serials(scope, std::iter::once(tasks).chain(entries)));
+}
+
+// __dom.poForget(id) — observer `id` collected (it was registered no more): its type let go of too.
+fn po_forget(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let t = timeline(scope, &args);
+    t.observer_types.remove(&id);
+    t.observers.retain(|o| o.id != id);
 }
 
 // __dom.poDisconnect(id) — observer `id` registered no more, its types let go of.
