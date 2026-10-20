@@ -5,7 +5,7 @@ require_relative 'support/session_teardown'
 
 # A click has ONE activation target (DOM dispatch: "If isActivationEvent is true, event's bubbles attribute is true,
 # activationTarget is null, and parent has activation behavior, then set activationTarget to parent") — the engine's
-# (element_state.rs `activation_target`) — and only its activation behaviour runs: the link is not followed for a click
+# (event_path.rs `activation_target`) — and only its activation behaviour runs: the link is not followed for a click
 # that does not bubble on what is inside it, nor past an element with activation behaviour of its own — a checkbox, a
 # label with a control, a details' summary (Chrome alike) — and, as HTML gives every input and button one ("The
 # activation behavior for input elements are these steps", "A button element element's activation behavior given event

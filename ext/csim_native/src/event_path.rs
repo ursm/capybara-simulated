@@ -240,7 +240,9 @@ fn related_slot(r: Related, index: &mut impl FnMut(NodeId) -> f64) -> f64 {
 // A click's activation target (DOM dispatch): along the path it is dispatched on — none where it is not dispatched at
 // all, nor past where the path is pruned (element_state.rs `activation_target_along`).
 fn activation_target(arena: &RealmArena, target: NodeId, related: Related, bubbles: bool, composed: bool) -> Option<NodeId> {
-    let steps = path(arena, target, related, composed);
+    activation_along(arena, &path(arena, target, related, composed), bubbles)
+}
+fn activation_along(arena: &RealmArena, steps: &[Step], bubbles: bool) -> Option<NodeId> {
     arena.activation_target_along(steps.iter().map(|s| (s.node, s.flags & STEP_AT_TARGET != 0)), bubbles)
 }
 
@@ -279,18 +281,21 @@ pub(crate) fn path_plan(arena: &RealmArena, path: impl IntoIterator<Item = NodeI
     (end.unwrap_or(len), last.is_some_and(|id| arena.is_document(id)))
 }
 
-// __dom.eventPath(targetNid, relatedNid, relatedOther, composed, formStop) -> [nodes, steps, plan]: the event path from
+// __dom.eventPath(targetNid, relatedNid, relatedOther, composed, formStop, activation, bubbles) -> [nodes, steps, plan]:
+// the event path from
 // the target (the relatedTarget a node `relatedNid`, else none, or with `relatedOther` something no retargeting moves).
 // `nodes` are the nodes it names, as `nodes_value` answers them; `steps` four numbers a step: its node, the target its
 // listeners see, its relatedTarget (an index into `nodes`; -1 none, -2 the event's own), and its `STEP_*` flags. `plan`
 // four numbers: `path_plan`'s bubbling end and Window (1 or 0); DOM "clearTargets" (1 or 0) — the last step its own
-// target, that target or its relatedTarget in a shadow tree; and the relatedTarget the Window sees, retargeted out of
-// every shadow tree (as a step's). Steps empty, where the event is not dispatched.
+// target, that target or its relatedTarget in a shadow tree; the relatedTarget the Window sees, retargeted out of
+// every shadow tree (as a step's); and, for a click (`activation`, the click bubbling or not), its activation target
+// (`activation_target`: an index into `nodes`, -1 none). Steps empty, where the event is not dispatched.
 fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = nid_arg(scope, &args, 0) else { return };
     let related = related_arg(scope, &args, 1);
     let composed = args.get(3).is_true();
     let form_stop = args.get(4).is_true();
+    let (activation, bubbles) = (args.get(5).is_true(), args.get(6).is_true());
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let steps = path(arena, target, related, composed);
@@ -299,6 +304,7 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         in_shadow(s.target) || matches!(s.related, Related::Node(r) if in_shadow(r))
     });
     let (end, window) = path_plan(arena, steps.iter().map(|s| s.node), form_stop);
+    let activation_target = if activation { activation_along(arena, &steps, bubbles) } else { None };
     let window_related = match related {
         Related::Node(r) => Related::Node(retarget_out(arena, r)),
         other => other,
@@ -319,7 +325,13 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         out.push(related_slot(s.related, &mut index));
         out.push(s.flags as f64);
     }
-    let plan = [end as f64, window as u8 as f64, clear_targets as u8 as f64, related_slot(window_related, &mut index)];
+    let plan = [
+        end as f64,
+        window as u8 as f64,
+        clear_targets as u8 as f64,
+        related_slot(window_related, &mut index),
+        activation_target.map_or(-1.0, &mut index)
+    ];
     let nodes_answer = crate::dom::nodes_value(scope, cid, &nodes);
     let steps_answer = crate::dom::f64_array(scope, &out);
     let plan_answer = crate::dom::f64_array(scope, &plan);

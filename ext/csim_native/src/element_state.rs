@@ -1181,7 +1181,8 @@ impl RealmArena {
         }
     }
     // The label a click on `id` activates the labeled control of (HTML "click in a label"): itself, where it is an HTML
-    // label; none where it is interactive content; else its nearest label ancestor short of any interactive one.
+    // label; none where it is interactive content; else its nearest label ancestor short of any interactive one — in
+    // the flat tree, as the click's path climbs: a node slotted into a label in a shadow tree is in it (Chrome alike).
     // None, too, where the click is on the label's labeled control or inside it — its own (Chrome: a click inside a
     // labeled form-associated custom element or `<output>` is not handed back to it).
     pub(crate) fn label_to_activate(&self, id: NodeId) -> Option<NodeId> {
@@ -1197,16 +1198,17 @@ impl RealmArena {
         if self.is_interactive_content(n) {
             return None;
         }
-        let mut cur = self.parent_of(id);
+        let up = |c: NodeId| self.get(c).and_then(|n| n.assigned_slot.filter(|&s| self.get(s).is_some()).or(n.parent).or(n.host));
+        let mut cur = up(id);
         while let Some(c) = cur {
-            let p = self.get(c).filter(|p| p.kind == NodeKind::Element)?;
+            let p = self.get(c)?;
             if p.is_html_named("label") {
                 return Some(c);
             }
             if self.is_interactive_content(p) {
                 return None;
             }
-            cur = self.parent_of(c);
+            cur = up(c);
         }
         None
     }

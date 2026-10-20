@@ -178,4 +178,18 @@ RSpec.describe 'the event path through shadow trees' do
     JS
     expect(got).to eq([true, true])
   end
+
+  # A node slotted into a label inside a shadow tree is in that label as the click's path climbs — the flat tree's —
+  # and clicking it clicks the label's control (HTML "click in a label"; Chrome 155 alike).
+  it 'clicks the control of a label a clicked node is slotted into' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        document.body.innerHTML = '<div id=ih><span id=is>t</span></div>';
+        document.getElementById('ih').attachShadow({mode: 'open'}).innerHTML = '<label><slot></slot><input type=checkbox id=ic></label>';
+        document.getElementById('is').click();
+        return document.getElementById('ih').shadowRoot.getElementById('ic').checked;
+      })()
+    JS
+    expect(got).to be(true)
+  end
 end

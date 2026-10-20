@@ -1,5 +1,5 @@
 // HTML's activation behaviours (§6.1-6.4, the element's own: §4.10.5.1.15-16, §4.10.6, §4.11.2, §4.6.4), for a click
-// whose activation target is `act` (element_state.rs `activation_target`): its legacy-pre-activation behaviour before
+// whose activation target is `act` (event_path.rs `activation_target`): its legacy-pre-activation behaviour before
 // the click's listeners run — a checkbox's checkedness toggled and indeterminate cleared, a radio button checked — and
 // what undoes it where a listener canceled the click; and, otherwise, which of its activation behaviours apply, which the
 // bindings run (dispatch.js): a checkable's `input` and `change`, a picker's activation consumed, an image button's
