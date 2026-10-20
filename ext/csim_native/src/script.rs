@@ -185,7 +185,49 @@ impl RealmArena {
     }
 }
 
+// Where an exception was thrown, by its V8 `stack`: its top frame of the page's (`at f (url:line:col)` / `at
+// url:line:col`) — the driver's own snapshot's skipped, as a browser's bindings are no frame of a stack — as `(document,
+// url, line, column)`, `document` where the frame is code the page's document compiled (an inline script, a handler
+// content attribute, a string timer, `new Function`, `eval`: V8's `eval at …, <anonymous>:L:C`), whose URL is the
+// document's. None for a stack of no such frame.
+pub(crate) fn stack_location(stack: &str) -> Option<(bool, String, u32, u32)> {
+    fn line_col(s: &str) -> Option<(&str, u32, u32)> {
+        let (rest, col) = s.rsplit_once(':')?;
+        let (rest, line) = rest.rsplit_once(':')?;
+        Some((rest, line.parse().ok()?, col.parse().ok()?))
+    }
+    for line in stack.lines() {
+        let Some(frame) = line.trim_start().strip_prefix("at ").filter(|_| line.starts_with(char::is_whitespace)) else { continue };
+        let evaluated = frame.contains("(eval at ").then(|| frame.strip_suffix(')')?.rsplit_once(", <anonymous>:")).flatten();
+        if let Some((l, c)) = evaluated.and_then(|(_, lc)| lc.split_once(':')).and_then(|(l, c)| Some((l.parse().ok()?, c.parse().ok()?))) {
+            return Some((true, String::new(), l, c));
+        }
+        let place = frame.split_once('(').map_or(frame, |(_, p)| p);
+        let place = place.strip_suffix(')').unwrap_or(place);
+        let Some((url, l, c)) = line_col(place) else { continue };
+        if url.is_empty() || url.contains(char::is_whitespace) || url == "<snapshot>" {
+            continue;
+        }
+        let document = url.starts_with("inline://") || url.starts_with("csim-eval");
+        return Some((document, url.to_owned(), l, c));
+    }
+    None
+}
+// __dom.stackLocation(stack) -> `[document, url, line, column]` of `stack_location`, or null.
+fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let stack = args.get(0).to_rust_string_lossy(scope);
+    let Some((document, url, line, column)) = stack_location(&stack) else { return rv.set_null() };
+    let items: [v8::Local<v8::Value>; 4] = [
+        v8::Boolean::new(scope, document).into(),
+        v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
+        v8::Integer::new_from_unsigned(scope, line).into(),
+        v8::Integer::new_from_unsigned(scope, column).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
     crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);
@@ -364,6 +406,16 @@ fn prepare_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exception_is_located_at_its_pages_top_frame() {
+        let stack = "Error: x\n    at f (<snapshot>:1:2)\n    at g (http://a/s.js:10:5)\n    at http://a/t.js:3:4";
+        assert_eq!(stack_location(stack), Some((false, "http://a/s.js".to_owned(), 10, 5)));
+        assert_eq!(stack_location("E\n    at http://a/t.js:3:4"), Some((false, "http://a/t.js".to_owned(), 3, 4)));
+        assert_eq!(stack_location("E\n    at h (eval at run (<snapshot>:1:1), <anonymous>:7:9)"), Some((true, String::new(), 7, 9)));
+        assert_eq!(stack_location("E\n    at inline://3:2:1"), Some((true, "inline://3".to_owned(), 2, 1)));
+        assert_eq!(stack_location("no frames"), None);
+    }
     use crate::dom::{NodeData, NodeKind};
 
     fn script(attrs: &[(&str, &str)]) -> NodeData {
