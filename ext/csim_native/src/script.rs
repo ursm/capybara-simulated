@@ -242,6 +242,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "scriptSupports", script_supports_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
+    crate::dom::register(scope, ns, "moduleContent", module_content_op, context_id);
     crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
     crate::dom::register(scope, ns, "classicScriptEncoding", classic_script_encoding_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
@@ -253,14 +254,26 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
     crate::mime::extract(&content_type).is_some_and(|m| is_javascript_mime(&m.essence))
 }
-// Capybara::Simulated::Native.module_content(content_type, json) -> whether a module script's response may be one (HTML
-// "fetch a single module script"): a JavaScript MIME type — or, for a JSON module, a JSON MIME type (`application/json`,
-// `text/json`, any `+json`).
-pub(crate) fn module_content_for_ruby(content_type: String, json: bool) -> bool {
-    crate::mime::extract(&content_type).is_some_and(|m| {
+// Whether a module script's response may be one of its `kind` (HTML "fetch a single module script", by the module type
+// its destination names): a JavaScript MIME type for any — and, for a JSON module (`json`), a JSON MIME type
+// (`application/json`, `text/json`, any `+json`), for a CSS module (`style`) `text/css`.
+fn module_content(content_type: &str, kind: &str) -> bool {
+    crate::mime::extract(content_type).is_some_and(|m| {
         is_javascript_mime(&m.essence)
-            || (json && crate::mime::is_json(&m.essence))
+            || (kind == "json" && crate::mime::is_json(&m.essence))
+            || (kind == "style" && m.essence == "text/css")
     })
+}
+// Capybara::Simulated::Native.module_content(content_type, json) -> `module_content`, a JSON module's or a script's.
+pub(crate) fn module_content_for_ruby(content_type: String, json: bool) -> bool {
+    module_content(&content_type, if json { "json" } else { "script" })
+}
+// __dom.moduleContent(contentType, kind) -> `module_content` (kind as a modulepreload's `as` names it: 'json', 'style',
+// anything else a script).
+fn module_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let header = args.get(0).to_rust_string_lossy(scope);
+    let kind = args.get(1).to_rust_string_lossy(scope);
+    rv.set_bool(module_content(&header, &kind));
 }
 // __dom.javaScriptContent(contentType) -> whether a response's `Content-Type` (Fetch "extract a MIME type") is a
 // JavaScript MIME type: what a classic worker-imported script must be served as.

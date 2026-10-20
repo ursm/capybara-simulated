@@ -5018,11 +5018,12 @@ module Capybara
         # opaque response to a cors-mode request (a module script, a crossorigin
         # classic script) is a NETWORK ERROR per Handle Fetch — the bytes must
         # never compile: the engine's (fetch_rules.rs `sw_subresource_usable`).
-        # MIME enforcement is deliberately not added here yet: the network path
-        # enforces it (`stylesheetResponseAccepted`, css-utils.js), but a service
-        # worker's response is taken as the sheet it answers — a
-        # `new Response(text)` respondWith (text/plain) serving a stylesheet is
-        # load-bearing for green static-router subtests.
+        # MIME enforcement is the consumer's, which the answer's content type
+        # rides along for: a module script's applies (`module_content`), but a
+        # stylesheet's is deliberately not applied to a worker's answer yet — the
+        # network path enforces it (`stylesheetResponseAccepted`, css-utils.js),
+        # but a `new Response(text)` respondWith (text/plain) serving a
+        # stylesheet is load-bearing for green static-router subtests.
         type   = r['type'].to_s
         status = type == 'opaque' ? 0 : (r['status'] || 200).to_i
         return {'blocked' => true} unless sw_response_allowed?(r, mode)
@@ -5039,7 +5040,7 @@ module Capybara
           headers = r['headers'] || {}
           return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers}
         end
-        {'body' => RuntimeShared.utf8_text(bytes), 'status' => status}
+        {'body' => RuntimeShared.utf8_text(bytes), 'status' => status, 'contentType' => header_field(r['headers'] || {}, 'content-type').to_s}
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)

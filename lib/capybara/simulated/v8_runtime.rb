@@ -1268,17 +1268,18 @@ module Capybara
           )
           return handles[url] = nil if r && r['blocked']   # respondWith failed the load
           src = r && r['body']
+          content_type = r && r['contentType']
         end
         if src.nil?
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh.
           src = @browser.external_asset_source(url_s, asset_document_of(target))
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
-          # (…a response of a MIME type no module script is — no JavaScript one, nor a JSON one for a JSON module — no
-          # module at all: HTML "fetch a single module script")
           content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
-          src = nil if src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         end
+        # (…a response of a MIME type no module script is — no JavaScript one, nor a JSON one for a JSON module — no
+        # module at all, whoever answered it: HTML "fetch a single module script")
+        src = nil if src && !inline_src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         return handles[url] = nil unless src
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory
