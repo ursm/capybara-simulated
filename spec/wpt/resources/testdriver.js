@@ -252,7 +252,8 @@
   // Only runs when the keydown wasn't preventDefault'd — matching real browsers.
   function keyDefaultAction(name, keydownEv) {
     if (keydownEv && keydownEv.defaultPrevented) return;
-    if (name === 'Tab' && typeof W.__csimAdvanceFocus === 'function') {
+    // (…Tab's none with Control / Meta / Alt held, as the engine's key plan has it: keys.rs `FOCUS_NAVIGATION`)
+    if (name === 'Tab' && !__ctrlHeld && !__metaHeld && !__altHeld && typeof W.__csimAdvanceFocus === 'function') {
       W.__csimAdvanceFocus(__shiftHeld);
     } else if ((name === 'ArrowDown' || name === 'ArrowUp' || name === 'ArrowLeft' || name === 'ArrowRight') &&
                typeof W.__csimArrowKeyDefault === 'function') {
@@ -462,7 +463,10 @@
         if (!dspecial) {
           // Printable key: keypress + beforeinput → splice the char at the caret →
           // input, for a text control or contenteditable — mirrors send_keys.
-          dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dchar, shiftKey: __shiftHeld, ctrlKey: __ctrlHeld, metaKey: __metaHeld, altKey: __altHeld }));
+          // (…none with Alt held — Control / Meta made it an accelerator above — its char code the engine's: keys.rs
+          // `resolveKey`)
+          var dcode = W.__dom.resolveKey(dchar, false)[6];
+          if (!__altHeld) dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dchar, keyCode: dcode, charCode: dcode, shiftKey: __shiftHeld }));
           if (!dEv.defaultPrevented) typeCharAction(dchar, t);
         } else if (dkn === 'Backspace' || dkn === 'Delete') {
           if (!dEv.defaultPrevented) deleteKeyAction(dkn === 'Delete', __ctrlHeld || __altHeld || __metaHeld, t);

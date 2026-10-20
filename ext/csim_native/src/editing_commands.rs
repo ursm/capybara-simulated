@@ -132,7 +132,7 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
     });
     if let Some(control) = control {
         let n = arena.get(control).expect("filtered above");
-        let refused = support != 1 || n.plain_attr("readonly").is_some() || arena.is_actually_disabled(control);
+        let refused = support != 1 || n.is_read_only() || arena.is_actually_disabled(control);
         let nothing_cut = name.eq_ignore_ascii_case("cut") && {
             let (sel, _) = arena.text_selection(control);
             sel.start == sel.end

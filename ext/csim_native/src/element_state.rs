@@ -1026,12 +1026,10 @@ impl RealmArena {
     pub(crate) fn is_read_write(&self, id: NodeId) -> bool {
         let Some(n) = self.get(id) else { return false };
         if n.is_html_named("input") {
-            return n.input_has(crate::input_types::READONLY)
-                && n.plain_attr("readonly").is_none()
-                && !self.is_actually_disabled(id);
+            return n.input_has(crate::input_types::READONLY) && !n.is_read_only() && !self.is_actually_disabled(id);
         }
         if n.is_html_named("textarea") {
-            return n.plain_attr("readonly").is_none() && !self.is_actually_disabled(id);
+            return !n.is_read_only() && !self.is_actually_disabled(id);
         }
         self.is_editable(id)
     }

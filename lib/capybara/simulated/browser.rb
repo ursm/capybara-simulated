@@ -2403,20 +2403,20 @@ module Capybara
         # as one combo atom (shift held over enter), while independent
         # non-modifier keys stay separate calls — each one settles
         # between dispatches so a dropdown highlight (Avo Tags input's
-        # arrow navigation) commits before the next key fires. Tab /
-        # backtab are focus-advance, dispatched out of band.
+        # arrow navigation) commits before the next key fires. Tab is a
+        # key as any — its events, a listener's cancel, the chord held
+        # (keys.rs `FOCUS_NAVIGATION`) — and backtab Shift + Tab.
         held = []
         Array(keys).each do |k|
           sym = k.is_a?(Symbol) ? k : (k.respond_to?(:to_sym) ? k.to_sym : nil)
-          if sym == :tab || sym == :backtab
-            dom_call('__csimAdvanceFocus', sym == :backtab)
-          elsif sym && MODIFIER_KEY_NAMES.include?(sym)
+          if sym && MODIFIER_KEY_NAMES.include?(sym)
             held << sym
           else
             handle = active_element_handle
             handle = current_document_handle if handle.nil? || handle.zero?
-            atom = held.empty? ? k : (held + [k])
-            send_keys(handle, [atom])
+            key = sym == :backtab ? :tab : k
+            chord = sym == :backtab ? held | [:shift] : held
+            send_keys(handle, [chord.empty? ? key : (chord + [key])])
           end
         end
       end

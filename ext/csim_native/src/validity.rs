@@ -204,6 +204,9 @@ impl RealmArena {
         if !candidate || self.is_actually_disabled(id) {
             return false;
         }
+        // (…`readonly` specified, whatever the input's type — the attribute's constraint validation clause bars an
+        // `<input>` with it, a color, a file or a submit one too (form-validation-willValidate) — and a textarea's, a
+        // form-associated custom element's)
         if (face || matches!(&*n.local_name, "input" | "textarea")) && n.plain_attr("readonly").is_some() {
             return false;
         }
@@ -255,7 +258,7 @@ impl RealmArena {
         } else {
             let required_applies = tag != "input" || crate::input_types::facts(ty) & crate::input_types::REQUIRED != 0;
             let readonly_applies = tag == "textarea" || crate::input_types::facts(ty) & crate::input_types::READONLY != 0;
-            let mutable = !(readonly_applies && (self.is_actually_disabled(id) || n.plain_attr("readonly").is_some()));
+            let mutable = !(readonly_applies && self.is_actually_disabled(id)) && !n.is_read_only();
             if required_applies && n.plain_attr("required").is_some() && empty && mutable {
                 v |= VALUE_MISSING;
             }

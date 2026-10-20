@@ -169,13 +169,8 @@ fn show_picker_refusal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         return rv.set_uint32(PICKER_READ_ONLY);
     }
     let top = std::iter::once(cid).chain(arena.ancestor_realms(cid)).last().unwrap_or(cid);
-    if !exempt && top != cid {
-        let ours = realm(scope, cid).location.origin_key(cid);
-        let dom = crate::dom::dom(scope);
-        let theirs = dom.arena.enter_known(top).map(|a| a.location.origin_key(top));
-        if theirs.is_none_or(|k| k != ours) {
-            return rv.set_uint32(PICKER_CROSS_ORIGIN);
-        }
+    if !exempt && top != cid && arena.origin_key_of(top) != arena.origin_key_of(cid) {
+        return rv.set_uint32(PICKER_CROSS_ORIGIN);
     }
     rv.set_uint32(if realm(scope, cid).consume_activation(cid) { 0 } else { PICKER_NO_ACTIVATION });
 }

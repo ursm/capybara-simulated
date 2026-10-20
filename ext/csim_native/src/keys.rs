@@ -192,7 +192,8 @@ pub(crate) const ENTER_ACTIVATES: u32 = 1 << 9;
 pub(crate) const SPACE_ACTIVATES: u32 = 1 << 10;
 // Tab with no Control / Meta / Alt held: focus moved to the next tabbable element (Shift: the previous one).
 pub(crate) const FOCUS_NAVIGATION: u32 = 1 << 11;
-// Control / Meta + A in a typeable element: all its content selected.
+// Control / Meta + A: all the content selected — an editing host's, a text control's (a read-only one's too), else
+// the document's (Chrome's SelectAll).
 pub(crate) const SELECT_ALL: u32 = 1 << 12;
 // Control / Meta + X, C, V: the clipboard's cut, copy and paste of the focused element's selection.
 pub(crate) const CUT: u32 = 1 << 13;
@@ -213,7 +214,7 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     let tag = &*n.local_name;
     let input_type = if tag == "input" { n.input_type() } else { "" };
     let check_or_radio = matches!(input_type, "checkbox" | "radio");
-    let control = matches!(tag, "input" | "textarea") && n.plain_attr("readonly").is_none() && n.plain_attr("disabled").is_none();
+    let control = matches!(tag, "input" | "textarea") && !n.is_read_only() && n.plain_attr("disabled").is_none();
     // (…a text control edits its own value, wherever it is: one inside an editing host — a design-mode document's
     // included — is no part of the host's content to a key, Chrome)
     let host = !matches!(tag, "input" | "textarea") && arena.is_editable(id);
@@ -229,7 +230,7 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     set(EDITING_HOST, host);
     set(CHECK_OR_RADIO, check_or_radio);
     set(INTERACTIVE, matches!(tag, "a" | "button" | "summary" | "select"));
-    set(KEYPRESS, !chord && (is("Enter") || (key.len() == 1 && char == Some(key))));
+    set(KEYPRESS, !chord && (is("Enter") || (one_character(key) && char == Some(key))));
     set(CLOSE_REQUEST, is("Escape"));
     let arrow = is("ArrowDown") || is("ArrowUp") || is("ArrowLeft") || is("ArrowRight");
     set(ARROW_CHOICE, arrow && (tag == "select" || input_type == "radio"));
@@ -241,7 +242,7 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     set(FOCUS_NAVIGATION, is("Tab") && !chord);
     let command = modifiers & (CTRL | META) != 0;
     let letter = |l: u8| matches!(key, [u] if u8::try_from(*u).is_ok_and(|b| b.to_ascii_lowercase() == l));
-    set(SELECT_ALL, command && typeable && letter(b'a'));
+    set(SELECT_ALL, command && letter(b'a'));
     set(CUT, command && letter(b'x'));
     set(COPY, command && letter(b'c'));
     set(PASTE, command && letter(b'v'));
@@ -348,6 +349,10 @@ pub(crate) fn motion(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key
     }
     kind | if forward { MOVE_FORWARD } else { 0 } | if held(SHIFT) { MOVE_EXTEND } else { 0 }
 }
+// Whether `units` are one character: one code point, a surrogate pair's two units among them.
+fn one_character(units: &[u16]) -> bool {
+    char::decode_utf16(units.iter().copied()).count() == 1
+}
 fn is_units(units: &[u16], ascii: &str) -> bool {
     units.iter().copied().eq(ascii.bytes().map(u16::from))
 }
@@ -404,8 +409,12 @@ fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         None => v8::null(scope).into(),
     };
     // (…the `keypress` char code of a key that produces a character: Enter's a carriage return, a printable one's its
-    // character's first code unit — Chrome's)
-    let char_code = if is_units(&k.key, "Enter") { 13 } else { k.char.as_ref().and_then(|c| c.first()).map_or(0, |&u| u32::from(u)) };
+    // character's code point — UI Events' legacy `charCode`, "the Unicode reference number" — an emoji's past U+FFFF)
+    let char_code = if is_units(&k.key, "Enter") {
+        13
+    } else {
+        k.char.as_ref().and_then(|c| char::decode_utf16(c.iter().copied()).next()).and_then(Result::ok).map_or(0, u32::from)
+    };
     let items: [v8::Local<v8::Value>; 7] = [
         crate::dom::utf16_value(scope, &k.key),
         crate::dom::utf16_value(scope, &k.code),

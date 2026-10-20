@@ -315,7 +315,7 @@ const STEP_BACKUP: u32 = 1 << 18; // a reaction enqueued: the backup element que
 const STEP_REMOVED: u32 = 1 << 19; // the attribute removed: its Attr node detached
 const STEP_POPOVER: u32 = 1 << 20; // a `popover` changed: a showing popover of another state now hidden
 const STEP_LINK_RESOURCE: u32 = 1 << 21; // a `<link>`'s resource may be another: fetched again, its `load` fired
-const STEP_PICTURE_SOURCE: u32 = 1 << 22; // …its `srcset` / `src`: its images' data updated too
+const STEP_PICTURE_SOURCE: u32 = 1 << 22; // …its candidates or what selects it: its images' data updated too
 
 // __dom.attrWrite(element, how, a, b, c, d) -> `[steps, key, oldValue, localName]` of the change made (`how`, above):
 // what the bindings do for it (`STEP_*`), the key of the attribute, the value it had (null for none) and its local
@@ -580,10 +580,11 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let renavigates = !set || changed || (local == "src" && n.plain_attr("srcdoc").is_none());
     steps |= flag(frame && matches!(local, "src" | "srcdoc") && renavigates, STEP_FRAME_SRC);
     steps |= flag(local == "src" && set, STEP_MEDIA_SRC);
-    // (…a `<source>` a `<picture>` holds: its candidates, its `media` and `type`, and the dimensions its images take)
-    let picture = html && tag == "source" && changed && set && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.is_html_named("picture"));
-    let selects = matches!(local, "srcset" | "src");
-    steps |= flag(picture && (selects || matches!(local, "media" | "type" | "width" | "height")), STEP_PICTURE);
+    // (…a `<source>` a `<picture>` holds, set, changed or removed: HTML's relevant mutations of its images — its
+    // candidates and what selects it, `srcset`, `sizes`, `media`, `type` — and the dimensions they take)
+    let picture = html && tag == "source" && changed && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.is_html_named("picture"));
+    let selects = matches!(local, "srcset" | "sizes" | "media" | "type");
+    steps |= flag(picture && (selects || matches!(local, "width" | "height")), STEP_PICTURE);
     steps |= flag(picture && selects, STEP_PICTURE_SOURCE);
     steps |= flag(local.starts_with("on"), STEP_HANDLER);
     steps |= flag(changed && matches!(local, "form" | "id" | "disabled"), STEP_FORM_OWNER);

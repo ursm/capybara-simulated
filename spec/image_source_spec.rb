@@ -30,4 +30,20 @@ RSpec.describe 'image source selection' do
     # `type` names no format to refuse (b5).
     expect(got).to eq(%w[a3 b1 b4 b5 c2])
   end
+
+  # A `<picture>`'s `<source>` whose `media` stops matching, or whose `srcset` goes, is no longer the one selected: its
+  # image is selected again (HTML's relevant mutations of a source: set, changed or removed).
+  it "selects a picture's image again as its source's media or srcset change" do
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    doc = '<!DOCTYPE html><picture><source id=s srcset="/i.png?one" media="(min-width: 1px)"><img id=i src="/i.png?fallback"></picture>'
+    app = ->(env) { env['PATH_INFO'] == '/i.png' ? [200, {'content-type' => 'image/png'}, [png]] : [200, {'content-type' => 'text/html'}, [doc]] }
+    s = simulated_session(app)
+    s.visit 'http://www.example.com/'
+    src = -> { poll_until { (u = s.evaluate_script('i.currentSrc')).empty? ? nil : u.split('?').last } }
+    expect(src.call).to eq('one')
+    s.execute_script("s.media = '(max-width: 1px)'")
+    expect(poll_until { (v = src.call) == 'fallback' ? v : nil }).to eq('fallback')
+    s.execute_script("s.media = '(min-width: 1px)'; s.removeAttribute('srcset')")
+    expect(poll_until { (v = src.call) == 'fallback' ? v : nil }).to eq('fallback')
+  end
 end
