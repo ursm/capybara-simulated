@@ -32,6 +32,24 @@ RSpec.describe 'event target state' do
     expect(names).to eq([[], [], []])
   end
 
+  it 'gives a frozen target its listeners and handlers, internal state of it (DOM: its event listener list)' do
+    s = simulated_session(app)
+    s.visit '/'
+    seen = s.evaluate_script(<<~JS)
+      (() => {
+        const seen = [];
+        for (const t of [Object.freeze(new XMLHttpRequest()), Object.freeze(document.getElementById('d')), Object.freeze(new EventTarget())]) {
+          t.addEventListener('x', () => seen.push('listener'));
+          if ('onclick' in t || t instanceof XMLHttpRequest) t.onload = t.onclick = () => seen.push('handler');
+          t.dispatchEvent(new Event('x'));
+          t.dispatchEvent(new Event(t instanceof XMLHttpRequest ? 'load' : 'click'));
+        }
+        return seen;
+      })()
+    JS
+    expect(seen).to eq(%w[listener handler listener handler listener])
+  end
+
   it 'fires a handler set through another realm’s view of a frame’s window, in order with its listeners' do
     s = simulated_session(app)
     s.visit '/'
