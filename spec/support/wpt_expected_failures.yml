@@ -4937,27 +4937,6 @@ html/semantics/interactive-elements/the-dialog-element/dialog-overlay.html:
 - Opening and closing a modal dialog changes computed overlay to 'auto' and back to
   'none'
 - dialog computed overlay initially 'none'
-html/semantics/interactive-elements/the-dialog-element/dialog-popover-closedby-complex.html:
-- clicking dialogA with modal dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking dialogA with modal dialogA and modeless dialogB, same structure, but with
-  shadow DOM slots
-- clicking dialogA with modeless dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking dialogA with modeless dialogA and modeless dialogB, same structure, but
-  with shadow DOM slots
-- clicking dialogB with modal dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking dialogB with modal dialogA and modeless dialogB, same structure, but with
-  shadow DOM slots
-- clicking dialogB with modeless dialogA and modal dialogB, same structure, but with
-  shadow DOM slots
-- clicking dialogB with modeless dialogA and modeless dialogB, same structure, but
-  with shadow DOM slots
-- clicking popoverA with modal dialogA and modeless dialogB, same structure, but with
-  shadow DOM slots
-- clicking popoverA with modeless dialogA and modeless dialogB, same structure, but
-  with shadow DOM slots
 html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay.html:
 - "== html/semantics/interactive-elements/the-dialog-element/dialog-popover-overlay-ref.html"
 html/semantics/interactive-elements/the-dialog-element/dialog-requestclose-3.html:
@@ -5906,8 +5885,6 @@ shadow-dom/dragenter-related-target.html:
 shadow-dom/execcommand-insertList-in-shadow.html:
 - Toggle off List for all the child nodes in the ShadowRoot
 shadow-dom/focus/click-focus-slot-ancestor.html:
-- Clicking on non-focusable slot inside focusable div will make the flat-tree focusable
-  ancestor get focused
 - Select on non-focusable non-editable slot in a contenteditable shadow DOM and inside
   focusable div will select text
 - Select on non-focusable slot inside focusable div will select text

@@ -192,4 +192,33 @@ RSpec.describe 'the event path through shadow trees' do
     JS
     expect(got).to be(true)
   end
+
+  # Touch Events' retargeting steps (w3c/touch-events ED, §Retargeting, run for every TouchEvent): a Touch's target
+  # reads as its unadjusted target retargeted against the event's — a node in a closed shadow tree as its host outside
+  # it — and DOM's clearTargets counts the touch targets too (a dispatch that never leaves the shadow tree leaves none
+  # behind). Chrome 155 retargets only the touches its own input makes: a page's `new Touch()` keeps the inner node
+  # throughout (`host/inner`), leaking it past the closed tree.
+  it "retargets a TouchEvent's touches as the dispatch retargets the event" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        document.body.innerHTML = '<div id=host></div>';
+        const host = document.getElementById('host');
+        const inner = host.attachShadow({mode: 'closed'}).appendChild(document.createElement('i'));
+        const nm = (n) => n === null ? 'null' : n === host ? 'host' : n === inner ? 'inner' : 'other';
+        const seen = [];
+        const look = (where) => (e) => seen.push(where + ':' + nm(e.target) + '/' + nm(e.changedTouches[0].target));
+        window.addEventListener('touchstart', look('window'), {capture: true});
+        inner.addEventListener('touchstart', look('inner'));
+        host.addEventListener('touchstart', look('host'));
+        const touch = (composed) => {
+          const t = new Touch({identifier: 0, target: inner});
+          const e = new TouchEvent('touchstart', {bubbles: true, composed, changedTouches: [t]});
+          inner.dispatchEvent(e);
+          return nm(e.target) + '/' + nm(t.target);
+        };
+        return [touch(true), touch(false), seen];
+      })()
+    JS
+    expect(got).to eq(['host/host', 'null/null', %w[window:host/host inner:inner/inner host:host/host inner:inner/inner]])
+  end
 end

@@ -281,13 +281,14 @@ pub(crate) fn path_plan(arena: &RealmArena, path: impl IntoIterator<Item = NodeI
     (end.unwrap_or(len), last.is_some_and(|id| arena.is_document(id)))
 }
 
-// __dom.eventPath(targetNid, relatedNid, relatedOther, composed, formStop, activation, bubbles) -> [nodes, steps, plan]:
-// the event path from
+// __dom.eventPath(targetNid, relatedNid, relatedOther, composed, formStop, activation, bubbles, touchNids) -> [nodes,
+// steps, plan]: the event path from
 // the target (the relatedTarget a node `relatedNid`, else none, or with `relatedOther` something no retargeting moves).
 // `nodes` are the nodes it names, as `nodes_value` answers them; `steps` four numbers a step: its node, the target its
 // listeners see, its relatedTarget (an index into `nodes`; -1 none, -2 the event's own), and its `STEP_*` flags. `plan`
-// four numbers: `path_plan`'s bubbling end and Window (1 or 0); DOM "clearTargets" (1 or 0) — the last step its own
-// target, that target or its relatedTarget in a shadow tree; the relatedTarget the Window sees, retargeted out of
+// five numbers: `path_plan`'s bubbling end and Window (1 or 0); DOM "clearTargets" (1 or 0) — the last step its own
+// target, that target, its relatedTarget or a touch target (`touchNids`, a TouchEvent's touches' nodes) retargeted
+// against it in a shadow tree; the relatedTarget the Window sees, retargeted out of
 // every shadow tree (as a step's); and, for a click (`activation`, the click bubbling or not), its activation target
 // (`activation_target`: an index into `nodes`, -1 none). Steps empty, where the event is not dispatched.
 fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -296,12 +297,15 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let composed = args.get(3).is_true();
     let form_stop = args.get(4).is_true();
     let (activation, bubbles) = (args.get(5).is_true(), args.get(6).is_true());
+    let touches = crate::dom::nids_arg(scope, args.get(7));
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let steps = path(arena, target, related, composed);
     let in_shadow = |id: NodeId| arena.get(arena.root_of(id)).is_some_and(|n| n.host.is_some());
     let clear_targets = steps.iter().rev().find(|s| s.flags & STEP_AT_TARGET != 0).is_some_and(|s| {
-        in_shadow(s.target) || matches!(s.related, Related::Node(r) if in_shadow(r))
+        in_shadow(s.target)
+            || matches!(s.related, Related::Node(r) if in_shadow(r))
+            || touches.iter().any(|&t| in_shadow(retarget_node(arena, t, s.node)))
     });
     let (end, window) = path_plan(arena, steps.iter().map(|s| s.node), form_stop);
     let activation_target = if activation { activation_along(arena, &steps, bubbles) } else { None };

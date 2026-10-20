@@ -57903,22 +57903,12 @@ selection/contenteditable/modifying-selection-with-non-primary-mouse-button.tent
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: middle click should set focus to clicked editable element and collapse selection
-    around the clicked point
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: middle mouse button down should move caret, but its button up shouldn't move
     caret
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: secondary click should move caret in an editable element
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: secondary click should set focus to clicked editable element and collapse
-    selection around the clicked point
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -57929,11 +57919,6 @@ selection/contenteditable/modifying-selection-with-non-primary-mouse-button.tent
     path/suffix. CLAUDE.md rule 1.
 selection/contenteditable/modifying-selection-with-primary-mouse-button.tentative.html:
 - name: Primary click should move caret in an editable element
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Primary click should set focus to clicked editable element and collapse selection
-    around the clicked point
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

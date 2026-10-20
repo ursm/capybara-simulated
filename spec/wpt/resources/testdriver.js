@@ -371,27 +371,11 @@
     if (mType && !suppressed) {
       var ev = new W.MouseEvent(mType, Object.assign({ bubbles: true, cancelable: true, composed: true }, at));
       dispatch(target, ev);
-      // HTML mousedown default action: move focus to the clicked element, or — if
-      // it isn't a focus target — reset focus to the body. The Capybara click path
-      // runs the focus half in __csimClickResolve; the testdriver-injected pointer
-      // sequence needs both halves. target.focus() is self-gating: it focuses a
-      // focusable target, delegates into a (possibly closed) delegatesFocus shadow
-      // host, and no-ops otherwise. After it, document.activeElement === target iff
-      // the target took (or delegated) focus; if not, the click landed on
-      // non-focusable content and focus moves to the body (blur the prior focus).
-      // Only blur when the prior active element is STILL focused — if focus()'s
-      // focusin handler moved focus elsewhere, that new focus is legitimate and
-      // must not be clobbered.
-      // (shadow-dom/focus/click-focus-delegatesFocus-*, focus-click-on-shadow-host)
-      if (mType === 'mousedown' && !ev.defaultPrevented && typeof target.focus === 'function') {
-        var doc = D();
-        var prevActive = doc && doc._activeElement;
-        try { W.__dom.setPointerModality(true); } catch (e) {}   // pointer-driven focus → not :focus-visible
-        try { target.focus(); } catch (e) {}
-        if (doc && doc.activeElement !== target && doc._activeElement === prevActive &&
-            prevActive && typeof prevActive.blur === 'function') {
-          try { prevActive.blur(); } catch (e) {}
-        }
+      // HTML's mousedown default action, the driver's own press's (`__csimFocusOnPress`): focus to the nearest element
+      // up from the node pressed that can take it — its editing host, a link around it, a delegatesFocus host — and
+      // where none can, the focused element loses it.
+      if (mType === 'mousedown' && !ev.defaultPrevented) {
+        try { W.__csimAsScriptSteps(function () { W.__csimFocusOnPress(target); }); } catch (e) {}
       }
     }
   }
@@ -405,13 +389,14 @@
         if (a.origin && typeof a.origin === 'object' && a.origin.nodeType) {
           // (…an element origin: the offset from its centre — the element itself the target)
           var box = a.origin.getBoundingClientRect();
-          p.target = a.origin;
           p.x = box.left + box.width / 2 + (a.x || 0); p.y = box.top + box.height / 2 + (a.y || 0);
+          // (…what is at that point inside it, in its shadow tree too — not retargeted: the event is, as it climbs)
+          p.target = W.__csimPointerTargetAt ? W.__csimPointerTargetAt(a.origin, p.x, p.y) : a.origin;
         } else {
           // (…a viewport origin — or the pointer's own — the point named, and what is there the target)
           if (a.origin === 'pointer') { p.x = (p.x || 0) + (a.x || 0); p.y = (p.y || 0) + (a.y || 0); }
           else { p.x = a.x || 0; p.y = a.y || 0; }
-          var hit = D() && D().elementFromPoint(p.x, p.y);
+          var hit = W.__csimPointerTargetAt ? W.__csimPointerTargetAt(null, p.x, p.y) : D() && D().elementFromPoint(p.x, p.y);
           p.target = hit || scroller();
         }
         if (p.down) {                                   // implicit pointer capture
