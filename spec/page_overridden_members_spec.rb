@@ -511,4 +511,20 @@ RSpec.describe 'members a page overrides' do
     # (…the page's own put back for the teardown's checks, which are a page's scripts)
     s.execute_script('[JSON.stringify, window.eval] = window.__kept')
   end
+
+  # …and of streams: a beacon refuses a stream body of any realm's — a frame's too — by its brand, not by an `instanceof`
+  # of this realm's class.
+  it "refuses a beacon a stream of another realm's is the body of" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8">']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], f = document.createElement('iframe');
+      f.onload = () => {
+        try { navigator.sendBeacon('/b', new f.contentWindow.ReadableStream()); done('none'); } catch (e) { done(e.name); }
+      };
+      f.src = '/frame';
+      document.body.appendChild(f);
+    JS
+    expect(got).to eq('TypeError')
+  end
 end
