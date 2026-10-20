@@ -172,19 +172,27 @@ pub(crate) fn stylesheet_encoding(content_type: &str, bytes: &[u8], environment:
     }
     encoding_rs::Encoding::for_label(environment.as_bytes()).unwrap_or(encoding_rs::UTF_8)
 }
-// __dom.stylesheetText(bytes, contentType, environment) -> the sheet's text: its bytes decoded with that fallback
-// encoding, a BOM's over it (CSS Syntax "decode") — undefined where that is UTF-8's, the text the host decoded already.
+// __dom.stylesheetText(bytesOrText, contentType, linkCharset, documentCharset) -> [the sheet's text, the encoding it
+// decoded with]: its bytes (or, where the host kept none, its text's UTF-8, which they are) decoded with that fallback
+// encoding — its environment the `<link>`'s `charset` where that is an encoding's label (HTML "link type stylesheet"),
+// else the document's or the importing sheet's (`documentCharset`) — a BOM's over it (CSS Syntax "decode"); the text
+// undefined where it decodes as the host read it (UTF-8, or ASCII in an encoding ASCII is ASCII in).
 fn stylesheet_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(bytes) = bytes_arg(scope, args.get(0)) else { return };
-    let [content_type, environment] = [1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let input = args.get(0);
+    let bytes = if input.is_string() { input.to_rust_string_lossy(scope).into_bytes() } else { let Some(b) = bytes_arg(scope, input) else { return }; b };
+    let [content_type, link_charset, document_charset] = [1, 2, 3].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let environment = if encoding_rs::Encoding::for_label(link_charset.as_bytes()).is_some() { link_charset } else { document_charset };
     let encoding = encoding_rs::Encoding::for_bom(&bytes).map_or_else(|| stylesheet_encoding(&content_type, &bytes, &environment), |(e, _)| e);
-    if encoding == encoding_rs::UTF_8 {
-        return;
-    }
-    let (text, _, _) = encoding.decode(&bytes);
-    let units: Vec<u16> = text.encode_utf16().collect();
-    let text = utf16_string(scope, &units);
-    rv.set(text);
+    let unchanged = encoding == encoding_rs::UTF_8 || (encoding.is_ascii_compatible() && bytes.is_ascii());
+    let text: v8::Local<v8::Value> = if unchanged {
+        v8::undefined(scope).into()
+    } else {
+        let (text, _, _) = encoding.decode(&bytes);
+        let units: Vec<u16> = text.encode_utf16().collect();
+        utf16_string(scope, &units)
+    };
+    let name = v8::String::new(scope, encoding.name()).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    rv.set(v8::Array::new_with_elements(scope, &[text, name]).into());
 }
 
 // The decoders a streaming `TextDecoder` keeps between its calls, by realm and id (the page side closes one when its
