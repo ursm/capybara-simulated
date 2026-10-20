@@ -545,6 +545,10 @@ fn base64url_decode(text: &str) -> Option<Vec<u8>> {
     (bits < 6).then_some(out)
 }
 
+// `n` random bytes as lowercase hex.
+pub(crate) fn random_hex(n: usize) -> String {
+    random_bytes(n).iter().map(|x| format!("{x:02x}")).collect()
+}
 fn random_bytes(n: usize) -> Vec<u8> {
     let mut out = vec![0u8; n];
     rand_core::OsRng.fill_bytes(&mut out);

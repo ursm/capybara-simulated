@@ -88,4 +88,15 @@ RSpec.describe 'Form submission encoding' do
     s.click_button 'go'
     expect(received.first[:body]).to include('filename="a%0Ab%0D.txt"'.b, %(name="_charset_"\r\n\r\nUTF-8).b)
   end
+
+  # A file control with no file picked submits an empty file entry — no filename, no bytes, its type
+  # application/octet-stream (HTML "constructing the entry list").
+  it 'submits an empty file entry as an application/octet-stream part' do
+    received = []
+    s = simulated_session(app(received, '<form action="/mp" method="post" enctype="multipart/form-data"><input type="file" name="up"><button>go</button></form>'))
+    s.visit '/'
+    s.find('button').click
+    body = received.first[:body]
+    expect(body).to include(%(Content-Disposition: form-data; name="up"; filename=""\r\nContent-Type: application/octet-stream\r\n\r\n\r\n))
+  end
 end

@@ -3254,58 +3254,21 @@ module Capybara
       end
 
       # HTML "encode the entry list" by enctype, in the form's submission character `encoding` → [body, exact
-      # Content-Type]. The Content-Type is sent verbatim (no charset suffix), which the spec's form-submission resources
-      # compare exactly. text/plain is `name=value\r\n` per entry (NOT urlencoded); urlencoded (and GET) merge each file
-      # entry as its bare filename. Every name, value and filename is encoded in `encoding` — natively in a legacy one
-      # (encoding_rs, a character it cannot encode written `&#N;`). `entries` is the ordered entry list — string
-      # {'name','value'} or file {'name','file'=>true,'filename','handle','index'} entries; a file's bytes resolve
-      # through the `@file_picks` slot.
+      # Content-Type], the engine's (text_codec.rs `encode_entry_list_for_ruby`). `entries` is the ordered entry list —
+      # string {'name','value'} or file {'name','file'=>true,'filename','handle','index'} entries; a file's bytes resolve
+      # through the `@file_picks` slot, or come from the VM (an in-memory `new File([…])`).
       def encode_entry_list(entries, enctype, encoding)
-        # The encoders normalize CR/LF → CRLF in each name and value — a file entry's filename too where it IS the value
-        # (urlencoded, text/plain), not where it is a filename (multipart, which only escapes it) — the entry list itself
-        # stays raw, matching the JS encoders and real browsers (newline-normalization.html, multipart-formdata.window.js).
-        encode = ->(s) { encoding == 'UTF-8' ? s.to_s.b : Native.form_encode(encoding, s.to_s) }
-        text   = ->(s) { encode.(normalize_form_newlines(s)) }
-        if enctype.start_with?('multipart/form-data')
-          boundary = "csim-#{SecureRandom.hex(8)}"
-          body     = String.new.force_encoding(Encoding::ASCII_8BIT)
-          entries.each do |e|
-            name = text.(e['name'])
-            if e['file']
-              path = entry_file_path(e)
-              if path
-                append_multipart_part(body, boundary, name, File.binread(path),
-                                      filename:     encode.(File.basename(path)),
-                                      content_type: Rack::Mime.mime_type(File.extname(path)))
-              elsif e['bytes']
-                # An in-memory `new File([…])` has no on-disk slot; its bytes are
-                # carried from the VM.
-                ct = e['type'].to_s
-                ct = 'application/octet-stream' if ct.empty?
-                append_multipart_part(body, boundary, name, e['bytes'], filename: encode.(e['filename']), content_type: ct)
-              else
-                append_multipart_part(body, boundary, name, '', filename: encode.(e['filename']))
-              end
-            else
-              append_multipart_part(body, boundary, name, text.(e['value']))
-            end
-          end
-          body << "--#{boundary}--\r\n"
-          [body, "multipart/form-data; boundary=#{boundary}"]
-        else
-          pairs = entries.map {|e| [text.(e['name']), text.(e['file'] ? e['filename'] : e['value'])] }
-          if enctype == 'text/plain'
-            [pairs.map {|name, value| name + '=' + value + "\r\n" }.join.b, 'text/plain']
-          else
-            [URI.encode_www_form(pairs), 'application/x-www-form-urlencoded']
-          end
-        end
-      end
+        list = entries.map {|e|
+          next [e['name'].to_s, e['value'].to_s] unless e['file']
 
-      # HTML form-submission newline normalization: every lone CR, lone LF, and CRLF in an
-      # entry name/value becomes a CRLF (the JS encoders' `normalizeNL` counterpart).
-      def normalize_form_newlines(s)
-        s.to_s.gsub(/\r\n?|\n/, "\r\n")
+          path = entry_file_path(e)
+          if path
+            [e['name'].to_s, File.basename(path), Rack::Mime.mime_type(File.extname(path)), File.binread(path)]
+          else
+            [e['name'].to_s, e['filename'].to_s, e['type'].to_s, e['bytes'].to_s.b]
+          end
+        }
+        Native.encode_entry_list(list, enctype, encoding)
       end
 
       # Resolve a threaded file entry's on-disk path via the `@file_picks` slot
@@ -3319,20 +3282,6 @@ module Capybara
         return nil if handle.nil?
         picks = @file_picks && @file_picks[handle.to_i]
         picks && picks[entry['index'].to_i]
-      end
-
-      # One part of a multipart/form-data body. `name` and `filename` are bytes, already encoded; a LF, CR or `"` in
-      # them is escaped `%0A` / `%0D` / `%22`, as HTML's multipart encoding has it.
-      def append_multipart_part(body, boundary, name, content, filename: nil, content_type: nil)
-        escape = ->(s) { s.b.gsub(/[\n\r"]/n) {|c| format('%%%02X', c.ord) } }
-        body << "--#{boundary}\r\n"
-        disposition = %[form-data; name="#{escape.(name)}"].b
-        disposition << %[; filename="#{escape.(filename)}"].b if filename
-        body << "Content-Disposition: #{disposition}\r\n"
-        body << "Content-Type: #{content_type}\r\n" if content_type
-        body << "\r\n"
-        body << content.to_s.b
-        body << "\r\n"
       end
 
       def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil)

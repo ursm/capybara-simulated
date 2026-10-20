@@ -213,8 +213,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         .define_module("Simulated")?
         .define_module("Native")?;
     native.define_module_function("unicode_class_ranges", magnus::function!(unicode::class_ranges, 1))?;
-    // HTML's "encode" for a form the host submits in its legacy submission encoding.
-    native.define_module_function("form_encode", magnus::function!(text_codec::form_encode, 2))?;
+    // HTML's "encode the entry list" of a form the host submits, by its enctype (text_codec.rs, multipart.rs).
+    native.define_module_function("encode_entry_list", magnus::function!(text_codec::encode_entry_list_for_ruby, 3))?;
     // An image resource's bytes decoded to RGBA, on whichever thread fetched them.
     native.define_module_function("decode_image", magnus::function!(image_decode::decode_for_ruby, 3))?;
     // A web font's file unwrapped from its WOFF / WOFF2 container.

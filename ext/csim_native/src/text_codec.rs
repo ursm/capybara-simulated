@@ -311,21 +311,12 @@ fn form_bytes(encoding: Option<&'static Encoding>, text: &str) -> Vec<u8> {
     encoding.map_or_else(|| text.as_bytes().to_vec(), |encoding| encoding.encode(text).0.into_owned())
 }
 
-// Capybara::Simulated::Native.form_encode(encoding, text) -> the bytes (BINARY): a form the host submits.
-pub(crate) fn form_encode(ruby: &magnus::Ruby, encoding: String, text: String) -> magnus::RString {
-    ruby.str_from_slice(&form_bytes(Encoding::for_label(encoding.as_bytes()), &text))
-}
-
-// __dom.formEncode(enctype, encoding, list) -> `[body, contentType]`: HTML's "encode the entry list" of `list` (flat
-// `[name, value, …]`, a file entry's value its filename) for a form submitted as `enctype` — `text/plain` (each entry
-// `name=value` and a CRLF) or, for any other, application/x-www-form-urlencoded (the URL Standard's serializer, a space
-// `+`) — each name and value's newlines CRLF first, in `encoding`'s bytes (a character a legacy one cannot encode
-// `&#N;`; null for UTF-8). The body as a byte string (a character per byte).
-fn form_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let plain = args.get(0).to_rust_string_lossy(scope).eq_ignore_ascii_case("text/plain");
-    let encoding = encoding_arg(scope, args.get(1)).filter(|e| *e != encoding_rs::UTF_8);
-    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
-    let crlf = |s: String| -> String {
+// HTML's "encode the entry list" of `entries` (each name and value — a file entry's its filename) for a form submitted
+// as `enctype`: `text/plain` (each entry `name=value` and a CRLF) or, for any other, application/x-www-form-urlencoded
+// (the URL Standard's serializer, a space `+`) — each name and value's newlines CRLF first, in `encoding`'s bytes (a
+// character a legacy one cannot encode `&#N;`; none for UTF-8) — and the Content-Type it is sent under.
+pub(crate) fn encode_entries(enctype: &str, encoding: Option<&'static Encoding>, entries: &[(String, String)]) -> (Vec<u8>, &'static str) {
+    let crlf = |s: &str| -> String {
         let mut out = String::with_capacity(s.len());
         let mut chars = s.chars().peekable();
         while let Some(c) = chars.next() {
@@ -340,30 +331,77 @@ fn form_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         }
         out
     };
+    let encoding = encoding.filter(|e| *e != encoding_rs::UTF_8);
+    if enctype.eq_ignore_ascii_case("text/plain") {
+        let text: String = entries.iter().map(|(name, value)| format!("{}={}\r\n", crlf(name), crlf(value))).collect();
+        return (form_bytes(encoding, &text), "text/plain");
+    }
+    let bytes = encoder(move |s| std::borrow::Cow::Owned(form_bytes(encoding, s)));
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    serializer.encoding_override(Some(&bytes));
+    for (name, value) in entries {
+        serializer.append_pair(&crlf(name), &crlf(value));
+    }
+    (serializer.finish().into_bytes(), "application/x-www-form-urlencoded")
+}
+// __dom.formEncode(enctype, encoding, list) -> `[body, contentType]` of `list` (flat `[name, value, …]`, a file entry's
+// value its filename) submitted as `enctype` in `encoding` (`encode_entries`): the body as a byte string (a character
+// per byte).
+fn form_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let enctype = args.get(0).to_rust_string_lossy(scope);
+    let encoding = encoding_arg(scope, args.get(1));
+    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
     let entries: Vec<(String, String)> = (0..list.length() / 2)
         .map(|i| {
             let [name, value] = [2 * i, 2 * i + 1].map(|k| list.get_index(scope, k).map_or_else(String::new, |v| v.to_rust_string_lossy(scope)));
-            (crlf(name), crlf(value))
+            (name, value)
         })
         .collect();
-    let body = if plain {
-        let text: String = entries.iter().map(|(name, value)| format!("{name}={value}\r\n")).collect();
-        form_bytes(encoding, &text)
-    } else {
-        let bytes = encoder(move |s| std::borrow::Cow::Owned(form_bytes(encoding, s)));
-        let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-        serializer.encoding_override(Some(&bytes));
-        for (name, value) in &entries {
-            serializer.append_pair(name, value);
-        }
-        serializer.finish().into_bytes()
-    };
-    let content_type = if plain { "text/plain" } else { "application/x-www-form-urlencoded" };
+    let (body, content_type) = encode_entries(&enctype, encoding, &entries);
     let body = v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map(Into::into);
     let content_type = v8::String::new(scope, content_type).map(Into::into);
     let (Some(body), Some(content_type)) = (body, content_type) else { return };
     let values: [v8::Local<'_, v8::Value>; 2] = [body, content_type];
     rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// Capybara::Simulated::Native.encode_entry_list(entries, enctype, encoding) -> [body (BINARY), contentType]: the entry
+// list of a form the host submits, encoded — `entries` each `[name, value]` or, a file's, `[name, filename, type,
+// bytes]` — multipart/form-data under a boundary of its own (multipart.rs `encode`), else as `encode_entries` does.
+pub(crate) fn encode_entry_list_for_ruby(ruby: &magnus::Ruby, entries: magnus::RArray, enctype: String, encoding: String) -> Result<(magnus::RString, String), magnus::Error> {
+    use magnus::TryConvert;
+    let encoding = Encoding::for_label(encoding.as_bytes()).filter(|e| *e != encoding_rs::UTF_8);
+    let mut list: Vec<(String, Result<String, (String, String, Vec<u8>)>)> = Vec::new();
+    for entry in entries.into_iter() {
+        let entry = magnus::RArray::try_convert(entry)?;
+        let name = String::try_convert(entry.entry(0)?)?;
+        let value = if entry.len() >= 4 {
+            let bytes: magnus::RString = entry.entry(3)?;
+            // SAFETY: the bytes are copied out before anything can run Ruby code.
+            Err((String::try_convert(entry.entry(1)?)?, String::try_convert(entry.entry(2)?)?, unsafe { bytes.as_slice() }.to_vec()))
+        } else {
+            Ok(String::try_convert(entry.entry(1)?)?)
+        };
+        list.push((name, value));
+    }
+    if enctype.to_ascii_lowercase().starts_with("multipart/form-data") {
+        let boundary = format!("csim-{}", crate::webcrypto::random_hex(8));
+        let parts: Vec<(String, crate::multipart::Value<'_>)> = list
+            .iter()
+            .map(|(name, value)| {
+                let value = match value {
+                    Ok(text) => crate::multipart::Value::Text(text.clone()),
+                    Err((filename, kind, bytes)) => crate::multipart::Value::File { name: filename.clone(), kind, bytes },
+                };
+                (name.clone(), value)
+            })
+            .collect();
+        let body = crate::multipart::encode(&parts, encoding, &boundary);
+        return Ok((ruby.str_from_slice(&body), format!("multipart/form-data; boundary={boundary}")));
+    }
+    let pairs: Vec<(String, String)> = list.into_iter().map(|(name, value)| (name, value.unwrap_or_else(|(filename, _, _)| filename))).collect();
+    let (body, content_type) = encode_entries(&enctype, encoding, &pairs);
+    Ok((ruby.str_from_slice(&body), content_type.to_owned()))
 }
 
 // (…an encoder as the serializer takes one: its bytes borrowing from the text they encode, as they may)
