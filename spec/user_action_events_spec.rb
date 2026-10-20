@@ -327,4 +327,36 @@ RSpec.describe 'User action events' do
     session.find('#btn').click
     expect(session.evaluate_script('__order')).to eq(%w[l1 m1:click l2 body])
   end
+
+  # …and of the events the UA fires as it handles the click — the checkbox's input and change, a form's submit — which
+  # run with no script on the stack as the click's own listeners do.
+  it "runs the microtasks of a click's change and submit listeners before the next listener" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.__order = [];
+      const later = (name, e) => Promise.resolve().then(() => __order.push(name + ':' + (window.event === e ? e.type : 'none')));
+      const cb = document.getElementById('cb');
+      cb.addEventListener('change', (e) => { __order.push('c1'); later('mc1', e); });
+      cb.addEventListener('change', () => __order.push('c2'));
+      const form = document.createElement('form');
+      form.action = 'javascript:void 0';
+      form.addEventListener('submit', (e) => { e.preventDefault(); __order.push('s1'); later('ms1', e); });
+      form.addEventListener('submit', () => __order.push('s2'));
+      form.appendChild(document.createElement('button')).id = 'go';
+      document.body.appendChild(form);
+    JS
+    session.find('#cb').click
+    session.find('#go').click
+    expect(session.evaluate_script('__order')).to eq(%w[c1 mc1:change c2 s1 ms1:submit s2])
+  end
+
+  # The checkpoint runs inside the call, a passive listener's still passive: a microtask it queued cancels nothing.
+  it "leaves a passive listener's microtasks passive" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      document.getElementById('cb').addEventListener('click', (e) => Promise.resolve().then(() => e.preventDefault()), {passive: true});
+    JS
+    session.find('#cb').click
+    expect(session.evaluate_script("document.getElementById('cb').checked")).to be(true)
+  end
 end
