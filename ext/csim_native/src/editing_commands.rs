@@ -123,8 +123,9 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // element_state.rs `editing_root` — a `contenteditable=true` nested in an editable element no root of its own, the
 // body in design mode), its kind deciding — a `plaintext-only` one takes the text commands alone (`TARGET_HOST`). None
 // for no range at all, and for `unlink` with one that selects nothing. `selectAll` selects in any focused text control,
-// a readonly one's too, and in no host the document's body — its document element where it has none (Chrome; the
-// Editing draft's selectAll).
+// a readonly or disabled one's too (Chrome), and in no host the document's body — its document element where it has
+// none, and none at all (`TARGET_HOST` with no node: the selection emptied) where it has no document element either
+// (the Editing draft's selectAll; Chrome).
 const TARGET_NONE: u32 = 0;
 const TARGET_CONTROL: u32 = 1;
 const TARGET_HOST: u32 = 2;
@@ -137,7 +138,7 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
     });
     if let Some(control) = control {
         let n = arena.get(control).expect("filtered above");
-        let refused = support != 1 || (!select_all && n.is_read_only()) || arena.is_actually_disabled(control);
+        let refused = support != 1 || (!select_all && (n.is_read_only() || arena.is_actually_disabled(control)));
         let nothing_cut = name.eq_ignore_ascii_case("cut") && {
             let (sel, _) = arena.text_selection(control);
             sel.start == sel.end
@@ -150,8 +151,7 @@ fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active
         }
         let Some(doc) = crate::selection::document_of(scope, selection) else { return (TARGET_NONE, None) };
         let arena = realm(scope, cid);
-        let root = arena.relative(doc, crate::dom::RELATIVE_BODY).or_else(|| arena.get(doc)?.children.iter().copied().find(|&c| arena.is_element(c)));
-        (if root.is_some() { TARGET_HOST } else { TARGET_NONE }, root)
+        (TARGET_HOST, arena.relative(doc, crate::dom::RELATIVE_BODY).or_else(|| arena.get(doc)?.children.iter().copied().find(|&c| arena.is_element(c))))
     };
     let Some((anchor, collapsed)) = crate::selection::document_anchor(scope, cid, selection) else { return page(scope) };
     if name.eq_ignore_ascii_case("unlink") && collapsed {
@@ -193,11 +193,9 @@ fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: 
     if matches!(action, Action::Copy) {
         return (STEP_COPY, None);
     }
-    if matches!(action, Action::SelectAll) {
-        let (kind, node) = command_target(scope, cid, name, active, selection);
-        return if kind == TARGET_NONE { (STEP_NONE, None) } else { (STEP_SELECT_ALL, node) };
-    }
     match command_target(scope, cid, name, active, selection) {
+        (TARGET_NONE, _) => (STEP_NONE, None),
+        (_, node) if matches!(action, Action::SelectAll) => (STEP_SELECT_ALL, node),
         (TARGET_HOST, host) => (STEP_HOST, host),
         (TARGET_CONTROL, Some(control)) => {
             let arena = realm(scope, cid);

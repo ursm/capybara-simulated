@@ -300,4 +300,33 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     JS
     expect(got).to eq([true, true, true, true, true, true, 0, 4])
   end
+
+  # …with a cancelable `selectstart` first, at what it selects in — the body, a text control — which a page cancels to
+  # keep the selection it had (Chrome and Firefox); and in a document with no document element at all, the selection
+  # emptied and true (the Editing draft; Chrome).
+  it 'fires selectstart before selecting all, and empties the selection where there is nothing to select' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p id=p>page</p><input id=i value=abcd><iframe></iframe>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sel = getSelection(), seen = [];
+        document.addEventListener('selectstart', (e) => seen.push(e.target.localName || e.target.nodeName));
+        sel.collapse(document.getElementById('p').firstChild, 1);
+        const out = [document.execCommand('selectAll'), sel.isCollapsed];
+        sel.collapse(document.getElementById('p').firstChild, 1);
+        document.addEventListener('selectstart', (e) => e.preventDefault(), {once: true});
+        out.push(document.execCommand('selectAll'), sel.isCollapsed, sel.anchorOffset);
+        const i = document.getElementById('i');
+        i.focus();
+        out.push(document.execCommand('selectAll'), i.selectionEnd);
+        const frame = document.querySelector('iframe').contentDocument;
+        frame.documentElement.remove();
+        out.push(frame.queryCommandEnabled('selectAll'), frame.execCommand('selectAll'), frame.getSelection().rangeCount);
+        return [out, seen];
+      })()
+    JS
+    expect(got).to eq([[true, false, true, true, 1, true, 4, true, true, 0], %w[body body input]])
+  end
 end
