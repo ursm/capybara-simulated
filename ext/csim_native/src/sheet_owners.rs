@@ -168,9 +168,15 @@ impl RealmArena {
 // (Blink's `CanUseSheet` takes an empty type and `application/x-unknown-content-type`, what a missing header is
 // sniffed as) — and in a quirks-mode document, whatever its type, one `same_origin` with the document. Any other is
 // none: both refuse one ("not a supported stylesheet MIME type"), and applied, a page's `@import` answered with an
-// HTML page cascaded that page's text as thousands of rules.
-pub(crate) fn sheet_response_accepted(content_type: &str, quirks: bool, same_origin: impl FnOnce() -> bool) -> bool {
+// HTML page cascaded that page's text as thousands of rules. With `X-Content-Type-Options: nosniff` (`nosniff`, the
+// header's value) none but `text/css` is one, the quirks exception included (Fetch "should response to request be
+// blocked due to nosniff?", destination `style`).
+pub(crate) fn sheet_response_accepted(content_type: &str, nosniff: &str, quirks: bool, same_origin: impl FnOnce() -> bool) -> bool {
     let essence = crate::mime::extract(content_type).map(|m| m.essence).unwrap_or_default();
+    // (…the header's first value, as Fetch "determine nosniff" takes it)
+    if crate::headers::decode_split(nosniff).first().is_some_and(|v| v.eq_ignore_ascii_case("nosniff")) {
+        return essence == "text/css";
+    }
     matches!(essence.as_str(), "" | "text/css" | "application/x-unknown-content-type") || (quirks && same_origin())
 }
 
@@ -483,14 +489,29 @@ fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let items = [key, selected, owners];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.sheetResponseAccepted(contentType, url, quirks) -> `sheet_response_accepted` of a response from `url` — of the
+// __dom.sheetResponseAccepted(contentType, nosniff, url, quirks) -> `sheet_response_accepted` of a response from `url` — of the
 // calling realm's document's origin where it is same origin.
 fn sheet_response_accepted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let content_type = args.get(0).to_rust_string_lossy(scope);
-    let url = args.get(1).to_rust_string_lossy(scope);
-    let quirks = args.get(2).is_true();
+    let [content_type, nosniff, url] = [0, 1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let quirks = args.get(3).is_true();
     let cid = crate::dom::realm_id(scope, &args);
     let origin = crate::dom::realm(scope, cid).location.origin().to_owned();
-    let accepted = sheet_response_accepted(&content_type, quirks, || ada_url::Url::parse(&url, None).is_ok_and(|u| u.origin() == origin));
+    let accepted = sheet_response_accepted(&content_type, &nosniff, quirks, || ada_url::Url::parse(&url, None).is_ok_and(|u| u.origin() == origin));
     rv.set_bool(accepted);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sheet_response_accepted;
+
+    // A fetched sheet is `text/css`, no type, the type a missing header is sniffed as, or a quirks document's
+    // same-origin one — and under `nosniff`, `text/css` alone.
+    #[test]
+    fn a_style_sheet_is_one_by_its_type_and_nosniff_takes_text_css_alone() {
+        assert!(sheet_response_accepted("text/css; charset=utf-8", "", false, || false));
+        assert!(sheet_response_accepted("", "", false, || false) && sheet_response_accepted("text/plain", "", true, || true));
+        assert!(!sheet_response_accepted("text/plain", "", false, || true));
+        assert!(sheet_response_accepted("text/css", "nosniff", false, || false));
+        assert!(!sheet_response_accepted("", "NoSniff", false, || false) && !sheet_response_accepted("text/plain", "nosniff, x", true, || true));
+    }
 }
