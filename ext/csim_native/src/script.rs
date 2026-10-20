@@ -243,6 +243,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "scriptSupports", script_supports_op, context_id);
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
     crate::dom::register(scope, ns, "moduleContent", module_content_op, context_id);
+    crate::dom::register(scope, ns, "modulepreloadDestination", modulepreload_destination_op, context_id);
     crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
     crate::dom::register(scope, ns, "classicScriptEncoding", classic_script_encoding_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
@@ -254,22 +255,23 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
     crate::mime::extract(&content_type).is_some_and(|m| is_javascript_mime(&m.essence))
 }
-// Whether a module script's response may be one of its `kind` (HTML "fetch a single module script", by the module type
-// its destination names): a JavaScript MIME type for any — and, for a JSON module (`json`), a JSON MIME type
-// (`application/json`, `text/json`, any `+json`), for a CSS module (`style`) `text/css`.
+// Whether a module script's response may be one of its `kind` — the destination its module type fetches with (HTML
+// "fetch a single module script"): a JSON module's (`json`) a JSON MIME type (`application/json`, `text/json`, any
+// `+json`), a CSS module's (`style`) `text/css`, a text module's (`text`) any, any other a JavaScript MIME type.
 fn module_content(content_type: &str, kind: &str) -> bool {
-    crate::mime::extract(content_type).is_some_and(|m| {
-        is_javascript_mime(&m.essence)
-            || (kind == "json" && crate::mime::is_json(&m.essence))
-            || (kind == "style" && m.essence == "text/css")
-    })
+    match kind {
+        "text" => true,
+        "json" => crate::mime::extract(content_type).is_some_and(|m| crate::mime::is_json(&m.essence)),
+        "style" => crate::mime::extract(content_type).is_some_and(|m| m.essence == "text/css"),
+        _ => crate::mime::extract(content_type).is_some_and(|m| is_javascript_mime(&m.essence)),
+    }
 }
-// Capybara::Simulated::Native.module_content(content_type, json) -> `module_content`, a JSON module's or a script's.
+// Capybara::Simulated::Native.module_content(content_type, json) -> `module_content`, a script's — or, for a module the
+// host takes for a JSON one (by its URL: no import attributes reach it yet), a JSON one's or a script's.
 pub(crate) fn module_content_for_ruby(content_type: String, json: bool) -> bool {
-    module_content(&content_type, if json { "json" } else { "script" })
+    module_content(&content_type, "script") || (json && module_content(&content_type, "json"))
 }
-// __dom.moduleContent(contentType, kind) -> `module_content` (kind as a modulepreload's `as` names it: 'json', 'style',
-// anything else a script).
+// __dom.moduleContent(contentType, kind) -> `module_content`.
 fn module_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let header = args.get(0).to_rust_string_lossy(scope);
     let kind = args.get(1).to_rust_string_lossy(scope);
@@ -280,6 +282,29 @@ fn module_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 fn javascript_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let header = args.get(0).to_rust_string_lossy(scope);
     rv.set_bool(crate::mime::extract(&header).is_some_and(|m| is_javascript_mime(&m.essence)));
+}
+
+// The destination a `<link rel=modulepreload>` fetches with, by its `as` (HTML "fetch and process the linked resource",
+// modulepreload): its potential destination's — `fetch` none — where that is a module preload destination (a
+// script-like one, `json`, `style`, `text`), `script` for an `as` that names none (missing, or no keyword); None for one
+// that names any other destination, which fetches nothing and fails (`as=image`).
+const POTENTIAL_DESTINATIONS: [&str; 24] = [
+    "fetch", "audio", "audioworklet", "document", "embed", "font", "frame", "iframe", "image", "json", "manifest", "object",
+    "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "text", "track", "video", "webidentity",
+    "worker", "xslt",
+];
+const MODULE_PRELOAD_DESTINATIONS: [&str; 9] = ["audioworklet", "paintworklet", "script", "serviceworker", "sharedworker", "worker", "json", "style", "text"];
+fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
+    let Some(&named) = POTENTIAL_DESTINATIONS.iter().find(|d| d.eq_ignore_ascii_case(as_value)) else { return Some("script") };
+    MODULE_PRELOAD_DESTINATIONS.iter().copied().find(|&d| d == named)
+}
+// __dom.modulepreloadDestination(as) -> `modulepreload_destination`, null for none.
+fn modulepreload_destination_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let as_value = if args.get(0).is_null_or_undefined() { String::new() } else { args.get(0).to_rust_string_lossy(scope) };
+    match modulepreload_destination(&as_value).and_then(|d| v8::String::new(scope, d)) {
+        Some(d) => rv.set(d.into()),
+        None => rv.set_null(),
+    }
 }
 
 // Whether a script's response is refused before it runs, its fetch a network error (Fetch "main fetch"): its MIME type
@@ -427,6 +452,23 @@ mod tests {
     use super::*;
 
     use crate::dom::{NodeData, NodeKind};
+
+    // A modulepreload's `as`: a module preload destination as it names it, `script` for none or no keyword, nothing
+    // for any other destination (`fetch` its own: none); and what a module of each kind takes.
+    #[test]
+    fn a_modulepreload_fetches_by_its_as_and_a_module_takes_its_kinds_type() {
+        assert_eq!(modulepreload_destination(""), Some("script"));
+        assert_eq!(modulepreload_destination("bogus"), Some("script"));
+        assert_eq!(modulepreload_destination("Style"), Some("style"));
+        assert_eq!(modulepreload_destination("worker"), Some("worker"));
+        assert_eq!(modulepreload_destination("image"), None);
+        assert_eq!(modulepreload_destination("fetch"), None);
+        assert!(module_content("text/javascript; charset=utf-8", "script"));
+        assert!(!module_content("text/javascript", "style") && !module_content("text/javascript", "json"));
+        assert!(module_content("text/css", "style") && module_content("application/ld+json", "json"));
+        assert!(module_content("text/plain", "text") && !module_content("text/plain", "script"));
+        assert!(module_content_for_ruby("application/json".into(), true) && module_content_for_ruby("text/javascript".into(), true));
+    }
 
     #[test]
     fn an_exception_is_located_at_its_pages_top_frame() {

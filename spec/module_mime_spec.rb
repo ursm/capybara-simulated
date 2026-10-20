@@ -4,9 +4,11 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# A module script's response must be of a MIME type a module of its kind is — a JavaScript one, a JSON one for a JSON
-# module, `text/css` for a CSS one — whoever answered it (HTML "fetch a single module script"): a `modulepreload` of
-# anything else fails, as its module would, and a module a service worker answers as `text/plain` is no module either.
+# A module script's response must be of the MIME type its kind's is — a JavaScript one for a script, a JSON one for a
+# JSON module, `text/css` for a CSS one, each that one alone — whoever answered it (HTML "fetch a single module
+# script"): a `modulepreload` of anything else fails, as its module would; one whose `as` names a destination no module
+# preload is (`image`) fetches nothing and fails; and a module a service worker answers as `text/plain` is no module
+# either. (Chrome and the upstream WPT preload/modulepreload.html: `module1.js` as `style` or `json` fails.)
 RSpec.describe 'a module script’s MIME type' do
   let(:app) {
     worker = <<~JS
@@ -23,6 +25,7 @@ RSpec.describe 'a module script’s MIME type' do
       when '/plain.js' then [200, {'content-type' => 'text/plain'}, ['export const x = 1;']]
       when '/mod.js' then [200, {'content-type' => 'text/javascript'}, ['export const x = 1;']]
       when '/sheet.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+      when '/data.json' then [200, {'content-type' => 'application/json'}, ['{"a": 1}']]
       when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>in scope']]
       else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>main']]
       end
@@ -42,7 +45,11 @@ RSpec.describe 'a module script’s MIME type' do
     session.visit '/'
     session.execute_script(<<~JS)
       window.seen = [];
-      for (const [href, as] of [['/plain.js', null], ['/mod.js', null], ['/sheet.css', 'style'], ['/mod.js', 'style']]) {
+      const cases = [
+        ['/plain.js', null], ['/mod.js', null], ['/sheet.css', 'style'], ['/mod.js', 'style'], ['/mod.js', 'json'],
+        ['/data.json', 'json'], ['/data.json', null], ['/mod.js', 'image'], ['/mod.js', 'bogus']
+      ];
+      for (const [href, as] of cases) {
         const link = document.createElement('link');
         link.rel = 'modulepreload';
         if (as) link.as = as;
@@ -52,8 +59,18 @@ RSpec.describe 'a module script’s MIME type' do
         document.head.appendChild(link);
       }
     JS
-    got = poll_until { (s = session.evaluate_script('window.seen')).size == 4 && s }
-    expect(got.sort).to eq(['/mod.js: load', '/mod.js:style load', '/plain.js: error', '/sheet.css:style load'])
+    got = poll_until { (s = session.evaluate_script('window.seen')).size == 9 && s }
+    expect(got.sort).to eq([
+      '/data.json: error',
+      '/data.json:json load',
+      '/mod.js: load',
+      '/mod.js:bogus load',
+      '/mod.js:image error',
+      '/mod.js:json error',
+      '/mod.js:style error',
+      '/plain.js: error',
+      '/sheet.css:style load'
+    ])
   end
 
   it 'runs no module a service worker answers as text/plain' do
