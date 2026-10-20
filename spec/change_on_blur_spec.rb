@@ -73,4 +73,22 @@ RSpec.describe 'change on blur' do
     JS
     expect(got).to eq([[[], true], ['blur']])
   end
+
+  # A control that stops being focusable while focused loses focus by the same unfocusing steps as a blur: its `change`
+  # committed before its `blur` and `focusout` — disabled at once, or moved by `moveBefore` into a hidden subtree.
+  it 'commits change before blur where a focused control stops being focusable' do
+    s = session_for(<<~HTML)
+      <input id=a><div id=h hidden></div><input id=b>
+      <script>
+        window.log = [];
+        for (const id of ['a', 'b']) for (const t of ['change', 'blur', 'focusout']) document.getElementById(id).addEventListener(t, () => log.push(id + ':' + t));
+      </script>
+    HTML
+    s.find('#a').send_keys('x')
+    s.execute_script("document.getElementById('a').disabled = true")
+    s.find('#b').send_keys('y')
+    s.execute_script("document.getElementById('h').moveBefore(document.getElementById('b'), null)")
+    s.document.synchronize { s.evaluate_script('log.length') == 6 or raise Capybara::ExpectationNotMet }
+    expect(s.evaluate_script('log')).to eq(%w[a:change a:blur a:focusout b:change b:blur b:focusout])
+  end
 end
