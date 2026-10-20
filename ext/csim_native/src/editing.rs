@@ -191,15 +191,17 @@ pub(crate) fn inline_level(arena: &RealmArena, id: NodeId) -> Option<bool> {
 // where that is in a non-editable island or no host (Chrome) — the focus, where it is outside the host, at its edge, and
 // where it is in a non-editable island in it, out of the island on the anchor's side (Chrome: `a[<span
 // contenteditable=false>X]Y</span>b`, typed over, is `x<span contenteditable=false>XY</span>b`). A design-mode
-// document's is its body (`design_mode_body`): its document element would take the head into a block an edit wraps.
+// document's is its body (`design_mode_body`): its document element would take the head into a block an edit wraps —
+// an end outside the body, the anchor's too, at the body's edge on its side.
 #[allow(clippy::type_complexity)]
 pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (NodeId, u32)) -> Option<(NodeId, ((NodeId, u32), (NodeId, u32)))> {
     let start = if arena.is_element(anchor.0) { anchor.0 } else { arena.parent_of(anchor.0)? };
-    let host = arena.design_mode_body(arena.editing_host(start)?, start);
+    let host = arena.design_mode_body(arena.editing_host(start)?);
     let backward = crate::ranges::compare_points(arena, anchor, focus)? == std::cmp::Ordering::Greater;
     let clamp = |(node, offset): (NodeId, u32), after: bool| -> Option<(NodeId, u32)> {
         if !within(arena, host, node) {
-            return Some(if after { (host, 0) } else { (host, arena.get(host)?.children.len() as u32) });
+            let before = crate::ranges::compare_points(arena, (node, offset), (host, 0))? == std::cmp::Ordering::Less;
+            return Some(if before { (host, 0) } else { (host, arena.get(host)?.children.len() as u32) });
         }
         Some(match island_of(arena, node, host) {
             Some(island) => (arena.parent_of(island)?, arena.child_index(island) as u32 + after as u32),
@@ -207,7 +209,7 @@ pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (
         })
     };
     // (…both ends in one leaf the one place beside it, the anchor's: nothing of the leaf selected)
-    let focus = clamp(focus, backward)?;
+    let (anchor, focus) = (clamp(anchor, !backward)?, clamp(focus, backward)?);
     let (anchor, focus) = if anchor.0 == focus.0 && beside_leaf(arena, anchor).0 != anchor.0 {
         let place = beside_leaf(arena, if backward { focus } else { anchor });
         (place, place)

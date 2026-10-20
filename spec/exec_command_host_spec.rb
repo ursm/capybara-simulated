@@ -199,6 +199,30 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     expect(got).to eq(%w[div blockquote ol])
   end
 
+  # …and wherever in the document its selection is — a caret in the `<title>`, a range over the document element, which
+  # Ctrl+A in a design-mode document made — an edit goes into the body, at the edge on the selection's side, and the head
+  # is never edited (Chrome: `insertText` at a title caret types at the body's start; `selectAll` selects the body's
+  # content).
+  it 'edits a design-mode document’s body wherever its selection is' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><title>TT</title><body><p>abcd</p>']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      document.designMode = 'on';
+      getSelection().collapse(document.querySelector('title').firstChild, 1);
+      document.execCommand('insertText', false, 'Z');
+    JS
+    s.find('body').send_keys([:control, 'a'])
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sel = getSelection(), range = [sel.anchorNode.localName, sel.anchorOffset, sel.focusNode.localName, sel.focusOffset];
+        const typed = document.body.innerHTML;
+        document.execCommand('indent');
+        return [document.title, typed, range, document.head.innerHTML, document.body.firstElementChild.localName];
+      })()
+    JS
+    expect(got).to eq(['TT', 'Z<p>abcd</p>', ['body', 0, 'body', 2], '<meta charset="utf-8"><title>TT</title>', 'blockquote'])
+  end
+
   # A copy in a document with no browsing context — a created one, a removed frame's — has no selection a window holds:
   # false, as every other command there (it threw a TypeError).
   it 'answers false for a copy in a document with no browsing context' do

@@ -1040,22 +1040,23 @@ impl RealmArena {
     // The root editable element of `id` (Chrome's and Firefox's: what a command edits in and fires `input` at, a
     // selection moves to the ends of by `documentboundary`): its editing host's highest inclusive ancestor in an unbroken
     // chain of editable elements — a `contenteditable=false` island breaks it, a `contenteditable=true` nested in an
-    // editable element does not — in design mode the document's body, where that holds it. None where `id` (an element,
-    // or a node's parent element) is not editable.
+    // editable element does not — in design mode (or under an editable document element) the document's body
+    // (`design_mode_body`). None where `id` (an element, or a node's parent element) is not editable.
     pub(crate) fn editing_root(&self, id: NodeId) -> Option<NodeId> {
         let start = if self.is_element(id) { id } else { self.parent_of(id).filter(|&p| self.is_element(p))? };
         let mut root = self.editing_host(start)?;
         while let Some(parent) = self.parent_of(root).filter(|&p| self.is_element(p) && self.is_editable(p)) {
             root = parent;
         }
-        Some(self.design_mode_body(root, start))
+        Some(self.design_mode_body(root))
     }
-    // An editing host or root as the edits go by it: the document element a design-mode document's walk ends at its body
-    // instead, where that holds `start` — what a page edits there is the body's content, not the head beside it.
-    pub(crate) fn design_mode_body(&self, root: NodeId, start: NodeId) -> NodeId {
+    // An editing host or root as the edits go by it: the document element a design-mode document's walk ends at — or an
+    // editable document element's — its body instead, where it has one, whatever in the document a selection is at:
+    // what a page edits there is the body's content, never the head (Chrome: a caret in the `<title>` types at the body's
+    // start, `selectAll` selects the body's content; Blink's highest editable root stops at the body).
+    pub(crate) fn design_mode_body(&self, root: NodeId) -> NodeId {
         let doc = self.parent_of(root).filter(|&d| self.get(d).is_some_and(|n| n.kind == NodeKind::Document));
-        let body = doc.and_then(|d| self.relative(d, crate::dom::RELATIVE_BODY));
-        body.filter(|&b| self.shadow_including_ancestor(b, start)).unwrap_or(root)
+        doc.and_then(|d| self.relative(d, crate::dom::RELATIVE_BODY)).unwrap_or(root)
     }
     // The submittable elements whose values a form's entry list takes (HTML "construct the entry list" step 5.1), in tree
     // order: its tree's button / input / select / textarea and form-associated custom elements whose form owner it is —
