@@ -54,6 +54,30 @@ pub(crate) fn cors_safelisted_method(method: &[u8]) -> bool {
     ["GET", "HEAD", "POST"].iter().any(|m| m.as_bytes() == method)
 }
 
+// Fetch "determine nosniff": whether an `X-Content-Type-Options` value's first (get, decode and split) is `nosniff`.
+pub(crate) fn determine_nosniff(value: &str) -> bool {
+    crate::headers::decode_split(value).first().is_some_and(|v| v.eq_ignore_ascii_case("nosniff"))
+}
+// …and "should response to request be blocked due to nosniff?": under it, a script-like destination's response that
+// is no JavaScript MIME type, a style one's that is no `text/css` (`destination` as a request's, ASCII
+// case-insensitively — a preload's `as` names it).
+pub(crate) fn blocked_by_nosniff(destination: &str, content_type: &str, nosniff: &str) -> bool {
+    if !determine_nosniff(nosniff) {
+        return false;
+    }
+    let essence = crate::mime::extract(content_type).map(|m| m.essence);
+    let is = |d: &str| destination.eq_ignore_ascii_case(d);
+    if ["audioworklet", "paintworklet", "script", "serviceworker", "sharedworker", "worker"].iter().any(|d| is(d)) {
+        return !essence.as_deref().is_some_and(crate::script::is_javascript_mime);
+    }
+    is("style") && essence.as_deref() != Some("text/css")
+}
+// __dom.nosniffBlocked(destination, contentType, nosniff) -> `blocked_by_nosniff`.
+fn nosniff_blocked_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [destination, content_type, nosniff] = [0, 1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
+    rv.set_bool(blocked_by_nosniff(&destination, &content_type, &nosniff));
+}
+
 // Fetch "HTTP fetch" (§4.4) step 5.5: whether a service worker's response may answer a request in `mode` with
 // `redirect` — none of an error, a CORS response to a same-origin request, an opaque one to a request not no-cors, an
 // opaque redirect to one whose redirect mode is not manual, or a redirected response to one that does not follow.
@@ -383,6 +407,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
     crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
     crate::dom::register(scope, ns, "swSubresourceUsable", sw_subresource_usable_op, context_id);
+    crate::dom::register(scope, ns, "nosniffBlocked", nosniff_blocked_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -576,6 +601,16 @@ pub(crate) fn http_token_for_ruby(s: magnus::RString) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Under `nosniff` (its first value, any case) a script-like destination takes a JavaScript MIME type alone, a style
+    // one `text/css`; any other, and any response without it, is not blocked.
+    #[test]
+    fn nosniff_blocks_a_script_or_style_response_of_another_type() {
+        assert!(determine_nosniff("NoSniff, x") && !determine_nosniff("x, nosniff") && !determine_nosniff(""));
+        assert!(blocked_by_nosniff("Style", "text/plain", "nosniff") && !blocked_by_nosniff("style", "text/css; charset=x", "nosniff"));
+        assert!(blocked_by_nosniff("worker", "", "nosniff") && !blocked_by_nosniff("script", "text/javascript", "nosniff"));
+        assert!(!blocked_by_nosniff("image", "text/plain", "nosniff") && !blocked_by_nosniff("style", "text/plain", ""));
+    }
 
     #[test]
     fn a_subresource_uses_an_ok_or_opaque_answer_fetch_allows() {

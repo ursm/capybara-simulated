@@ -5,7 +5,8 @@ require_relative 'support/session_teardown'
 
 # A style sheet served with `X-Content-Type-Options: nosniff` is one only where it is `text/css` (Fetch "should
 # response to request be blocked due to nosniff?", destination `style`): one with no type, and in a quirks-mode document
-# a same-origin `text/plain` one — each a sheet without the header — is none under it, its `<link>`'s load an `error`.
+# a same-origin `text/plain` one — each a sheet without the header — is none under it, its `<link>`'s load an `error`;
+# and a `preload` of it `as=style` errs as well (Chrome).
 RSpec.describe 'a style sheet under nosniff' do
   let(:app) {
     sheet = ->(id) { "##{id} { color: rgb(0, 128, 0) }" }
@@ -22,6 +23,8 @@ RSpec.describe 'a style sheet under nosniff' do
           <link rel=stylesheet href="/untyped.css" onload="seen.push('b load')" onerror="seen.push('b error')">
           <link rel=stylesheet href="/plain.css" onload="seen.push('c load')" onerror="seen.push('c error')">
           <link rel=stylesheet href="/plain-sniffed.css" onload="seen.push('d load')" onerror="seen.push('d error')">
+          <link rel=preload as=style href="/plain.css" onload="seen.push('preload c load')" onerror="seen.push('preload c error')">
+          <link rel=preload as=style href="/css.css" onload="seen.push('preload a load')" onerror="seen.push('preload a error')">
           <script>window.seen = [];</script>
           <p id=a>a</p><p id=b>b</p><p id=c>c</p><p id=d>d</p>
         HTML
@@ -36,6 +39,6 @@ RSpec.describe 'a style sheet under nosniff' do
       [document.compatMode, seen.slice().sort(), ['a', 'b', 'c', 'd'].map((id) => getComputedStyle(document.getElementById(id)).color)]
     JS
     green, black = 'rgb(0, 128, 0)', 'rgb(0, 0, 0)'
-    expect(got).to eq(['BackCompat', ['a load', 'b error', 'c error', 'd load'], [green, black, black, green]])
+    expect(got).to eq(['BackCompat', ['a load', 'b error', 'c error', 'd load', 'preload a load', 'preload c error'], [green, black, black, green]])
   end
 end

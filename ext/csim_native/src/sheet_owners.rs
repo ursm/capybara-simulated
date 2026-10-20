@@ -172,11 +172,10 @@ impl RealmArena {
 // header's value) none but `text/css` is one, the quirks exception included (Fetch "should response to request be
 // blocked due to nosniff?", destination `style`).
 pub(crate) fn sheet_response_accepted(content_type: &str, nosniff: &str, quirks: bool, same_origin: impl FnOnce() -> bool) -> bool {
-    let essence = crate::mime::extract(content_type).map(|m| m.essence).unwrap_or_default();
-    // (…the header's first value, as Fetch "determine nosniff" takes it)
-    if crate::headers::decode_split(nosniff).first().is_some_and(|v| v.eq_ignore_ascii_case("nosniff")) {
-        return essence == "text/css";
+    if crate::fetch_rules::determine_nosniff(nosniff) {
+        return !crate::fetch_rules::blocked_by_nosniff("style", content_type, nosniff);
     }
+    let essence = crate::mime::extract(content_type).map(|m| m.essence).unwrap_or_default();
     matches!(essence.as_str(), "" | "text/css" | "application/x-unknown-content-type") || (quirks && same_origin())
 }
 

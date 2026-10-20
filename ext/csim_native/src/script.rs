@@ -317,9 +317,7 @@ pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integri
     let never = essence.as_deref().is_some_and(|e| {
         ["audio/", "image/", "video/"].iter().any(|p| e.starts_with(p)) || e == "text/csv"
     });
-    // (…the header's first value, as Fetch "determine nosniff" takes it)
-    let nosniff = crate::headers::decode_split(nosniff).first().is_some_and(|v| v.eq_ignore_ascii_case("nosniff"));
-    let sniffed = nosniff && !essence.as_deref().is_some_and(is_javascript_mime);
+    let sniffed = crate::fetch_rules::blocked_by_nosniff("script", content_type, nosniff);
     let integrity_fails = !crate::integrity::response_matches(body, integrity, !opaque);
     never || sniffed || integrity_fails
 }
