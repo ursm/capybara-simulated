@@ -114,6 +114,7 @@ mod image_source;
 mod keyframes;
 mod layout;
 mod legacy;
+mod link_resource;
 mod media;
 mod media_query_lists;
 mod message_ports;

@@ -259,7 +259,7 @@ pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
 // Whether a module script's response may be one of its `kind` — the destination its module type fetches with (HTML
 // "fetch a single module script"): a JSON module's (`json`) a JSON MIME type (`application/json`, `text/json`, any
 // `+json`), a CSS module's (`style`) `text/css`, a text module's (`text`) any, any other a JavaScript MIME type.
-fn module_content(content_type: &str, kind: &str) -> bool {
+pub(crate) fn module_content(content_type: &str, kind: &str) -> bool {
     match kind {
         "text" => true,
         "json" => crate::mime::extract(content_type).is_some_and(|m| crate::mime::is_json(&m.essence)),
@@ -296,14 +296,14 @@ fn as_keyword(as_value: &str) -> Option<&'static str> {
 // modulepreload): the module preload destination it names, `script` for an `as` in no state (missing, or no keyword:
 // `as=audio` too); None for one naming a preload destination no module is (`image`, `fetch`), which fetches nothing and
 // fails.
-fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
+pub(crate) fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
     let Some(named) = as_keyword(as_value) else { return Some("script") };
     MODULE_PRELOAD_DESTINATIONS.contains(&named).then_some(named)
 }
 // The destination a `<link rel=preload>` fetches with (HTML "translate a preload destination"): the preload destination
 // its `as` names, `fetch` the empty one — None for any other (missing, empty, no keyword, a module's alone: `json`,
 // `worker`), which fetches nothing (Chrome and Firefox: no request, no event).
-fn preload_destination(as_value: &str) -> Option<&'static str> {
+pub(crate) fn preload_destination(as_value: &str) -> Option<&'static str> {
     let named = as_keyword(as_value).filter(|d| PRELOAD_DESTINATIONS.contains(d))?;
     Some(if named == "fetch" { "" } else { named })
 }

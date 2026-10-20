@@ -322,6 +322,8 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 pub(crate) const STATE_XML_DOCUMENT: u32 = 1 << 19;
 // …and that its design mode is enabled (HTML §6.8.2 `designMode`): its document element an editing host.
 pub(crate) const STATE_DESIGN_MODE: u32 = 1 << 20;
+// …and, on a `<link>`, that it obtained nothing because its `media` did not match (link_resource.rs `link_plan`).
+pub(crate) const STATE_LINK_MEDIA_SKIPPED: u32 = 1 << 21;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
@@ -2885,6 +2887,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::focus::install(scope, ns, context_id);
     crate::autofocus::install(scope, ns, context_id);
     crate::sheet_owners::install(scope, ns, context_id);
+    crate::link_resource::install(scope, ns, context_id);
     crate::blob_urls::install(scope, ns, context_id);
     crate::blob_rules::install(scope, ns, context_id);
     let edges = dom(scope).arena.edge_gen.store();
