@@ -60,7 +60,9 @@ impl Face {
         if self.status == ERROR || (self.sources.is_none() && self.file.is_none()) {
             return FaceRecord::default();
         }
-        self.record().clone()
+        let mut record = self.record().clone();
+        record.file = self.file.clone();
+        record
     }
     // Its rule's descriptors written over it once they CHANGE: each attribute what the rule declares now, or its default.
     // A rule that says what it did leaves the face alone — script may have set an attribute since, which it keeps
@@ -199,15 +201,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ffConnect", connect_op, context_id);
     crate::dom::register(scope, ns, "ffSources", sources_op, context_id);
     crate::dom::register(scope, ns, "ffLocalStyle", local_style_op, context_id);
+    crate::dom::register(scope, ns, "ffFetchedStatus", fetched_status_op, context_id);
 }
 
 // The fields `ffField` reads, by number (font-face.js names them): 0..10 the attributes' descriptors, then these.
 const FAMILY: u32 = 11;
 const STATUS: u32 = 12;
-const FILE: u32 = 13;
-const ERROR_MESSAGE: u32 = 14;
-const RULE: u32 = 15;
-const IDENTITY: u32 = 16;
+const ERROR_MESSAGE: u32 = 13;
+const RULE: u32 = 14;
+const IDENTITY: u32 = 15;
 
 // __dom.ffField(state, field) -> the face's `field` (null for a text it has none of).
 fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -218,7 +220,6 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         k if (k as usize) < f.descriptors.len() => Some(f.descriptors[k as usize].as_str()),
         FAMILY => Some(f.family.as_str()),
         STATUS => return rv.set_uint32(f.status),
-        FILE => f.file.as_deref(),
         ERROR_MESSAGE => f.error.as_deref(),
         RULE => {
             match f.rule {
@@ -329,4 +330,25 @@ fn local_style_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(face) = face(scope, args.get(0)) else { return };
     let style = face.borrow_mut().record().local_style();
     rv.set(v8::String::new(scope, style).unwrap().into());
+}
+
+// __dom.ffFetchedStatus(state) -> what the face's downloads already went through, as a status: `loaded` where one of them
+// came as a font native reads, `error` where every one came and none did, else `unloaded` (font_files.rs
+// `source_tried`) — what a CSS-connected face whose file layout already fetched starts as.
+fn fetched_status_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(face) = face(scope, args.get(0)) else { return };
+    let urls: Vec<String> = face.borrow().sources.iter().flatten().filter_map(|s| match s {
+        FaceSource::Url(u) => Some(u.clone()),
+        FaceSource::Local(_) => None,
+    }).collect();
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let tried: Vec<Option<bool>> = urls.iter().map(|u| crate::font_files::source_tried(arena, crate::font_files::URL, u)).collect();
+    rv.set_uint32(if tried.contains(&Some(true)) {
+        LOADED
+    } else if !tried.is_empty() && tried.iter().all(Option::is_some) {
+        ERROR
+    } else {
+        UNLOADED
+    });
 }

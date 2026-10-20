@@ -27,6 +27,8 @@ pub(crate) struct FaceRecord {
     // Its `size-adjust` (1 for none) and its `ascent-override` / `descent-override` / `line-gap-override`, em fractions.
     pub(crate) size_adjust: f64,
     pub(crate) overrides: [Option<f64>; 3],
+    // A buffer face's file, its own bytes' (font_face_state.rs): what it is read from, sources or none.
+    pub(crate) file: Option<String>,
 }
 
 // How far a face is from a style, each of §5.2's steps in turn: stretch, slant, weight — compared in that order.
@@ -59,7 +61,7 @@ impl Default for FaceRecord {
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
-        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3] }
+        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3], file: None }
     }
     // The weight / style its `local()` names are looked up under: the bucket of the low end of its weight and its slant.
     pub(crate) fn local_style(&self) -> &'static str {
@@ -509,16 +511,12 @@ fn font_face_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::dom::f64_array(scope, &picked).into());
 }
 
-// __dom.fontFaceInfo(index) -> `[sources, sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges,
-// localStyle]` of a face: its sources in order, flat `[kind, value, …]` (`url` / `local`), its overrides NaN where it has
-// none, its ranges a flat `[lo, hi, …]` or null for every code point, and the weight / style its `local()` names are
-// looked up under (`FaceRecord::local_style`).
+// __dom.fontFaceInfo(index) -> `[sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges]` of a face: its
+// overrides NaN where it has none, its ranges a flat `[lo, hi, …]` or null for every code point.
 fn font_face_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let index = args.get(0).int32_value(scope).unwrap_or(-1);
     let Some(face) = usize::try_from(index).ok().and_then(|i| faces_of(scope, &args).get(i).cloned()) else { return rv.set_null() };
-    let sources = sources_array(scope, &face.sources);
-    let mut items: Vec<v8::Local<v8::Value>> = vec![sources.into()];
-    items.push(v8::Number::new(scope, face.size_adjust).into());
+    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Number::new(scope, face.size_adjust).into()];
     for o in face.overrides {
         items.push(v8::Number::new(scope, o.unwrap_or(f64::NAN)).into());
     }
@@ -526,7 +524,6 @@ fn font_face_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         Some(r) => crate::dom::f64_array(scope, &r.iter().flat_map(|&(lo, hi)| [f64::from(lo), f64::from(hi)]).collect::<Vec<_>>()).into(),
         None => v8::null(scope).into(),
     });
-    items.push(v8::String::new(scope, face.local_style()).unwrap().into());
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 pub(crate) fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v8::Local<'s, v8::Array> {
