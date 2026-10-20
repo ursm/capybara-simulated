@@ -176,4 +176,42 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     JS
     expect(got).to eq([[true, 'abc', false, false, 'abc', true, 'aQbc'], ['insertText:"b"', 'insertText:"Q"']])
   end
+
+  # A design-mode document's editing root is its body (element_state.rs `design_mode_body`), for the edit as for what
+  # queryCommandEnabled answers: a block command wraps the body's content, as a contenteditable host's — not the document
+  # element's, which took the head into the block and left the document with no body.
+  it 'wraps a design-mode document’s body content, not its head' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>x']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.designMode = 'on';
+        const out = [];
+        for (const command of ['justifyCenter', 'indent', 'insertOrderedList']) {
+          document.body.innerHTML = 'abcd';
+          getSelection().collapse(document.body.firstChild, 1);
+          document.execCommand(command);
+          out.push(document.head !== null && document.body !== null && document.body.firstElementChild?.localName);
+        }
+        return out;
+      })()
+    JS
+    expect(got).to eq(%w[div blockquote ol])
+  end
+
+  # A copy in a document with no browsing context — a created one, a removed frame's — has no selection a window holds:
+  # false, as every other command there (it threw a TypeError).
+  it 'answers false for a copy in a document with no browsing context' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe></iframe>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const created = document.implementation.createHTMLDocument('');
+        const frame = document.querySelector('iframe'), removed = frame.contentDocument;
+        frame.remove();
+        return [created.execCommand('copy'), removed.execCommand('copy')];
+      })()
+    JS
+    expect(got).to eq([false, false])
+  end
 end

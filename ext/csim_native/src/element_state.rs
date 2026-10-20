@@ -1048,10 +1048,14 @@ impl RealmArena {
         while let Some(parent) = self.parent_of(root).filter(|&p| self.is_element(p) && self.is_editable(p)) {
             root = parent;
         }
-        // (…the document element a design-mode document's walk ends at: its body instead, where that holds `start`)
+        Some(self.design_mode_body(root, start))
+    }
+    // An editing host or root as the edits go by it: the document element a design-mode document's walk ends at its body
+    // instead, where that holds `start` — what a page edits there is the body's content, not the head beside it.
+    pub(crate) fn design_mode_body(&self, root: NodeId, start: NodeId) -> NodeId {
         let doc = self.parent_of(root).filter(|&d| self.get(d).is_some_and(|n| n.kind == NodeKind::Document));
         let body = doc.and_then(|d| self.relative(d, crate::dom::RELATIVE_BODY));
-        Some(body.filter(|&b| self.shadow_including_ancestor(b, start)).unwrap_or(root))
+        body.filter(|&b| self.shadow_including_ancestor(b, start)).unwrap_or(root)
     }
     // The submittable elements whose values a form's entry list takes (HTML "construct the entry list" step 5.1), in tree
     // order: its tree's button / input / select / textarea and form-associated custom elements whose form owner it is —
