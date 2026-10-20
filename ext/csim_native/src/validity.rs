@@ -761,7 +761,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "labelsOf", labels_of, context_id);
     crate::dom::register(scope, ns, "isEditable", is_editable, context_id);
     crate::dom::register(scope, ns, "isFormAssociated", is_form_associated, context_id);
-    crate::dom::register(scope, ns, "activationTarget", activation_target, context_id);
 }
 
 // __dom.isFormAssociated(nid) -> whether the element is a form-associated one (`element_state::is_form_associated`).
@@ -781,17 +780,6 @@ fn node_test(
     let cid = crate::dom::realm_id(scope, args);
     let Some(id) = crate::dom::nid_arg(scope, args, 0) else { return rv.set_bool(false) };
     rv.set_bool(test(crate::dom::realm(scope, cid), id));
-}
-
-// __dom.activationTarget(nid, bubbles, composed) -> the activation target of a click on the node
-// (`element_state::activation_target`; a click that bubbles and is composed where the two are not given), as
-// `node_value` answers it — null for none.
-fn activation_target(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
-    let (bubbles, composed) = (!args.get(1).is_false(), !args.get(2).is_false());
-    let found = crate::dom::realm(scope, cid).activation_target(target, bubbles, composed);
-    rv.set(crate::dom::node_value(scope, found));
 }
 
 // __dom.implicitSubmissionForm(nid) -> [the form Enter in the control submits] or []

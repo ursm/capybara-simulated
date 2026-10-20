@@ -759,13 +759,23 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     }
 }
 
-// `__dom.dispatchPath(targetNid, formStop)` -> [path, stores, end, window] for a dispatch at a node: the target and its
-// ancestors up to its root, their objects — made for the nodes the engine made that have none — each one's listener
-// store (undefined for none), and the rest of its plan (event_path.rs `path_plan`); undefined where a node of it still has no object, which the bindings' own walk then answers; null where the path crosses a shadow root, which the flat
-// tree's event path (event_path.rs) retargets across.
+// `__dom.dispatchPath(targetNid, formStop, relatedNid)` -> [path, stores, end, window] for a dispatch at a node: the
+// target and its ancestors up to its root, their objects — made for the nodes the engine made that have none — each
+// one's listener store (undefined for none), and the rest of its plan (event_path.rs `path_plan`). Undefined where a
+// node of it has no handle (an Attr's slot), whose dispatch takes the target alone; null where the path crosses a
+// shadow root, or its relatedTarget is in a shadow tree, which the flat tree's event path (event_path.rs) retargets —
+// and where V8 dropped an object of it, which that path's answer makes anew.
 fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let form_stop = args.get(1).is_true();
+    // (…a relatedTarget in a shadow tree — another realm's too, which this realm's count of hosts does not see — is
+    // retargeted along the flat tree's path)
+    if let Some(related) = crate::dom::nid_arg(scope, &args, 2) {
+        let arena = &crate::dom::dom(scope).arena;
+        if arena.get(arena.root_of(related)).is_some_and(|n| n.host.is_some()) {
+            return rv.set_null();
+        }
+    }
     // (…the objects of the nodes the engine made made first — a clone's ancestors the page never asked for — before any
     // handle is read: making one runs script)
     let chain: Vec<(NodeId, Option<HeldObject>)> = {
@@ -785,9 +795,11 @@ fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
     // (…the handles found next, while the arena is borrowed: reading the references allocates nothing a collection
     // could take one in until they are all read)
-    let handles: Option<Vec<*const NodeHandle>> = {
+    // (…and the plan of the path those name, which making objects ran script before)
+    let found: Option<(Vec<*const NodeHandle>, (usize, bool))> = {
         let arena = &crate::dom::dom(scope).arena;
         let mut out = Vec::new();
+        let mut ids = Vec::new();
         let mut cur = Some(target);
         let mut whole = true;
         while let Some(id) = cur.filter(|_| whole) {
@@ -799,18 +811,19 @@ fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
                 Some(h) => out.push(h as *const NodeHandle),
                 None => whole = false,
             }
+            ids.push(id);
             cur = arena.parent_of(id);
         }
-        whole.then_some(out)
+        whole.then(|| (out, crate::event_path::path_plan(arena, ids, form_stop)))
     };
-    let Some(handles) = handles else { return };
-    let (end, window) = crate::event_path::path_plan(&crate::dom::dom(scope).arena, chain.iter().map(|&(id, _)| id), form_stop);
+    let Some((handles, (end, window))) = found else { return };
     let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
     let mut path = Vec::with_capacity(handles.len());
     let mut stores = Vec::with_capacity(handles.len());
     for &h in &handles {
         // SAFETY: a handle's object is alive while its reference holds it; the main thread wrote the references.
-        let Some(object) = (unsafe { (*(*h).object.get()).get(scope) }) else { return };
+        // (…one V8 dropped since all the same: the flat tree's event path, which makes objects as it answers)
+        let Some(object) = (unsafe { (*(*h).object.get()).get(scope) }) else { return rv.set_null() };
         path.push(object.into());
         stores.push(unsafe { (*(*h).listeners.get()).get(scope) }.map_or(undefined, Into::into));
     }

@@ -141,6 +141,7 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "eventPath", event_path, context_id);
+    crate::dom::register(scope, ns, "activationTarget", activation_target_op, context_id);
     crate::dom::register(scope, ns, "retarget", retarget_op, context_id);
     crate::dom::register(scope, ns, "hoverChains", hover_chains_op, context_id);
     crate::dom::register(scope, ns, "composedPath", composed_path_op, context_id);
@@ -236,6 +237,33 @@ fn related_slot(r: Related, index: &mut impl FnMut(NodeId) -> f64) -> f64 {
     }
 }
 
+// A click's activation target (DOM dispatch): along the path it is dispatched on — none where it is not dispatched at
+// all, nor past where the path is pruned (element_state.rs `activation_target_along`).
+fn activation_target(arena: &RealmArena, target: NodeId, related: Related, bubbles: bool, composed: bool) -> Option<NodeId> {
+    let steps = path(arena, target, related, composed);
+    arena.activation_target_along(steps.iter().map(|s| (s.node, s.flags & STEP_AT_TARGET != 0)), bubbles)
+}
+
+// __dom.activationTarget(targetNid, relatedNid, relatedOther, bubbles, composed) -> the activation target of a click at
+// the node (its relatedTarget as `eventPath` takes it), as `node_value` answers it — null for none.
+fn activation_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(target) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let related = related_arg(scope, &args, 1);
+    let (bubbles, composed) = (args.get(3).is_true(), args.get(4).is_true());
+    let cid = realm_id(scope, &args);
+    let found = activation_target(crate::dom::realm(scope, cid), target, related, bubbles, composed);
+    rv.set(crate::dom::node_value(scope, found));
+}
+
+// The relatedTarget arguments at `at` and `at + 1`: a node's nid, else whether there is something else (a Window).
+fn related_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, at: i32) -> Related {
+    match nid_arg(scope, args, at) {
+        Some(r) => Related::Node(r),
+        None if args.get(at + 1).is_true() => Related::Other,
+        None => Related::None,
+    }
+}
+
 // The rest of a dispatch's plan, of a path's nodes `path` (target first): where its bubbling ends — at the first
 // ancestor `<form>` for a `submit` or `reset` (`form_stop`), which neither Blink nor Gecko lets one bubble past (no
 // spec text says so: dispatch.js) — and whether it goes on to a Window, its top a document.
@@ -260,11 +288,7 @@ pub(crate) fn path_plan(arena: &RealmArena, path: impl IntoIterator<Item = NodeI
 // every shadow tree (as a step's). Steps empty, where the event is not dispatched.
 fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = nid_arg(scope, &args, 0) else { return };
-    let related = match nid_arg(scope, &args, 1) {
-        Some(r) => Related::Node(r),
-        None if args.get(2).is_true() => Related::Other,
-        None => Related::None,
-    };
+    let related = related_arg(scope, &args, 1);
     let composed = args.get(3).is_true();
     let form_stop = args.get(4).is_true();
     let cid = realm_id(scope, &args);

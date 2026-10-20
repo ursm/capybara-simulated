@@ -121,4 +121,61 @@ RSpec.describe 'the event path through shadow trees' do
     JS
     expect(got).to eq(['true other host', 'true window host', 'false null shadow'])
   end
+
+  # A click's activation target is found along the path it is dispatched on (DOM dispatch sets it only from the items
+  # appended): none where the dispatch is skipped, nor past where the path is pruned. Chrome 155 likewise.
+  it 'activates nothing a click skipped or pruned never reaches' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        document.body.innerHTML = '<a href="#jumped"><div id=h></div></a><label><div id=h2></div><input type=checkbox id=cb></label>';
+        const sh = document.getElementById('h').attachShadow({mode: 'open'});
+        sh.innerHTML = '<span id=in></span>';
+        const sh2 = document.getElementById('h2').attachShadow({mode: 'open'});
+        sh2.innerHTML = '<span id=in2></span>';
+        const click = (target, init) => target.dispatchEvent(new MouseEvent('click', Object.assign({bubbles: true}, init)));
+        click(document.getElementById('h'), {relatedTarget: sh.getElementById('in')});
+        click(document.getElementById('h2'), {relatedTarget: sh2.getElementById('in2')});
+        click(sh.getElementById('in'), {composed: true, relatedTarget: document.getElementById('h')});
+        return [location.hash, document.getElementById('cb').checked];
+      })()
+    JS
+    expect(got).to eq(['', false])
+  end
+
+  # composedPath() is the path the dispatch took, fixed as it began — a listener moving a node changes nothing of it.
+  it "reads composedPath() off the dispatch's path, wherever a listener moved a node" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        document.body.innerHTML = '<section><div></div></section>';
+        const div = document.querySelector('div');
+        let seen;
+        div.addEventListener('x', () => document.body.appendChild(div));
+        div.addEventListener('x', (e) => { seen = e.composedPath().map((n) => n === window ? 'window' : n.nodeName).join(); });
+        div.dispatchEvent(new Event('x', {bubbles: true}));
+        return seen;
+      })()
+    JS
+    expect(got).to eq('DIV,SECTION,BODY,HTML,#document,window')
+  end
+
+  # A relatedTarget in a shadow tree another realm made — whose hosts this realm, shadow-free, never counted — is
+  # retargeted all the same: a listener, and the event after, see its host.
+  it "retargets a relatedTarget in another realm's shadow tree" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><iframe srcdoc="<div id=fh></div><script>document.getElementById(\'fh\').attachShadow({mode: \'open\'}).innerHTML = \'<i></i>\'</script>"></iframe>']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const run = () => {
+        const fdoc = frames[0].document;
+        const fh = fdoc.getElementById('fh');
+        let seen;
+        document.body.addEventListener('x', (e) => { seen = e.relatedTarget === fh; });
+        const e = new FocusEvent('x', {relatedTarget: fh.shadowRoot.firstChild});
+        document.body.dispatchEvent(e);
+        done([seen, e.relatedTarget === fh]);
+      };
+      frames[0].document.readyState === 'complete' && frames[0].document.getElementById('fh') ? run() : document.querySelector('iframe').onload = run;
+    JS
+    expect(got).to eq([true, true])
+  end
 end

@@ -1231,28 +1231,19 @@ impl RealmArena {
                 _ => false,
             }
     }
-    // A click's activation target (DOM dispatch): the nearest element with activation behaviour on its event path — the
-    // target, or, the click bubbling, an ancestor the way the event path climbs (a node's assigned slot, else its parent,
-    // else a shadow root's host), out of the target's own shadow tree only for a composed click. A summary is passed by
-    // where the click came through interactive content inside it — a `<select>`, a `<label>`, a `<video controls>` — as
-    // Chrome and Firefox pass it (WPT the-summary-element/interactive-content).
-    pub(crate) fn activation_target(&self, target: NodeId, bubbles: bool, composed: bool) -> Option<NodeId> {
-        let target_root = self.root_of(target);
+    // A click's activation target (DOM dispatch), along its event path (event_path.rs `activation_target`), each step
+    // with whether it is its own shadow-adjusted target: the first element with activation behaviour — the target; an
+    // ancestor in its tree only for a click that bubbles; one the path retargets to (a host) whether it does or not. A
+    // summary is passed by where the click came through interactive content inside it — a `<select>`, a `<label>`, a
+    // `<video controls>` — as Chrome and Firefox pass it (WPT the-summary-element/interactive-content).
+    pub(crate) fn activation_target_along(&self, path: impl IntoIterator<Item = (NodeId, bool)>, bubbles: bool) -> Option<NodeId> {
         let mut through_interactive = false;
-        let mut cur = Some(target);
-        while let Some(c) = cur {
+        for (c, own_target) in path {
             let n = self.get(c)?;
-            if self.is_click_activatable(c) && !(through_interactive && n.is_html_named("summary")) {
+            if (own_target || bubbles) && self.is_click_activatable(c) && !(through_interactive && n.is_html_named("summary")) {
                 return Some(c);
             }
-            if !bubbles {
-                return None;
-            }
             through_interactive |= self.is_interactive_content(n);
-            if !composed && c == target_root && n.kind != NodeKind::Element && n.host.is_some() {
-                return None;
-            }
-            cur = n.assigned_slot.filter(|&s| self.get(s).is_some()).or(n.parent).or(n.host);
         }
         None
     }
