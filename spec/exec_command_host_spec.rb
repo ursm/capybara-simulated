@@ -329,4 +329,43 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     JS
     expect(got).to eq([[true, false, true, true, 1, true, 4, true, true, 0], %w[body body input]])
   end
+
+  # …the `selectstart` of an editing host in a shadow tree at its shadow host, as the document sees one (Chrome: `sh`);
+  # and what its listener did is what selectAll then selects in: a control it moved the focus from is left as it was,
+  # and a body it replaced is the new one (Chrome: `blur-to-j … i=1-1`, the new body's text selected).
+  it 'fires selectstart at a shadow host, and selects what its listener left' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><div id=sh></div><input id=i value=abcd><input id=j value=wxyz>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const seen = [], sh = document.getElementById('sh');
+        document.addEventListener('selectstart', (e) => seen.push(e.target.id || e.target.localName));
+        const host = sh.attachShadow({mode: 'open'}).appendChild(document.createElement('div'));
+        host.contentEditable = 'true';
+        host.textContent = 'inner';
+        host.focus();
+        getSelection().collapse(host.firstChild, 1);
+        document.execCommand('selectAll');
+        const i = document.getElementById('i'), j = document.getElementById('j');
+        i.focus();
+        i.setSelectionRange(1, 1);
+        document.addEventListener('selectstart', () => j.focus(), {once: true});
+        document.execCommand('selectAll');
+        const out = [document.activeElement.id, i.selectionStart, i.selectionEnd];
+        j.blur();
+        getSelection().collapse(document.body, 0);
+        document.addEventListener('selectstart', () => {
+          const body = document.createElement('body');
+          body.textContent = 'renewed';
+          document.documentElement.replaceChild(body, document.body);
+        }, {once: true});
+        document.execCommand('selectAll');
+        out.push(getSelection().toString());
+        return [seen, out];
+      })()
+    JS
+    expect(got).to eq([%w[sh i body], ['j', 1, 1, 'renewed']])
+  end
 end
