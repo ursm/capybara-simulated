@@ -349,24 +349,35 @@ pub(crate) enum Entry {
     Text(String),
     File { filename: String, kind: String, bytes: FileBytes },
 }
-// …a file entry's bytes: its own, a file on disk read only where they are sent, or none.
+// …a file entry's bytes: its own, or ones asked for only where they are sent — a file on disk, or the page side's.
 pub(crate) enum FileBytes {
     Own(Vec<u8>),
     Path(String),
+    Ask(usize),
 }
 
-// A form's submission (HTML "submit" steps 20-25): its method — POST where `method` says so (ASCII case-insensitively),
+// A form's submission (HTML "submit" steps 14, 20-25) — none where its action is no URL: its method — POST where `method` says so (ASCII case-insensitively),
 // else GET — the URL it navigates to, and for a POST its body and the exact Content-Type it is sent under. A GET's URL
 // is `action` with its query the entry list urlencoded ("mutate action URL", a file entry its filename), a POST's body
 // the entry list encoded by `enctype` (`application/x-www-form-urlencoded` where it names none): multipart/form-data
 // under a boundary of its own (multipart.rs `encode`, a file part its bytes), else as `encode_entries` does — each in
-// `encoding`.
+// `encoding`, a file's bytes asked of `read` only there (an error, its own, ends the submission).
 pub(crate) struct FormRequest {
     pub(crate) post: bool,
     pub(crate) url: String,
     pub(crate) body: Option<(Vec<u8>, String)>,
 }
-pub(crate) fn form_request(action: &str, method: &str, enctype: &str, encoding: Option<&'static Encoding>, entries: &[(String, Entry)]) -> FormRequest {
+pub(crate) fn form_request<E>(
+    action: &str,
+    method: &str,
+    enctype: &str,
+    encoding: Option<&'static Encoding>,
+    entries: &[(String, Entry)],
+    read: &mut dyn FnMut(&FileBytes) -> Result<Vec<u8>, E>,
+) -> Result<Option<FormRequest>, E> {
+    if url::Url::parse(action).is_err() {
+        return Ok(None);
+    }
     let encoding = encoding.filter(|e| *e != encoding_rs::UTF_8);
     let named = || -> Vec<(String, String)> {
         entries
@@ -379,28 +390,27 @@ pub(crate) fn form_request(action: &str, method: &str, enctype: &str, encoding: 
     };
     if !method.eq_ignore_ascii_case("post") {
         let (query, _) = encode_entries("application/x-www-form-urlencoded", encoding, &named());
-        return FormRequest { post: false, url: crate::url_ops::mutated_action_url(action, &String::from_utf8_lossy(&query)), body: None };
+        return Ok(Some(FormRequest { post: false, url: crate::url_ops::mutated_action_url(action, &String::from_utf8_lossy(&query)), body: None }));
     }
     let body = if enctype.to_ascii_lowercase().starts_with("multipart/form-data") {
         let boundary = format!("----csimFormBoundary{}", crate::webcrypto::random_hex(16));
-        let read: Vec<Option<Vec<u8>>> = entries
-            .iter()
-            .map(|(_, value)| match value {
-                // (…a file gone since it was picked sends no bytes)
-                Entry::File { bytes: FileBytes::Path(path), .. } => Some(std::fs::read(path).unwrap_or_default()),
+        let mut asked: Vec<Option<Vec<u8>>> = Vec::with_capacity(entries.len());
+        for (_, value) in entries {
+            asked.push(match value {
+                Entry::File { bytes: bytes @ (FileBytes::Path(_) | FileBytes::Ask(_)), .. } => Some(read(bytes)?),
                 _ => None,
-            })
-            .collect();
+            });
+        }
         let parts: Vec<(String, crate::multipart::Value<'_>)> = entries
             .iter()
-            .zip(&read)
-            .map(|((name, value), read)| {
+            .zip(&asked)
+            .map(|((name, value), asked)| {
                 let value = match value {
                     Entry::Text(text) => crate::multipart::Value::Text(text.clone()),
                     Entry::File { filename, kind, bytes } => {
                         let bytes = match bytes {
                             FileBytes::Own(own) => own.as_slice(),
-                            FileBytes::Path(_) => read.as_deref().unwrap_or_default(),
+                            FileBytes::Path(_) | FileBytes::Ask(_) => asked.as_deref().unwrap_or_default(),
                         };
                         crate::multipart::Value::File { name: filename.clone(), kind, bytes }
                     }
@@ -413,12 +423,13 @@ pub(crate) fn form_request(action: &str, method: &str, enctype: &str, encoding: 
         let (body, content_type) = encode_entries(enctype, encoding, &named());
         (body, content_type.to_owned())
     };
-    FormRequest { post: true, url: action.to_owned(), body: Some(body) }
+    Ok(Some(FormRequest { post: true, url: action.to_owned(), body: Some(body) }))
 }
 
 // Capybara::Simulated::Native.form_request(action, method, enctype, encoding, entries) -> [method, url, body, contentType]
-// of a form the host submits (`form_request`): `entries` each `[name, value]` or, a file's, `[name, filename, type,
-// path, bytes]` — its bytes read from `path` where it has one — the body and its type nil for a GET.
+// of a form the host submits (`form_request`), or nil where it submits nothing: `entries` each `[name, value]` or, a
+// file's, `[name, filename, type, path, bytes]` — its bytes read from `path` where it has one (a file gone since it was
+// picked an IOError: Chrome's upload fails too) — the body and its type nil for a GET.
 pub(crate) fn form_request_for_ruby(
     ruby: &magnus::Ruby,
     action: String,
@@ -426,7 +437,7 @@ pub(crate) fn form_request_for_ruby(
     enctype: String,
     encoding: String,
     entries: magnus::RArray,
-) -> Result<(String, String, Option<magnus::RString>, Option<String>), magnus::Error> {
+) -> Result<Option<(String, String, Option<magnus::RString>, Option<String>)>, magnus::Error> {
     use magnus::TryConvert;
     let mut list: Vec<(String, Entry)> = Vec::new();
     for entry in entries.into_iter() {
@@ -448,17 +459,22 @@ pub(crate) fn form_request_for_ruby(
         };
         list.push((name, value));
     }
-    let request = form_request(&action, &method, &enctype, Encoding::for_label(encoding.as_bytes()), &list);
+    let mut read = |bytes: &FileBytes| match bytes {
+        FileBytes::Path(path) => std::fs::read(path).map_err(|e| magnus::Error::new(ruby.exception_io_error(), format!("{path}: {e}"))),
+        _ => Ok(Vec::new()),
+    };
+    let Some(request) = form_request(&action, &method, &enctype, Encoding::for_label(encoding.as_bytes()), &list, &mut read)? else { return Ok(None) };
     let (body, content_type) = match request.body {
         Some((body, content_type)) => (Some(ruby.str_from_slice(&body)), Some(content_type)),
         None => (None, None),
     };
-    Ok((if request.post { "POST" } else { "GET" }.to_owned(), request.url, body, content_type))
+    Ok(Some((if request.post { "POST" } else { "GET" }.to_owned(), request.url, body, content_type)))
 }
 
-// __dom.formRequest(action, method, enctype, encoding, list) -> `[method, url, body, contentType]` of a form submitted
-// (`form_request`): `list` flat `[name, value, …]`, a file entry's value `[filename, type, bytes]`; the body a byte
-// string (a character per byte), it and its type null for a GET.
+// __dom.formRequest(action, method, enctype, encoding, list, bytesOf) -> `[method, url, body, contentType]` of a form
+// submitted (`form_request`), or null where it submits nothing: `list` flat `[name, value, …]`, a file entry's value
+// `[filename, type]`, its bytes asked of `bytesOf(k)` (`k` the entry's place) only where the body carries them; the
+// body a byte string (a character per byte), it and its type null for a GET.
 fn form_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [action, method, enctype] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
     let encoding = encoding_arg(scope, args.get(3));
@@ -471,14 +487,23 @@ fn form_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
             Some(file) => {
                 let text = |scope: &mut v8::PinScope<'_, '_>, i: u32| file.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
                 let (filename, kind) = (text(scope, 0), text(scope, 1));
-                let bytes = file.get_index(scope, 2).map_or_else(Vec::new, |v| crate::blob_data::bytes_arg(scope, v));
-                Entry::File { filename, kind, bytes: FileBytes::Own(bytes) }
+                Entry::File { filename, kind, bytes: FileBytes::Ask(list.len()) }
             }
             None => Entry::Text(value.map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()),
         };
         list.push((name, entry));
     }
-    let request = form_request(&action, &method, &enctype, encoding, &list);
+    let bytes_of = v8::Local::<v8::Function>::try_from(args.get(5)).ok();
+    let mut read = |bytes: &FileBytes| -> Result<Vec<u8>, ()> {
+        let (FileBytes::Ask(k), Some(f)) = (bytes, bytes_of) else { return Ok(Vec::new()) };
+        let k = v8::Integer::new_from_unsigned(scope, *k as u32).into();
+        let undefined = v8::undefined(scope).into();
+        // (…a throw the op's own: nothing is submitted)
+        let got = f.call(scope, undefined, &[k]).ok_or(())?;
+        Ok(crate::blob_data::bytes_arg(scope, got))
+    };
+    let Ok(request) = form_request(&action, &method, &enctype, encoding, &list, &mut read) else { return };
+    let Some(request) = request else { return rv.set_null() };
     let mut items: Vec<v8::Local<v8::Value>> = vec![
         v8::String::new(scope, if request.post { "POST" } else { "GET" }).unwrap().into(),
         v8::String::new(scope, &request.url).map_or_else(|| v8::null(scope).into(), Into::into),
@@ -522,11 +547,15 @@ mod tests {
             ("a".to_owned(), Entry::Text("1 2".to_owned())),
             ("f".to_owned(), Entry::File { filename: "x.txt".to_owned(), kind: String::new(), bytes: FileBytes::Own(b"hi".to_vec()) }),
         ];
-        let get = form_request("http://h/p?old#frag", "dialog", "", None, &entries);
+        let request = |action: &str, method: &str, enctype: &str| {
+            form_request(action, method, enctype, None, &entries, &mut |_| Ok::<_, ()>(b"asked".to_vec())).unwrap()
+        };
+        assert!(request("http://[x", "get", "").is_none());
+        let get = request("http://h/p?old#frag", "dialog", "").unwrap();
         assert_eq!((get.post, get.url.as_str(), get.body.is_none()), (false, "http://h/p?a=1+2&f=x.txt#frag", true));
-        let post = form_request("http://h/p", "POST", "", None, &entries);
+        let post = request("http://h/p", "POST", "").unwrap();
         assert_eq!(post.body, Some((b"a=1+2&f=x.txt".to_vec(), "application/x-www-form-urlencoded".to_owned())));
-        let multipart = form_request("http://h/p", "post", "Multipart/Form-Data", None, &entries).body.unwrap();
+        let multipart = request("http://h/p", "post", "Multipart/Form-Data").unwrap().body.unwrap();
         let text = String::from_utf8(multipart.0).unwrap();
         assert!(multipart.1.starts_with("multipart/form-data; boundary=----csimFormBoundary"));
         assert!(text.contains("name=\"f\"; filename=\"x.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nhi\r\n"));

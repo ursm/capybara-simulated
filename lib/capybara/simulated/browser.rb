@@ -3198,7 +3198,10 @@ module Capybara
         action     = spec['action'].to_s
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
         action_url = parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s
-        method, url, body, content_type = form_request(spec, action_url, entry_list)
+        request = form_request(spec, action_url, entry_list)
+        return unless request
+
+        method, url, body, content_type = request
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
@@ -3253,7 +3256,7 @@ module Capybara
       end
 
       # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET —
-      # the engine's (text_codec.rs `form_request`): `spec` the form's (`__csimFormSerialize`), its action resolved as
+      # or nil where it submits nothing (its action no URL), the engine's (text_codec.rs `form_request`): `spec` the form's (`__csimFormSerialize`), its action resolved as
       # `action_url`, its entry list `entry_list` where the submission built one (the post-`formdata` one), else the
       # spec's. Each entry string {'name','value'} or file {'name','file'=>true,'filename','type', and 'handle'/'index'
       # or 'bytes'}: a file's bytes read — only where its body carries them — through its `@file_picks` slot, else the
@@ -10549,8 +10552,11 @@ module Capybara
       def submit_form_in_realm(realm_id, form_handle, submitter_handle, entry_list = nil)
         spec = @runtime.realm_call(realm_id, '__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
-        target = spec['target'].to_s
-        method, url, body, content_type = form_request(spec, spec['action'].to_s, entry_list)
+        target  = spec['target'].to_s
+        request = form_request(spec, spec['action'].to_s, entry_list)
+        return unless request
+
+        method, url, body, content_type = request
         if frame_self_target?(target)
           if method == 'GET'
             navigate_realm_self_get(realm_id, url)

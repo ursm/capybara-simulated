@@ -134,4 +134,31 @@ RSpec.describe 'Form submission encoding' do
       expect(name.call(File.join(dir, "\xE9b.txt".dup.force_encoding('UTF-8')))).to eq("\uFFFDb.txt")
     end
   end
+
+  # A multipart body carries a picked file's bytes, into a named frame too (the page's request, its bytes read only
+  # there); a file gone since it was picked fails the submission, as Chrome's upload does; an action that is no URL
+  # submits nothing (HTML "submit" step 14).
+  it 'uploads a picked file into a named frame, fails on one deleted, and submits nothing to an action that is no URL' do
+    received = []
+    form = <<~HTML
+      <form id="nf" action="/nf" method="post" enctype="multipart/form-data" target="f"><input type="file" name="up"></form>
+      <form id="tf" action="/top" method="post" enctype="multipart/form-data"><input type="file" name="up"></form>
+      <form id="bad" action="http://[x"><input name="a" value="1"></form>
+    HTML
+    s = simulated_session(app(received, form))
+    s.visit '/'
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'up.txt')
+      File.write(path, 'bytes!')
+      s.find('#nf input').set(path)
+      s.execute_script('nf.requestSubmit()')
+      s.within_frame('f') { expect(s).to have_text('ok') }
+      expect(received.first[:body]).to include(%(filename="up.txt"\r\nContent-Type: text/plain\r\n\r\nbytes!\r\n))
+      s.find('#tf input').set(path)
+      File.delete(path)
+      expect { s.execute_script('tf.requestSubmit()') }.to raise_error(IOError, /up\.txt/)
+    end
+    s.execute_script('bad.requestSubmit()')
+    expect(received.size).to eq(1)
+  end
 end
