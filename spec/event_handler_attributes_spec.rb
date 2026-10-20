@@ -63,6 +63,22 @@ RSpec.describe 'Event handler content attributes' do
     expect(got).to eq([nil, nil, 'function', [2]])
   end
 
+  # …which asks of a handler not yet compiled alone: one compiled stays, wherever its element goes (Chrome 155 alike).
+  it 'keeps a compiled inline handler in a document with no browsing context' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        window.hits = [];
+        const d = document.body.appendChild(document.createElement('div'));
+        d.setAttribute('onclick', 'hits.push("live")');
+        d.click();
+        new DOMParser().parseFromString('<p>', 'text/html').adoptNode(d);
+        d.click();
+        return [typeof d.onclick, hits];
+      })()
+    JS
+    expect(got).to eq(['function', %w[live live]])
+  end
+
   # A body adopted from or into a frame's document forwards to its new document's Window, the handler that Window's own
   # (Chrome 155 alike).
   it "forwards an adopted body's handlers to its document's Window" do
