@@ -66,12 +66,21 @@ pub(crate) fn service_worker_response_allowed(mode: &str, redirect: &str, respon
 }
 
 // …and whether a subresource the page fetches may use it (a `destination` request, `mode` its element's, redirect mode
-// follow): one Fetch allows (`service_worker_response_allowed`) and — for every consumer but an image, which decodes what
-// it is given — an ok status, or an opaque one's (status 0, a no-cors answer the consumer cannot read): HTML "fetch a
-// classic script" / "obtain a stylesheet", the media resource's verification, a `<link>`'s fetch's success.
+// follow): one Fetch allows (`service_worker_response_allowed`), and by what its consumer makes of a status — an image
+// decodes what it is given, and a prefetch is a success where it is no network error (HTML "fetch and process the
+// linked resource" for `prefetch`); a media resource's fetch errs on an HTTP 4xx or 5xx (HTML's media data processing
+// list), and a script's, a style sheet's or a font's wants an ok status ("fetch a classic script", "obtain a
+// stylesheet") — an opaque answer, whose status a no-cors consumer cannot read, any of them.
 pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type: &str, redirected: bool, status: u32) -> bool {
-    service_worker_response_allowed(mode, "follow", response_type, redirected)
-        && (destination == "image" || response_type == "opaque" || (200..=299).contains(&status))
+    if !service_worker_response_allowed(mode, "follow", response_type, redirected) {
+        return false;
+    }
+    match destination {
+        "image" | "" => true,
+        _ if response_type == "opaque" => true,
+        "audio" | "video" | "track" => status < 400,
+        _ => (200..=299).contains(&status),
+    }
 }
 
 // Fetch "main fetch" (§4.1) step 12's `same-origin` branch: whether a request in mode `same-origin` for `url` (absolute,
@@ -579,9 +588,11 @@ mod tests {
         assert!(sw_subresource_usable("audio", "no-cors", "opaque", false, 0));
         assert!(!sw_subresource_usable("audio", "cors", "opaque", false, 0));
         assert!(!sw_subresource_usable("video", "no-cors", "basic", false, 404));
+        assert!(sw_subresource_usable("audio", "no-cors", "basic", false, 304));
         assert!(sw_subresource_usable("image", "no-cors", "basic", false, 404));
         assert!(!sw_subresource_usable("", "no-cors", "opaqueredirect", false, 0));
-        assert!(sw_subresource_usable("", "no-cors", "default", false, 200));
+        assert!(sw_subresource_usable("", "no-cors", "default", false, 404));
+        assert!(!sw_subresource_usable("script", "no-cors", "basic", false, 304));
     }
 
     #[test]

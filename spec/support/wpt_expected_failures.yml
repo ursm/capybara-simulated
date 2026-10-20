@@ -5190,8 +5190,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/url.window.js:
 html/webappapis/dynamic-markup-insertion/the-innerhtml-property/annotation-xml-fragment-parsing.html:
 - HTML parsing does apply in <annotation-xml encoding="application/xhtml+xml">
 html/webappapis/scripting/events/compile-event-handler-settings-objects.html:
-- The entry settings object while executing the compiled callback via Web IDL's invoke
-  must be that of the node document
 - The incumbent settings object while executing the compiled callback via Web IDL's
   invoke must be that of the node document
 html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:

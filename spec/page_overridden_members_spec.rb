@@ -487,14 +487,28 @@ RSpec.describe 'members a page overrides' do
     s.visit '/'
     got = s.evaluate_async_script(<<~JS)
       const done = arguments[0];
+      const kept = [JSON.parse, JSON.stringify, window.Date];
       JSON.parse = JSON.stringify = () => { throw new Error('page JSON'); };
       window.Date = function () { throw new Error('page Date'); };
       (async () => {
         const parsed = await new Response('{"a":1}').json();
         const made = await Response.json({b: 2}).text();
-        done([parsed.a, made, typeof new File([], 'f').lastModified, d.valueAsDate.getUTCDate()]);
+        const got = [parsed.a, made, typeof new File([], 'f').lastModified, d.valueAsDate.getUTCDate()];
+        // (…the page's own put back for the teardown's checks, which are a page's scripts)
+        [JSON.parse, JSON.stringify, window.Date] = kept;
+        done(got);
       })().catch((e) => done(String(e)));
     JS
     expect(got).to eq([1, '{"b":2}', 'number', 2])
+  end
+
+  # …and of the driver's own scripts: `evaluate_script` compiles its code with the realm's JSON and eval as they began.
+  it 'evaluates scripts whatever a page put in JSON.stringify and eval' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8">']] })
+    s.visit '/'
+    s.execute_script('window.__kept = [JSON.stringify, window.eval]; JSON.stringify = () => "1"; window.eval = () => 2;')
+    expect(s.evaluate_script('"x" + "y"')).to eq('xy')
+    # (…the page's own put back for the teardown's checks, which are a page's scripts)
+    s.execute_script('[JSON.stringify, window.eval] = window.__kept')
   end
 end

@@ -5013,9 +5013,10 @@ module Capybara
         # executes/applies (its real bytes ride the private render channel). An
         # opaque response to a cors-mode request (a module script, a crossorigin
         # classic script) is a NETWORK ERROR per Handle Fetch — the bytes must
-        # never compile: the engine's (fetch_rules.rs `sw_subresource_usable`). MIME enforcement is deliberately not added here yet: the
-        # network path enforces it (`stylesheetResponseAccepted`, css-utils.js),
-        # but a service worker's response is taken as the sheet it answers — a
+        # never compile: the engine's (fetch_rules.rs `sw_subresource_usable`).
+        # MIME enforcement is deliberately not added here yet: the network path
+        # enforces it (`stylesheetResponseAccepted`, css-utils.js), but a service
+        # worker's response is taken as the sheet it answers — a
         # `new Response(text)` respondWith (text/plain) serving a stylesheet is
         # load-bearing for green static-router subtests.
         type   = r['type'].to_s

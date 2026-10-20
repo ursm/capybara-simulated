@@ -5,10 +5,10 @@ require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# A subresource a controlling service worker answers uses the answer only where Fetch allows it and it is an ok one (or
-# an opaque one, a no-cors answer of status 0) — the engine's one verdict (fetch_rules.rs `sw_subresource_usable`) for
-# a `<link rel=prefetch>` and an `<audio>` alike: a 404 errors them, a 200 loads them, and a 304 — no ok status, which
-# a media resource's verification refuses — errors an audio too.
+# A subresource a controlling service worker answers uses the answer where Fetch allows it and its consumer takes its
+# status — the engine's one verdict (fetch_rules.rs `sw_subresource_usable`): a `<link rel=prefetch>` loads whatever
+# the status (HTML: a success where it is no network error — Chrome errs on a 404), an `<audio>` errs on a 404 and on
+# an answer of no media data (a 304), and plays a 200.
 RSpec.describe 'Service Worker subresource verdict' do
   include PollUntil
 
@@ -42,7 +42,7 @@ RSpec.describe 'Service Worker subresource verdict' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 
-  it 'errors a prefetch and an audio a 404 answers, loads them on a 200, and errors an audio a 304 answers' do
+  it 'loads a prefetch whatever its status, and errors an audio a 404 or an empty 304 answers' do
     session = simulated_session(app)
     session.visit '/'
     session.execute_script(<<~JS)
@@ -78,7 +78,7 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     seen = poll_until { session.evaluate_script('globalThis.__seen') }
     expect(seen).to eq(
-      'prefetch-missing' => 'error',
+      'prefetch-missing' => 'load',
       'prefetch-found'   => 'load',
       'audio-missing'    => 'error',
       'audio-found'      => 'canplaythrough',
