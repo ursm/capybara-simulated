@@ -125,3 +125,54 @@ RSpec.describe 'Node as an EventTarget' do
     expect(session.evaluate_script('(() => { try { new Node(); } catch (e) { return e.message; } })()')).to eq("Failed to construct 'Node': Illegal constructor")
   end
 end
+
+# DOM "inner invoke" sets `window.event` on the LISTENER's global (its relevant realm's), not the dispatch's: a
+# listener from another realm on a node reads the event off its own `window.event`, but one on a node inside a shadow
+# tree finds its global's left as it was (step 8). An object listener's realm is the object's, whatever realm its
+# `handleEvent` comes from. event-global-extra.window.js.
+RSpec.describe "A node listener's window.event" do
+  let(:session) {
+    simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=host></div><iframe srcdoc="<p>"></iframe>']]
+    })
+  }
+
+  before { session.visit '/' }
+
+  it "is the event on the listener's own realm, and left alone for one in a shadow tree" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const f = frames[0];
+        const seen = [];
+        const record = f.eval('(seen) => function (e) { seen.push(window.event === e ? "event" : String(window.event)); }');
+        const host = document.getElementById('host');
+        const inner = host.attachShadow({mode: 'open'}).appendChild(document.createElement('span'));
+        host.addEventListener('x', record(seen));
+        inner.addEventListener('x', record(seen));
+        host.addEventListener('x', {handleEvent: record(seen)});
+        inner.dispatchEvent(new Event('x', {bubbles: true, composed: true}));
+        return [seen, f.event === undefined, window.event === undefined];
+      })()
+    JS
+    expect(got).to eq([%w[undefined event undefined], true, true])
+  end
+
+  it 'is hidden from a listener of a node that was in a shadow tree as the dispatch began, wherever it is moved' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const host = document.getElementById('host');
+        const child = host.attachShadow({mode: 'open'}).appendChild(document.createElement('i'));
+        const inner = child.appendChild(document.createElement('b'));
+        const seen = [];
+        const look = (e) => seen.push(window.event === e ? 'event' : String(window.event));
+        inner.addEventListener('x', (e) => { host.appendChild(child); look(e); });
+        inner.addEventListener('x', look);
+        child.addEventListener('x', look);
+        host.addEventListener('x', look);
+        inner.dispatchEvent(new Event('x', {bubbles: true, composed: true}));
+        return seen;
+      })()
+    JS
+    expect(got).to eq(%w[undefined undefined undefined event])
+  end
+end

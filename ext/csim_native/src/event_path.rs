@@ -56,18 +56,27 @@ fn event_parent(arena: &RealmArena, id: NodeId, composed: bool, target_root: Nod
     assigned_slot(arena, id).or_else(|| arena.parent_of(id))
 }
 
-// One step of the path: the node, the target its listeners see, its relatedTarget, and whether it is a closed shadow
-// root, or a slot in a closed shadow tree a slottable was assigned to.
+// One step of the path: the node, the target its listeners see, its relatedTarget, and its `STEP_*` flags.
 struct Step {
     node: NodeId,
     target: NodeId,
     related: Related,
-    root_closed: bool,
-    slot_closed: bool,
+    flags: u8,
 }
+
+// A step's flags: a closed shadow root; a slot in a closed shadow tree a slottable was assigned to; a node whose root
+// is a shadow root (DOM "invocation-target-in-shadow-tree", taken as the path is built).
+const STEP_ROOT_CLOSED: u8 = 1;
+const STEP_SLOT_CLOSED: u8 = 2;
+const STEP_IN_SHADOW: u8 = 4;
 
 fn closed_root(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.host.is_some() && n.shadow_is(crate::dom::SHADOW_CLOSED))
+}
+
+fn step_flags(arena: &RealmArena, id: NodeId, slot_closed: bool) -> u8 {
+    let in_shadow = arena.get(arena.root_of(id)).is_some_and(|n| n.host.is_some());
+    (closed_root(arena, id) as u8 * STEP_ROOT_CLOSED) | (slot_closed as u8 * STEP_SLOT_CLOSED) | (in_shadow as u8 * STEP_IN_SHADOW)
 }
 
 fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) -> Vec<Step> {
@@ -82,8 +91,7 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
         node: target,
         target,
         related: retarget(arena, related, target),
-        root_closed: closed_root(arena, target),
-        slot_closed: false,
+        flags: step_flags(arena, target, false),
     }];
     let (mut current, mut current_root) = (target, target_root);
     let mut slottable = assigned_slot(arena, target).map(|_| target);
@@ -107,7 +115,7 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
             current = p;
             current_root = arena.root_of(p);
         }
-        steps.push(Step { node: p, target: current, related: rel, root_closed: closed_root(arena, p), slot_closed: slot_in_closed_tree });
+        steps.push(Step { node: p, target: current, related: rel, flags: step_flags(arena, p, slot_in_closed_tree) });
         slot_in_closed_tree = false;
         parent = event_parent(arena, p, composed, target_root);
     }
@@ -171,13 +179,13 @@ pub(crate) fn composed_steps(flags: &[(bool, bool)], current: usize) -> Vec<usiz
     }
     kept
 }
-// __dom.composedPath(flags, current) -> the indices of the steps `composed_steps` keeps: `flags` a number a step (1 a
-// closed shadow root, 2 a slot in a closed tree), `current` the current target's step.
+// __dom.composedPath(flags, current) -> the indices of the steps `composed_steps` keeps: `flags` a step's `STEP_*`
+// flags, as `eventPath` answers them, `current` the current target's step.
 fn composed_path_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
     let flags: Vec<(bool, bool)> = (0..list.length())
         .map(|i| list.get_index(scope, i).and_then(|v| v.uint32_value(scope)).unwrap_or(0))
-        .map(|f| (f & 1 != 0, f & 2 != 0))
+        .map(|f| (f & STEP_ROOT_CLOSED as u32 != 0, f & STEP_SLOT_CLOSED as u32 != 0))
         .collect();
     let current = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
     if current >= flags.len() {
@@ -211,9 +219,9 @@ fn retarget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 
 // __dom.eventPath(targetNid, relatedNid, relatedOther, composed) -> [nodes, steps]: the event path from the target (the
 // relatedTarget a node `relatedNid`, else none, or with `relatedOther` something no retargeting moves). `nodes` are the
-// nodes it names, as `nodes_value` answers them; `steps` five numbers a step: its node, the target
-// its listeners see, its relatedTarget (an index into `nodes`; -1 none, -2 the event's own), whether it is a closed
-// shadow root, and whether it is a slot in a closed tree. Empty, where the event is not dispatched.
+// nodes it names, as `nodes_value` answers them; `steps` four numbers a step: its node, the target
+// its listeners see, its relatedTarget (an index into `nodes`; -1 none, -2 the event's own), and its `STEP_*` flags.
+// Empty, where the event is not dispatched.
 fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = nid_arg(scope, &args, 0) else { return };
     let related = match nid_arg(scope, &args, 1) {
@@ -234,7 +242,7 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             (nodes.len() - 1) as f64
         }
     };
-    let mut out = Vec::with_capacity(steps.len() * 5);
+    let mut out = Vec::with_capacity(steps.len() * 4);
     for s in &steps {
         out.push(index(s.node));
         out.push(index(s.target));
@@ -243,8 +251,7 @@ fn event_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             Related::Other => -2.0,
             Related::Node(r) => index(r),
         });
-        out.push(s.root_closed as u8 as f64);
-        out.push(s.slot_closed as u8 as f64);
+        out.push(s.flags as f64);
     }
     let nodes_answer = crate::dom::nodes_value(scope, cid, &nodes);
     let steps_answer = crate::dom::f64_array(scope, &out);

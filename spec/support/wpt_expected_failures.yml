@@ -2212,9 +2212,7 @@ dom/events/click-on-absolute-pseudo.html:
 - "[harness] ERROR"
 dom/events/event-global-extra.window.js:
 - Listener from a different global
-- window.event and element from another document
 - window.event and moving an element post-dispatch
-- window.event should not be affected by nodes moving post-dispatch
 dom/events/relatedTarget.window.js:
 - Reset targets before activation behavior
 - Reset targets on early return
