@@ -3012,7 +3012,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
     // Native text metrics (fontations) for inline layout: register a font (fontconfig path or in-memory
-    // SFNT bytes) to a handle the JS side names its faces by (`walkFace`); layout measures runs in-process.
+    // SFNT bytes) to a handle the JS side names its faces by (`walkFaces`); layout measures runs in-process.
     register(scope, ns, "registerFontPath", register_font_path, context_id);
     register(scope, ns, "registerFontScaled", register_font_scaled, context_id);
     register(scope, ns, "registerFontStack", register_font_stack, context_id);

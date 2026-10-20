@@ -1,5 +1,5 @@
 // The Rust walk's ops: `layoutBuild`, the layout pass the Rust walk builds from the style engine's values, and the faces
-// it asks the JS side for (`styleFaces`, `walkFace`), which only that side resolves today.
+// it asks for (`styleFaces`, `walkFaces`), each family's file the JS side's to fetch.
 
 use crate::dom::{dom, realm, realm_id, register, NodeId, GEN_CASCADE, GEN_DIRTY, GEN_SCROLL, GEN_SETTLE};
 use crate::walk::{self, Basis, Face, Outcome};
@@ -52,7 +52,7 @@ fn note_scrolled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // root placed natively), its boxes kept in the arena for the geometry (geometry.rs `store_layout`) — `records` 1 or 2
 // recording its text pieces for the text geometry too (text_geometry.rs) — and where `records` is 2, for a pass a
 // painter records, each text piece as it draws it, kept for the painter (paint.rs `Painted`): answered `true`. Or
-// `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve (`walkFace`) and ask again — or
+// `[family, bucket, …]` — the faces the walk needs first, for the JS side to resolve (`walkFaces`) and ask again — or
 // the walk's decline, a string.
 fn layout_build(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
@@ -233,10 +233,12 @@ fn walk_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     for k in (0..wanted.length().saturating_sub(1)).step_by(2) {
         let (family, bucket) = (text(scope, k), text(scope, k + 1));
         let fallbacks = crate::font_faces::serialized_family_list(&family).into_iter().skip(1).chain(std::iter::once("sans-serif".to_owned()));
-        let mut face = resolve_face(scope, resolve, &family, &bucket);
+        // (…nothing learnt once the script is terminated while the page side resolves a face)
+        let Some(mut face) = resolve_face(scope, resolve, &family, &bucket) else { return };
         if !measures(face) {
             for next in fallbacks {
-                face = resolve_face(scope, resolve, &next, &bucket);
+                let Some(next) = resolve_face(scope, resolve, &next, &bucket) else { return };
+                face = next;
                 if measures(face) {
                     break;
                 }
@@ -246,16 +248,20 @@ fn walk_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
 }
 // …one family's face as the page side resolves it: its handle and its metric overrides (-1 and none where it answers
-// nothing, or throws).
+// nothing, or throws) — None once the script is terminated.
 type Resolved = (i32, [Option<f64>; 3]);
-fn resolve_face(scope: &mut v8::PinScope<'_, '_>, resolve: v8::Local<'_, v8::Function>, family: &str, bucket: &str) -> Resolved {
-    let (Some(f), Some(b)) = (v8::String::new(scope, family), v8::String::new(scope, bucket)) else { return (-1, [None; 3]) };
+fn resolve_face(scope: &mut v8::PinScope<'_, '_>, resolve: v8::Local<'_, v8::Function>, family: &str, bucket: &str) -> Option<Resolved> {
+    let (Some(f), Some(b)) = (v8::String::new(scope, family), v8::String::new(scope, bucket)) else { return Some((-1, [None; 3])) };
     let undefined = v8::undefined(scope).into();
     v8::tc_scope!(let tc, scope);
-    let Some(answer) = resolve.call(tc, undefined, &[f.into(), b.into()]).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) else { return (-1, [None; 3]) };
+    let answer = resolve.call(tc, undefined, &[f.into(), b.into()]);
+    if tc.has_terminated() {
+        return None;
+    }
+    let Some(answer) = answer.and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) else { return Some((-1, [None; 3])) };
     let number = |tc: &mut v8::PinScope<'_, '_>, k: u32| answer.get_index(tc, k).and_then(|v| v.number_value(tc)).filter(|v| v.is_finite());
     let handle = number(tc, 0).map_or(-1, |h| h as i32);
-    (handle, [number(tc, 1), number(tc, 2), number(tc, 3)])
+    Some((handle, [number(tc, 1), number(tc, 2), number(tc, 3)]))
 }
 // …whether native can lay a run out with it (`FontMetrics::face`).
 fn measures((handle, overrides): Resolved) -> bool {

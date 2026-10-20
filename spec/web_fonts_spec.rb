@@ -47,6 +47,10 @@ RSpec.describe 'web fonts' do
       when '/ahem.woff2' then [200, {'content-type' => 'font/woff2'}, [AHEM_WOFF2]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/based/only.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
+      when '/inner-face.html'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><style>@font-face { font-family: A; src: url(/ahem.ttf); }</style><span id="t" style="font: 20px A">abcd</span>']]
+      when '/outer.html'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/inner-face.html"></iframe>']]
       when '/framed.html'
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/based.html"></iframe><span id="t" style="font: 20px A">abcd</span>']]
       when '/based.html' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><base href="/based/"><body>']]
@@ -272,6 +276,47 @@ RSpec.describe 'web fonts' do
       });
     JS
     expect(got).to eq([80, false])
+  end
+
+  # A CSS-connected face whose file layout already fetched starts loaded in its own realm's set — read through another
+  # realm's FontFaceSet methods too, which settle it by what ITS document's sources gave.
+  it "starts a CSS-connected face loaded by its own realm's fetches, whichever realm reads the set" do
+    s = session('/outer.html')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const d = frames[0].document;
+        d.getElementById('t').getBoundingClientRect();
+        [...d.fonts];
+        d.styleSheets[0].insertRule('@font-face { font-family: C; src: url(/ahem.ttf); }', 1);
+        const seen = [];
+        FontFaceSet.prototype.forEach.call(d.fonts, (f) => seen.push(f.family + ':' + f.status));
+        return seen;
+      })()
+    JS
+    expect(got).to eq(%w[A:loaded C:loaded])
+  end
+
+  # load() tries a face's sources in order: an installed `local()` font ahead of a download that fails loads the face.
+  it 'loads a script face from its first source that gives a font, a local() one ahead of a download' do
+    s = session
+    installed = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const names = ['DejaVu Sans', 'Liberation Sans', 'Noto Sans', 'Arial'];
+      (async () => {
+        for (const name of names) {
+          const ok = await new FontFace('Probe', `local("${name}")`).load().then(() => true, () => false);
+          if (ok) return done(name);
+        }
+        done(null);
+      })();
+    JS
+    skip 'no font this machine has installed under a common name' unless installed
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = new FontFace('X', 'local("#{installed}"), url(/missing.ttf)');
+      f.load().then(() => done(f.status), () => done(f.status));
+    JS
+    expect(got).to eq('loaded')
   end
 
   # ── which rules apply, and against what base ──

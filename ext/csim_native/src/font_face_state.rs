@@ -200,7 +200,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ffSettle", settle_op, context_id);
     crate::dom::register(scope, ns, "ffConnect", connect_op, context_id);
     crate::dom::register(scope, ns, "ffSources", sources_op, context_id);
-    crate::dom::register(scope, ns, "ffLocalStyle", local_style_op, context_id);
+    crate::dom::register(scope, ns, "ffFile", file_op, context_id);
     crate::dom::register(scope, ns, "ffFetchedStatus", fetched_status_op, context_id);
 }
 
@@ -325,11 +325,18 @@ fn sources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set(list.into());
 }
 
-// __dom.ffLocalStyle(state) -> the weight / style its `local()` names are looked up under (`FaceRecord::local_style`).
-fn local_style_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(face) = face(scope, args.get(0)) else { return };
-    let style = face.borrow_mut().record().local_style();
-    rv.set(v8::String::new(scope, style).unwrap().into());
+// __dom.ffFile(state, fetch) -> the file the face is read from, or null where it has none native reads: a buffer face's
+// own, else the first of its sources, in order, that gives one (font_files.rs `face_file`) — what `load()` loads.
+fn file_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(face), Ok(fetch)) = (face(scope, args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1))) else { return rv.set_null() };
+    let (file, sources, bucket) = {
+        let mut f = face.borrow_mut();
+        let bucket = f.record().local_style();
+        (f.file.clone(), f.sources.clone().unwrap_or_default(), bucket)
+    };
+    let cid = crate::dom::realm_id(scope, &args);
+    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, fetch);
+    crate::font_files::answer_file(scope, &mut rv, file);
 }
 
 // __dom.ffFetchedStatus(state) -> what the face's downloads already went through, as a status: `loaded` where one of them
