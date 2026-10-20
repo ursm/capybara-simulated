@@ -11,6 +11,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "encodingName", encoding_name, context_id);
     register(scope, ns, "textDecode", text_decode, context_id);
     register(scope, ns, "decodeBytes", decode_bytes, context_id);
+    register(scope, ns, "stylesheetText", stylesheet_text, context_id);
     register(scope, ns, "textDecoderOpen", text_decoder_open, context_id);
     register(scope, ns, "textDecoderPush", text_decoder_push, context_id);
     register(scope, ns, "textDecoderClose", text_decoder_close, context_id);
@@ -151,6 +152,36 @@ fn decode_bytes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         encoding_rs::Encoding::for_label(charset.1.as_bytes())
     });
     let (text, _, _) = fallback.unwrap_or(encoding_rs::UTF_8).decode(&bytes);
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let text = utf16_string(scope, &units);
+    rv.set(text);
+}
+
+// CSS Syntax §3.2 "determine the fallback encoding" of a style sheet's bytes: its response's `Content-Type` charset
+// where that is an encoding's label; else the label an `@charset "…";` opening the first 1024 bytes names (UTF-16 as
+// UTF-8: a sheet that says so in ASCII is none); else the environment's (`environment`, its document's); else UTF-8.
+pub(crate) fn stylesheet_encoding(content_type: &str, bytes: &[u8], environment: &str) -> &'static encoding_rs::Encoding {
+    let charset = crate::mime::extract(content_type).and_then(|m| m.parameters.into_iter().find(|(n, _)| n == "charset").map(|(_, v)| v));
+    if let Some(e) = charset.and_then(|c| encoding_rs::Encoding::for_label(c.as_bytes())) {
+        return e;
+    }
+    let head = &bytes[..bytes.len().min(1024)];
+    let rule = head.strip_prefix(b"@charset \"").and_then(|rest| rest.windows(2).position(|w| w == b"\";").map(|end| &rest[..end]));
+    if let Some(e) = rule.and_then(encoding_rs::Encoding::for_label) {
+        return if e == encoding_rs::UTF_16BE || e == encoding_rs::UTF_16LE { encoding_rs::UTF_8 } else { e };
+    }
+    encoding_rs::Encoding::for_label(environment.as_bytes()).unwrap_or(encoding_rs::UTF_8)
+}
+// __dom.stylesheetText(bytes, contentType, environment) -> the sheet's text: its bytes decoded with that fallback
+// encoding, a BOM's over it (CSS Syntax "decode") — undefined where that is UTF-8's, the text the host decoded already.
+fn stylesheet_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(bytes) = bytes_arg(scope, args.get(0)) else { return };
+    let [content_type, environment] = [1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
+    let encoding = encoding_rs::Encoding::for_bom(&bytes).map_or_else(|| stylesheet_encoding(&content_type, &bytes, &environment), |(e, _)| e);
+    if encoding == encoding_rs::UTF_8 {
+        return;
+    }
+    let (text, _, _) = encoding.decode(&bytes);
     let units: Vec<u16> = text.encode_utf16().collect();
     let text = utf16_string(scope, &units);
     rv.set(text);
@@ -540,7 +571,19 @@ fn legacy_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_chunk, encode_entries, form_request, Encoding, Entry, FileBytes};
+    use super::{encode_chunk, encode_entries, form_request, stylesheet_encoding, Encoding, Entry, FileBytes};
+
+    // A style sheet's fallback encoding: its Content-Type charset, an opening `@charset` (UTF-16 as UTF-8), its
+    // document's, UTF-8 — in that order (CSS Syntax §3.2).
+    #[test]
+    fn a_style_sheet_decodes_by_its_charset_its_rule_or_its_document() {
+        let rule = "@charset \"iso-8859-1\";p{}".as_bytes();
+        assert_eq!(stylesheet_encoding("text/css; charset=shift_jis", rule, "utf-8"), encoding_rs::SHIFT_JIS);
+        assert_eq!(stylesheet_encoding("text/css", rule, "utf-8"), encoding_rs::WINDOWS_1252);
+        assert_eq!(stylesheet_encoding("text/css", b"@charset \"utf-16\";", "windows-1252"), encoding_rs::UTF_8);
+        assert_eq!(stylesheet_encoding("text/css", b" @charset \"iso-8859-1\";", "euc-jp"), encoding_rs::EUC_JP);
+        assert_eq!(stylesheet_encoding("text/css; charset=bogus", b"p{}", ""), encoding_rs::UTF_8);
+    }
 
     #[test]
     fn a_form_request_is_a_get_unless_its_method_is_post() {
