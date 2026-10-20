@@ -60481,7 +60481,7 @@ xhr/xmlhttprequest-sync-default-permissions-policy.tentative.sub.html:
 
 html/dom/reflection-metadata.html:
 - name: "link.as: IDL set to \"AUDIO\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60489,7 +60489,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"DOCUMENT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60497,7 +60497,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"EMBED\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60505,7 +60505,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"MANIFEST\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60513,7 +60513,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"OBJECT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60521,7 +60521,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"REPORT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60529,7 +60529,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"VIDEO\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60537,7 +60537,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"XSLT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60545,7 +60545,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"audio\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60553,7 +60553,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"document\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60561,7 +60561,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"embed\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60569,7 +60569,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"manifest\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60577,7 +60577,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"object\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60585,7 +60585,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"report\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60593,7 +60593,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"video\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60601,7 +60601,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: IDL set to \"xslt\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60609,7 +60609,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"AUDIO\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60617,7 +60617,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"DOCUMENT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60625,7 +60625,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"EMBED\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60633,7 +60633,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"MANIFEST\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60641,7 +60641,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"OBJECT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60649,7 +60649,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"REPORT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60657,7 +60657,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"VIDEO\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60665,7 +60665,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"XSLT\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60673,7 +60673,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"audio\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60681,7 +60681,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"document\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60689,7 +60689,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"embed\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60697,7 +60697,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"manifest\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60705,7 +60705,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"object\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60713,7 +60713,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"report\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60721,7 +60721,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"video\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
@@ -60729,7 +60729,7 @@ html/dom/reflection-metadata.html:
     destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
     (no state, read as ""). CLAUDE.md rule 1, case 3.'
 - name: "link.as: setAttribute() to \"xslt\""
-  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
     "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
     "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
     preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",

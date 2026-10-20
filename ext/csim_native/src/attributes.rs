@@ -553,16 +553,17 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let script = is_script(n);
     let flag = |on: bool, step: u32| if on { step } else { 0 };
     steps |= flag(script && local == "src" && old.is_none(), STEP_SCRIPT);
-    // (…a `<link>`'s `rel`, `href`, `type`, `media`, `title`, `disabled` or `as`, a `<style>`'s `media`, `title` or `type` — but
-    // an `href` or a `rel` set to the value it had, which changes nothing: the same resource, Chrome 155 keeps the sheet —
-    // and of those a `<link>`'s that may name another resource: its `rel`, its `href`, its `disabled` removed)
+    // (…a `<link>`'s `rel`, `href`, `type`, `media`, `title`, `disabled` or `as`, a `<style>`'s `media`, `title` or
+    // `type` — but an `href`, a `rel` or an `as` set to the value it had, which changes nothing: the same resource,
+    // Chrome 155 keeps the sheet and fetches no preload again — and of those a `<link>`'s that may name another resource:
+    // its `rel`, its `href`, its `disabled` removed)
     // (…a sheet owner's: an HTML or SVG `<style>`, an HTML `<link>`)
     let owner = crate::sheet_owners::is_sheet_owner(n);
     let link_sheet = owner
         && tag == "link"
         && match local {
-            "rel" | "href" => changed,
-            "type" | "media" | "title" | "disabled" | "as" => true,
+            "rel" | "href" | "as" => changed,
+            "type" | "media" | "title" | "disabled" => true,
             _ => false,
         };
     steps |= flag(link_sheet || (owner && tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);

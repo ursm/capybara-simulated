@@ -7,7 +7,8 @@ require_relative 'support/poll_until'
 # A `<link rel=preload>` fetches by the preload destination its `as` names (HTML "translate a preload destination":
 # `fetch`, `font`, `image`, `script`, `style`, `track`, ASCII case-insensitively) — and one whose `as` names none
 # (missing, empty, no keyword, `audio`, `worker`) fetches nothing and fires no event, as Chrome and Firefox make no
-# request for it, until a change of its `as` names one; nor does one whose `media` does not match, until it does.
+# request for it, until a change of its `as` names one; nor does one whose `media` does not match, until it does. An
+# `as` set to the value it had changes nothing (Chrome: one request).
 RSpec.describe 'a preload’s destination' do
   it 'fetches by its `as`, and nothing for one naming no destination' do
     requested = []
@@ -25,12 +26,25 @@ RSpec.describe 'a preload’s destination' do
         <link rel=preload as="worker" href="/worker" onload="seen.push('worker load')" onerror="seen.push('worker error')">
         <link id=later rel=preload href="/later" onload="seen.push('later load')" onerror="seen.push('later error')">
         <link id=print rel=preload as="fetch" media="print" href="/print" onload="seen.push('print load')">
-        <script>setTimeout(() => { document.getElementById('later').as = 'script'; document.getElementById('print').media = 'all'; }, 100);</script>
+        <link id=same rel=preload as="script" href="/same" onload="seen.push('same load')">
+        <script>
+          setTimeout(() => {
+            document.getElementById('later').as = 'script';
+            document.getElementById('print').media = 'all';
+            document.getElementById('same').setAttribute('as', 'script');
+            // (…a barrier: a preload connected after the change, whose load comes after any it made)
+            const barrier = document.createElement('link');
+            Object.assign(barrier, { rel: 'preload', as: 'fetch', href: '/barrier', onload: () => seen.push('barrier load') });
+            document.head.append(barrier);
+          }, 100);
+        </script>
       HTML
     }
     s = simulated_session(app)
     s.visit '/'
-    got = poll_until { (seen = s.evaluate_script('window.seen')).size == 4 && seen }
-    expect([got.sort, requested.sort]).to eq([%w[fetch font later print].map {|n| "#{n} load" }, %w[/fetch /font /later /print]])
+    # (…an `as` set to the value it had fetching nothing again: no second `same load` before the barrier's)
+    got = poll_until { (seen = s.evaluate_script('window.seen')).include?('barrier load') && seen }
+    loads = %w[barrier fetch font later print same].map {|n| "#{n} load" }
+    expect([got.sort, requested.sort]).to eq([loads, %w[/barrier /fetch /font /later /print /same]])
   end
 end
