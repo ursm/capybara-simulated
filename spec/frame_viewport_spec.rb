@@ -211,4 +211,15 @@ RSpec.describe 'frame viewport' do
       expect(s.evaluate_script('frameElement.id')).to eq('o')
     end
   end
+
+  # The frame realms a page disposed — a frame removed, one navigated — go with the page, their marks as discarded too:
+  # the next page counts none (the count a `defaultView` read gates its question on: navigables.rs `discardedRealms`).
+  it 'forgets the realms a page disposed as the next one begins' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe srcdoc="a"></iframe><iframe srcdoc="b"></iframe>']] })
+    s.visit '/'
+    s.execute_script("document.querySelectorAll('iframe')[0].remove(); document.querySelectorAll('iframe')[0].srcdoc = 'c'")
+    expect(s.evaluate_script('__dom.discardedRealms[0]')).to be > 0
+    s.visit '/'
+    expect(s.evaluate_script('__dom.discardedRealms[0]')).to eq(0)
+  end
 end

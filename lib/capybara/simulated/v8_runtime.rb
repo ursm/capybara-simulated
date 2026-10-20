@@ -434,17 +434,23 @@ module Capybara
         @frame_realm_parents&.clear
         @window_realm_meta&.clear
         @loading_frame_realms&.clear
-        return if @frame_realms.nil?
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
-        # before disposing the realm — otherwise a page's frame arenas accumulate across visits. Done
-        # from the main context (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
-        if @ctx && !@frame_realms.empty?
-          drops = @frame_realms.keys.map {|id| "__dom.dropRealm(#{id.to_i});" }.join
+        # before disposing the realm — otherwise a page's frame arenas accumulate across visits — and
+        # those the page disposed before it went (`discarded_realm_ids`: a frame removed or navigated),
+        # whose arenas, and their marks as discarded, lived on until now. Done from the main context
+        # (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
+        ids = (@frame_realms&.keys || []) + discarded_realm_ids
+        if @ctx && !ids.empty?
+          drops = ids.map {|id| "__dom.dropRealm(#{id.to_i});" }.join
           @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil
         end
+        discarded_realm_ids.clear
+        return if @frame_realms.nil?
         @frame_realms.each_value {|fr| fr.dispose rescue nil }
         @frame_realms.clear
       end
+      # The frame realms the page disposed (`dispose_frame_realm`), its page leave to drop.
+      def discarded_realm_ids = (@discarded_realm_ids ||= [])
 
       # Frame-scoped navigation: tear down the realm `old_id` and build a fresh
       # one for the same `<iframe>` from the just-fetched document, returning the
@@ -529,6 +535,7 @@ module Capybara
         ctx.eval_void("globalThis.__dom && globalThis.__dom.discardRealm(#{id.to_i});") rescue nil
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
+        discarded_realm_ids << id.to_i
         nil
       end
 
