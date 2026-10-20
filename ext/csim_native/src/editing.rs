@@ -191,12 +191,20 @@ pub(crate) fn inline_level(arena: &RealmArena, id: NodeId) -> Option<bool> {
 // where that is in a non-editable island or no host (Chrome) — the focus, where it is outside the host, at its edge, and
 // where it is in a non-editable island in it, out of the island on the anchor's side (Chrome: `a[<span
 // contenteditable=false>X]Y</span>b`, typed over, is `x<span contenteditable=false>XY</span>b`). A design-mode
-// document's is its body (`design_mode_body`): its document element would take the head into a block an edit wraps —
-// an end outside the body, the anchor's too, at the body's edge on its side.
+// document's is its body where the selection is in it or the head (`design_mode_body`): its document element would take
+// the head into a block an edit wraps — an end outside the body, the anchor's too, at the body's edge on its side.
 #[allow(clippy::type_complexity)]
 pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (NodeId, u32)) -> Option<(NodeId, ((NodeId, u32), (NodeId, u32)))> {
     let start = if arena.is_element(anchor.0) { anchor.0 } else { arena.parent_of(anchor.0)? };
-    let host = arena.design_mode_body(arena.editing_host(start)?);
+    let root = arena.editing_host(start)?;
+    let host = arena.design_mode_body(root, start);
+    // (…one from a design-mode body into an element a script put beside it, which edits in place, edits neither: Chrome)
+    if host != root {
+        let end = if arena.is_element(focus.0) { focus.0 } else { arena.parent_of(focus.0)? };
+        if !within(arena, host, end) && arena.design_mode_body(root, end) != host {
+            return None;
+        }
+    }
     let backward = crate::ranges::compare_points(arena, anchor, focus)? == std::cmp::Ordering::Greater;
     let clamp = |(node, offset): (NodeId, u32), after: bool| -> Option<(NodeId, u32)> {
         if !within(arena, host, node) {

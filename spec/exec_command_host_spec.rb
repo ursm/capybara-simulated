@@ -223,6 +223,23 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     expect(got).to eq(['TT', 'Z<p>abcd</p>', ['body', 0, 'body', 2], '<meta charset="utf-8"><title>TT</title>', 'blockquote'])
   end
 
+  # …but an element a script put beside the body, under the document element, is edited where it is (Chrome: `afZter`).
+  it 'edits an element beside a design-mode document’s body in place' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p>abcd</p>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.designMode = 'on';
+        const after = document.documentElement.appendChild(document.createElement('div'));
+        after.textContent = 'after';
+        getSelection().collapse(after.firstChild, 2);
+        document.execCommand('insertText', false, 'Z');
+        return [after.textContent, document.body.innerHTML];
+      })()
+    JS
+    expect(got).to eq(['afZter', '<p>abcd</p>'])
+  end
+
   # A copy in a document with no browsing context — a created one, a removed frame's — has no selection a window holds:
   # false, as every other command there (it threw a TypeError).
   it 'answers false for a copy in a document with no browsing context' do

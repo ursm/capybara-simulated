@@ -1048,15 +1048,19 @@ impl RealmArena {
         while let Some(parent) = self.parent_of(root).filter(|&p| self.is_element(p) && self.is_editable(p)) {
             root = parent;
         }
-        Some(self.design_mode_body(root))
+        Some(self.design_mode_body(root, start))
     }
     // An editing host or root as the edits go by it: the document element a design-mode document's walk ends at — or an
-    // editable document element's — its body instead, where it has one, whatever in the document a selection is at:
-    // what a page edits there is the body's content, never the head (Chrome: a caret in the `<title>` types at the body's
-    // start, `selectAll` selects the body's content; Blink's highest editable root stops at the body).
-    pub(crate) fn design_mode_body(&self, root: NodeId) -> NodeId {
+    // editable document element's — its body instead, where it has one and `start` is in it, in the head, or the document
+    // element itself: what a page edits there is the body's content, never the head (Chrome: a caret in the `<title>`
+    // types at the body's start, `selectAll` selects the body's content; Blink's highest editable root stops at the
+    // body). Another child of the document element — one a script put beside the body — edits in place, as in Chrome.
+    pub(crate) fn design_mode_body(&self, root: NodeId, start: NodeId) -> NodeId {
         let doc = self.parent_of(root).filter(|&d| self.get(d).is_some_and(|n| n.kind == NodeKind::Document));
-        doc.and_then(|d| self.relative(d, crate::dom::RELATIVE_BODY)).unwrap_or(root)
+        let Some(body) = doc.and_then(|d| self.relative(d, crate::dom::RELATIVE_BODY)) else { return root };
+        let head = self.get(root).and_then(|n| n.children.iter().copied().find(|&c| self.get(c).is_some_and(|h| h.is_html_named("head"))));
+        let canonical = start == root || self.shadow_including_ancestor(body, start) || head.is_some_and(|h| self.shadow_including_ancestor(h, start));
+        if canonical { body } else { root }
     }
     // The submittable elements whose values a form's entry list takes (HTML "construct the entry list" step 5.1), in tree
     // order: its tree's button / input / select / textarea and form-associated custom elements whose form owner it is —
