@@ -458,8 +458,8 @@ pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
     })
 }
 
-// __dom.fontFacesSet(rules, states, list): a document's faces, in order — the realm's from now on, what it read of them
-// before forgotten (font_resolve.rs) unless it is the list `list` numbers again. First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine
+// __dom.fontFacesSet(rules, states): a document's faces, in order — the realm's from now on, what it read of them before
+// forgotten (font_resolve.rs). First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine
 // last listed them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its set, by
 // their states (font_face_state.rs `listed`). A face with nothing to read holds a place all the same — and so does each
 // of a list of rules the engine no longer holds (an index listed before the rules last moved): where the page side's
@@ -467,19 +467,13 @@ pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
 fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let rules = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
     let added = crate::font_face_state::listed(scope, args.get(1));
-    let list = args.get(2).number_value(scope).unwrap_or(f64::NAN);
     let cid = crate::dom::realm_id(scope, &args);
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
     let ruled = if arena.rule_faces.len() == rules { arena.rule_faces.clone() } else { vec![FaceRecord::default(); rules] };
     let faces: Vec<FaceRecord> = ruled.into_iter().chain(added).collect();
-    // (…what was read of the list kept where it is the same list again, `list` its number: another document's handed over
-    // in between)
-    if arena.font_faces_list != Some(list.to_bits()) {
-        arena.font_faces_list = Some(list.to_bits());
-        arena.face_files.clear();
-        arena.family_faces.clear();
-    }
     arena.font_faces = faces;
+    arena.face_files.clear();
+    arena.family_faces.clear();
 }
 
 // __dom.fontFacesMatching(font, text, states) -> the indices of the faces `font` and `text` match among a font face
