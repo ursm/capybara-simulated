@@ -7,7 +7,8 @@ require_relative 'support/poll_until'
 
 # A classic script a controlling service worker answers is decoded as a network one is — by its response's Content-Type
 # charset (script.rs `classic_script_encoding`) — whether the parser fetched it or a script inserted it: its bytes and
-# its Content-Type, not a text the host made of them.
+# its Content-Type, not a text the host made of them — and refused as a network one is: a `nosniff` one of no JavaScript
+# type is a network error.
 RSpec.describe 'Service Worker script charset' do
   include PollUntil
 
@@ -20,6 +21,7 @@ RSpec.describe 'Service Worker script charset' do
         const bytes = (name) => new Uint8Array([...new TextEncoder().encode('window.' + name + " = '"), 0x96, 0xBC, 0x27, 0x3B]);
         if (u.pathname === '/scope/parsed.js') e.respondWith(new Response(bytes('parsed'), {headers: {'content-type': 'text/javascript; charset=shift_jis'}}));
         else if (u.pathname === '/scope/inserted.js') e.respondWith(new Response(bytes('inserted'), {headers: {'content-type': 'text/javascript; charset=shift_jis'}}));
+        else if (u.pathname === '/scope/sniffed.js') e.respondWith(new Response('window.sniffed = 1;', {headers: {'content-type': 'text/plain', 'x-content-type-options': 'nosniff'}}));
       });
     JS
     page = '<!DOCTYPE html><meta charset="utf-8"><script src="/scope/parsed.js"></script><body>'
@@ -43,7 +45,7 @@ RSpec.describe 'Service Worker script charset' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 
-  it 'decodes a served script by its Content-Type charset, parsed or inserted' do
+  it 'decodes a served script by its Content-Type charset, parsed or inserted, and refuses one nosniff fails' do
     session = simulated_session(app)
     session.visit '/'
     session.execute_script(<<~JS)
@@ -56,12 +58,19 @@ RSpec.describe 'Service Worker script charset' do
         f.onload = () => {
           const s = f.contentDocument.createElement('script');
           s.src = '/scope/inserted.js';
-          s.onload = () => { globalThis.__got = [f.contentWindow.parsed, f.contentWindow.inserted]; };
+          s.onload = () => {
+            // (…and one whose `nosniff` its text/plain type fails, as a network response's does)
+            const n = f.contentDocument.createElement('script');
+            n.src = '/scope/sniffed.js';
+            n.onerror = () => { globalThis.__got = [f.contentWindow.parsed, f.contentWindow.inserted, 'error', f.contentWindow.sniffed ?? null]; };
+            n.onload = () => { globalThis.__got = [f.contentWindow.parsed, f.contentWindow.inserted, 'load', f.contentWindow.sniffed ?? null]; };
+            f.contentDocument.body.appendChild(n);
+          };
           f.contentDocument.body.appendChild(s);
         };
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__got') }).to eq(%w[名 名])
+    expect(poll_until { session.evaluate_script('globalThis.__got') }).to eq(['名', '名', 'error', nil])
   end
 end

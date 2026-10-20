@@ -91,4 +91,20 @@ RSpec.describe 'change on blur' do
     s.document.synchronize { s.evaluate_script('log.length') == 6 or raise Capybara::ExpectationNotMet }
     expect(s.evaluate_script('log')).to eq(%w[a:change a:blur a:focusout b:change b:blur b:focusout])
   end
+
+  # …and one made `hidden` does too, at the rendering update (HTML's focus fixup): still focused right after the change,
+  # `change`, `blur` and `focusout` once a frame has passed — `document.activeElement` the body then (Chrome 155).
+  it 'loses focus at the rendering update where a focused control is hidden' do
+    s = session_for(<<~HTML)
+      <input id=e>
+      <script>
+        window.log = [];
+        for (const t of ['change', 'blur', 'focusout']) e.addEventListener(t, () => log.push(t));
+      </script>
+    HTML
+    s.find('#e').send_keys('x')
+    expect(s.evaluate_script("(() => { e.hidden = true; return document.activeElement.id; })()")).to eq('e')
+    s.document.synchronize { s.evaluate_script('log.length') == 3 or raise Capybara::ExpectationNotMet }
+    expect(s.evaluate_script('[log, document.activeElement.tagName]')).to eq([%w[change blur focusout], 'BODY'])
+  end
 end
