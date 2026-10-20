@@ -204,6 +204,13 @@ const STEP_SOURCE_INSERTED: u32 = 4;
 const CHANGE_CONNECTED: u32 = 1;
 const CHANGE_REFUSED: u32 = 1 << 1;
 const CHANGE_ASKS_RESET: u32 = 1 << 2;
+// …and whether it inserted or removed a `<picture>`'s `<source>`: a relevant mutation of each of its images, whose
+// source is selected again (HTML "update the image data").
+const CHANGE_PICTURE_SOURCES: u32 = 1 << 3;
+fn picture_sources(arena: &RealmArena, parent: NodeId, added: &[NodeId], removed: &[NodeId]) -> bool {
+    arena.get(parent).is_some_and(|p| p.is_html_named("picture"))
+        && added.iter().chain(removed).any(|&n| arena.get(n).is_some_and(|d| d.is_html_named("source")))
+}
 
 // What `removing` names: no child (an insertion), every child (replace all), or the one.
 #[derive(Clone, Copy)]
@@ -330,8 +337,13 @@ fn change_children(
     if (!removed.is_empty() || !added.is_empty()) && !record_child_list(scope, caller, parent, added, &removed, siblings, Some(renewals)) {
         return None;
     }
-    let asks = realm(scope, cid).affects_selectedness(parent, added);
-    let flags = (if connected { CHANGE_CONNECTED } else { 0 }) | (if refused { CHANGE_REFUSED } else { 0 }) | (if asks { CHANGE_ASKS_RESET } else { 0 });
+    let arena = realm(scope, cid);
+    let asks = arena.affects_selectedness(parent, added);
+    let sources = picture_sources(arena, parent, added, &removed);
+    let flags = (if connected { CHANGE_CONNECTED } else { 0 })
+        | (if refused { CHANGE_REFUSED } else { 0 })
+        | (if asks { CHANGE_ASKS_RESET } else { 0 })
+        | (if sources { CHANGE_PICTURE_SOURCES } else { 0 });
     crate::dom::dom(scope).arena.change_flags.set(flags);
     Some(Ok(removed))
 }
@@ -393,8 +405,12 @@ pub(crate) fn changes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, chan
         if crate::dom::factory_threw(scope) {
             return out;
         }
-        let asks = realm(scope, cid).affects_selectedness(*parent, added);
-        let flags = (if *connected { CHANGE_CONNECTED } else { 0 }) | (if asks { CHANGE_ASKS_RESET } else { 0 });
+        let arena = realm(scope, cid);
+        let asks = arena.affects_selectedness(*parent, added);
+        let sources = picture_sources(arena, *parent, added, removed);
+        let flags = (if *connected { CHANGE_CONNECTED } else { 0 })
+            | (if asks { CHANGE_ASKS_RESET } else { 0 })
+            | (if sources { CHANGE_PICTURE_SOURCES } else { 0 });
         out.push(v8::Integer::new_from_unsigned(scope, flags).into());
     }
     out

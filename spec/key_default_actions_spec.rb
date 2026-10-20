@@ -57,4 +57,14 @@ RSpec.describe 'Key default actions' do
     s.find('#ed').set("a\u{1F600}")
     expect(s.evaluate_script('[ed.textContent, L]')).to eq(["a\u{1F600}", [97, 0x1F600]])
   end
+
+  # An email field is a text control to its chords too: Control + A selects its text, which the next key types over,
+  # and Control + V pastes over it (Chrome) — never the page's text selected instead.
+  it 'selects all of an email field and pastes into it' do
+    s = session_of('<input id=e type=email value=a@b.c><input id=f type=email value=old@b.c><p>para text</p>')
+    s.find('#e').send_keys([:control, 'a'], 'x@y.z')
+    s.execute_script('navigator.clipboard.writeText("new@b.c")')
+    s.find('#f').send_keys([:control, 'a'], [:control, 'v'])
+    expect(s.evaluate_script('[e.value, f.value, getSelection().toString()]')).to eq(['x@y.z', 'new@b.c', ''])
+  end
 end

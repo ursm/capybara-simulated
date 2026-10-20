@@ -45,5 +45,12 @@ RSpec.describe 'image source selection' do
     expect(poll_until { (v = src.call) == 'fallback' ? v : nil }).to eq('fallback')
     s.execute_script("s.media = '(min-width: 1px)'; s.removeAttribute('srcset')")
     expect(poll_until { (v = src.call) == 'fallback' ? v : nil }).to eq('fallback')
+    # (…and a source inserted before the image, or removed: a relevant mutation as its attributes' are)
+    s.execute_script("s.setAttribute('srcset', '/i.png?one')")
+    expect(poll_until { (v = src.call) == 'one' ? v : nil }).to eq('one')
+    s.execute_script('s.remove()')
+    expect(poll_until { (v = src.call) == 'fallback' ? v : nil }).to eq('fallback')
+    s.execute_script("i.before(Object.assign(document.createElement('source'), {srcset: '/i.png?two'}))")
+    expect(poll_until { (v = src.call) == 'two' ? v : nil }).to eq('two')
   end
 end

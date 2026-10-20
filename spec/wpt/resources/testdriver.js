@@ -465,9 +465,14 @@
           // input, for a text control or contenteditable — mirrors send_keys.
           // (…none with Alt held — Control / Meta made it an accelerator above — its char code the engine's: keys.rs
           // `resolveKey`)
+          // (…and none after a canceled keydown, a canceled one typing nothing)
           var dcode = W.__dom.resolveKey(dchar, false)[6];
-          if (!__altHeld) dispatch(t, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dchar, keyCode: dcode, charCode: dcode, shiftKey: __shiftHeld }));
-          if (!dEv.defaultPrevented) typeCharAction(dchar, t);
+          var dkp = null;
+          if (!__altHeld && !dEv.defaultPrevented) {
+            dkp = new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: dchar, keyCode: dcode, charCode: dcode, shiftKey: __shiftHeld });
+            dispatch(t, dkp);
+          }
+          if (!dEv.defaultPrevented && !(dkp && dkp.defaultPrevented)) typeCharAction(dchar, t);
         } else if (dkn === 'Backspace' || dkn === 'Delete') {
           if (!dEv.defaultPrevented) deleteKeyAction(dkn === 'Delete', __ctrlHeld || __altHeld || __metaHeld, t);
         } else if (dkn === 'Enter') {
@@ -583,9 +588,9 @@
       __shiftHeld = __ctrlHeld = __metaHeld = __altHeld = false;   // start fresh; a modifier in
                              // `keys` stays held for the rest of THIS call (WebDriver sticky), but
                              // does not leak into a later send_keys / Actions chain
-      for (var i = 0; i < str.length; i++) {
-        var ch = str[i];
-        var cp = str.codePointAt(i);
+      // (…a character at a time: a code point, a surrogate pair's two units one character)
+      for (var ch of str) {
+        var cp = ch.codePointAt(0);
         // WebDriver special keys (arrows, Backspace, Enter, …) live in the PUA
         // block U+E000..U+F8FF. They produce keydown/keyup but DON'T insert text
         // — so no keypress, no value mutation, no `input` event for them.
@@ -594,10 +599,13 @@
         var isMod = trackModifier(kn, true);   // sets __shiftHeld for a held Shift
         var kdEv = new W.KeyboardEvent('keydown', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld });
         dispatch(element, kdEv);
-        if (!special) {
-          dispatch(element, new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: kn, shiftKey: __shiftHeld }));
+        if (!special && !kdEv.defaultPrevented) {
+          // (…its keypress the engine's char code, and none canceled typing nothing; nor a read-only control's value)
+          var kcode = W.__dom.resolveKey(kn, false)[6];
+          var kpEv = new W.KeyboardEvent('keypress', { bubbles: true, cancelable: true, composed: true, key: kn, keyCode: kcode, charCode: kcode, shiftKey: __shiftHeld });
+          dispatch(element, kpEv);
           try {
-            if (element && 'value' in element) {
+            if (element && 'value' in element && !kpEv.defaultPrevented && !element.readOnly) {
               element.value = (element.value || '') + ch;
               var InputCtor = W.InputEvent || W.Event;
               dispatch(element, new InputCtor('input', { bubbles: true, composed: true, data: ch }));
