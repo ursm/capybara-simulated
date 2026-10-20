@@ -29,6 +29,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         when '/'                then [200, {'content-type' => 'text/html'}, ['<html><body>main</body></html>']]
         when '/sw.js'           then [200, {'content-type' => 'text/javascript'}, [worker]]
         when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<html><body>in-scope</body></html>']]
+        when '/scope/parsed.html' then [200, {'content-type' => 'text/html'}, ['<html><body><script src="/scope/swerr.js"></script></body></html>']]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -100,19 +101,25 @@ RSpec.describe 'Service Worker subresource verdict' do
         await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
         const f = document.createElement('iframe');
         f.src = '/scope/page.html';
-        f.onload = () => {
-          const d = f.contentDocument;
-          const s = d.createElement('script');
-          s.onerror = () => {
-            const entries = f.contentWindow.performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/swerr.js'));
-            globalThis.__seen = entries.map((e) => e.initiatorType + ':' + e.responseStatus);
+        const entries = (w) => w.performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/swerr.js')).map((e) => e.initiatorType + ':' + e.responseStatus);
+        const parsed = document.createElement('iframe');
+        parsed.src = '/scope/parsed.html';
+        parsed.onload = () => {
+          const fromParser = entries(parsed.contentWindow);
+          const f = document.createElement('iframe');
+          f.src = '/scope/page.html';
+          f.onload = () => {
+            const d = f.contentDocument;
+            const s = d.createElement('script');
+            s.onerror = () => { globalThis.__seen = [fromParser, entries(f.contentWindow)]; };
+            s.src = '/scope/swerr.js';
+            d.head.appendChild(s);
           };
-          s.src = '/scope/swerr.js';
-          d.head.appendChild(s);
+          document.body.appendChild(f);
         };
-        document.body.appendChild(f);
+        document.body.appendChild(parsed);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['script:0'])
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq([['script:0'], ['script:0']])
   end
 end
