@@ -20,6 +20,8 @@ RSpec.describe 'a style sheet’s encoding' do
       when '/parent.css' then [200, {'content-type' => 'text/css'}, ['@charset "iso-8859-1";@import "child.css";']]
       when '/child.css' then [200, {'content-type' => 'text/css'}, ["#f::before { content: \"#{e_acute}\" }".b]]
       when '/linked.css' then [200, {'content-type' => 'text/css'}, ["#g::before { content: \"#{e_acute}\" }".b]]
+      when '/inserted.css' then [200, {'content-type' => 'text/css'}, ["#i::before { content: \"#{e_acute}\" }".b]]
+      when '/shadow.css' then [200, {'content-type' => 'text/css'}, ["#j::before { content: \"#{e_acute}\" }".b]]
       when '/utf16.css' then [200, {'content-type' => 'text/css; charset=utf-16le'}, ['#h::before { content: "x" }'.encode('UTF-16LE').b]]
       when '/latin1.html'
         [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="windows-1252"><link rel=stylesheet href="/plain.css"><p id=c>c</p>']]
@@ -45,5 +47,29 @@ RSpec.describe 'a style sheet’s encoding' do
     s.visit '/latin1.html'
     got << s.evaluate_script("getComputedStyle(document.getElementById('c'), '::before').content")
     expect(got).to eq(['"é"', '"é"', '"é"', '"Ã©"', '"é"', '"é"', '"x"', '"é"'])
+  end
+
+  # …an `@import` a script inserts into a Latin-1 sheet decodes as one it held from the first, and a shadow tree's
+  # `<link charset>` is its sheet's environment as a document's is (Chrome 155: `é` each).
+  it 'decodes an inserted import by its sheet, and a shadow tree’s link by its charset' do
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      {
+        const sheet = [...document.styleSheets].find((sh) => sh.href && sh.href.endsWith('/rule.css'));
+        sheet.insertRule('@import "/inserted.css";', 0);
+        const i = document.body.appendChild(document.createElement('p'));
+        i.id = 'i';
+        const host = document.body.appendChild(document.createElement('div'));
+        const root = host.attachShadow({mode: 'open'});
+        root.innerHTML = '<link rel=stylesheet href="/shadow.css" charset="iso-8859-1"><p id=j>j</p>';
+        setTimeout(() => done([
+          getComputedStyle(i, '::before').content,
+          getComputedStyle(root.getElementById('j'), '::before').content
+        ]), 50);
+      }
+    JS
+    expect(got).to eq(['"é"', '"é"'])
   end
 end
