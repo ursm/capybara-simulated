@@ -275,18 +275,14 @@
     return !!(list && list.some(function (e) { return !e.passive; }));
   }
   function chainHasNonPassive(target, type) {
-    for (var n = target; n; ) {
-      if (listHasNonPassive(W.__csimListenersFor(n, type))) return true;
-      if (n.nodeType === 9) break;                 // Document — element walk done
-      // Climb via _parent; only fall back to ownerDocument for a CONNECTED node
-      // (a detached node's event never propagates to the live document, so we
-      // must not count that document's listeners against it).
-      n = n._parent || (n.isConnected ? n.ownerDocument : null) || null;
+    // (…along the composed event path the UA's event takes — through a slot and its shadow root to the host — and
+    // the window, where it reaches the document)
+    var path = W.__csimComposedPathOf(target);
+    for (var i = 0; i < path.length; i++) {
+      if (listHasNonPassive(W.__csimListenersFor(path[i], type))) return true;
     }
-    if (typeof W.__csimWindowListenersFor === 'function') {
-      if (listHasNonPassive(W.__csimWindowListenersFor(type))) return true;
-    }
-    return false;
+    var top = path[path.length - 1];
+    return !!(top && top.nodeType === 9 && top === D() && listHasNonPassive(W.__csimWindowListenersFor(type)));
   }
 
   // ---- target resolution without layout -----------------------------------
@@ -390,7 +386,8 @@
           // (…an element origin: the offset from its centre — the element itself the target)
           var box = a.origin.getBoundingClientRect();
           p.x = box.left + box.width / 2 + (a.x || 0); p.y = box.top + box.height / 2 + (a.y || 0);
-          // (…what is at that point inside it, in its shadow tree too — not retargeted: the event is, as it climbs)
+          // (…what is at that point inside it, in its shadow tree too — not retargeted: the event is, as it climbs; the
+          // element itself where what is there is not inside it)
           p.target = W.__csimPointerTargetAt ? W.__csimPointerTargetAt(a.origin, p.x, p.y) : a.origin;
         } else {
           // (…a viewport origin — or the pointer's own — the point named, and what is there the target)
@@ -400,7 +397,8 @@
           p.target = hit || scroller();
         }
         if (p.down) {                                   // implicit pointer capture
-          if (p.type === 'touch') fireTouch(p.target, 'touchmove');
+          // (…a touch's moves and its end at the element it started on: Touch Events)
+          if (p.type === 'touch') fireTouch(p.downTarget, 'touchmove');
           else firePointer(p.target, 'pointermove', 'mousemove', p.x, p.y);
         }
         break;
@@ -415,7 +413,7 @@
       case 'pointerUp':
         p = state[a.pointer];
         if (!p.target) p.target = scroller();
-        if (p.type === 'touch') fireTouch(p.target, 'touchend');
+        if (p.type === 'touch') fireTouch(p.downTarget || p.target, 'touchend');
         else {
           firePointer(p.target, 'pointerup', 'mouseup', p.x, p.y);
           // `click` fires only when up lands on the same target the pointer went

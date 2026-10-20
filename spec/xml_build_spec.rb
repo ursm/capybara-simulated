@@ -5,8 +5,10 @@ require_relative 'support/session_teardown'
 
 # An XML parse is built by the engine (xml_parse.rs `xmlBuild`): a DOMParser's document and an XML document's fragment
 # parse — every node in its document, namespaces and prefixes as the scope declares them, processing instructions,
-# CDATA sections and a doctype as nodes, an XHTML `<template>`'s children its contents, an inline handler kept; the
-# bindings' steps run after for the elements that have them. Every expectation is Chrome's.
+# CDATA sections and a doctype as nodes, an XHTML `<template>`'s children its contents, an inline handler kept — its
+# attribute, but no handler: scripting is disabled in a document with no browsing context, Chrome 155's `onclick` null
+# and its click running none; the bindings' steps run after for the elements that have them. Every expectation is
+# Chrome's.
 RSpec.describe 'XML build' do
   let(:session) {
     simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>']] }).tap {|s| s.visit '/' }
@@ -25,11 +27,12 @@ RSpec.describe 'XML build' do
           doc.doctype.systemId, doc.childNodes[1].nodeType, doc.childNodes[1].target, doc.documentElement.namespaceURI,
           e.namespaceURI, e.prefix, e.localName, a.namespaceURI, a.prefix, e.getAttribute('b'),
           e.firstChild.nodeType, e.firstChild.data, t.childNodes.length, t.content.firstChild.localName,
-          t.content.firstChild.ownerDocument !== doc, e.ownerDocument === doc, window.hit
+          t.content.firstChild.ownerDocument !== doc, e.ownerDocument === doc, window.hit ?? null,
+          doc.querySelector('button').getAttribute('onclick'), doc.querySelector('button').onclick
         ];
       })()
     JS
-    expect(got).to eq(['r.dtd', 7, 'pi', 'urn:r', 'urn:x', 'x', 'e', 'urn:x', 'x', '2', 4, 'c<d', 0, 'p', true, true, 1])
+    expect(got).to eq(['r.dtd', 7, 'pi', 'urn:r', 'urn:x', 'x', 'e', 'urn:x', 'x', '2', 4, 'c<d', 0, 'p', true, true, nil, 'window.hit = 1', nil])
   end
 
   it "builds an XML document's fragment, its scripts not run, and refuses one not well-formed" do

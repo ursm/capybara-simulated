@@ -5176,8 +5176,6 @@ html/webappapis/scripting/events/onerroreventhandler.html:
 - onerror + !ErrorEvent + Window
 - onerror + Document
 - onerror + ErrorEvent + Window
-html/webappapis/scripting/events/uncompiled_event_handler_with_scripting_disabled.html:
-- when scripting is disabled, the handler is never compiled
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document

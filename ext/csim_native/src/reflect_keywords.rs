@@ -277,8 +277,9 @@ pub(crate) static TABLES: [KeywordTable; 25] = [
 ];
 
 // HTML's event handler content attributes (§8.1.8.1) — what the elements' event handler IDL attributes name: an HTML,
-// SVG or MathML element's (HTMLElement's, SVGElement's and MathMLElement's), and those a body or frameset reflects to
-// its Window (HTMLBodyElement's and HTMLFrameSetElement's, WindowEventHandlers'); sorted.
+// SVG or MathML element's (HTMLElement's, SVGElement's and MathMLElement's), and those a body or frameset forwards to
+// its Window (§8.1.8.2: WindowEventHandlers', HTMLBodyElement's and HTMLFrameSetElement's own, and the
+// "Window-reflecting body element event handler set" of GlobalEventHandlers'); sorted.
 pub(crate) static ELEMENT_EVENT_HANDLERS: &[&str] = &[
     "onabort",
     "onanimationcancel",
@@ -382,12 +383,16 @@ pub(crate) static ELEMENT_EVENT_HANDLERS: &[&str] = &[
     "onwebkittransitionend",
     "onwheel",
 ];
-pub(crate) static WINDOW_REFLECTING_EVENT_HANDLERS: &[&str] = &[
+pub(crate) static FORWARDED_EVENT_HANDLERS: &[&str] = &[
     "onafterprint",
     "onbeforeprint",
     "onbeforeunload",
+    "onblur",
+    "onerror",
+    "onfocus",
     "onhashchange",
     "onlanguagechange",
+    "onload",
     "onmessage",
     "onmessageerror",
     "onoffline",
@@ -398,6 +403,8 @@ pub(crate) static WINDOW_REFLECTING_EVENT_HANDLERS: &[&str] = &[
     "onpageswap",
     "onpopstate",
     "onrejectionhandled",
+    "onresize",
+    "onscroll",
     "onstorage",
     "onunhandledrejection",
     "onunload",

@@ -3,11 +3,7 @@
 // attributes make (reflect_keywords.rs). The bindings compile and call the handler.
 
 use crate::dom::{nid_arg, realm_id, NodeId, NodeKind, RealmArena};
-use crate::reflect_keywords::{ELEMENT_EVENT_HANDLERS, LEGACY_HANDLER_EVENT_TYPES, WINDOW_REFLECTING_EVENT_HANDLERS};
-
-// GlobalEventHandlers' handlers a body or frameset forwards to its Window as well: HTML's "Window-reflecting body
-// element event handler set".
-const WINDOW_REFLECTING_GLOBAL: [&str; 6] = ["onblur", "onerror", "onfocus", "onload", "onresize", "onscroll"];
+use crate::reflect_keywords::{ELEMENT_EVENT_HANDLERS, FORWARDED_EVENT_HANDLERS, LEGACY_HANDLER_EVENT_TYPES};
 
 // The event type the handler `name` listens for: its name past `on`, but HTML's four legacy WebKit-prefixed handlers'
 // camel-case one.
@@ -17,7 +13,7 @@ pub(crate) fn event_type(name: &str) -> &str {
 
 // Whether `name` is a body's or frameset's handler its Window has instead (§8.1.8.2).
 fn forwarded(name: &str) -> bool {
-    WINDOW_REFLECTING_EVENT_HANDLERS.binary_search(&name).is_ok() || WINDOW_REFLECTING_GLOBAL.contains(&name)
+    FORWARDED_EVENT_HANDLERS.binary_search(&name).is_ok()
 }
 
 // The attribute `name` (in no namespace) of the element `id` as an event handler content attribute: none where it is
@@ -60,4 +56,18 @@ fn handler_forwarded_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     rv.set_bool(arena.get(id).is_some_and(|n| n.is_html_named("body") || n.is_html_named("frameset")) && forwarded(&name));
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::reflect_keywords::{ELEMENT_EVENT_HANDLERS, FORWARDED_EVENT_HANDLERS};
+
+    // The generated tables are searched by halves: they must stay sorted.
+    #[test]
+    fn the_handler_tables_are_sorted() {
+        assert!(ELEMENT_EVENT_HANDLERS.is_sorted());
+        assert!(FORWARDED_EVENT_HANDLERS.is_sorted());
+        assert_eq!(super::event_type("onwebkitanimationend"), "webkitAnimationEnd");
+        assert_eq!(super::event_type("onclick"), "click");
+    }
 }

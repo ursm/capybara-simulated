@@ -1957,8 +1957,15 @@ const LEGACY_HANDLER_EVENT_TYPES = {
   onwebkitanimationstart:     'webkitAnimationStart',
   onwebkittransitionend:      'webkitTransitionEnd'
 };
+// The event handlers a body or frameset forwards to its Window (HTML §8.1.8.2): WindowEventHandlers' and the
+// "Window-reflecting body element event handler set" of GlobalEventHandlers', sorted.
+const FORWARDED_EVENT_HANDLERS = [...new Set([...windowHandlers, 'onblur', 'onerror', 'onfocus', 'onload', 'onresize', 'onscroll'])].sort();
 const parentTable = `// WindowEventHandlers' event handler attributes.
 export const WINDOW_EVENT_HANDLERS = ${JSON.stringify(windowHandlers)};
+
+// The event handlers a body or frameset forwards to its Window (HTML §8.1.8.2): WindowEventHandlers' and the
+// "Window-reflecting body element event handler set" of GlobalEventHandlers'.
+export const FORWARDED_EVENT_HANDLERS = new Set(${JSON.stringify(FORWARDED_EVENT_HANDLERS)});
 
 // The event type of each event handler whose type is not its name past \`on\` (HTML's legacy WebKit-prefixed four).
 export const LEGACY_HANDLER_EVENT_TYPES = ${JSON.stringify(LEGACY_HANDLER_EVENT_TYPES)};
@@ -2071,13 +2078,14 @@ ${keywords.map(([k, v]) => `            (${JSON.stringify(k)}, ${JSON.stringify(
 ];
 
 // HTML's event handler content attributes (§8.1.8.1) — what the elements' event handler IDL attributes name: an HTML,
-// SVG or MathML element's (HTMLElement's, SVGElement's and MathMLElement's), and those a body or frameset reflects to
-// its Window (HTMLBodyElement's and HTMLFrameSetElement's, WindowEventHandlers'); sorted.
+// SVG or MathML element's (HTMLElement's, SVGElement's and MathMLElement's), and those a body or frameset forwards to
+// its Window (§8.1.8.2: WindowEventHandlers', HTMLBodyElement's and HTMLFrameSetElement's own, and the
+// "Window-reflecting body element event handler set" of GlobalEventHandlers'); sorted.
 pub(crate) static ELEMENT_EVENT_HANDLERS: &[&str] = &[
 ${handlerNames(['HTMLElement', 'SVGElement', 'MathMLElement']).map((n) => `    ${JSON.stringify(n)},`).join('\n')}
 ];
-pub(crate) static WINDOW_REFLECTING_EVENT_HANDLERS: &[&str] = &[
-${handlerNames(['HTMLBodyElement', 'HTMLFrameSetElement']).map((n) => `    ${JSON.stringify(n)},`).join('\n')}
+pub(crate) static FORWARDED_EVENT_HANDLERS: &[&str] = &[
+${FORWARDED_EVENT_HANDLERS.map((n) => `    ${JSON.stringify(n)},`).join('\n')}
 ];
 // …and the event type of each whose type is not its name past \`on\` (HTML's legacy WebKit-prefixed four).
 pub(crate) static LEGACY_HANDLER_EVENT_TYPES: &[(&str, &str)] = &[

@@ -193,11 +193,11 @@ RSpec.describe 'the event path through shadow trees' do
     expect(got).to be(true)
   end
 
-  # Touch Events' retargeting steps (w3c/touch-events ED, §Retargeting, run for every TouchEvent): a Touch's target
-  # reads as its unadjusted target retargeted against the event's — a node in a closed shadow tree as its host outside
-  # it — and DOM's clearTargets counts the touch targets too (a dispatch that never leaves the shadow tree leaves none
-  # behind). Chrome 155 retargets only the touches its own input makes: a page's `new Touch()` keeps the inner node
-  # throughout (`host/inner`), leaking it past the closed tree.
+  # DOM dispatch's touch target list (Touch Events' retargeting steps hand it the touches' targets): a Touch's target
+  # reads as the target it was made with retargeted against each object whose listeners run — a node in a closed shadow
+  # tree as its host outside it, itself inside — and DOM's clearTargets counts the touch targets too (a dispatch that
+  # never leaves the shadow tree leaves none behind). Chrome 155 retargets only the touches its own input makes: a
+  # page's `new Touch()` keeps the inner node throughout (`host/inner`), leaking it past the closed tree.
   it "retargets a TouchEvent's touches as the dispatch retargets the event" do
     got = session.evaluate_script(<<~JS)
       (() => {
@@ -220,5 +220,29 @@ RSpec.describe 'the event path through shadow trees' do
       })()
     JS
     expect(got).to eq(['host/host', 'null/null', %w[window:host/host inner:inner/inner host:host/host inner:inner/inner]])
+  end
+
+  # …against each path item, not the event's target: a second finger inside the shadow tree reads as itself to a
+  # listener in that tree while the event's target is a light child slotted into it.
+  it "retargets a touch against each listener's node, not the event's target" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        document.body.innerHTML = '<div id=host><b id=light></b></div>';
+        const host = document.getElementById('host');
+        const light = document.getElementById('light');
+        const root = host.attachShadow({mode: 'closed'});
+        root.innerHTML = '<slot></slot><i></i>';
+        const inner = root.querySelector('i');
+        const nm = (n) => n === host ? 'host' : n === inner ? 'inner' : n === light ? 'light' : 'other';
+        const seen = [];
+        const t = new Touch({identifier: 1, target: inner});
+        for (const [name, at] of [['slot', root.querySelector('slot')], ['root', root], ['host', host]]) {
+          at.addEventListener('touchstart', (e) => seen.push(name + ':' + nm(e.target) + '/' + nm(e.touches[0].target)));
+        }
+        light.dispatchEvent(new TouchEvent('touchstart', {bubbles: true, composed: true, touches: [t]}));
+        return seen;
+      })()
+    JS
+    expect(got).to eq(%w[slot:light/inner root:light/inner host:light/host])
   end
 end
