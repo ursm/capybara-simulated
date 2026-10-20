@@ -461,15 +461,18 @@ fn faces_of<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallback
 }
 
 // __dom.fontFacesSet(rules, states) -> whether any face restricts its `unicode-range`: a document's faces, in order — the
-// realm's from now on. With `rules`, the faces of the `@font-face` rules its sheets hold first, as the style engine last
-// listed them (`RealmArena::rule_faces`); then the faces script added to its set, by their states (font_face_state.rs
-// `listed`). A face with nothing to read holds a place all the same.
+// realm's from now on. First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine last listed
+// them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its set, by
+// their states (font_face_state.rs `listed`). A face with nothing to read holds a place all the same — and so does each
+// of a list of rules the engine no longer holds (an index listed before the rules last moved): where the page side's
+// list and this one disagree, nothing is picked rather than another rule's face.
 fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let rules = args.get(0).is_true();
+    let rules = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
     let added = crate::font_face_state::listed(scope, args.get(1));
     let cid = crate::dom::realm_id(scope, &args);
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
-    let faces: Vec<FaceRecord> = if rules { arena.rule_faces.clone() } else { Vec::new() }.into_iter().chain(added).collect();
+    let ruled = if arena.rule_faces.len() == rules { arena.rule_faces.clone() } else { vec![FaceRecord::default(); rules] };
+    let faces: Vec<FaceRecord> = ruled.into_iter().chain(added).collect();
     let restricted = faces.iter().any(|f| f.ranges.is_some());
     arena.font_faces = faces;
     rv.set_bool(restricted);
@@ -534,9 +537,24 @@ pub(crate) fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSo
 pub(crate) fn sources(src: &str, base: &str) -> Vec<FaceSource> {
     parse(&format!("font-family: x; src: {src}"), base).map_or(Vec::new(), |f| f.sources)
 }
+// …of a FontFace's `src` string, which has to be ONE `src` value, whole (CSS Font Loading §2.1, "parse source as a
+// <font-src-list>"): none where it is not — trailing text the block it would be read in takes for other descriptors
+// (`url(x); font-weight: 900`) among what it is not.
+pub(crate) fn face_sources(src: &str, base: &str) -> Option<Vec<FaceSource>> {
+    descriptor("src", src)?;
+    Some(sources(src, base)).filter(|s| !s.is_empty())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_face_source_is_one_src_value_whole() {
+        assert_eq!(face_sources("url(a.woff), local(B)", "http://x/").map(|s| s.len()), Some(2));
+        assert_eq!(face_sources("url(a.woff); font-weight: 900", "http://x/"), None);
+        assert_eq!(face_sources("url(a.woff); unicode-range: U+0", "http://x/"), None);
+        assert_eq!(face_sources("", "http://x/"), None);
+    }
 
     #[test]
     fn local_style_reads_the_descriptors() {

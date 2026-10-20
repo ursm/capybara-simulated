@@ -1,5 +1,5 @@
 // A FontFace as the engine holds it (CSS Font Loading §2): its family and its descriptors, parsed and serialized by
-// their `@font-face` grammars, its source — a `src` string, or the file a buffer's bytes decoded to — its status, the
+// their `@font-face` grammars, its sources — its `src` string's, or the file a buffer's bytes decoded to — its status, the
 // error its constructor's arguments gave it, and for a CSS-connected face the rule it is of — on a handle the bindings'
 // object wraps (`__dom.FontFaceStateBase`). What font matching reads of it (`record`) is kept until a descriptor moves;
 // the face's promise, the loading cycle's tasks and its events are the bindings'.
@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 use v8::cppgc::{GarbageCollected, Visitor};
 
-use crate::font_faces::{FaceRecord, FACE_ATTRIBUTE_DESCRIPTORS};
+use crate::font_faces::{FaceRecord, FaceSource, FACE_ATTRIBUTE_DESCRIPTORS};
 
 // The wrapper tag `Object::wrap` / `unwrap` file the handle under (blob_data.rs' 18).
 const TAG: u16 = 19;
@@ -26,9 +26,8 @@ struct Face {
     // Its family as its descriptor serializes it, and each attribute's descriptor (`FACE_ATTRIBUTE_DESCRIPTORS`' order).
     family: String,
     descriptors: [String; 11],
-    // Its `src` string and the URL its `url()`s resolve against — none for a buffer's face, whose file is `file`.
-    source: Option<String>,
-    base: String,
+    // The sources its `src` string names, its `url()`s resolved — none for a buffer's face, whose file is `file`.
+    sources: Option<Vec<FaceSource>>,
     file: Option<String>,
     status: u32,
     // The message its constructor's arguments errored it with.
@@ -49,17 +48,16 @@ impl Face {
             for (name, value) in FACE_ATTRIBUTE_DESCRIPTORS.iter().zip(&self.descriptors) {
                 block.push_str(&format!(" {name}: {value};"));
             }
-            if let Some(src) = &self.source {
-                block.push_str(&format!(" src: {src};"));
-            }
-            self.record = Some(crate::font_faces::parse(&block, &self.base).unwrap_or_default());
+            let mut record = crate::font_faces::parse(&block, "about:blank").unwrap_or_default();
+            record.sources = self.sources.clone().unwrap_or_default();
+            self.record = Some(record);
         }
         self.record.as_ref().expect("made above")
     }
     // …and in a document's face list: none for a face with nothing to read — a buffer that decoded to no font, a face
     // its arguments errored (Chrome lays the text out with the fallback) — which holds its place all the same.
     fn listed(&mut self) -> FaceRecord {
-        if self.status == ERROR || (self.source.is_none() && self.file.is_none()) {
+        if self.status == ERROR || (self.sources.is_none() && self.file.is_none()) {
             return FaceRecord::default();
         }
         self.record().clone()
@@ -96,7 +94,8 @@ unsafe impl GarbageCollected for FaceHandle {
 // `family` parsed as the `font-family` descriptor, its serialization kept (one that is none, or does not write back as
 // given, a quoted string of it: font_faces.rs `constructed_family`, csswg-drafts#6236); each of `descriptors` (in
 // `FACE_ATTRIBUTE_DESCRIPTORS`' order, undefined for one not given) parsed by its grammar — one that does not, the empty
-// string, and the face errored; `source` a `src` string (null: a buffer's) that does not parse as one errored too. An
+// string, and the face errored; `source` a `src` string (null: a buffer's) that is not one `src` value whole errored too
+// (`font_faces::face_sources`), its `url()`s resolved against `base`. An
 // errored face's status is `error` from the start.
 fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if args.new_target().is_undefined() {
@@ -123,11 +122,13 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         descriptors[k] = value.unwrap_or_default();
     }
     // (…Chrome: `new FontFace('a', {})` is an error face, in these words)
-    if let Some(src) = source.as_deref().filter(|src| crate::font_faces::sources(src, &base).is_empty()) {
+    let sources = source.as_deref().map(|src| crate::font_faces::face_sources(src, &base));
+    if let (Some(src), Some(None)) = (&source, &sources) {
         error = Some(format!("The source provided ('{src}') could not be parsed as a value list."));
     }
+    let sources = sources.map(Option::unwrap_or_default);
     let status = if error.is_some() { ERROR } else { UNLOADED };
-    let face = Face { family, descriptors, source, base, file: None, status, error, rule: None, identity: None, reflected: None, record: None };
+    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, record: None };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
@@ -203,11 +204,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // The fields `ffField` reads, by number (font-face.js names them): 0..10 the attributes' descriptors, then these.
 const FAMILY: u32 = 11;
 const STATUS: u32 = 12;
-const SOURCE: u32 = 13;
-const FILE: u32 = 14;
-const ERROR_MESSAGE: u32 = 15;
-const RULE: u32 = 16;
-const IDENTITY: u32 = 17;
+const FILE: u32 = 13;
+const ERROR_MESSAGE: u32 = 14;
+const RULE: u32 = 15;
+const IDENTITY: u32 = 16;
 
 // __dom.ffField(state, field) -> the face's `field` (null for a text it has none of).
 fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -218,7 +218,6 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         k if (k as usize) < f.descriptors.len() => Some(f.descriptors[k as usize].as_str()),
         FAMILY => Some(f.family.as_str()),
         STATUS => return rv.set_uint32(f.status),
-        SOURCE => f.source.as_deref(),
         FILE => f.file.as_deref(),
         ERROR_MESSAGE => f.error.as_deref(),
         RULE => {
@@ -288,8 +287,8 @@ fn settle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // __dom.ffConnect(state, rule, identity, declared, family) — the face is CSS-connected (CSS Font Loading §2.2): of the
 // rule `rule`, made of its `declared` descriptors (`FACE_ATTRIBUTE_DESCRIPTORS`' order, empty for one the rule does not
 // declare), what makes it that face `identity`, its family the rule's `family` as the style engine took and serialized
-// it (`math` stays `math`, which the constructor's stricter reading would have quoted); with no `identity`, the rule it is of already declaring `declared` now —
-// reflected where they changed since (`Face::reflect`).
+// it (`math` stays `math`, which the constructor's stricter reading would have quoted); with no `identity`, the rule it
+// is of already declaring `declared` now — reflected where they changed since (`Face::reflect`).
 fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(face) = face(scope, args.get(0)) else { return };
     let rule = args.get(1).uint32_value(scope);
@@ -320,9 +319,7 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // each `url()` resolved against its base — none for a buffer's face.
 fn sources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(face) = face(scope, args.get(0)) else { return };
-    let f = face.borrow();
-    let sources = f.source.as_deref().map_or(Vec::new(), |src| crate::font_faces::sources(src, &f.base));
-    drop(f);
+    let sources = face.borrow().sources.clone().unwrap_or_default();
     let list = crate::font_faces::sources_array(scope, &sources);
     rv.set(list.into());
 }

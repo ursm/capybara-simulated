@@ -47,6 +47,8 @@ RSpec.describe 'web fonts' do
       when '/ahem.woff2' then [200, {'content-type' => 'font/woff2'}, [AHEM_WOFF2]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/based/only.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
+      when '/framed.html'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/based.html"></iframe><span id="t" style="font: 20px A">abcd</span>']]
       when '/based.html' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><base href="/based/"><body>']]
       when '/broken.ttf'  then [200, {'content-type' => 'font/ttf'}, ['not a font']]
       when '/weights.html'
@@ -242,6 +244,34 @@ RSpec.describe 'web fonts' do
       Promise.allSettled([c.load(), n.load()]).then(() => done([c.status, n.status, document.fonts.check('condensed 20px S'), document.fonts.check('20px S')]));
     JS
     expect(got).to eq(['loaded', 'error', true, false])
+  end
+
+  # A FontFace's `src` is ONE `src` value, whole: trailing text is no descriptor of the face's but an error, as Chrome's.
+  it 'errors a face whose src string runs past its one value' do
+    s = session
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = new FontFace('A', 'url(/ahem.ttf); font-weight: 900');
+      f.loaded.catch((e) => done([f.status, f.weight, e.name]));
+    JS
+    expect(got).to eq(['error', 'normal', 'SyntaxError'])
+  end
+
+  # A face another realm made, in this document's set, is this document's to measure with — renamed, it is no longer
+  # the face of the family it was.
+  it "follows a descriptor rewritten on another realm's face in the set" do
+    s = session('/framed.html')
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = new (document.querySelector('iframe').contentWindow.FontFace)('A', 'url(/ahem.ttf)');
+      document.fonts.add(f);
+      f.load().then(() => {
+        const before = t.getBoundingClientRect().width;
+        f.family = 'Q';
+        done([before, t.getBoundingClientRect().width === before]);
+      });
+    JS
+    expect(got).to eq([80, false])
   end
 
   # ── which rules apply, and against what base ──
