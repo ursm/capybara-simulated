@@ -332,6 +332,22 @@ RSpec.describe 'web fonts' do
     expect(got).to eq(['error', [], true])
   end
 
+  # A CSS-connected face is one its document's set holds: its own load() settles through that set's cycle, whose events
+  # are FontFaceSetLoadEvents — `loading` with no faces, `loadingerror` with the face that failed (Chrome).
+  it "settles a CSS-connected face's own load() through its document's set" do
+    s = session
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [];
+      for (const type of ['loading', 'loadingerror']) document.fonts.addEventListener(type, (e) => seen.push(type + ':' + e.fontfaces.map((f) => f.family).join()));
+      const style = document.createElement('style');
+      style.textContent = '@font-face { font-family: Gone2; src: url(/missing.ttf); }';
+      document.head.appendChild(style);
+      const face = [...document.fonts].find((f) => f.family === 'Gone2');
+      face.load().catch(() => setTimeout(() => done([face.status, seen]), 50));
+    JS
+    expect(got).to eq(['error', ['loading:', 'loadingerror:Gone2']])
+  end
+
   # ── which rules apply, and against what base ──
   it 'resolves a src against the stylesheet that declares it' do
     s = session('/nested.html')
