@@ -6721,17 +6721,14 @@ module Capybara
         nil   # redirect loop → failed navigation
       end
 
-      # A frame's document is a SECURE CONTEXT only when every ANCESTOR document is
-      # https — a service worker never controls (nor intercepts navigations of) a
-      # frame anywhere under an http document (secure-context.https). Walks the
-      # realm parent chain; the tree root is the window document itself. The
-      # frame's OWN scheme needs no check here: an http frame URL can't match an
-      # https registration scope anyway.
       # Whether a service worker may control a navigation of realm `realm_id`'s own navigable — the engine's
       # (navigables.rs `sw_may_control_navigation`: a secure context by its top-level creation URL, no origin a sandbox
-      # makes opaque).
-      private def secure_frame_ancestors?(realm_id)
-        @runtime.realm_call(realm_id.to_i, '__csimSwMayControlNavigation') == true
+      # makes opaque) — none of a frame realm gone (whose answer the main realm's would stand in for).
+      private def sw_may_control_frame_navigation?(realm_id)
+        id = realm_id.to_i
+        return false if id.positive? && !@runtime.frame_realm_alive?(id)
+
+        @runtime.realm_call(id, '__csimSwMayControlNavigation') == true
       end
 
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
@@ -10513,7 +10510,7 @@ module Capybara
         referrer_source, referrer_policy = realm_referrer_initiator(realm_id)
         return unless prompt_to_unload_frame(realm_id)
 
-        if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
+        if (!url.to_s.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: referrer_source, referrer_policy: referrer_policy,
                                                       resulting_client_id: rid, **post_args))
@@ -10636,7 +10633,7 @@ module Capybara
         # Skipped when an https navigation sits under an insecure ancestor (see
         # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
         initiator, referrer_policy = referrer
-        if (!get_url.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
+        if (!get_url.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
                                                           referrer_source: initiator, referrer_policy: referrer_policy,
                                                           site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
@@ -10711,7 +10708,7 @@ module Capybara
         # Skipped when an https navigation sits under an insecure ancestor (see
         # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
         initiator, referrer_policy = referrer
-        if (!url.to_s.start_with?('https://') || secure_frame_ancestors?(realm_id)) &&
+        if (!url.to_s.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
            (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: initiator, referrer_policy: referrer_policy,
                                                       site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))

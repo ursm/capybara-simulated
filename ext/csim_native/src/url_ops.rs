@@ -96,16 +96,17 @@ pub(crate) fn mutated_action_url(action: &str, query: &str) -> String {
         None => format!("{path}?{query}"),
     }
 }
-// Secure Contexts §3.1 "Is origin potentially trustworthy?" of a serialized `origin`: an opaque one ("null") never; a
-// tuple one whose scheme is https or wss, whose host is a loopback address (127.0.0.0/8, ::1) or a `localhost` name,
-// or whose scheme is file.
+// Secure Contexts §3.1 "Is origin potentially trustworthy?" of a serialized `origin`: an opaque one ("null") never —
+// a file: URL's among them, whose origin serializes so; a tuple one whose scheme is https or wss, or whose host is a
+// loopback address (127.0.0.0/8, ::1) or a `localhost` name, a trailing dot or not.
 pub(crate) fn potentially_trustworthy(origin: &str) -> bool {
     let Ok(url) = ada_url::Url::parse(origin, None) else { return false };
-    if matches!(url.protocol(), "https:" | "wss:" | "file:") {
+    if matches!(url.protocol(), "https:" | "wss:") {
         return true;
     }
     let host = url.hostname().to_ascii_lowercase();
-    if host == "localhost" || host.ends_with(".localhost") || host == "[::1]" {
+    let name = host.strip_suffix('.').unwrap_or(&host);
+    if name == "localhost" || name.ends_with(".localhost") || host == "[::1]" {
         return true;
     }
     host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
@@ -564,6 +565,8 @@ mod tests {
             ("wss://a.test", true),
             ("http://localhost:3000", true),
             ("http://app.localhost", true),
+            ("http://localhost.", true),
+            ("http://app.localhost.:8080", true),
             ("http://127.0.0.1", true),
             ("http://127.2.3.4:8080", true),
             ("http://[::1]", true),
