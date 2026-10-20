@@ -1121,8 +1121,10 @@ pub(crate) struct RealmState {
     // The nodes holding a scroll offset (`NodeData::scroll`), which every layout clamps to the range its box has then
     // (`geometry::reclamp_scrolls`) and a removal from the tree drops (`detach`).
     pub(crate) scrolled_nodes: Vec<NodeId>,
-    // The document's `@font-face`s, as the page side last listed them (font_faces.rs).
+    // The document's `@font-face`s, as the page side last listed them (font_faces.rs) — and the faces of the rules its
+    // sheets hold, as the style engine last listed them (`styleFontFaces`), which that list begins with.
     pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
+    pub(crate) rule_faces: Vec<crate::font_faces::FaceRecord>,
     // Its performance timeline's entry buffers, ids and registered observers (perf_timeline.rs).
     pub(crate) perf_timeline: crate::perf_timeline::PerfTimeline,
 }
@@ -4940,10 +4942,10 @@ fn style_shadow_sheets_unguarded(
     engine.set_shadow_sheets(arena, root, &sheets);
 }
 
-// __dom.styleFontFaces() -> [faceId, faceText, firstUrl, isFace, family, src, identity, attribute × 11, …]: the
-// `@font-face` rules the document's sheets hold that apply (`StyleEngine::font_faces`), each by its identity, its
-// declarations as text, its first `url()` source resolved (null for none), and what the FontFaceSet makes of it
-// (`font_faces::rule_face`). Undefined with no engine yet.
+// __dom.styleFontFaces() -> [faceId, firstUrl, isFace, family, src, identity, attribute × 11, …]: the `@font-face` rules
+// the document's sheets hold that apply (`StyleEngine::font_faces`), each by its identity, its first `url()` source
+// resolved (null for none), and what the FontFaceSet makes of it (`font_faces::rule_face`) — their faces kept for the
+// document's face list (`RealmArena::rule_faces`, `fontFacesSet`). Undefined with no engine yet.
 fn style_font_faces(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -4961,11 +4963,12 @@ fn style_font_faces_unguarded(
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-    for face in engine.font_faces(&arena.sheets) {
-        let (Some(text), url) = (v8::String::new(scope, &face.text), face.first_url.and_then(|u| v8::String::new(scope, &u))) else { continue };
+    let faces = engine.font_faces(&arena.sheets);
+    arena.rule_faces = faces.iter().map(|face| face.record.clone().unwrap_or_default()).collect();
+    for face in faces {
+        let url = face.first_url.and_then(|u| v8::String::new(scope, &u));
         let rule = crate::font_faces::rule_face(&face.declared);
         items.push(v8::Integer::new_from_unsigned(scope, face.id).into());
-        items.push(text.into());
         items.push(url.map_or_else(|| v8::null(scope).into(), Into::into));
         items.push(v8::Boolean::new(scope, rule.is_face).into());
         for value in [&rule.family, &rule.src, &rule.identity].into_iter().chain(&rule.attributes) {

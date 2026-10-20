@@ -49,6 +49,13 @@ pub(crate) fn bucket(weight: f64, slanted: bool) -> &'static str {
     }
 }
 
+// A face of no family: what a block that names none holds its place in a list with.
+impl Default for FaceRecord {
+    fn default() -> FaceRecord {
+        FaceRecord::of(String::new())
+    }
+}
+
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
@@ -73,14 +80,17 @@ impl FaceRecord {
 // where it names no family. A face with no source (one script built of a buffer) has none, and the page side knows its
 // file.
 pub(crate) fn parse(text: &str, base: &str) -> Option<FaceRecord> {
-    use style::font_face::{FontStyleRange, Source};
     use style::stylesheets::CssRuleType;
     let url = crate::cssom_decl::url_data(base);
     let context = crate::cssom_decl::rule_context(&url, CssRuleType::FontFace, false);
     let mut input = cssparser::ParserInput::new(text);
     let mut parser = cssparser::Parser::new(&mut input);
-    let rule = style::font_face::parse_font_face_block(&context, &mut parser, cssparser::SourceLocation { line: 0, column: 0 });
-    let d = rule.descriptors;
+    record(&style::font_face::parse_font_face_block(&context, &mut parser, cssparser::SourceLocation { line: 0, column: 0 }).descriptors)
+}
+// …and of the descriptors an `@font-face` rule of the page's declares, as the style engine parsed them (style.rs
+// `font_faces`).
+pub(crate) fn record(d: &style::properties::font_face::Descriptors) -> Option<FaceRecord> {
+    use style::font_face::{FontStyleRange, Source};
     let family = d.font_family.as_ref()?.name.to_string().to_ascii_lowercase();
     let mut sources = Vec::new();
     for source in d.src.as_ref().map_or(&[][..], |s| &s.0[..]) {
@@ -487,21 +497,20 @@ fn faces_of<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallback
     &mut arena.font_faces
 }
 
-// __dom.fontFacesSet(texts, bases) -> whether any face restricts its `unicode-range`: the document's faces, each a
-// descriptor block and the base its `url()`s resolve against (`parse`), in order — the realm's from now on. A block
-// that names no family holds a place all the same.
+// __dom.fontFacesSet(rules, texts, bases) -> whether any face restricts its `unicode-range`: a document's faces, in order
+// — the realm's from now on. With `rules`, the faces of the `@font-face` rules its sheets hold first, as the style engine
+// last listed them (`RealmArena::rule_faces`); then the faces script added to its set, each a descriptor block and the
+// base its `url()`s resolve against (`parse`). A face that names no family holds a place all the same.
 fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let texts = strings(scope, args.get(0));
-    let bases = strings(scope, args.get(1));
-    let faces: Vec<FaceRecord> = texts
-        .iter()
-        .enumerate()
-        .map(|(k, text)| {
-            parse(text, bases.get(k).map_or("about:blank", String::as_str)).unwrap_or_else(|| FaceRecord::of(String::new()))
-        })
-        .collect();
+    let rules = args.get(0).is_true();
+    let texts = strings(scope, args.get(1));
+    let bases = strings(scope, args.get(2));
+    let added = texts.iter().enumerate().map(|(k, text)| parse(text, bases.get(k).map_or("about:blank", String::as_str)).unwrap_or_default());
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena: &mut RealmArena = crate::dom::realm(scope, cid);
+    let faces: Vec<FaceRecord> = if rules { arena.rule_faces.clone() } else { Vec::new() }.into_iter().chain(added).collect();
     let restricted = faces.iter().any(|f| f.ranges.is_some());
-    *faces_of(scope, &args) = faces;
+    arena.font_faces = faces;
     rv.set_bool(restricted);
 }
 
@@ -518,7 +527,7 @@ fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
             // (…a face's `family` its descriptor serialized — the quoted literal a constructor made of an invalid family
             // too: the name it names)
             let family = family_descriptor(family).map_or_else(|| family.clone(), |(name, _)| name).to_ascii_lowercase();
-            let face = parse(&format!("font-family: x; {block}"), "about:blank").unwrap_or_else(|| FaceRecord::of(String::new()));
+            let face = parse(&format!("font-family: x; {block}"), "about:blank").unwrap_or_default();
             FaceRecord { family, ..face }
         })
         .collect();
