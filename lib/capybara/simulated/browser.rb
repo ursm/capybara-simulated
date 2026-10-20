@@ -1585,11 +1585,18 @@ module Capybara
       end
 
       # A file the user picked from disk, as the JS side builds its File:
-      # name, size, type and modification time.
+      # name, size, type and modification time — its name text, a path of
+      # raw bytes read as the UTF-8 a file system names it in.
       def picked_file(path)
         stat = (File.stat(path) rescue nil)
+        name = File.basename(path)
+        name = if name.encoding == Encoding::BINARY
+                 name.dup.force_encoding('UTF-8').scrub
+               else
+                 name.encode('UTF-8', invalid: :replace, undef: :replace)
+               end
         {
-          'name'         => File.basename(path),
+          'name'         => name,
           'size'         => stat ? stat.size : 0,
           # Real browsers tag the File with the MIME type they
           # sniffed from the path / disk header. Uppy's image-type
@@ -3259,7 +3266,7 @@ module Capybara
       # entries. Only a multipart body carries a file's bytes — read then through its `@file_picks` slot, or come from
       # the VM (an in-memory `new File([…])`); any other enctype sends its filename.
       def encode_entry_list(entries, enctype, encoding)
-        multipart = enctype.start_with?('multipart/form-data')
+        multipart = enctype.downcase.start_with?('multipart/form-data')
         list = entries.map {|e|
           next [e['name'].to_s, e['value'].to_s] unless e['file']
           next [e['name'].to_s, e['filename'].to_s] unless multipart

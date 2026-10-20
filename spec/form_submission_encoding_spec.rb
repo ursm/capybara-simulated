@@ -116,4 +116,18 @@ RSpec.describe 'Form submission encoding' do
     end
     expect(received.first[:query]).to eq('up=gone.txt')
   end
+
+  # A picked file's name is text: a path of raw bytes is read as the UTF-8 the file system names it in, a byte that is
+  # none a U+FFFD.
+  it "names a picked file of a raw-byte path by its bytes' UTF-8" do
+    received = []
+    s = simulated_session(app(received, '<form action="/get"><input type="file" name="up"><button>go</button></form>'))
+    s.visit '/'
+    Dir.mktmpdir do |dir|
+      path = File.join(dir.b, "\xC3\xA9t\xE9.txt".b)
+      File.write(path, 'x')
+      s.attach_file('up', path)
+      expect(s.evaluate_script('document.querySelector("input").files[0].name')).to eq("\u00E9t\uFFFD.txt")
+    end
+  end
 end
