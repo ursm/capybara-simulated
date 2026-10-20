@@ -601,22 +601,48 @@ fn listened_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set(crate::dom::nodes_value(scope, cid, &listened));
 }
 
-// `__dom.rareData(node[, make])` -> the node's rare data record — made first, with `make`, where it has none; else
-// undefined.
+// `__dom.rareData(object[, make])` -> the object's rare data record — made first, with `make`, where it has none; else
+// undefined. A node's is its handle's; any other object's — a window, an XMLHttpRequest, a node with no handle — sits
+// under a V8 private key, which no page script can name, enumerate or replace.
 fn rare_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ptr) = handle_of(scope, args.get(0)) else { return };
+    let make = args.get(1).is_true();
+    let Some(ptr) = handle_of(scope, args.get(0)) else {
+        let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+        // (…read in the object's own context: a WindowProxy keys a private name to its window only for the window's own
+        // realm, so a frame's window asked from its parent would otherwise answer a record of the proxy's)
+        let key = rare_key(scope);
+        if let Some(record) = object.get_private(scope, key).filter(|v| v.is_object()) {
+            return rv.set(record);
+        }
+        if make {
+            let record = new_record(scope);
+            object.set_private(scope, key, record.into());
+            rv.set(record.into());
+        }
+        return;
+    };
     let slot = unsafe { ptr.as_ref() }.rare.get();
     // SAFETY: the main thread writes the reference; the handle lives while the object, an argument, does.
     if let Some(record) = unsafe { (*slot).get(scope) } {
         return rv.set(record.into());
     }
-    if args.get(1).is_true() {
-        let null: v8::Local<v8::Value> = v8::null(scope).into();
-        let record = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
+    if make {
+        let record = new_record(scope);
         // SAFETY: as above.
         unsafe { (*slot).reset(scope, Some(record)) };
         rv.set(record.into());
     }
+}
+
+fn new_record<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Object> {
+    let null: v8::Local<v8::Value> = v8::null(scope).into();
+    v8::Object::with_prototype_and_properties(scope, null, &[], &[])
+}
+
+// The private key a handle-less object's rare data sits under: one per isolate, so every realm reaches the same record.
+fn rare_key<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Private> {
+    let name = v8::String::new(scope, "csim#rareData");
+    v8::Private::for_api(scope, name)
 }
 
 // `__dom.nodeData(node)` -> a character data node's data (`data`): the string it holds, or one made from the arena's and
