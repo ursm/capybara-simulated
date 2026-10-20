@@ -226,6 +226,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbIndexLive", index_live, context_id);
     register(scope, ns, "idbWriteIndexes", write_indexes, context_id);
     register(scope, ns, "idbGenerator", generator, context_id);
+    register(scope, ns, "idbKeyRefusal", key_refusal, context_id);
     register(scope, ns, "idbPut", put, context_id);
     register(scope, ns, "idbDelete", delete, context_id);
     register(scope, ns, "idbRetrieve", retrieve, context_id);
@@ -597,13 +598,35 @@ fn write_indexes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.idbGenerator(store) -> its key generator's current number (Infinity past 2^53), or null without one.
+// __dom.idbGenerator(store) -> the key its key generator generates next ("generate a key"), its current number — or
+// `GENERATOR_EXHAUSTED`, a ConstraintError, once that is past 2^53 (its maximum: a double tells no larger number from
+// it); null without one.
+const GENERATOR_EXHAUSTED: i32 = -1;
 fn generator(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let store = id_arg(scope, &args, 0);
     match with(|s| s.stores.get(&store).and_then(|st| st.current)) {
+        Some(n) if n > 2f64.powi(53) => rv.set_int32(GENERATOR_EXHAUSTED),
         Some(n) => rv.set_double(n),
         None => rv.set_null(),
     }
+}
+
+// What `put` / `add` refuse with a DataError before the value is cloned ("add or put" steps 6 and 7): a key given to a
+// store of in-line keys, and none to one of out-of-line keys and no key generator.
+const KEY_GIVEN_IN_LINE: u32 = 1;
+const KEY_MISSING: u32 = 2;
+// __dom.idbKeyRefusal(store, keyGiven) -> the refusal of a write of a key given or not (`KEY_*`), 0 for none.
+fn key_refusal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let store = id_arg(scope, &args, 0);
+    let given = args.get(1).is_true();
+    let refusal = with(|s| {
+        s.stores.get(&store).map_or(0, |st| match (st.key_path != KeyPath::None, given) {
+            (true, true) => KEY_GIVEN_IN_LINE,
+            (false, false) if st.current.is_none() => KEY_MISSING,
+            _ => 0,
+        })
+    });
+    rv.set_uint32(refusal);
 }
 
 // What a write is refused with: a record at the key already (`add`), or a unique index's key another record holds.
