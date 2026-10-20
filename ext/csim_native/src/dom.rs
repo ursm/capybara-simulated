@@ -2452,6 +2452,7 @@ pub(crate) struct Dom {
     // …and a WebSocket's connection's (ws_state.rs).
     pub(crate) ws_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     pub(crate) event_source_state_template: Option<v8::Global<v8::FunctionTemplate>>,
+    pub(crate) font_face_state_template: Option<v8::Global<v8::FunctionTemplate>>,
     // …and a URLPattern's (url_pattern.rs).
     pub(crate) url_pattern_template: Option<v8::Global<v8::FunctionTemplate>>,
     // A service worker realm's static router rules (sw_router.rs), by realm.
@@ -2935,6 +2936,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::sw_router::install(scope, ns, context_id);
     crate::ws_state::install(scope, ns, context_id);
     crate::event_source_state::install(scope, ns, context_id);
+    crate::font_face_state::install(scope, ns, context_id);
     crate::service_worker::install(scope, ns, context_id);
     crate::storage_areas::install(scope, ns, context_id);
     crate::paint::install(scope, ns, context_id);

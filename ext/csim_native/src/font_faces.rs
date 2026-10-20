@@ -62,7 +62,7 @@ impl FaceRecord {
         FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3] }
     }
     // The weight / style its `local()` names are looked up under: the bucket of the low end of its weight and its slant.
-    fn local_style(&self) -> &'static str {
+    pub(crate) fn local_style(&self) -> &'static str {
         bucket(self.weight.0, self.slanted)
     }
     // How far it is from what a style asks for (CSS Fonts 4 §5.2): the nearest stretch first, then the same slant, then
@@ -270,7 +270,7 @@ pub(crate) struct RuleFace {
 pub(crate) fn rule_face(declared: &[(&str, String)]) -> RuleFace {
     let of = |name: &str| declared.iter().find(|(n, _)| *n == name).map_or_else(String::new, |(_, v)| v.clone());
     let (family, src) = (of("font-family"), of("src"));
-    let sources = parse(&format!("font-family: x; src: {src}"), "about:blank").map_or(Vec::new(), |f| f.sources);
+    let sources = sources(&src, "about:blank");
     let name = family_descriptor(&family).map_or_else(|| family.trim().to_owned(), |(name, _)| name);
     let mut identity = name;
     for source in &sources {
@@ -405,11 +405,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFacesSet", font_faces_set, context_id);
     crate::dom::register(scope, ns, "fontFacePick", font_face_pick, context_id);
     crate::dom::register(scope, ns, "fontFaceInfo", font_face_info, context_id);
-    crate::dom::register(scope, ns, "fontFaceSources", font_face_sources, context_id);
-    crate::dom::register(scope, ns, "fontFaceDescriptor", font_face_descriptor, context_id);
-    crate::dom::register(scope, ns, "fontLocalStyle", font_local_style, context_id);
     crate::dom::register(scope, ns, "fontFamilyList", font_family_list_op, context_id);
-    crate::dom::register(scope, ns, "fontFamilyDescriptor", font_family_descriptor_op, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
 }
 // __dom.fontFamilyList(stack) -> the families of a `font-family` value, each as a stack of that one family
@@ -417,17 +413,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 fn font_family_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let stack = args.get(0).to_rust_string_lossy(scope);
     let items: Vec<v8::Local<v8::Value>> = serialized_family_list(&stack).iter().filter_map(|f| v8::String::new(scope, f)).map(Into::into).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-
-// __dom.fontFamilyDescriptor(value, constructed) -> [name, serialization] of a `font-family` descriptor
-// (`family_descriptor`), or null for a value that is none — with `constructed`, a FontFace constructor's
-// (`constructed_family`), which is never none.
-fn font_family_descriptor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let value = args.get(0).to_rust_string_lossy(scope);
-    let parsed = if args.get(1).is_true() { Some(constructed_family(&value)) } else { family_descriptor(&value) };
-    let Some((name, serialized)) = parsed else { return rv.set_null() };
-    let items: Vec<v8::Local<v8::Value>> = [name, serialized].iter().filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
@@ -469,43 +454,19 @@ pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
-// __dom.fontFaceDescriptor(name, value) -> the value serialized, or null where it is invalid (`descriptor`) — with no
-// value, the default (`descriptor_default`).
-fn font_face_descriptor(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = args.get(0).to_rust_string_lossy(scope);
-    let value = if args.get(1).is_undefined() {
-        descriptor_default(&name).map(str::to_owned)
-    } else {
-        let value = args.get(1).to_rust_string_lossy(scope);
-        descriptor(&name, &value)
-    };
-    match value.and_then(|v| v8::String::new(scope, &v)) {
-        Some(v) => rv.set(v.into()),
-        None => rv.set_null(),
-    }
-}
-
-// An array argument's strings.
-fn strings(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Vec<String> {
-    let Ok(list) = v8::Local::<v8::Array>::try_from(v) else { return Vec::new() };
-    (0..list.length()).map(|k| list.get_index(scope, k).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()).collect()
-}
-
 fn faces_of<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'a mut Vec<FaceRecord> {
     let cid = crate::dom::realm_id(scope, args);
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
     &mut arena.font_faces
 }
 
-// __dom.fontFacesSet(rules, texts, bases) -> whether any face restricts its `unicode-range`: a document's faces, in order
-// — the realm's from now on. With `rules`, the faces of the `@font-face` rules its sheets hold first, as the style engine
-// last listed them (`RealmArena::rule_faces`); then the faces script added to its set, each a descriptor block and the
-// base its `url()`s resolve against (`parse`). A face that names no family holds a place all the same.
+// __dom.fontFacesSet(rules, states) -> whether any face restricts its `unicode-range`: a document's faces, in order — the
+// realm's from now on. With `rules`, the faces of the `@font-face` rules its sheets hold first, as the style engine last
+// listed them (`RealmArena::rule_faces`); then the faces script added to its set, by their states (font_face_state.rs
+// `listed`). A face with nothing to read holds a place all the same.
 fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let rules = args.get(0).is_true();
-    let texts = strings(scope, args.get(1));
-    let bases = strings(scope, args.get(2));
-    let added = texts.iter().enumerate().map(|(k, text)| parse(text, bases.get(k).map_or("about:blank", String::as_str)).unwrap_or_default());
+    let added = crate::font_face_state::listed(scope, args.get(1));
     let cid = crate::dom::realm_id(scope, &args);
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
     let faces: Vec<FaceRecord> = if rules { arena.rule_faces.clone() } else { Vec::new() }.into_iter().chain(added).collect();
@@ -514,23 +475,11 @@ fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_bool(restricted);
 }
 
-// __dom.fontFacesMatching(font, text, families, descriptors) -> the indices of the faces `font` and `text` match among
-// a font face set's (`matching`) — each face its family and its other descriptors' block (`font-weight: …; …`) — or
-// null where `font` is no `font` value.
+// __dom.fontFacesMatching(font, text, states) -> the indices of the faces `font` and `text` match among a font face
+// set's (`matching`), by their states — or null where `font` is no `font` value.
 fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (font, text) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
-    let (families, blocks) = (strings(scope, args.get(2)), strings(scope, args.get(3)));
-    let faces: Vec<FaceRecord> = families
-        .iter()
-        .zip(&blocks)
-        .map(|(family, block)| {
-            // (…a face's `family` its descriptor serialized — the quoted literal a constructor made of an invalid family
-            // too: the name it names)
-            let family = family_descriptor(family).map_or_else(|| family.clone(), |(name, _)| name).to_ascii_lowercase();
-            let face = parse(&format!("font-family: x; {block}"), "about:blank").unwrap_or_default();
-            FaceRecord { family, ..face }
-        })
-        .collect();
+    let faces = crate::font_face_state::records(scope, args.get(2));
     match matching(&faces, &font, &text) {
         Some(picked) => rv.set(crate::dom::f64_array(scope, &picked.into_iter().map(|i| i as f64).collect::<Vec<_>>()).into()),
         None => rv.set_null(),
@@ -544,18 +493,6 @@ fn font_face_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let all = args.get(2).is_true();
     let picked: Vec<f64> = pick(faces_of(scope, &args), &stack, &bucket, all).into_iter().map(|i| i as f64).collect();
     rv.set(crate::dom::f64_array(scope, &picked).into());
-}
-
-// __dom.fontLocalStyle(weight, style) -> the weight / style a face's `local()` names are looked up under, of its `weight`
-// and `style` descriptors as written (a FontFace's attributes, a rule's — a value they refuse as none: normal): `bold`
-// where the low end of its weight is 600 or more, `italic` where it is slanted, in the colon form `fc_match` expects —
-// '' for neither.
-fn font_local_style(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [weight, style] = [0, 1].map(|k| args.get(k).to_rust_string_lossy(scope));
-    rv.set(v8::String::new(scope, local_style_of(&weight, &style)).unwrap().into());
-}
-fn local_style_of(weight: &str, style: &str) -> &'static str {
-    parse(&format!("font-family: a; font-weight: {weight}; font-style: {style}"), "about:blank").map_or("", |f| f.local_style())
 }
 
 // __dom.fontFaceInfo(index) -> `[sources, sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges,
@@ -578,7 +515,7 @@ fn font_face_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     items.push(v8::String::new(scope, face.local_style()).unwrap().into());
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v8::Local<'s, v8::Array> {
+pub(crate) fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v8::Local<'s, v8::Array> {
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
     for source in list {
         let (kind, value) = match source {
@@ -592,22 +529,20 @@ fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v
     v8::Array::new_with_elements(scope, &items)
 }
 
-// __dom.fontFaceSources(src, base) -> a `src` descriptor's sources in order, flat `[kind, value, …]`, each `url()`
-// resolved against `base` — those a browser would try (`parse`); none where it does not parse.
-fn font_face_sources(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let src = args.get(0).to_rust_string_lossy(scope);
-    let base = args.get(1).to_rust_string_lossy(scope);
-    let sources = parse(&format!("font-family: x; src: {src}"), &base).map_or(Vec::new(), |f| f.sources);
-    let list = sources_array(scope, &sources);
-    rv.set(list.into());
+// A `src` descriptor's sources a browser would try, in order, each `url()` resolved against `base` (`parse`) — none
+// where it does not parse.
+pub(crate) fn sources(src: &str, base: &str) -> Vec<FaceSource> {
+    parse(&format!("font-family: x; src: {src}"), base).map_or(Vec::new(), |f| f.sources)
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn local_style_reads_the_descriptors() {
+        let local_style_of = |weight: &str, style: &str| {
+            parse(&format!("font-family: a; font-weight: {weight}; font-style: {style}"), "about:blank").map_or("", |f| f.local_style())
+        };
         assert_eq!(local_style_of("bold", "normal"), "bold");
         assert_eq!(local_style_of("700 400", "normal"), "");
         assert_eq!(local_style_of("650.5", "italic"), "bold:italic");

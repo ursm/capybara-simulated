@@ -46,6 +46,8 @@ RSpec.describe 'web fonts' do
       when '/ahem.woff' then [200, {'content-type' => 'font/woff'}, [woff_of(AHEM)]]
       when '/ahem.woff2' then [200, {'content-type' => 'font/woff2'}, [AHEM_WOFF2]]
       when '/missing.ttf' then [404, {'content-type' => 'text/plain'}, ['no']]
+      when '/based/only.ttf' then [200, {'content-type' => 'font/ttf'}, [AHEM]]
+      when '/based.html' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><base href="/based/"><body>']]
       when '/broken.ttf'  then [200, {'content-type' => 'font/ttf'}, ['not a font']]
       when '/weights.html'
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
@@ -226,6 +228,20 @@ RSpec.describe 'web fonts' do
     s = session
     s.execute_script("document.fonts.add(new FontFace('Added', 'url(/ahem.ttf)')); var el = document.createElement('span'); el.id = 'added'; el.style.fontFamily = 'Added'; el.textContent = 'abcd'; document.body.appendChild(el);")
     expect(width(s, 'added')).to eq(80)
+  end
+
+  # A script's face resolves its `src` against its realm's API base URL — the document's base URL — and a set matches its
+  # faces by their stretch before their style and weight (CSS Fonts 4 §5.2): `condensed` takes the condensed face only.
+  it "resolves a script face's src against the document's base URL, and matches a set's faces by their stretch" do
+    s = session('/based.html')
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const c = new FontFace('S', 'url(only.ttf)', {stretch: 'condensed'}), n = new FontFace('S', 'url(/missing.ttf)');
+      document.fonts.add(c);
+      document.fonts.add(n);
+      Promise.allSettled([c.load(), n.load()]).then(() => done([c.status, n.status, document.fonts.check('condensed 20px S'), document.fonts.check('20px S')]));
+    JS
+    expect(got).to eq(['loaded', 'error', true, false])
   end
 
   # ── which rules apply, and against what base ──

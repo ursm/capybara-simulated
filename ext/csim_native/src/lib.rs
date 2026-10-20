@@ -56,6 +56,7 @@ mod editing_insert;
 mod element_state;
 mod event_path;
 mod event_source_state;
+mod font_face_state;
 mod focus;
 // Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout); the JS side
 // registers a font (registerFontPath) to a handle it names the face by (`walkFace`).
