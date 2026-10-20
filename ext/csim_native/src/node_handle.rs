@@ -759,12 +759,13 @@ fn set_subtree_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     }
 }
 
-// `__dom.dispatchPath(targetNid)` -> [path, stores] for a dispatch at a node: the target and its ancestors up to its
-// root, their objects — made for the nodes the engine made that have none — and each one's listener store (undefined
-// for none); undefined where a node of it still has no object, which the bindings' own walk then answers; null where the path crosses a shadow root, which the flat
+// `__dom.dispatchPath(targetNid, formStop)` -> [path, stores, end, window] for a dispatch at a node: the target and its
+// ancestors up to its root, their objects — made for the nodes the engine made that have none — each one's listener
+// store (undefined for none), and the rest of its plan (event_path.rs `path_plan`); undefined where a node of it still has no object, which the bindings' own walk then answers; null where the path crosses a shadow root, which the flat
 // tree's event path (event_path.rs) retargets across.
 fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(target) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let form_stop = args.get(1).is_true();
     // (…the objects of the nodes the engine made made first — a clone's ancestors the page never asked for — before any
     // handle is read: making one runs script)
     let chain: Vec<(NodeId, Option<HeldObject>)> = {
@@ -803,6 +804,7 @@ fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         whole.then_some(out)
     };
     let Some(handles) = handles else { return };
+    let (end, window) = crate::event_path::path_plan(&crate::dom::dom(scope).arena, chain.iter().map(|&(id, _)| id), form_stop);
     let undefined: v8::Local<v8::Value> = v8::undefined(scope).into();
     let mut path = Vec::with_capacity(handles.len());
     let mut stores = Vec::with_capacity(handles.len());
@@ -814,7 +816,9 @@ fn dispatch_path(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     }
     let path = v8::Array::new_with_elements(scope, &path).into();
     let stores = v8::Array::new_with_elements(scope, &stores).into();
-    rv.set(v8::Array::new_with_elements(scope, &[path, stores]).into());
+    let end = v8::Number::new(scope, end as f64).into();
+    let window = v8::Boolean::new(scope, window).into();
+    rv.set(v8::Array::new_with_elements(scope, &[path, stores, end, window]).into());
 }
 
 // `__dom.noteListenerType(type)`: a node has a listener of `type` — a type none had before, counted.
