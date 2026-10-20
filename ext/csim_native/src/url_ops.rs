@@ -10,6 +10,7 @@ use ada_url::Url;
 use crate::dom::register;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "potentiallyTrustworthy", potentially_trustworthy_op, context_id);
     register(scope, ns, "urlParse", url_parse, context_id);
     register(scope, ns, "urlSet", url_set, context_id);
     register(scope, ns, "urlIsFragmentNavigation", url_is_fragment_navigation, context_id);
@@ -95,6 +96,26 @@ pub(crate) fn mutated_action_url(action: &str, query: &str) -> String {
         None => format!("{path}?{query}"),
     }
 }
+// Secure Contexts §3.1 "Is origin potentially trustworthy?" of a serialized `origin`: an opaque one ("null") never; a
+// tuple one whose scheme is https or wss, whose host is a loopback address (127.0.0.0/8, ::1) or a `localhost` name,
+// or whose scheme is file.
+pub(crate) fn potentially_trustworthy(origin: &str) -> bool {
+    let Ok(url) = ada_url::Url::parse(origin, None) else { return false };
+    if matches!(url.protocol(), "https:" | "wss:" | "file:") {
+        return true;
+    }
+    let host = url.hostname().to_ascii_lowercase();
+    if host == "localhost" || host.ends_with(".localhost") || host == "[::1]" {
+        return true;
+    }
+    host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
+}
+// __dom.potentiallyTrustworthy(origin) -> `potentially_trustworthy`.
+fn potentially_trustworthy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let origin = args.get(0).to_rust_string_lossy(scope);
+    rv.set_bool(potentially_trustworthy(&origin));
+}
+
 // The referrer policy tokens (Referrer Policy §3).
 const POLICIES: [&str; 8] = [
     "no-referrer",
@@ -518,6 +539,24 @@ fn javascript_url_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_origin_is_trustworthy_as_secure_contexts_says() {
+        for (origin, trusted) in [
+            ("https://a.test", true),
+            ("wss://a.test", true),
+            ("http://localhost:3000", true),
+            ("http://app.localhost", true),
+            ("http://127.0.0.1", true),
+            ("http://127.2.3.4:8080", true),
+            ("http://[::1]", true),
+            ("http://www.example.com", false),
+            ("http://10.0.0.1", false),
+            ("null", false),
+        ] {
+            assert_eq!(potentially_trustworthy(origin), trusted, "{origin}");
+        }
+    }
 
     #[test]
     fn a_javascript_url_runs_its_percent_decoded_utf8() {

@@ -5811,20 +5811,8 @@ service-workers/service-worker/resource-timing.sub.https.html:
 - Non-controlled resource loads
 service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
 - Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
-- Request for an iframe in the iframe sandboxed by CSP HTTP header with allow-scripts
-  flag
-- Request for an iframe in the iframe sandboxed by an attribute with allow-scripts
-  flag
-- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
-  the iframe sandboxed by CSP HTTP header with allow-scripts flag
-- Request for an sandboxed iframe with allow-scripts and allow-same-origin flag in
-  the iframe sandboxed by an attribute with allow-scripts flag
 - Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
   by CSP HTTP header with allow-scripts and allow-same-origin flag
-- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
-  by CSP HTTP header with allow-scripts flag
-- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
-  by an attribute with allow-scripts flag
 - Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
   by attribute with allow-scripts and allow-same-origin flag
 - Request for an sandboxed iframe with allow-scripts flag in the normal iframe
