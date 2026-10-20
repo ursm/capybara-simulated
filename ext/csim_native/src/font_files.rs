@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::dom::{realm, realm_id, register};
+use crate::dom::realm;
 use crate::font_faces::FaceSource;
 
 // A source, by its kind (`URL`, `LOCAL`) and its key: the URL, or the name and the weight / style it was asked under.
@@ -15,10 +15,6 @@ pub(crate) struct FontFiles(HashMap<(u32, String), Option<String>>);
 // A source's kind, by number (font-metrics.js names them).
 pub(crate) const URL: u32 = 0;
 pub(crate) const LOCAL: u32 = 1;
-
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    register(scope, ns, "fontFaceFile", font_face_file, context_id);
-}
 
 // The script was terminated while the page side was asked: nothing it answered is kept.
 pub(crate) struct Terminated;
@@ -88,15 +84,4 @@ pub(crate) fn answer_file(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnV
 pub(crate) fn source_tried(arena: &crate::dom::RealmArena, kind: u32, value: &str) -> Option<bool> {
     let path = arena.font_files.0.get(&(kind, value.to_owned()))?;
     Some(path.as_deref().is_some_and(|p| crate::font::register_path(p) >= 0))
-}
-
-// __dom.fontFaceFile(index, fetch) -> the file the document's face `index` is read from (font_faces.rs, the realm's
-// list), or null where it has none native reads (`face_file`).
-fn font_face_file(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(fetch) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return rv.set_null() };
-    let index = args.get(0).uint32_value(scope).unwrap_or(u32::MAX) as usize;
-    let cid = realm_id(scope, &args);
-    let Some(face) = realm(scope, cid).font_faces.get(index).cloned() else { return rv.set_null() };
-    let file = face_file(scope, cid, face.file.as_deref(), &face.sources, face.local_style(), fetch);
-    answer_file(scope, &mut rv, file);
 }

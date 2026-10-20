@@ -23,7 +23,7 @@ use skrifa::{FontRef, MetadataProvider};
 pub(crate) struct FontMetrics {
     ascii: [Option<f64>; 128],
     avg: f64,
-    // A `unicode-range` SPLIT (`registerFontStack`): the faces a run's characters pick from, in order — the first that
+    // A `unicode-range` SPLIT (font_resolve.rs `stack_handle`): the faces a run's characters pick from, in order — the first that
     // covers a character measures it, and one none covers is this face's own (`member_for`). None for a single face.
     split: Option<Vec<StackMember>>,
     // The `size-adjust` its advances are scaled by (`register_scaled`), which a painter draws its glyphs at too — 1 for
@@ -84,7 +84,7 @@ impl FontMetrics {
     pub(crate) fn member_handle(&self, cp: u32) -> Option<i32> {
         self.member_for(cp).map(|m| m.handle)
     }
-    // Whether this face splits a run's characters across faces (`registerFontStack`).
+    // Whether this face splits a run's characters across faces (font_resolve.rs `stack_handle`).
     pub(crate) fn is_split(&self) -> bool {
         self.split.is_some()
     }
@@ -398,7 +398,7 @@ pub(crate) fn sfnt_for_ruby(ruby: &magnus::Ruby, bytes: magnus::RString) -> Opti
     out.map(|s| ruby.str_from_slice(&s))
 }
 
-// A face as the host names it — fontconfig.rs answers it, `registerFontPath` takes it: its file's path, then, for a
+// A face as the host names it — fontconfig.rs answers it, `register_path` takes it: its file's path, then, for a
 // member of a collection (`.ttc`) other than its first, a NUL and the member's index — NUL being the one character no
 // path holds.
 pub(crate) fn face_name(path: &str, index: u32) -> String {

@@ -411,8 +411,6 @@ fn weight_distance(want: f64, (lo, hi): (f64, f64)) -> f64 {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "fontFacesSet", font_faces_set, context_id);
-    crate::dom::register(scope, ns, "fontFacePick", font_face_pick, context_id);
-    crate::dom::register(scope, ns, "fontFaceInfo", font_face_info, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
 }
 
@@ -459,28 +457,23 @@ pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
-fn faces_of<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'a mut Vec<FaceRecord> {
-    let cid = crate::dom::realm_id(scope, args);
-    let arena: &mut RealmArena = crate::dom::realm(scope, cid);
-    &mut arena.font_faces
-}
 
-// __dom.fontFacesSet(rules, states) -> whether any face restricts its `unicode-range`: a document's faces, in order — the
-// realm's from now on. First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine last listed
-// them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its set, by
+// __dom.fontFacesSet(rules, states): a document's faces, in order — the realm's from now on, what it read of them before
+// forgotten (font_resolve.rs). First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine
+// last listed them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its set, by
 // their states (font_face_state.rs `listed`). A face with nothing to read holds a place all the same — and so does each
 // of a list of rules the engine no longer holds (an index listed before the rules last moved): where the page side's
 // list and this one disagree, nothing is picked rather than another rule's face.
-fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let rules = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
     let added = crate::font_face_state::listed(scope, args.get(1));
     let cid = crate::dom::realm_id(scope, &args);
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
     let ruled = if arena.rule_faces.len() == rules { arena.rule_faces.clone() } else { vec![FaceRecord::default(); rules] };
     let faces: Vec<FaceRecord> = ruled.into_iter().chain(added).collect();
-    let restricted = faces.iter().any(|f| f.ranges.is_some());
     arena.font_faces = faces;
-    rv.set_bool(restricted);
+    arena.face_files.clear();
+    arena.family_faces.clear();
 }
 
 // __dom.fontFacesMatching(font, text, states) -> the indices of the faces `font` and `text` match among a font face
@@ -494,30 +487,6 @@ fn font_faces_matching(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
 }
 
-// __dom.fontFacePick(stack, bucket, all) -> the indices of the faces the stack takes (`pick`).
-fn font_face_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let stack = args.get(0).to_rust_string_lossy(scope);
-    let bucket = args.get(1).to_rust_string_lossy(scope);
-    let all = args.get(2).is_true();
-    let picked: Vec<f64> = pick(faces_of(scope, &args), &stack, &bucket, all).into_iter().map(|i| i as f64).collect();
-    rv.set(crate::dom::f64_array(scope, &picked).into());
-}
-
-// __dom.fontFaceInfo(index) -> `[sizeAdjust, ascentOverride, descentOverride, lineGapOverride, ranges]` of a face: its
-// overrides NaN where it has none, its ranges a flat `[lo, hi, …]` or null for every code point.
-fn font_face_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let index = args.get(0).int32_value(scope).unwrap_or(-1);
-    let Some(face) = usize::try_from(index).ok().and_then(|i| faces_of(scope, &args).get(i).cloned()) else { return rv.set_null() };
-    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Number::new(scope, face.size_adjust).into()];
-    for o in face.overrides {
-        items.push(v8::Number::new(scope, o.unwrap_or(f64::NAN)).into());
-    }
-    items.push(match &face.ranges {
-        Some(r) => crate::dom::f64_array(scope, &r.iter().flat_map(|&(lo, hi)| [f64::from(lo), f64::from(hi)]).collect::<Vec<_>>()).into(),
-        None => v8::null(scope).into(),
-    });
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
 pub(crate) fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSource]) -> v8::Local<'s, v8::Array> {
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
     for source in list {

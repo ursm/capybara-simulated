@@ -1125,6 +1125,10 @@ pub(crate) struct RealmState {
     // sheets hold, as the style engine last listed them (`styleFontFaces`), which that list begins with.
     pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
     pub(crate) rule_faces: Vec<crate::font_faces::FaceRecord>,
+    // What a face of that list is read from, once asked (font_resolve.rs `indexed_file`), and the face each family stack
+    // takes at a bucket (`family_face`) — both forgotten when the list moves.
+    pub(crate) face_files: Vec<Option<Option<String>>>,
+    pub(crate) family_faces: std::collections::HashMap<String, std::collections::HashMap<String, crate::font_resolve::Resolved>>,
     // Its performance timeline's entry buffers, ids and registered observers (perf_timeline.rs).
     pub(crate) perf_timeline: crate::perf_timeline::PerfTimeline,
 }
@@ -2729,7 +2733,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::selected_coordinates::install(scope, ns, context_id);
     crate::realm_location::install(scope, ns, context_id);
-    crate::font_files::install(scope, ns, context_id);
+    crate::font_resolve::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);
@@ -3011,11 +3015,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "forgetRealmObjects", forget_realm_objects, context_id);
     // The layout walk's reuse counts (the pass itself, `layoutBuild`, is walk_ops.rs's).
     register(scope, ns, "layoutMeasureCounts", layout_measure_counts, context_id);
-    // Native text metrics (fontations) for inline layout: register a font (fontconfig path or in-memory
-    // SFNT bytes) to a handle the JS side names its faces by (`walkFaces`); layout measures runs in-process.
-    register(scope, ns, "registerFontPath", register_font_path, context_id);
-    register(scope, ns, "registerFontScaled", register_font_scaled, context_id);
-    register(scope, ns, "registerFontStack", register_font_stack, context_id);
     if let Some(key) = v8::String::new(scope, "__dom") {
         let global = context.global(scope);
         global.set(scope, key.into(), ns.into());
@@ -5670,60 +5669,6 @@ fn drop_realm(
         crate::text_codec::drop_realm(scope, id);   // (…and the stream decoders it left open)
         crate::agents::drop_realm(scope, id);   // (…and the agent it was)
     }
-}
-
-// __dom.registerFontPath(face) -> handle (>=0), or -1 when the face can't be read/parsed. The host resolved the face
-// (`font::face_name`) via fontconfig; native parses it (skrifa) into an advance table, cached.
-fn register_font_path(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let path = args.get(0).to_rust_string_lossy(scope);
-    rv.set_int32(crate::font::register_path(&path));
-}
-
-// __dom.registerFontScaled(handle, scale) -> handle: the face `handle` under a `size-adjust` of `scale`.
-fn register_font_scaled(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let handle = args.get(0).int32_value(scope).unwrap_or(-1);
-    let scale = args.get(1).number_value(scope).unwrap_or(f64::NAN);
-    rv.set_int32(if scale.is_finite() && scale > 0.0 { crate::font::register_scaled(handle, scale) } else { -1 });
-}
-
-// __dom.registerFontStack(primary, members) -> handle: a `unicode-range` split, `members` a flat [handle, ascOverride,
-// descOverride, gapOverride, rangeCount, lo, hi, …] list in pick order — each member's `@font-face` metric overrides (NaN
-// for none: its file's metrics, `FontMetrics::face`), and rangeCount -1 where it covers every code point.
-fn register_font_stack(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let primary = args.get(0).int32_value(scope).unwrap_or(-1);
-    let flat = f64_arg(args.get(1));
-    let mut members = Vec::new();
-    let mut i = 0;
-    while i + 4 < flat.len() {
-        let (handle, overrides, count) = (flat[i] as i32, [flat[i + 1], flat[i + 2], flat[i + 3]].map(|v| v.is_finite().then_some(v)), flat[i + 4]);
-        i += 5;
-        let ranges = if count < 0.0 {
-            None
-        } else {
-            let n = count as usize;
-            if i + 2 * n > flat.len() {
-                break;
-            }
-            let r = (0..n).map(|k| (flat[i + 2 * k] as u32, flat[i + 2 * k + 1] as u32)).collect();
-            i += 2 * n;
-            Some(r)
-        };
-        let vertical = crate::font::with_font(handle, |fm| fm.face(overrides).map(|(v, _, _)| v)).flatten();
-        members.push(crate::font::StackMember { ranges, handle, vertical });
-    }
-    rv.set_int32(crate::font::register_stack(primary, members));
 }
 
 // A Float64Array argument's values, read IN PLACE rather than copied out twice through a byte vector. Copied only

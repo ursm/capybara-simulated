@@ -57,9 +57,10 @@ mod element_state;
 mod event_path;
 mod event_source_state;
 mod font_face_state;
+mod font_resolve;
 mod focus;
-// Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout); the JS side
-// registers a font (registerFontPath) to a handle it names the face by (`walkFaces`).
+// Native text metrics (fontations) — used IN-PROCESS by inline layout (mod layout): a font file registered
+// (`font::register_path`) to the handle a family's face is (font_resolve.rs, `walkFaces`).
 mod font;
 mod font_faces;
 mod form_entries;
