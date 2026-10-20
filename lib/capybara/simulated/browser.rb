@@ -3255,28 +3255,23 @@ module Capybara
 
       # HTML "encode the entry list" by enctype, in the form's submission character `encoding` → [body, exact
       # Content-Type], the engine's (text_codec.rs `encode_entry_list_for_ruby`). `entries` is the ordered entry list —
-      # string {'name','value'} or file {'name','file'=>true,'filename','handle','index'} entries; a file's bytes resolve
-      # through the `@file_picks` slot, or come from the VM (an in-memory `new File([…])`).
+      # string {'name','value'} or file {'name','file'=>true,'filename','type', and 'handle'/'index' or 'bytes'}
+      # entries. Only a multipart body carries a file's bytes — read then through its `@file_picks` slot, or come from
+      # the VM (an in-memory `new File([…])`); any other enctype sends its filename.
       def encode_entry_list(entries, enctype, encoding)
+        multipart = enctype.start_with?('multipart/form-data')
         list = entries.map {|e|
           next [e['name'].to_s, e['value'].to_s] unless e['file']
+          next [e['name'].to_s, e['filename'].to_s] unless multipart
 
           path = entry_file_path(e)
-          if path
-            [e['name'].to_s, File.basename(path), Rack::Mime.mime_type(File.extname(path)), File.binread(path)]
-          else
-            [e['name'].to_s, e['filename'].to_s, e['type'].to_s, e['bytes'].to_s.b]
-          end
+          [e['name'].to_s, e['filename'].to_s, e['type'].to_s, path ? File.binread(path) : e['bytes'].to_s.b]
         }
         Native.encode_entry_list(list, enctype, encoding)
       end
 
-      # Resolve a threaded file entry's on-disk path via the `@file_picks` slot
-      # recorded at `attach_file` time (handle/index). nil for a purely in-memory
-      # `new File(['bytes'], …)` (no slot) — a CLASSIC (non-Turbo) submit then
-      # drops its bytes, while the fetch/XHR path serializes them in JS
-      # (`serializeMultipart` → `blobBytes`). This covers every realistic upload
-      # (a host-backed file submitted through Turbo or a plain form).
+      # A threaded file entry's on-disk path, through the `@file_picks` slot recorded at `attach_file` time
+      # (handle/index) — nil for an in-memory `new File([…])`, which has no slot (its bytes come from the VM).
       def entry_file_path(entry)
         handle = entry['handle']
         return nil if handle.nil?

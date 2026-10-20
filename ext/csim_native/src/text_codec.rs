@@ -422,7 +422,16 @@ fn legacy_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 
 #[cfg(test)]
 mod tests {
-    use super::encode_chunk;
+    use super::{encode_chunk, encode_entries, Encoding};
+
+    #[test]
+    fn an_entry_list_encodes_by_its_enctype() {
+        let entries = [("a b".to_owned(), "x~*\r\ny".to_owned()), ("名".to_owned(), "😀".to_owned())];
+        assert_eq!(encode_entries("application/x-www-form-urlencoded", None, &entries).0, b"a+b=x%7E*%0D%0Ay&%E5%90%8D=%F0%9F%98%80".to_vec());
+        assert_eq!(encode_entries("TEXT/PLAIN", None, &entries), ("a b=x~*\r\ny\r\n名=😀\r\n".as_bytes().to_vec(), "text/plain"));
+        let sjis = Encoding::for_label(b"shift_jis");
+        assert_eq!(encode_entries("application/x-www-form-urlencoded", sjis, &entries[1..]).0, b"%96%BC=%26%23128512%3B".to_vec());
+    }
 
     #[test]
     fn a_chunk_keeps_a_lead_it_ends_with_for_the_next() {

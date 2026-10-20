@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require 'tmpdir'
 
 # A form submits in its submission character encoding — `accept-charset`, else its document's encoding (HTML "picking
 # an encoding for the form") — whichever path carries it: a top-level navigation the host encodes, or a named frame
@@ -98,5 +99,21 @@ RSpec.describe 'Form submission encoding' do
     s.find('button').click
     body = received.first[:body]
     expect(body).to include(%(Content-Disposition: form-data; name="up"; filename=""\r\nContent-Type: application/octet-stream\r\n\r\n\r\n))
+  end
+
+  # A form submitted as anything but multipart sends a file entry's filename alone: it reads no file, so one deleted
+  # since it was picked submits all the same.
+  it "submits a picked file's name, not its bytes, where the enctype is not multipart" do
+    received = []
+    s = simulated_session(app(received, '<form action="/get"><input type="file" name="up"><button>go</button></form>'))
+    s.visit '/'
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'gone.txt')
+      File.write(path, 'x')
+      s.attach_file('up', path)
+      File.delete(path)
+      s.find('button').click
+    end
+    expect(received.first[:query]).to eq('up=gone.txt')
   end
 end
