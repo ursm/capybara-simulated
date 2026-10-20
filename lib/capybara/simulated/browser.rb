@@ -24,6 +24,10 @@ require_relative 'webauthn_state'
 
 module Capybara
   module Simulated
+    # An asynchronous script that never called its callback in the time Capybara waits (`evaluate_async_script`), as
+    # Selenium's and Cuprite's ScriptTimeoutError say of one.
+    class ScriptTimeoutError < StandardError; end
+
     class Browser
       # Fallback origin for `visit('/foo')` and friends when no current
       # page is loaded yet. Track Capybara's idea of the test server
@@ -2664,7 +2668,7 @@ module Capybara
           sleep 0.01
           tick_real_time
         end
-        nil
+        raise ScriptTimeoutError, "the script did not call its callback within #{Capybara.default_max_wait_time} seconds"
       ensure
         # (…and what the script left to do, once its result is read: a navigation would take the result with the page)
         drain_task_intents

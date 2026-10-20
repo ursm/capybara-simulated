@@ -191,21 +191,27 @@ impl RealmArena {
 // content attribute, a string timer, `new Function`, `eval`: V8's `eval at …, <anonymous>:L:C`), whose URL is the
 // document's. None for a stack of no such frame.
 pub(crate) fn stack_location(stack: &str) -> Option<(bool, String, u32, u32)> {
+    fn number(s: &str) -> Option<u32> {
+        s.bytes().all(|b| b.is_ascii_digit()).then(|| s.parse().ok()).flatten()
+    }
     fn line_col(s: &str) -> Option<(&str, u32, u32)> {
         let (rest, col) = s.rsplit_once(':')?;
         let (rest, line) = rest.rsplit_once(':')?;
-        Some((rest, line.parse().ok()?, col.parse().ok()?))
+        Some((rest, number(line)?, number(col)?))
     }
     for line in stack.lines() {
         let Some(frame) = line.trim_start().strip_prefix("at ").filter(|_| line.starts_with(char::is_whitespace)) else { continue };
         let evaluated = frame.contains("(eval at ").then(|| frame.strip_suffix(')')?.rsplit_once(", <anonymous>:")).flatten();
-        if let Some((l, c)) = evaluated.and_then(|(_, lc)| lc.split_once(':')).and_then(|(l, c)| Some((l.parse().ok()?, c.parse().ok()?))) {
+        if let Some((l, c)) = evaluated.and_then(|(_, lc)| lc.split_once(':')).and_then(|(l, c)| Some((number(l)?, number(c)?))) {
             return Some((true, String::new(), l, c));
         }
-        let place = frame.split_once('(').map_or(frame, |(_, p)| p);
+        // (…after the function's name, which a page may make anything — `foo (bar)` — the last ` (`: no script URL has a
+        // space)
+        let place = frame.rsplit_once(" (").map_or(frame, |(_, p)| p);
         let place = place.strip_suffix(')').unwrap_or(place);
         let Some((url, l, c)) = line_col(place) else { continue };
-        if url.is_empty() || url.contains(char::is_whitespace) || url == "<snapshot>" {
+        // (…the driver's own frames: the snapshot's, and the host's `<eval>` its script runners are compiled under)
+        if url.is_empty() || url.contains(char::is_whitespace) || url == "<snapshot>" || url == "<eval>" {
             continue;
         }
         let document = url.starts_with("inline://") || url.starts_with("csim-eval");
@@ -407,6 +413,8 @@ fn prepare_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 mod tests {
     use super::*;
 
+    use crate::dom::{NodeData, NodeKind};
+
     #[test]
     fn an_exception_is_located_at_its_pages_top_frame() {
         let stack = "Error: x\n    at f (<snapshot>:1:2)\n    at g (http://a/s.js:10:5)\n    at http://a/t.js:3:4";
@@ -415,8 +423,14 @@ mod tests {
         assert_eq!(stack_location("E\n    at h (eval at run (<snapshot>:1:1), <anonymous>:7:9)"), Some((true, String::new(), 7, 9)));
         assert_eq!(stack_location("E\n    at inline://3:2:1"), Some((true, "inline://3".to_owned(), 2, 1)));
         assert_eq!(stack_location("no frames"), None);
+        // (…a function name of parentheses its own, the location after the last ` (`; a URL of them kept)
+        assert_eq!(stack_location("E\n    at foo (bar) (http://a/s.js:3:22)"), Some((false, "http://a/s.js".to_owned(), 3, 22)));
+        assert_eq!(stack_location("E\n    at a(b (http://a/s.js:6:31)"), Some((false, "http://a/s.js".to_owned(), 6, 31)));
+        assert_eq!(stack_location("E\n    at f (http://a/x(1).js:3:4)"), Some((false, "http://a/x(1).js".to_owned(), 3, 4)));
+        assert_eq!(stack_location("E\n    at Promise.all (index 0)\n    at http://a/s.js:1:2"), Some((false, "http://a/s.js".to_owned(), 1, 2)));
+        assert_eq!(stack_location("E\n    at http://a/s.js:+1:2"), None);
+        assert_eq!(stack_location("E\n    at globalThis.__csim_runScript (<eval>:34:99)\n    at http://a/s.js:1:2"), Some((false, "http://a/s.js".to_owned(), 1, 2)));
     }
-    use crate::dom::{NodeData, NodeKind};
 
     fn script(attrs: &[(&str, &str)]) -> NodeData {
         let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());

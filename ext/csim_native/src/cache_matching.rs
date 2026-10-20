@@ -73,7 +73,7 @@ pub(crate) fn has_duplicate<E: AsRef<Entry>>(entries: &[E]) -> bool {
 }
 
 // Whether a `Vary` names `*`: a response no cache may hold.
-pub(crate) fn vary_has_star(vary: &str) -> bool {
+fn vary_has_star(vary: &str) -> bool {
     vary.split(',').any(|f| f.trim() == "*")
 }
 
