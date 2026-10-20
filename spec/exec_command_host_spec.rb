@@ -240,6 +240,24 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     expect(got).to eq(['afZter', '<p>abcd</p>'])
   end
 
+  # …and a range from such an element into the head edits nothing — the head is never in an edit's range, nor the body
+  # taken away (it typed into the `<title>` and dropped the body).
+  it 'never edits the head from a range that starts beside the body' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><title>TT</title><body><p>abcd</p>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        document.designMode = 'on';
+        const x = document.documentElement.appendChild(document.createElement('div'));
+        x.textContent = 'xyzw';
+        getSelection().setBaseAndExtent(x.firstChild, 2, document.querySelector('title').firstChild, 1);
+        for (const command of ['insertText', 'delete', 'justifyCenter']) document.execCommand(command, false, 'Z');
+        return [document.head.innerHTML, document.body?.innerHTML];
+      })()
+    JS
+    expect(got).to eq(['<meta charset="utf-8"><title>TT</title>', '<p>abcd</p>'])
+  end
+
   # A copy in a document with no browsing context — a created one, a removed frame's — has no selection a window holds:
   # false, as every other command there (it threw a TypeError).
   it 'answers false for a copy in a document with no browsing context' do

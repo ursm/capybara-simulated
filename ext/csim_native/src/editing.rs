@@ -198,10 +198,12 @@ pub(crate) fn selection_host(arena: &RealmArena, anchor: (NodeId, u32), focus: (
     let start = if arena.is_element(anchor.0) { anchor.0 } else { arena.parent_of(anchor.0)? };
     let root = arena.editing_host(start)?;
     let host = arena.design_mode_body(root, start);
-    // (…one from a design-mode body into an element a script put beside it, which edits in place, edits neither: Chrome)
-    if host != root {
+    // (…one from an element a script put beside a design-mode body, which edits in place, to the body, the head or the
+    // document element edits nothing: the head is never in an edit's range. One from the body side to such an element
+    // is the body's, its end at the body's edge: Chrome.)
+    if host == root {
         let end = if arena.is_element(focus.0) { focus.0 } else { arena.parent_of(focus.0)? };
-        if !within(arena, host, end) && arena.design_mode_body(root, end) != host {
+        if arena.design_mode_body(root, end) != root {
             return None;
         }
     }
