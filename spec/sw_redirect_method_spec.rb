@@ -63,4 +63,28 @@ RSpec.describe 'Service Worker redirect method' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__methods') }).to eq(%w[HEAD GET GET])
   end
+
+  # An XMLHttpRequest follows a redirect the worker answers with as fetch() does: to the next hop, which the worker
+  # answers too — a 303 of a POST a GET — its response redirected, at the last hop's URL.
+  it 'follows a redirect the worker answers an XMLHttpRequest with' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__xhr = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const x = new f.contentWindow.XMLHttpRequest();
+          x.open('POST', '/scope/r');
+          x.onload = () => { globalThis.__xhr = [x.getResponseHeader('x-method'), new URL(x.responseURL).pathname]; };
+          x.send('body');
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__xhr') }).to eq(['GET', '/scope/t'])
+  end
 end
