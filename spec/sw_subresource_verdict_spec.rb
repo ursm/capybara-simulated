@@ -20,6 +20,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         if (u.pathname === '/scope/missing') e.respondWith(new Response('no', {status: 404}));
         else if (u.pathname === '/scope/found') e.respondWith(new Response('yes'));
         else if (u.pathname === '/scope/unmodified') e.respondWith(new Response(null, {status: 304}));
+        else if (u.pathname === '/scope/swerr.js') e.respondWith(Response.error());
       });
     JS
     Rack::Builder.new {
@@ -84,5 +85,34 @@ RSpec.describe 'Service Worker subresource verdict' do
       'audio-found'      => 'canplaythrough',
       'audio-unmodified' => 'error'
     )
+  end
+
+  # A script a service worker answers with a network error (`Response.error()`) fails, and files its Resource Timing
+  # entry as any network error does (Fetch's response handover; Chrome 155: `/swerr.js`, status 0) — an inserted
+  # script's and the parser's alike.
+  it "files a Resource Timing entry for a script a worker answers with a network error" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument;
+          const s = d.createElement('script');
+          s.onerror = () => {
+            const entries = f.contentWindow.performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/swerr.js'));
+            globalThis.__seen = entries.map((e) => e.initiatorType + ':' + e.responseStatus);
+          };
+          s.src = '/scope/swerr.js';
+          d.head.appendChild(s);
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['script:0'])
   end
 end
