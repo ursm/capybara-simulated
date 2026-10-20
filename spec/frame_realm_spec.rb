@@ -176,6 +176,19 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(cross_window_get('document')).to eq('SecurityError')
   end
 
+  # HTML's CrossOriginGet and CrossOriginGetOwnPropertyHelper: `frames` is the WindowProxy itself, its methods and its
+  # descriptors' accessors this realm's cross-origin functions — so neither reaches the other origin's document or
+  # realm (`frames.document` and `frames.eval` read the frame's own, a descriptor's `location` getter the bare Location).
+  it 'reaches nothing of a cross-origin frame through frames, its methods or its descriptors' do
+    expect(cross_window_eval('w.frames === w')).to eq('ok:boolean')
+    expect(cross_window_eval('w.frames.document')).to eq('SecurityError')
+    expect(cross_window_eval('w.frames.eval')).to eq('SecurityError')
+    expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "location").get.call(w).href')).to eq('SecurityError')
+    expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "postMessage").value === w.postMessage ? 1 : null')).to eq('ok:number')
+    expect(cross_window_eval('w.close.call === Function.prototype.call ? 1 : null')).to eq('ok:number')
+    expect(cross_window_eval('w[0]')).to eq('ok:undefined')
+  end
+
   it 'exposes the cross-origin-safe properties without throwing (postMessage, closed)' do
     # The point is that an allowlisted property is READABLE cross-origin (no
     # SecurityError), unlike `document`. (`closed` is accessible though not yet a
