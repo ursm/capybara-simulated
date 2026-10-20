@@ -356,8 +356,8 @@ pub(crate) enum FileBytes {
     Ask(usize),
 }
 
-// A form's submission (HTML "submit" steps 14, 20-25) — none where its action is no URL: its method — POST where `method` says so (ASCII case-insensitively),
-// else GET — the URL it navigates to, and for a POST its body and the exact Content-Type it is sent under. A GET's URL
+// A form's submission (HTML "submit" steps 14, 20-25) — none where its action is no URL: its method — POST where
+// `method` says so (ASCII case-insensitively), else GET — the URL it navigates to, and for a POST its body and the exact Content-Type it is sent under. A GET's URL
 // is `action` with its query the entry list urlencoded ("mutate action URL", a file entry its filename), a POST's body
 // the entry list encoded by `enctype` (`application/x-www-form-urlencoded` where it names none): multipart/form-data
 // under a boundary of its own (multipart.rs `encode`, a file part its bytes), else as `encode_entries` does — each in
@@ -546,19 +546,29 @@ mod tests {
         let entries = [
             ("a".to_owned(), Entry::Text("1 2".to_owned())),
             ("f".to_owned(), Entry::File { filename: "x.txt".to_owned(), kind: String::new(), bytes: FileBytes::Own(b"hi".to_vec()) }),
+            ("g".to_owned(), Entry::File { filename: "y.txt".to_owned(), kind: "text/plain".to_owned(), bytes: FileBytes::Ask(2) }),
         ];
+        // (…a file's bytes asked for only where a multipart body carries them)
+        let asked = std::cell::Cell::new(0);
         let request = |action: &str, method: &str, enctype: &str| {
-            form_request(action, method, enctype, None, &entries, &mut |_| Ok::<_, ()>(b"asked".to_vec())).unwrap()
+            let mut read = |_: &FileBytes| {
+                asked.set(asked.get() + 1);
+                Ok::<_, ()>(b"asked".to_vec())
+            };
+            form_request(action, method, enctype, None, &entries, &mut read).unwrap()
         };
         assert!(request("http://[x", "get", "").is_none());
         let get = request("http://h/p?old#frag", "dialog", "").unwrap();
-        assert_eq!((get.post, get.url.as_str(), get.body.is_none()), (false, "http://h/p?a=1+2&f=x.txt#frag", true));
+        assert_eq!((get.post, get.url.as_str(), get.body.is_none()), (false, "http://h/p?a=1+2&f=x.txt&g=y.txt#frag", true));
         let post = request("http://h/p", "POST", "").unwrap();
-        assert_eq!(post.body, Some((b"a=1+2&f=x.txt".to_vec(), "application/x-www-form-urlencoded".to_owned())));
+        assert_eq!(post.body, Some((b"a=1+2&f=x.txt&g=y.txt".to_vec(), "application/x-www-form-urlencoded".to_owned())));
+        assert_eq!(asked.get(), 0);
         let multipart = request("http://h/p", "post", "Multipart/Form-Data").unwrap().body.unwrap();
         let text = String::from_utf8(multipart.0).unwrap();
         assert!(multipart.1.starts_with("multipart/form-data; boundary=----csimFormBoundary"));
         assert!(text.contains("name=\"f\"; filename=\"x.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nhi\r\n"));
+        assert!(text.contains("name=\"g\"; filename=\"y.txt\"\r\nContent-Type: text/plain\r\n\r\nasked\r\n"));
+        assert_eq!(asked.get(), 1);
     }
 
     #[test]

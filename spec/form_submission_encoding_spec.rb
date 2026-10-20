@@ -136,8 +136,8 @@ RSpec.describe 'Form submission encoding' do
   end
 
   # A multipart body carries a picked file's bytes, into a named frame too (the page's request, its bytes read only
-  # there); a file gone since it was picked fails the submission, as Chrome's upload does; an action that is no URL
-  # submits nothing (HTML "submit" step 14).
+  # there); a file gone since it was picked fails the submission, on either path, as Chrome's upload does; an action
+  # that is no URL submits nothing (HTML "submit" step 14).
   it 'uploads a picked file into a named frame, fails on one deleted, and submits nothing to an action that is no URL' do
     received = []
     form = <<~HTML
@@ -155,8 +155,12 @@ RSpec.describe 'Form submission encoding' do
       s.within_frame('f') { expect(s).to have_text('ok') }
       expect(received.first[:body]).to include(%(filename="up.txt"\r\nContent-Type: text/plain\r\n\r\nbytes!\r\n))
       s.find('#tf input').set(path)
+      s.find('#nf input').set(path)
       File.delete(path)
       expect { s.execute_script('tf.requestSubmit()') }.to raise_error(IOError, /up\.txt/)
+      # (…into a named frame alike: nothing posted, the frame left with no document of the response)
+      s.execute_script('nf.requestSubmit()')
+      s.within_frame('f') { expect(s).to have_no_text('ok') }
     end
     s.execute_script('bad.requestSubmit()')
     expect(received.size).to eq(1)
