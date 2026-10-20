@@ -3255,12 +3255,12 @@ module Capybara
         end
       end
 
-      # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET —
-      # or nil where it submits nothing (its action no URL), the engine's (text_codec.rs `form_request`): `spec` the
-      # form's (`__csimFormSerialize`), its action resolved as `action_url`, its entry list `entry_list` where the
-      # submission built one (the post-`formdata` one), else the spec's. Each entry string {'name','value'} or file {'name','file'=>true,'filename','type', and 'handle'/'index'
-      # or 'bytes'}: a file's bytes read — only where its body carries them — through its `@file_picks` slot, else the
-      # VM's (an in-memory `new File([…])`).
+      # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET — or
+      # nil where it submits nothing (its action no URL), the engine's (text_codec.rs `form_request`): `spec` the form's
+      # (`__csimFormSerialize`), its action resolved as `action_url`, its entry list `entry_list` where the submission
+      # built one (the post-`formdata` one), else the spec's. Each entry string {'name','value'} or file
+      # {'name','file'=>true,'filename','type', and 'handle'/'index' or 'bytes'}: a file's bytes read — only where its
+      # body carries them — through its `@file_picks` slot, else the VM's (an in-memory `new File([…])`).
       def form_request(spec, action_url, entry_list)
         entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
         list = entries.map {|e|

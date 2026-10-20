@@ -357,11 +357,12 @@ pub(crate) enum FileBytes {
 }
 
 // A form's submission (HTML "submit" steps 14, 20-25) — none where its action is no URL: its method — POST where
-// `method` says so (ASCII case-insensitively), else GET — the URL it navigates to, and for a POST its body and the exact Content-Type it is sent under. A GET's URL
-// is `action` with its query the entry list urlencoded ("mutate action URL", a file entry its filename), a POST's body
-// the entry list encoded by `enctype` (`application/x-www-form-urlencoded` where it names none): multipart/form-data
-// under a boundary of its own (multipart.rs `encode`, a file part its bytes), else as `encode_entries` does — each in
-// `encoding`, a file's bytes asked of `read` only there (an error, its own, ends the submission).
+// `method` says so (ASCII case-insensitively), else GET — the URL it navigates to, and for a POST its body and the
+// exact Content-Type it is sent under. A GET's URL is `action` with its query the entry list urlencoded ("mutate action
+// URL", a file entry its filename), a POST's body the entry list encoded by `enctype`
+// (`application/x-www-form-urlencoded` where it names none): multipart/form-data under a boundary of its own
+// (multipart.rs `encode`, a file part its bytes), else as `encode_entries` does — each in `encoding`, a file's bytes
+// asked of `read` only there (an error, its own, ends the submission).
 pub(crate) struct FormRequest {
     pub(crate) post: bool,
     pub(crate) url: String,
