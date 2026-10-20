@@ -359,4 +359,33 @@ RSpec.describe 'User action events' do
     session.find('#cb').click
     expect(session.evaluate_script("document.getElementById('cb').checked")).to be(true)
   end
+
+  # A label's click forwarded to its control is a step of the click: the user's drains between the control's listeners,
+  # the testdriver shim's — a page's script on the stack — drains nothing.
+  it "drains a label's forwarded click as it drains the label's" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.__order = [];
+      const cb = document.getElementById('cb');
+      const lb = document.body.appendChild(document.createElement('label'));
+      lb.id = 'lb';
+      lb.htmlFor = 'cb';
+      lb.textContent = 'label';
+      const first = (name) => () => { __order.push(name); Promise.resolve().then(() => __order.push('m' + name)); };
+      cb.addEventListener('click', first('k1'));
+      cb.addEventListener('click', () => __order.push('k2'));
+      cb.addEventListener('change', first('c1'));
+      cb.addEventListener('change', () => __order.push('c2'));
+    JS
+    session.find('#lb').click
+    user = session.evaluate_script('__order.splice(0)')
+    scripted = session.evaluate_script(<<~JS)
+      (() => {
+        __csimDispatchTrusted(document.getElementById('lb'), new MouseEvent('click', {bubbles: true, cancelable: true}));
+        __order.push('after');
+        return __order.slice();
+      })()
+    JS
+    expect([user, scripted]).to eq([%w[k1 mk1 k2 c1 mc1 c2], %w[k1 k2 c1 c2 after]])
+  end
 end
