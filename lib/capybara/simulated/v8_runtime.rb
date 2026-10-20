@@ -1441,44 +1441,50 @@ module Capybara
         # routes small bodies to a JS-only `(0, eval)` so they don't
         # pay the rendezvous round-trip.
         c.attach('__csim_runScriptCached', ->(label, body) {
-          RuntimeShared.safe_call {
-            src = body.to_s
-            # No-cd warm path, mirroring `native_module_for`: once this
-            # isolate has compiled a (label, bytesize), re-visits compile
-            # straight against V8's source-keyed in-memory cache — skipping
-            # the SHA256 of a 140KB+ chunk per visit (rbspy: ~4.8% of the
-            # Discourse perf sample was Digest#update) AND the disk lookup.
-            # The key is a heuristic, but a false positive only costs a
-            # plain recompile of the true source — never wrong code.
-            key = [label.to_s, src.bytesize]
-            if @compiled_script_keys.key?(key)
-              script = c.compile(src, filename: label.to_s)
-            else
-              sha    = Digest::SHA256.hexdigest(src)
-              cached = ScriptCache.lookup(sha, version_tag)
-              script = c.compile(src, filename: label.to_s, cached_data: cached)
-              $stderr.puts "[runScript] label=#{label.to_s[0,60]} hit=#{!cached.nil?} rejected=#{script.cache_rejected?}" if debug
-              # V8 forbids `produce_cache: true` from inside a host-fn
-              # callback so we queue misses + rejects for top-level
-              # produce via `ScriptCache.warm_pending!` after the
-              # current `V8Runtime#call` returns.
-              if cached.nil? || script.cache_rejected?
-                ScriptCache.queue_warm(c, sha, label, src, version_tag, stale: !cached.nil?)
-              end
-              @compiled_script_keys[key] = true if key
+          src = body.to_s
+          # No-cd warm path, mirroring `native_module_for`: once this
+          # isolate has compiled a (label, bytesize), re-visits compile
+          # straight against V8's source-keyed in-memory cache — skipping
+          # the SHA256 of a 140KB+ chunk per visit (rbspy: ~4.8% of the
+          # Discourse perf sample was Digest#update) AND the disk lookup.
+          # The key is a heuristic, but a false positive only costs a
+          # plain recompile of the true source — never wrong code.
+          #
+          # No `safe_call`, as `__csim_runScriptEval` has none: a compile or
+          # run error raises RustyRacer::ParseError / RuntimeError, which rusty
+          # throws on at the call site as the value the script threw (its
+          # SyntaxError, its Error, its `42`), so bridge.entry.js's
+          # `try { __csim_runScript(…) } catch` reports it (`window.onerror`)
+          # as it does a small script's. Swallowed here, a big bundle that
+          # threw at load fired no ErrorEvent at all.
+          key = [label.to_s, src.bytesize]
+          if @compiled_script_keys.key?(key)
+            script = c.compile(src, filename: label.to_s)
+          else
+            sha    = Digest::SHA256.hexdigest(src)
+            cached = ScriptCache.lookup(sha, version_tag)
+            script = c.compile(src, filename: label.to_s, cached_data: cached)
+            $stderr.puts "[runScript] label=#{label.to_s[0,60]} hit=#{!cached.nil?} rejected=#{script.cache_rejected?}" if debug
+            # V8 forbids `produce_cache: true` from inside a host-fn
+            # callback so we queue misses + rejects for top-level
+            # produce via `ScriptCache.warm_pending!` after the
+            # current `V8Runtime#call` returns.
+            if cached.nil? || script.cache_rejected?
+              ScriptCache.queue_warm(c, sha, label, src, version_tag, stale: !cached.nil?)
             end
-            begin
-              # run_void, not run: a `<script>`'s completion value is nobody's
-              # answer, and marshalling it would drag a large inline script's
-              # trailing jQuery-ish expression (a non-cloneable `ce.fn.init`)
-              # through the deep-copy filter for nothing. This is why `src` is
-              # the body verbatim — it used to carry a `;undefined` suffix, which
-              # then had to be hashed into the bytecode-cache key as well.
-              script.run_void
-            ensure
-              script.dispose
-            end
-          }
+            @compiled_script_keys[key] = true
+          end
+          begin
+            # run_void, not run: a `<script>`'s completion value is nobody's
+            # answer, and marshalling it would drag a large inline script's
+            # trailing jQuery-ish expression (a non-cloneable `ce.fn.init`)
+            # through the deep-copy filter for nothing. This is why `src` is
+            # the body verbatim — it used to carry a `;undefined` suffix, which
+            # then had to be hashed into the bytecode-cache key as well.
+            script.run_void
+          ensure
+            script.dispose
+          end
           nil
         })
         # Small bodies normally run JS-side via `(0, eval)(body)` — fast,
@@ -1508,8 +1514,8 @@ module Capybara
         # WPT helper corpus + the `<script>const CFG…` pattern both lead
         # with the declaration.
         # NOTE: do NOT wrap in `safe_call`. A JS throw from `c.eval`
-        # raises RustyRacer::RuntimeError, which rusty re-raises as a
-        # JS exception at the call site — so bridge.entry.js's
+        # raises RustyRacer::RuntimeError, which rusty throws on at the call
+        # site as the value thrown — so bridge.entry.js's
         # `try { __csim_runScript(…) } catch (e)` sees it and runs its
         # normal path (console diagnostic, `_ok=false`, fire the script
         # `error` event), exactly as the JS-side `(0, eval)` does.
