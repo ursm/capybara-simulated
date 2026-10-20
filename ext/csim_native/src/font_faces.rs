@@ -90,23 +90,9 @@ pub(crate) fn parse(text: &str, base: &str) -> Option<FaceRecord> {
 // …and of the descriptors an `@font-face` rule of the page's declares, as the style engine parsed them (style.rs
 // `font_faces`).
 pub(crate) fn record(d: &style::properties::font_face::Descriptors) -> Option<FaceRecord> {
-    use style::font_face::{FontStyleRange, Source};
+    use style::font_face::FontStyleRange;
     let family = d.font_family.as_ref()?.name.to_string().to_ascii_lowercase();
-    let mut sources = Vec::new();
-    for source in d.src.as_ref().map_or(&[][..], |s| &s.0[..]) {
-        match source {
-            Source::Url(u) => {
-                // (…a container no decoder here reads — EOT, an SVG font — is passed over, as a browser passes over a
-                // format it does not support)
-                if unreadable_format(u) {
-                    continue;
-                }
-                // (…one its base cannot resolve — a blob: worker's — as written, which the host resolves against the page)
-                sources.push(FaceSource::Url(u.url.url().map_or_else(|| u.url.original().unwrap_or_default().to_owned(), |url| url.as_str().to_owned())));
-            }
-            Source::Local(name) => sources.push(FaceSource::Local(name.name.to_string())),
-        }
-    }
+    let sources = source_list(d.src.as_ref());
     let stretch = d
         .font_stretch
         .as_ref()
@@ -138,6 +124,26 @@ pub(crate) fn record(d: &style::properties::font_face::Descriptors) -> Option<Fa
         overrides: [over(&d.ascent_override), over(&d.descent_override), over(&d.line_gap_override)],
         ..FaceRecord::of(family)
     })
+}
+// The sources of a parsed `src` a browser would try, in order.
+fn source_list(src: Option<&style::font_face::SourceList>) -> Vec<FaceSource> {
+    use style::font_face::Source;
+    let mut sources = Vec::new();
+    for source in src.map_or(&[][..], |s| &s.0[..]) {
+        match source {
+            Source::Url(u) => {
+                // (…a container no decoder here reads — EOT, an SVG font — is passed over, as a browser passes over a
+                // format it does not support)
+                if unreadable_format(u) {
+                    continue;
+                }
+                // (…one its base cannot resolve — a blob: worker's — as written, which the host resolves against the page)
+                sources.push(FaceSource::Url(u.url.url().map_or_else(|| u.url.original().unwrap_or_default().to_owned(), |url| url.as_str().to_owned())));
+            }
+            Source::Local(name) => sources.push(FaceSource::Local(name.name.to_string())),
+        }
+    }
+    sources
 }
 // An f32 the engine holds a percentage in, as the decimal it was written as: `90%` is 0.9, not 0.8999999761581421.
 fn decimal(x: f32) -> f64 {
@@ -270,7 +276,7 @@ pub(crate) struct RuleFace {
 pub(crate) fn rule_face(declared: &[(&str, String)]) -> RuleFace {
     let of = |name: &str| declared.iter().find(|(n, _)| *n == name).map_or_else(String::new, |(_, v)| v.clone());
     let (family, src) = (of("font-family"), of("src"));
-    let sources = sources(&src, "about:blank");
+    let sources = face_sources(&src, "about:blank").unwrap_or_default();
     let name = family_descriptor(&family).map_or_else(|| family.trim().to_owned(), |(name, _)| name);
     let mut identity = name;
     for source in &sources {
@@ -429,18 +435,23 @@ pub(crate) fn descriptor(name: &str, value: &str) -> Option<String> {
             return Some("auto".to_owned());
         }
     }
-    use style::properties::font_face::{DescriptorId, Descriptors};
-    use style::stylesheets::CssRuleType;
-    let url = crate::cssom_decl::url_data("about:blank");
-    let context = crate::cssom_decl::rule_context(&url, CssRuleType::FontFace, false);
-    let mut name_input = cssparser::ParserInput::new(name);
-    let id = cssparser::Parser::new(&mut name_input).parse_entirely(DescriptorId::parse).ok()?;
-    let mut value_input = cssparser::ParserInput::new(value);
-    let mut descriptors = Descriptors::default();
-    descriptors.set(id, &context, &mut cssparser::Parser::new(&mut value_input)).ok()?;
+    let id = descriptor_id(name)?;
     let mut out = String::new();
-    descriptors.get(id, &mut out).ok()?;
+    parsed_descriptor(name, value, "about:blank")?.get(id, &mut out).ok()?;
     Some(out)
+}
+fn descriptor_id(name: &str) -> Option<style::properties::font_face::DescriptorId> {
+    let mut input = cssparser::ParserInput::new(name);
+    cssparser::Parser::new(&mut input).parse_entirely(style::properties::font_face::DescriptorId::parse).ok()
+}
+// …the descriptors holding `value` for `name` alone, as the style system parses it, its `url()`s resolved against `base`.
+fn parsed_descriptor(name: &str, value: &str, base: &str) -> Option<style::properties::font_face::Descriptors> {
+    let url = crate::cssom_decl::url_data(base);
+    let context = crate::cssom_decl::rule_context(&url, style::stylesheets::CssRuleType::FontFace, false);
+    let mut input = cssparser::ParserInput::new(value);
+    let mut descriptors = style::properties::font_face::Descriptors::default();
+    descriptors.set(descriptor_id(name)?, &context, &mut cssparser::Parser::new(&mut input)).ok()?;
+    Some(descriptors)
 }
 // …and the value a FontFace attribute takes for the descriptor `name` where none is given (CSS Font Loading's FontFace
 // attributes, the descriptors' initial values) — none for no FontFace attribute's.
@@ -532,27 +543,25 @@ pub(crate) fn sources_array<'s>(scope: &mut v8::PinScope<'s, '_>, list: &[FaceSo
     v8::Array::new_with_elements(scope, &items)
 }
 
-// A `src` descriptor's sources a browser would try, in order, each `url()` resolved against `base` (`parse`) — none
-// where it does not parse.
-pub(crate) fn sources(src: &str, base: &str) -> Vec<FaceSource> {
-    parse(&format!("font-family: x; src: {src}"), base).map_or(Vec::new(), |f| f.sources)
-}
-// …of a FontFace's `src` string, which has to be ONE `src` value, whole (CSS Font Loading §2.1, "parse source as a
-// <font-src-list>"): none where it is not — trailing text the block it would be read in takes for other descriptors
-// (`url(x); font-weight: 900`) among what it is not.
+// The sources a `src` value names that a browser would try, in order, each `url()` resolved against `base` — the value
+// parsed as the descriptor, whole (CSS Font Loading §2.1, "parse source as a <font-src-list>"), each of its items that
+// does not parse dropped (CSS Fonts 4 §4.3: `local(A), url(b); font-weight: 900` is `local(A)` alone); none where none
+// is left.
 pub(crate) fn face_sources(src: &str, base: &str) -> Option<Vec<FaceSource>> {
-    descriptor("src", src)?;
-    Some(sources(src, base)).filter(|s| !s.is_empty())
+    let d = parsed_descriptor("src", src, base)?;
+    Some(source_list(d.src.as_ref())).filter(|s| !s.is_empty())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_face_source_is_one_src_value_whole() {
+    fn a_face_source_list_is_one_src_value() {
         assert_eq!(face_sources("url(a.woff), local(B)", "http://x/").map(|s| s.len()), Some(2));
         assert_eq!(face_sources("url(a.woff); font-weight: 900", "http://x/"), None);
         assert_eq!(face_sources("url(a.woff); unicode-range: U+0", "http://x/"), None);
+        assert_eq!(face_sources("local(B), url(a.woff); font-weight: 900", "http://x/"), Some(vec![FaceSource::Local("B".to_owned())]));
+        assert_eq!(face_sources("url(a.woff)", "http://x/"), Some(vec![FaceSource::Url("http://x/a.woff".to_owned())]));
         assert_eq!(face_sources("", "http://x/"), None);
     }
 
