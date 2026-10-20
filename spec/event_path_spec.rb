@@ -97,4 +97,28 @@ RSpec.describe 'the event path through shadow trees' do
       })()
     JS
   end
+
+  # DOM dispatch as the standard has it (whatwg/dom 369654b7), where Chrome 155 and Firefox depart from it each its own
+  # way: a target that is no node retargets the relatedTarget against itself, out of the shadow tree (Chrome keeps the
+  # shadow root, Firefox nulls both); a dispatch whose target is its own retargeted relatedTarget invokes nothing and
+  # sets no target, `clearTargets` false, the relatedTarget kept (Chrome likewise; Firefox nulls it).
+  it 'retargets a flat target\'s relatedTarget, and sets no target where the dispatch is skipped' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const host = document.createElement('div');
+        const shadow = host.attachShadow({mode: 'closed'});
+        const nm = (x) => x === null ? 'null' : x === host ? 'host' : x === shadow ? 'shadow' : x === window ? 'window' : 'other';
+        const out = [];
+        for (const target of [new EventTarget(), window, host]) {
+          let ran = false;
+          target.addEventListener('demo', () => ran = true);
+          const e = new FocusEvent('demo', {relatedTarget: shadow});
+          target.dispatchEvent(e);
+          out.push([ran, nm(e.target), nm(e.relatedTarget)].join(' '));
+        }
+        return out;
+      })()
+    JS
+    expect(got).to eq(['true other host', 'true window host', 'false null shadow'])
+  end
 end
