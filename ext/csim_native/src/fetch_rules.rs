@@ -382,7 +382,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
     crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
-    crate::dom::register(scope, ns, "swResponseAllowed", sw_response_allowed_op, context_id);
     crate::dom::register(scope, ns, "swSubresourceUsable", sw_subresource_usable_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
@@ -448,11 +447,6 @@ fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 fn same_origin_mode_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
     rv.set_bool(same_origin_mode_refused(&url, &here));
-}
-// __dom.swResponseAllowed(mode, redirectMode, type, redirected) -> `service_worker_response_allowed`.
-fn sw_response_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [mode, redirect, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
-    rv.set_bool(service_worker_response_allowed(&mode, &redirect, &response_type, args.get(3).is_true()));
 }
 // __dom.swSubresourceUsable(destination, mode, type, redirected, status) -> `sw_subresource_usable`.
 fn sw_subresource_usable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

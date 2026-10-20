@@ -65,7 +65,8 @@ RSpec.describe 'Service Worker redirect method' do
   end
 
   # An XMLHttpRequest follows a redirect the worker answers with as fetch() does: to the next hop, which the worker
-  # answers too — a 303 of a POST a GET — its response redirected, at the last hop's URL.
+  # answers too — a 303 of a POST a GET — its response redirected, at the last hop's URL, and its Resource Timing entry
+  # named by the request's.
   it 'follows a redirect the worker answers an XMLHttpRequest with' do
     session = simulated_session(app)
     session.visit '/'
@@ -79,12 +80,15 @@ RSpec.describe 'Service Worker redirect method' do
         f.onload = () => {
           const x = new f.contentWindow.XMLHttpRequest();
           x.open('POST', '/scope/r');
-          x.onload = () => { globalThis.__xhr = [x.getResponseHeader('x-method'), new URL(x.responseURL).pathname]; };
+          x.onload = () => {
+            const named = f.contentWindow.performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'xmlhttprequest').map((e) => new URL(e.name).pathname);
+            globalThis.__xhr = [x.getResponseHeader('x-method'), new URL(x.responseURL).pathname, named];
+          };
           x.send('body');
         };
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__xhr') }).to eq(['GET', '/scope/t'])
+    expect(poll_until { session.evaluate_script('globalThis.__xhr') }).to eq(['GET', '/scope/t', ['/scope/r']])
   end
 end
