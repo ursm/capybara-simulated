@@ -1506,7 +1506,7 @@ module Capybara
           # Mirror real browser: <input type=file>.value reflects only
           # the filename of the first chosen file (security-faked path).
           # __csimSetValue dispatches input + change synchronously.
-          js_value = paths.first ? File.basename(paths.first) : ''
+          js_value = paths.first ? picked_file_name(paths.first) : ''
           dom_call('__csimSetValue', handle, js_value)
         else
           dom_call('__csimSetValue', handle, coerced)
@@ -1585,18 +1585,11 @@ module Capybara
       end
 
       # A file the user picked from disk, as the JS side builds its File:
-      # name, size, type and modification time — its name text, a path of
-      # raw bytes read as the UTF-8 a file system names it in.
+      # name, size, type and modification time.
       def picked_file(path)
         stat = (File.stat(path) rescue nil)
-        name = File.basename(path)
-        name = if name.encoding == Encoding::BINARY
-                 name.dup.force_encoding('UTF-8').scrub
-               else
-                 name.encode('UTF-8', invalid: :replace, undef: :replace)
-               end
         {
-          'name'         => name,
+          'name'         => picked_file_name(path),
           'size'         => stat ? stat.size : 0,
           # Real browsers tag the File with the MIME type they
           # sniffed from the path / disk header. Uppy's image-type
@@ -1610,6 +1603,15 @@ module Capybara
           'type'         => mime_type_for_path(path),
           'lastModified' => stat ? (stat.mtime.to_f * 1000).to_i : 0
         }
+      end
+
+      # …its name, text: a path of raw bytes read as the UTF-8 a file system
+      # names it in, a byte that is none (or a path's in another encoding that
+      # does not convert) a U+FFFD.
+      def picked_file_name(path)
+        name = File.basename(path)
+        name = name.force_encoding('UTF-8') if name.encoding == Encoding::BINARY
+        name.encode('UTF-8', invalid: :replace, undef: :replace)
       end
 
       # HTML5 drag-and-drop simulation. Capybara routes `Element#drop`

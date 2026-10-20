@@ -124,10 +124,14 @@ RSpec.describe 'Form submission encoding' do
     s = simulated_session(app(received, '<form action="/get"><input type="file" name="up"><button>go</button></form>'))
     s.visit '/'
     Dir.mktmpdir do |dir|
-      path = File.join(dir.b, "\xC3\xA9t\xE9.txt".b)
-      File.write(path, 'x')
-      s.attach_file('up', path)
-      expect(s.evaluate_script('document.querySelector("input").files[0].name')).to eq("\u00E9t\uFFFD.txt")
+      name = lambda {|path|
+        File.write(path, 'x')
+        s.attach_file('up', path)
+        s.evaluate_script('document.querySelector("input").files[0].name')
+      }
+      expect(name.call(File.join(dir.b, "\xC3\xA9t\xE9.txt".b))).to eq("\u00E9t\uFFFD.txt")
+      # (…a text path whose bytes are no UTF-8 alike)
+      expect(name.call(File.join(dir, "\xE9b.txt".dup.force_encoding('UTF-8')))).to eq("\uFFFDb.txt")
     end
   end
 end
