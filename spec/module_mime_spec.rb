@@ -7,7 +7,7 @@ require_relative 'support/poll_until'
 # A module script's response must be of the MIME type its kind's is — a JavaScript one for a script, a JSON one for a
 # JSON module, `text/css` for a CSS one, each that one alone — whoever answered it (HTML "fetch a single module
 # script"): a `modulepreload` of anything else fails, as its module would; one whose `as` names a destination no module
-# preload is (`image`) fetches nothing and fails; and a module a service worker answers as `text/plain` is no module
+# preload is (`image`) fetches nothing and fails, and one whose `media` does not match fetches nothing; and a module a service worker answers as `text/plain` is no module
 # either. (Chrome and the upstream WPT preload/modulepreload.html: `module1.js` as `style` or `json` fails.)
 RSpec.describe 'a module script’s MIME type' do
   let(:app) {
@@ -47,19 +47,29 @@ RSpec.describe 'a module script’s MIME type' do
       window.seen = [];
       const cases = [
         ['/plain.js', null], ['/mod.js', null], ['/sheet.css', 'style'], ['/mod.js', 'style'], ['/mod.js', 'json'],
-        ['/data.json', 'json'], ['/data.json', null], ['/mod.js', 'image'], ['/mod.js', 'bogus']
+        ['/data.json', 'json'], ['/data.json', null], ['/mod.js', 'image'], ['/mod.js', 'bogus'], ['/mod.js', null, 'not all']
       ];
-      for (const [href, as] of cases) {
+      for (const [href, as, media] of cases) {
         const link = document.createElement('link');
         link.rel = 'modulepreload';
         if (as) link.as = as;
+        if (media) link.media = media;
         link.href = href;
-        link.onload = () => seen.push(href + ':' + (as || '') + ' load');
-        link.onerror = () => seen.push(href + ':' + (as || '') + ' error');
+        const label = href + ':' + (as || '') + (media ? '@' + media : '');
+        link.onload = () => seen.push(label + ' load');
+        link.onerror = () => seen.push(label + ' error');
         document.head.appendChild(link);
       }
     JS
-    got = poll_until { (s = session.evaluate_script('window.seen')).size == 9 && s }
+    # (…the one whose `media` does not match fetching nothing and firing nothing — the second plain one, after it, does)
+    session.execute_script(<<~JS)
+      const late = document.createElement('link');
+      late.rel = 'modulepreload';
+      late.href = '/mod.js?late';
+      late.onload = () => seen.push('late load');
+      document.head.appendChild(late);
+    JS
+    got = poll_until { (s = session.evaluate_script('window.seen')).size == 10 && s }
     expect(got.sort).to eq([
       '/data.json: error',
       '/data.json:json load',
@@ -69,7 +79,8 @@ RSpec.describe 'a module script’s MIME type' do
       '/mod.js:json error',
       '/mod.js:style error',
       '/plain.js: error',
-      '/sheet.css:style load'
+      '/sheet.css:style load',
+      'late load'
     ])
   end
 
