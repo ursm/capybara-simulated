@@ -14,12 +14,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "editCommand", edit_command, context_id);
     crate::dom::register(scope, ns, "commandSupport", command_support_op, context_id);
     crate::dom::register(scope, ns, "commandTarget", command_target_op, context_id);
-    crate::dom::register(scope, ns, "commandInputType", command_input_type_op, context_id);
-    crate::dom::register(scope, ns, "commandAction", command_action_op, context_id);
+    crate::dom::register(scope, ns, "commandPlan", command_plan_op, context_id);
     crate::dom::register(scope, ns, "commandStyle", command_style_op, context_id);
 }
 
-// What the bindings do to carry a command out, beyond `inputType`'s `input` (codes as `commandAction` hands them): the
+// What the bindings do to carry a command out, beyond `inputType`'s `input` (codes as `commandPlan` hands them): the
 // engine's edit of it alone (`editCommand`); text inserted (the selection deleted, for none); the selection's deletion,
 // backward or forward; a line break, a paragraph; a span carrying a CSS property (`commandStyle`); the block aligned
 // (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste; markup — in a text control, its
@@ -160,21 +159,58 @@ fn command_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.commandInputType(command) -> the `inputType` of the `input` it fires ('' for none, or for no command).
-fn command_input_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = args.get(0).to_rust_string_lossy(scope);
-    let input_type = command(&name).map_or("", |&(_, _, t, _)| t);
-    rv.set(v8::String::new(scope, input_type).map_or_else(|| v8::undefined(scope).into(), Into::into));
+// How `execCommand` carries a command out (`commandPlan`): not at all (it answers false); the selection copied, whatever
+// it is in; in a focused text control, its `Action` — the ones a control takes: text typed, the selection's deletion,
+// a line break (a textarea's alone), markup's text (a textarea's or a free-text input's), and cut and paste where its
+// selection APIs apply; in an editing host, its `Action`.
+const STEP_NONE: u32 = 0;
+const STEP_COPY: u32 = 1;
+const STEP_CONTROL: u32 = 2;
+const STEP_HOST: u32 = 3;
+fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>, has_view: bool) -> (u32, Option<NodeId>) {
+    let Some(&(_, _, _, action)) = command(name) else { return (STEP_NONE, None) };
+    if matches!(action, Action::Copy) {
+        return (STEP_COPY, None);
+    }
+    if !has_view {
+        return (STEP_NONE, None);
+    }
+    match command_target(scope, cid, name, active, selection) {
+        (TARGET_HOST, host) => (STEP_HOST, host),
+        (TARGET_CONTROL, Some(control)) => {
+            let arena = realm(scope, cid);
+            let n = arena.get(control).expect("a target is a node");
+            let takes = match action {
+                Action::Text | Action::Delete | Action::ForwardDelete | Action::LineBreak | Action::Paragraph => true,
+                Action::Cut | Action::Paste => arena.selection_applies(n, false),
+                Action::Html => n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::FREE_TEXT)),
+                _ => false,
+            };
+            if takes { (STEP_CONTROL, Some(control)) } else { (STEP_NONE, None) }
+        }
+        _ => (STEP_NONE, None),
+    }
 }
-
-// __dom.commandAction(command) -> [what the bindings do for it, its argument] (`Action::code`), undefined for no command.
-fn command_action_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.commandPlan(command, activeNid | -1, selection | null, hasView) -> [step, node | null, action, its argument,
+// inputType] (`command_plan`, `STEP_*`; `Action::code`; the `inputType` of the `input` it fires, '' for none), the
+// document's active element, its selection's state and whether it has a browsing context given — undefined for no
+// command.
+fn command_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
-    let Some(&(_, _, _, action)) = command(&name) else { return };
+    let Some(&(_, _, input_type, action)) = command(&name) else { return };
+    let active = crate::dom::nid_arg(scope, &args, 1);
+    let cid = crate::dom::realm_id(scope, &args);
+    let has_view = args.get(3).is_true();
+    let (step, node) = command_plan(scope, cid, &name, active, args.get(2), has_view);
     let (code, arg) = action.code();
-    let code = v8::Integer::new_from_unsigned(scope, code).into();
-    let arg = v8::String::new(scope, arg).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    rv.set(v8::Array::new_with_elements(scope, &[code, arg]).into());
+    let items = [
+        v8::Integer::new_from_unsigned(scope, step).into(),
+        crate::dom::node_value(scope, node),
+        v8::Integer::new_from_unsigned(scope, code).into(),
+        v8::String::new(scope, arg).map_or_else(|| v8::undefined(scope).into(), Into::into),
+        v8::String::new(scope, input_type).map_or_else(|| v8::undefined(scope).into(), Into::into),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.commandStyle(property, value, docNid) -> [the style attribute a styling command's span carries, the `input`
 // event's `data`]: `property: value` as an inline style of the document serializes it, in its mode (a quirks one's
