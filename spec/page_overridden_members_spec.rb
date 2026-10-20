@@ -479,4 +479,22 @@ RSpec.describe 'members a page overrides' do
     JS
     expect(got).to eq([true, true, true])
   end
+
+  # …and of JSON and Date: a body's `json()`, `Response.json()`, a File's `lastModified` and an input's `valueAsDate`
+  # are the platform's, whatever a page (a fake-timer library, a polyfill) put in those globals.
+  it 'parses, serializes and dates its own values whatever a page put in JSON and Date' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><input id="d" type="date" value="2020-01-02">']] })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      JSON.parse = JSON.stringify = () => { throw new Error('page JSON'); };
+      window.Date = function () { throw new Error('page Date'); };
+      (async () => {
+        const parsed = await new Response('{"a":1}').json();
+        const made = await Response.json({b: 2}).text();
+        done([parsed.a, made, typeof new File([], 'f').lastModified, d.valueAsDate.getUTCDate()]);
+      })().catch((e) => done(String(e)));
+    JS
+    expect(got).to eq([1, '{"b":2}', 'number', 2])
+  end
 end
