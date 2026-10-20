@@ -2757,6 +2757,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     // …and the namespace lookups (namespaces.rs)
     crate::namespaces::install(scope, ns, context_id);
     // …and the event path through shadow trees (event_path.rs)
+    crate::event_handlers::install(scope, ns, context_id);
     crate::event_path::install(scope, ns, context_id);
     // …and the realm's id, which spaces its nodes' handle ids apart from every other realm's (dom-nodes.js `Node`).
     let key = v8::String::new(scope, "realmId").expect("a short string");

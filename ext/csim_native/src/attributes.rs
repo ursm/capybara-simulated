@@ -587,7 +587,7 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let selects = matches!(local, "srcset" | "sizes" | "media" | "type");
     steps |= flag(picture && (selects || matches!(local, "width" | "height")), STEP_PICTURE);
     steps |= flag(picture && selects, STEP_PICTURE_SOURCE);
-    steps |= flag(local.starts_with("on"), STEP_HANDLER);
+    steps |= flag(local.starts_with("on") && crate::event_handlers::inline_handler(arena, id, local).is_some(), STEP_HANDLER);
     steps |= flag(changed && matches!(local, "form" | "id" | "disabled"), STEP_FORM_OWNER);
     // (…its state — auto, hint, manual (any other value), none — not its value: HTML's `popover` attribute change steps)
     // (…read only for a showing popover's: a value's state is no write's to compute)
