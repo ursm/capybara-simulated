@@ -330,7 +330,8 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     expect(got).to eq([[true, false, true, true, 1, true, 4, true, true, 0], %w[body body input]])
   end
 
-  # …the `selectstart` of an editing host in a shadow tree at its shadow host, as the document sees one (Chrome: `sh`);
+  # …the `selectstart` of an editing host in a shadow tree at its shadow host, as the document sees one (Chrome: `sh`) —
+  # a text control's at the control, its own listener hearing it and none outside the tree (Chrome: `si:si`);
   # and what its listener did is what selectAll then selects in: a control it moved the focus from is left as it was,
   # and a body it replaced is the new one (Chrome: `blur-to-j … i=1-1`, the new body's text selected).
   it 'fires selectstart at a shadow host, and selects what its listener left' do
@@ -342,7 +343,14 @@ RSpec.describe 'execCommand in the selection’s editing host' do
       (() => {
         const seen = [], sh = document.getElementById('sh');
         document.addEventListener('selectstart', (e) => seen.push(e.target.id || e.target.localName));
-        const host = sh.attachShadow({mode: 'open'}).appendChild(document.createElement('div'));
+        const root = sh.attachShadow({mode: 'open'});
+        const inner = root.appendChild(document.createElement('input'));
+        inner.value = 'shadow';
+        inner.addEventListener('selectstart', () => seen.push('inner'));
+        inner.focus();
+        document.execCommand('selectAll');
+        inner.blur();
+        const host = root.appendChild(document.createElement('div'));
         host.contentEditable = 'true';
         host.textContent = 'inner';
         host.focus();
@@ -366,6 +374,6 @@ RSpec.describe 'execCommand in the selection’s editing host' do
         return [seen, out];
       })()
     JS
-    expect(got).to eq([%w[sh i body], ['j', 1, 1, 'renewed']])
+    expect(got).to eq([%w[inner sh i body], ['j', 1, 1, 'renewed']])
   end
 end
