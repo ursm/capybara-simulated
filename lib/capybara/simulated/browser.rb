@@ -6727,13 +6727,11 @@ module Capybara
       # realm parent chain; the tree root is the window document itself. The
       # frame's OWN scheme needs no check here: an http frame URL can't match an
       # https registration scope anyway.
+      # Whether a service worker may control a navigation of realm `realm_id`'s own navigable — the engine's
+      # (navigables.rs `sw_may_control_navigation`: a secure context by its top-level creation URL, no origin a sandbox
+      # makes opaque).
       private def secure_frame_ancestors?(realm_id)
-        parent = @runtime.frame_realm_parent(realm_id).to_i
-        while parent.positive?
-          return false if frame_realm_url(parent).to_s.start_with?('http://')
-          parent = @runtime.frame_realm_parent(parent).to_i
-        end
-        !@current_url.to_s.start_with?('http://')
+        @runtime.realm_call(realm_id.to_i, '__csimSwMayControlNavigation') == true
       end
 
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
@@ -9772,7 +9770,7 @@ module Capybara
             ref_source = hop_referer   # the next hop strips from what THIS hop sent
             # A redirect response's Referrer-Policy overrides the policy for the next hop
             # (redirect-referrer-override): the last valid token of the header wins.
-            if (rp = resp_headers['referrer-policy'] || resp_headers['Referrer-Policy'])
+            if (rp = header_field(resp_headers, 'referrer-policy'))
               tok = Array(rp).join(',').split(',').map(&:strip).reverse.find {|t| REFERRER_POLICIES.include?(t) }
               ref_policy = tok if tok
             end
@@ -9884,11 +9882,11 @@ module Capybara
       # when tracing is off.
       def trace_network(method, url, status, req_headers, req_body, resp_headers, resp_body, t0, redirected)
         return unless @trace
-        ct = resp_headers && (resp_headers['content-type'] || resp_headers['Content-Type'])
+        ct = header_field(resp_headers, 'content-type')
         ct = header_text(ct).split(';', 2).first&.strip if ct   # "" → split is [] → first is nil
         size = if resp_body
                  resp_body.bytesize
-               elsif (cl = resp_headers && (resp_headers['content-length'] || resp_headers['Content-Length']))
+               elsif (cl = header_field(resp_headers, 'content-length'))
                  header_text(cl).to_i
                end
         log_network(method, url, status,
@@ -10076,7 +10074,7 @@ module Capybara
         if (loc = redirect_location(status, resp_headers))
           o_r['redirect_loc'] = resolve_against(loc, target)
         else
-          o_r['redirect_ct']       = header_text(resp_headers['content-type'] || resp_headers['Content-Type'])
+          o_r['redirect_ct']       = header_text(header_field(resp_headers, 'content-type'))
           o_r['opaque_render'] = body_str.to_s.b unless body_str.to_s.empty?
         end
         o_r
@@ -10108,7 +10106,7 @@ module Capybara
       end
 
       def text_response?(headers)
-        ct = header_text(headers['content-type'] || headers['Content-Type']).downcase
+        ct = header_text(header_field(headers, 'content-type')).downcase
         return false if ct.empty?
         TEXT_CONTENT_TYPE_PREFIXES.any? {|p| ct.start_with?(p) }
       end
@@ -11765,7 +11763,7 @@ module Capybara
       end
 
       def content_disposition_header(headers)
-        value = headers['content-disposition'] || headers['Content-Disposition']
+        value = header_field(headers, 'content-disposition')
         value && header_text(value)
       end
 
@@ -12255,14 +12253,11 @@ module Capybara
         false
       end
 
-      # Is this URL a secure cookie CHANNEL? https, plus the potentially-trustworthy
-      # loopback hosts (Chrome sets and sends Secure cookies on http://localhost /
-      # 127.0.0.1 — app suites run there).
+      # Is this URL a secure cookie CHANNEL? One of a potentially trustworthy origin (Secure Contexts, the engine's:
+      # url_ops.rs `potentially_trustworthy` — https, wss, a loopback host or `localhost`: Chrome sets and sends Secure
+      # cookies on http://localhost / 127.0.0.1, where app suites run).
       def secure_cookie_channel?(url)
-        u = url.to_s
-        return true if u.start_with?('https:', 'wss:')
-        h = (cookie_host(u) || '').sub(/:\d+\z/, '')
-        h == 'localhost' || h.end_with?('.localhost') || h.match?(/\A127\.\d+\.\d+\.\d+\z/) || h == '[::1]'
+        Native.potentially_trustworthy_origin(parse_url(url.to_s)&.fetch(:origin).to_s)
       end
 
       # A response's Set-Cookie fields stored for `url` — one cookie each (Rack 2 joins them with a newline, Rack 3 gives
@@ -12271,7 +12266,7 @@ module Capybara
       # `csim.cookie_site`; else its Fetch metadata's) says whether it was cross-site, and whether a top-level navigation
       # (no metadata: same-site).
       def merge_set_cookie(headers, url, env = nil)
-        sc = headers['set-cookie'] || headers['Set-Cookie']
+        sc = header_field(headers, 'set-cookie')
         return if sc.nil? || sc.empty?
 
         url = document_cookie_url unless cookie_host(url)
@@ -12296,6 +12291,12 @@ module Capybara
       # both real browsers and the harness's combine_headers.
       def stringify(headers)
         headers.each_with_object({}) {|(k, v), out| out[k.to_s] = header_text(v) }
+      end
+
+      # A response's header `name`, by its name ASCII case-insensitively — a Rack 2 app may spell it any way — or nil.
+      def header_field(headers, name)
+        headers&.each {|key, value| return value if key.to_s.casecmp?(name) }
+        nil
       end
 
       # …a header's value as script reads it: its fields combined (AssetCache.combined: each without the HTTP whitespace
@@ -12328,7 +12329,7 @@ module Capybara
       # for more than one, which the one value Location takes cannot be ("extract header list values": failure; Chrome's
       # ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION) and so has no followable target; nil for none (an empty Array too).
       def location_field(headers)
-        loc = headers['location'] || headers['Location']
+        loc = header_field(headers, 'location')
         return loc unless loc.is_a?(Array)
         return nil if loc.empty?
         loc.uniq.one? ? loc.first : ''

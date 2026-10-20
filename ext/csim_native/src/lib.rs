@@ -228,6 +228,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("font_strong_families", magnus::function!(fontconfig::strong_families_for_ruby, 1))?;
     // A URL's parts as the URL Standard's parser makes them, the page's own (url_ops.rs).
     native.define_module_function("url_parts", magnus::function!(url_ops::parts_for_ruby, 2))?;
+    // …and whether an origin is potentially trustworthy (Secure Contexts §3.1).
+    native.define_module_function("potentially_trustworthy_origin", magnus::function!(url_ops::potentially_trustworthy_for_ruby, 1))?;
     native.define_module_function("url_fragment_navigation", magnus::function!(url_ops::is_fragment_navigation_for_ruby, 2))?;
     // A `data:` URL's MIME type and body, by Fetch's data: URL processor, the page's too (data_url.rs).
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;

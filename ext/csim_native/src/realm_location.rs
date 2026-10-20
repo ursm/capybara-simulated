@@ -18,7 +18,7 @@ pub(crate) struct RealmLocation {
     document_origin: Option<String>,
     origin_key: Option<String>,
     // Whether its document's origin is a NEW opaque one — sandboxed — which every frame it makes inherits.
-    sandboxed: bool,
+    pub(crate) sandboxed: bool,
 }
 
 const HREF: usize = 0;

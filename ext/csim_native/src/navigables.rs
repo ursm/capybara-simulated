@@ -385,6 +385,31 @@ impl RealmArena {
         }
         None
     }
+    // Whether a service worker may control a navigation of the navigable `container` frames — realm `realm`'s own where
+    // none: where the environment it makes is a secure context (HTML §8.1.3.5, its top-level creation URL's — the top-
+    // level traversable's document's: `url_ops::secure_top_level`) and its document's origin is no opaque one a sandbox
+    // makes it — the container's own `sandbox` attribute, one around it, or the sandboxing of a document it is in, which
+    // every frame of its inherits (`RealmLocation::sandboxed`: a CSP `sandbox` too) — (Service Workers' "Match Service
+    // Worker Registration" finds none for an opaque origin: a sandboxed frame without `allow-same-origin` is
+    // uncontrolled).
+    pub(crate) fn sw_may_control_navigation(&self, realm: i32, container: Option<NodeId>) -> bool {
+        // (…the document the frame is in, for a frame's — its own realm's container's for a realm's own navigation)
+        let (around, own) = match container.and_then(|c| self.get(c)) {
+            Some(n) => (Some(n.realm), n.is_html_named("iframe").then(|| n.plain_attr("sandbox").map(str::to_owned)).flatten()),
+            None => (self.live_container(realm).and_then(|c| self.get(c)).map(|n| n.realm), None),
+        };
+        let top = self.top_level_realm(around.unwrap_or(realm));
+        if !self.realm_state(top).is_some_and(|s| crate::url_ops::secure_top_level(s.location.href())) {
+            return false;
+        }
+        let attributes: Vec<String> = match container {
+            Some(_) => own.into_iter().chain(around.into_iter().flat_map(|r| self.sandboxes_around(r))).collect(),
+            None => self.sandboxes_around(realm).collect(),
+        };
+        let documents = around.into_iter().flat_map(|r| std::iter::once(r).chain(self.ancestor_realms(r)));
+        !attributes.iter().any(|s| crate::sandbox::opaque_origin(None, Some(s)))
+            && !documents.into_iter().any(|r| self.realm_state(r).is_some_and(|s| s.location.sandboxed))
+    }
     // The `sandbox` attributes of the containers realm `realm`'s document and its ancestors' sit in, innermost first —
     // each sets the sandboxed navigation browsing context flag of every document in its frame (HTML §7.6.5, "iframe
     // sandboxing flag set", which a nested document's active sandboxing flag set takes on from its container's document).
@@ -392,6 +417,14 @@ impl RealmArena {
         std::iter::successors(self.live_container(realm), |&c| self.get(c).and_then(|n| self.live_container(n.realm)))
             .filter_map(|c| self.get(c).and_then(|n| n.is_html_named("iframe").then(|| n.plain_attr("sandbox").map(str::to_owned)).flatten()))
     }
+}
+
+// __dom.swMayControlNavigation(container) -> `sw_may_control_navigation` of the frame `container`, or (null) of the
+// calling realm's own navigable.
+fn sw_may_control_navigation_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let container = crate::node_handle::nid_of(scope, args.get(0));
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.sw_may_control_navigation(cid, container));
 }
 
 // Whether a `sandbox` attribute grants its documents navigating their top-level traversable (`allow-top-navigation`, or
@@ -498,6 +531,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
+    crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
     crate::dom::register(scope, ns, "childRealms", child_realms, context_id);
     crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);

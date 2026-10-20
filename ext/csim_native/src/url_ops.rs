@@ -110,6 +110,23 @@ pub(crate) fn potentially_trustworthy(origin: &str) -> bool {
     }
     host.parse::<std::net::Ipv4Addr>().is_ok_and(|ip| ip.is_loopback())
 }
+// …and "Is url potentially trustworthy?" (§3.2) of a URL: about:blank and about:srcdoc are, a `data:` URL is, any other
+// is as its origin is.
+pub(crate) fn potentially_trustworthy_url(url: &str) -> bool {
+    if matches!(url, "about:blank" | "about:srcdoc") {
+        return true;
+    }
+    let Ok(parsed) = ada_url::Url::parse(url, None) else { return false };
+    parsed.protocol() == "data:" || potentially_trustworthy(&parsed.origin())
+}
+// HTML "secure context" (§8.1.3.5) of a window's environment, by its top-level creation URL: none of a `data:` one, one
+// of a URL potentially trustworthy.
+pub(crate) fn secure_top_level(url: &str) -> bool {
+    !url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) && potentially_trustworthy_url(url)
+}
+pub(crate) fn potentially_trustworthy_for_ruby(origin: String) -> bool {
+    potentially_trustworthy(&origin)
+}
 // __dom.potentiallyTrustworthy(origin) -> `potentially_trustworthy`.
 fn potentially_trustworthy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let origin = args.get(0).to_rust_string_lossy(scope);
@@ -556,6 +573,8 @@ mod tests {
         ] {
             assert_eq!(potentially_trustworthy(origin), trusted, "{origin}");
         }
+        assert!(secure_top_level("https://a.test/x") && secure_top_level("about:blank") && secure_top_level("http://localhost/"));
+        assert!(!secure_top_level("data:text/html,x") && !secure_top_level("http://www.example.com/"));
     }
 
     #[test]

@@ -5809,13 +5809,6 @@ service-workers/service-worker/resource-timing-fetch-variants.https.html:
 service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
 - Non-controlled resource loads
-service-workers/service-worker/sandboxed-iframe-fetch-event.https.html:
-- Prepare an iframe sandboxed by <iframe sandbox="allow-scripts">.
-- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
-  by CSP HTTP header with allow-scripts and allow-same-origin flag
-- Request for an sandboxed iframe with allow-scripts flag in the iframe sandboxed
-  by attribute with allow-scripts and allow-same-origin flag
-- Request for an sandboxed iframe with allow-scripts flag in the normal iframe
 service-workers/service-worker/sandboxed-iframe-navigator-serviceworker.https.html:
 - Accessing navigator.serviceWorker in sandboxed iframe should throw.
 - Switching iframe sandbox attribute while loading the iframe
