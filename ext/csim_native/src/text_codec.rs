@@ -18,7 +18,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "utf8EncodeInto", utf8_encode_into, context_id);
     register(scope, ns, "utf8EncodeChunk", utf8_encode_chunk, context_id);
     register(scope, ns, "legacyEncode", legacy_encode, context_id);
-    register(scope, ns, "formEncode", form_encode_op, context_id);
+    register(scope, ns, "formRequest", form_request_op, context_id);
 }
 
 // An encoding by its name (every name is one of its own labels).
@@ -344,64 +344,156 @@ pub(crate) fn encode_entries(enctype: &str, encoding: Option<&'static Encoding>,
     }
     (serializer.finish().into_bytes(), "application/x-www-form-urlencoded")
 }
-// __dom.formEncode(enctype, encoding, list) -> `[body, contentType]` of `list` (flat `[name, value, …]`, a file entry's
-// value its filename) submitted as `enctype` in `encoding` (`encode_entries`): the body as a byte string (a character
-// per byte).
-fn form_encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let enctype = args.get(0).to_rust_string_lossy(scope);
-    let encoding = encoding_arg(scope, args.get(1));
-    let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(2)) else { return };
-    let entries: Vec<(String, String)> = (0..list.length() / 2)
-        .map(|i| {
-            let [name, value] = [2 * i, 2 * i + 1].map(|k| list.get_index(scope, k).map_or_else(String::new, |v| v.to_rust_string_lossy(scope)));
-            (name, value)
-        })
-        .collect();
-    let (body, content_type) = encode_entries(&enctype, encoding, &entries);
-    let body = v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map(Into::into);
-    let content_type = v8::String::new(scope, content_type).map(Into::into);
-    let (Some(body), Some(content_type)) = (body, content_type) else { return };
-    let values: [v8::Local<'_, v8::Value>; 2] = [body, content_type];
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
+// An entry of an entry list: a text value, or a file's filename, type and bytes — read where its body carries them.
+pub(crate) enum Entry {
+    Text(String),
+    File { filename: String, kind: String, bytes: FileBytes },
+}
+// …a file entry's bytes: its own, a file on disk read only where they are sent, or none.
+pub(crate) enum FileBytes {
+    Own(Vec<u8>),
+    Path(String),
 }
 
-// Capybara::Simulated::Native.encode_entry_list(entries, enctype, encoding) -> [body (BINARY), contentType]: the entry
-// list of a form the host submits, encoded — `entries` each `[name, value]` or, a file's, `[name, filename, type,
-// bytes]` — multipart/form-data under a boundary of its own (multipart.rs `encode`), else as `encode_entries` does.
-pub(crate) fn encode_entry_list_for_ruby(ruby: &magnus::Ruby, entries: magnus::RArray, enctype: String, encoding: String) -> Result<(magnus::RString, String), magnus::Error> {
-    use magnus::TryConvert;
-    let encoding = Encoding::for_label(encoding.as_bytes()).filter(|e| *e != encoding_rs::UTF_8);
-    let mut list: Vec<(String, Result<String, (String, String, Vec<u8>)>)> = Vec::new();
-    for entry in entries.into_iter() {
-        let entry = magnus::RArray::try_convert(entry)?;
-        let name = String::try_convert(entry.entry(0)?)?;
-        let value = if entry.len() >= 4 {
-            let bytes: magnus::RString = entry.entry(3)?;
-            // SAFETY: the bytes are copied out before anything can run Ruby code.
-            Err((String::try_convert(entry.entry(1)?)?, String::try_convert(entry.entry(2)?)?, unsafe { bytes.as_slice() }.to_vec()))
-        } else {
-            Ok(String::try_convert(entry.entry(1)?)?)
-        };
-        list.push((name, value));
-    }
-    if enctype.to_ascii_lowercase().starts_with("multipart/form-data") {
-        let boundary = format!("csim-{}", crate::webcrypto::random_hex(8));
-        let parts: Vec<(String, crate::multipart::Value<'_>)> = list
+// A form's submission (HTML "submit" steps 20-25): its method — POST where `method` says so (ASCII case-insensitively),
+// else GET — the URL it navigates to, and for a POST its body and the exact Content-Type it is sent under. A GET's URL
+// is `action` with its query the entry list urlencoded ("mutate action URL", a file entry its filename), a POST's body
+// the entry list encoded by `enctype` (`application/x-www-form-urlencoded` where it names none): multipart/form-data
+// under a boundary of its own (multipart.rs `encode`, a file part its bytes), else as `encode_entries` does — each in
+// `encoding`.
+pub(crate) struct FormRequest {
+    pub(crate) post: bool,
+    pub(crate) url: String,
+    pub(crate) body: Option<(Vec<u8>, String)>,
+}
+pub(crate) fn form_request(action: &str, method: &str, enctype: &str, encoding: Option<&'static Encoding>, entries: &[(String, Entry)]) -> FormRequest {
+    let encoding = encoding.filter(|e| *e != encoding_rs::UTF_8);
+    let named = || -> Vec<(String, String)> {
+        entries
             .iter()
-            .map(|(name, value)| {
+            .map(|(name, value)| match value {
+                Entry::Text(text) => (name.clone(), text.clone()),
+                Entry::File { filename, .. } => (name.clone(), filename.clone()),
+            })
+            .collect()
+    };
+    if !method.eq_ignore_ascii_case("post") {
+        let (query, _) = encode_entries("application/x-www-form-urlencoded", encoding, &named());
+        return FormRequest { post: false, url: crate::url_ops::mutated_action_url(action, &String::from_utf8_lossy(&query)), body: None };
+    }
+    let body = if enctype.to_ascii_lowercase().starts_with("multipart/form-data") {
+        let boundary = format!("----csimFormBoundary{}", crate::webcrypto::random_hex(16));
+        let read: Vec<Option<Vec<u8>>> = entries
+            .iter()
+            .map(|(_, value)| match value {
+                // (…a file gone since it was picked sends no bytes)
+                Entry::File { bytes: FileBytes::Path(path), .. } => Some(std::fs::read(path).unwrap_or_default()),
+                _ => None,
+            })
+            .collect();
+        let parts: Vec<(String, crate::multipart::Value<'_>)> = entries
+            .iter()
+            .zip(&read)
+            .map(|((name, value), read)| {
                 let value = match value {
-                    Ok(text) => crate::multipart::Value::Text(text.clone()),
-                    Err((filename, kind, bytes)) => crate::multipart::Value::File { name: filename.clone(), kind, bytes },
+                    Entry::Text(text) => crate::multipart::Value::Text(text.clone()),
+                    Entry::File { filename, kind, bytes } => {
+                        let bytes = match bytes {
+                            FileBytes::Own(own) => own.as_slice(),
+                            FileBytes::Path(_) => read.as_deref().unwrap_or_default(),
+                        };
+                        crate::multipart::Value::File { name: filename.clone(), kind, bytes }
+                    }
                 };
                 (name.clone(), value)
             })
             .collect();
-        let body = crate::multipart::encode(&parts, encoding, &boundary);
-        return Ok((ruby.str_from_slice(&body), format!("multipart/form-data; boundary={boundary}")));
+        (crate::multipart::encode(&parts, encoding, &boundary), format!("multipart/form-data; boundary={boundary}"))
+    } else {
+        let (body, content_type) = encode_entries(enctype, encoding, &named());
+        (body, content_type.to_owned())
+    };
+    FormRequest { post: true, url: action.to_owned(), body: Some(body) }
+}
+
+// Capybara::Simulated::Native.form_request(action, method, enctype, encoding, entries) -> [method, url, body, contentType]
+// of a form the host submits (`form_request`): `entries` each `[name, value]` or, a file's, `[name, filename, type,
+// path, bytes]` — its bytes read from `path` where it has one — the body and its type nil for a GET.
+pub(crate) fn form_request_for_ruby(
+    ruby: &magnus::Ruby,
+    action: String,
+    method: String,
+    enctype: String,
+    encoding: String,
+    entries: magnus::RArray,
+) -> Result<(String, String, Option<magnus::RString>, Option<String>), magnus::Error> {
+    use magnus::TryConvert;
+    let mut list: Vec<(String, Entry)> = Vec::new();
+    for entry in entries.into_iter() {
+        let entry = magnus::RArray::try_convert(entry)?;
+        let name = String::try_convert(entry.entry(0)?)?;
+        let value = if entry.len() >= 5 {
+            let path: Option<String> = entry.entry(3)?;
+            let bytes = match path {
+                Some(path) => FileBytes::Path(path),
+                None => {
+                    let own: Option<magnus::RString> = entry.entry(4)?;
+                    // SAFETY: the bytes are copied out before anything can run Ruby code.
+                    FileBytes::Own(own.map_or_else(Vec::new, |s| unsafe { s.as_slice() }.to_vec()))
+                }
+            };
+            Entry::File { filename: String::try_convert(entry.entry(1)?)?, kind: String::try_convert(entry.entry(2)?)?, bytes }
+        } else {
+            Entry::Text(String::try_convert(entry.entry(1)?)?)
+        };
+        list.push((name, value));
     }
-    let pairs: Vec<(String, String)> = list.into_iter().map(|(name, value)| (name, value.unwrap_or_else(|(filename, _, _)| filename))).collect();
-    let (body, content_type) = encode_entries(&enctype, encoding, &pairs);
-    Ok((ruby.str_from_slice(&body), content_type.to_owned()))
+    let request = form_request(&action, &method, &enctype, Encoding::for_label(encoding.as_bytes()), &list);
+    let (body, content_type) = match request.body {
+        Some((body, content_type)) => (Some(ruby.str_from_slice(&body)), Some(content_type)),
+        None => (None, None),
+    };
+    Ok((if request.post { "POST" } else { "GET" }.to_owned(), request.url, body, content_type))
+}
+
+// __dom.formRequest(action, method, enctype, encoding, list) -> `[method, url, body, contentType]` of a form submitted
+// (`form_request`): `list` flat `[name, value, …]`, a file entry's value `[filename, type, bytes]`; the body a byte
+// string (a character per byte), it and its type null for a GET.
+fn form_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [action, method, enctype] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
+    let encoding = encoding_arg(scope, args.get(3));
+    let Ok(flat) = v8::Local::<v8::Array>::try_from(args.get(4)) else { return };
+    let mut list: Vec<(String, Entry)> = Vec::new();
+    for k in (0..flat.length().saturating_sub(1)).step_by(2) {
+        let name = flat.get_index(scope, k).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+        let value = flat.get_index(scope, k + 1);
+        let entry = match value.and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) {
+            Some(file) => {
+                let text = |scope: &mut v8::PinScope<'_, '_>, i: u32| file.get_index(scope, i).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+                let (filename, kind) = (text(scope, 0), text(scope, 1));
+                let bytes = file.get_index(scope, 2).map_or_else(Vec::new, |v| crate::blob_data::bytes_arg(scope, v));
+                Entry::File { filename, kind, bytes: FileBytes::Own(bytes) }
+            }
+            None => Entry::Text(value.map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()),
+        };
+        list.push((name, entry));
+    }
+    let request = form_request(&action, &method, &enctype, encoding, &list);
+    let mut items: Vec<v8::Local<v8::Value>> = vec![
+        v8::String::new(scope, if request.post { "POST" } else { "GET" }).unwrap().into(),
+        v8::String::new(scope, &request.url).map_or_else(|| v8::null(scope).into(), Into::into),
+    ];
+    match request.body {
+        Some((body, content_type)) => {
+            items.push(v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map_or_else(|| v8::null(scope).into(), Into::into));
+            items.push(v8::String::new(scope, &content_type).map_or_else(|| v8::null(scope).into(), Into::into));
+        }
+        None => {
+            let null: v8::Local<v8::Value> = v8::null(scope).into();
+            items.extend([null, null]);
+        }
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // (…an encoder as the serializer takes one: its bytes borrowing from the text they encode, as they may)
@@ -422,7 +514,23 @@ fn legacy_encode(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 
 #[cfg(test)]
 mod tests {
-    use super::{encode_chunk, encode_entries, Encoding};
+    use super::{encode_chunk, encode_entries, form_request, Encoding, Entry, FileBytes};
+
+    #[test]
+    fn a_form_request_is_a_get_unless_its_method_is_post() {
+        let entries = [
+            ("a".to_owned(), Entry::Text("1 2".to_owned())),
+            ("f".to_owned(), Entry::File { filename: "x.txt".to_owned(), kind: String::new(), bytes: FileBytes::Own(b"hi".to_vec()) }),
+        ];
+        let get = form_request("http://h/p?old#frag", "dialog", "", None, &entries);
+        assert_eq!((get.post, get.url.as_str(), get.body.is_none()), (false, "http://h/p?a=1+2&f=x.txt#frag", true));
+        let post = form_request("http://h/p", "POST", "", None, &entries);
+        assert_eq!(post.body, Some((b"a=1+2&f=x.txt".to_vec(), "application/x-www-form-urlencoded".to_owned())));
+        let multipart = form_request("http://h/p", "post", "Multipart/Form-Data", None, &entries).body.unwrap();
+        let text = String::from_utf8(multipart.0).unwrap();
+        assert!(multipart.1.starts_with("multipart/form-data; boundary=----csimFormBoundary"));
+        assert!(text.contains("name=\"f\"; filename=\"x.txt\"\r\nContent-Type: application/octet-stream\r\n\r\nhi\r\n"));
+    }
 
     #[test]
     fn an_entry_list_encodes_by_its_enctype() {

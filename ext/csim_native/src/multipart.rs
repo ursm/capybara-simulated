@@ -165,14 +165,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "multipartFormData", multipart_op, context_id);
     crate::dom::register(scope, ns, "multipartEncode", encode_op, context_id);
 }
-// __dom.multipartEncode(entries, encoding, boundary) -> the body (`encode`) as a Uint8Array: `entries` a flat array,
+// __dom.multipartEncode(entries, boundary) -> the body (`encode`, in UTF-8) as a Uint8Array: `entries` a flat array,
 // each entry `name, value` for a field or `name, [filename, type, bytes]` for a file (its bytes a blob's bytes object, or
-// a picked file's: blob_data.rs `bytes_arg`); `encoding` the form's (null: UTF-8).
+// a picked file's: blob_data.rs `bytes_arg`).
 fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(list) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
-    let label = args.get(1);
-    let encoding = if label.is_null_or_undefined() { None } else { encoding_rs::Encoding::for_label(label.to_rust_string_lossy(scope).as_bytes()) };
-    let boundary = args.get(2).to_rust_string_lossy(scope);
+    let boundary = args.get(1).to_rust_string_lossy(scope);
     // (…a file's bytes read first, borrowed by the entries after)
     let mut raw: Vec<(String, Result<String, (String, String, Vec<u8>)>)> = Vec::new();
     let mut k = 0;
@@ -202,7 +200,7 @@ fn encode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             (name.clone(), value)
         })
         .collect();
-    let body = encode(&entries, encoding, &boundary);
+    let body = encode(&entries, None, &boundary);
     rv.set(crate::blob_data::byte_array(scope, body));
 }
 // __dom.multipartFormData(bytes, contentType) -> [name, filename (null for a field), type, value, …] — a field's value

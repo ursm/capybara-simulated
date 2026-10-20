@@ -1475,7 +1475,7 @@ module Capybara
         # `attach_file` hands us a Pathname (or Array of Pathnames);
         # the marshaller rejects non-primitive types. Coerce to a path-list
         # form V8 can hold — the actual multipart upload happens later
-        # in `encode_entry_list` during form submission.
+        # in `form_request` during form submission.
         coerced = coerce_set_value(value)
         # For date/time-shaped inputs we need the type-specific
         # string. Probe the handle's `type` and re-format Date / Time
@@ -3195,13 +3195,10 @@ module Capybara
         invalidate_find_cache
         spec = dom_call('__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
-        action  = spec['action'].to_s
-        method  = spec['method'].to_s.upcase
-        method  = 'GET' if method.empty?
-        enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
-        entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
-        encoding = spec['encoding'] || 'UTF-8'
+        action     = spec['action'].to_s
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
+        action_url = parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s
+        method, url, body, content_type = form_request(spec, action_url, entry_list)
         # A form submitted inside a frame whose target is that frame (self, or a
         # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
         frame_entry = frame_nav_target_entry(spec['target'])
@@ -3230,53 +3227,45 @@ module Capybara
           initiator = [initiator[0], 'no-referrer'] if no_referrer
         end
         if method == 'GET'
-          # GET ignores enctype: the entry list is always the urlencoded query.
-          query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
-          # HTML "mutate action URL" for GET: SET the query to the entry list
-          # unconditionally — an empty list clears any query the action already
-          # carried (browsers navigate to `action?`), it isn't preserved.
-          target = Native.form_action_url(parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s, query)
           if new_window
-            @driver.open_aux_window(target, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
+            @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: referrer)
           elsif named_frame
-            navigate_realm_self_get(named_frame, target, referrer: initiator)
+            navigate_realm_self_get(named_frame, url, referrer: initiator)
           elsif frame_entry
-            navigate_frame(target, entry: frame_entry)
+            navigate_frame(url, entry: frame_entry)
           else
-            navigate(target)
+            navigate(url)
           end
         else
-          body, content_type = encode_entry_list(entries, enctype, encoding)
           if new_window
-            @driver.open_aux_window(action_url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
+            @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: referrer,
                                     post: {body: body, content_type: content_type})
           elsif named_frame
-            navigate_realm_self_post(named_frame, action_url, body, content_type, referrer: initiator)
+            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator)
           elsif frame_entry
-            navigate_frame_post(action_url, body, content_type, entry: frame_entry)
+            navigate_frame_post(url, body, content_type, entry: frame_entry)
           else
-            navigate_post(action_url, body, content_type)
+            navigate_post(url, body, content_type)
           end
         end
       end
 
-      # HTML "encode the entry list" by enctype, in the form's submission character `encoding` → [body, exact
-      # Content-Type], the engine's (text_codec.rs `encode_entry_list_for_ruby`). `entries` is the ordered entry list —
-      # string {'name','value'} or file {'name','file'=>true,'filename','type', and 'handle'/'index' or 'bytes'}
-      # entries. Only a multipart body carries a file's bytes — read then through its `@file_picks` slot, or come from
-      # the VM (an in-memory `new File([…])`); any other enctype sends its filename.
-      def encode_entry_list(entries, enctype, encoding)
-        multipart = enctype.downcase.start_with?('multipart/form-data')
+      # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET —
+      # the engine's (text_codec.rs `form_request`): `spec` the form's (`__csimFormSerialize`), its action resolved as
+      # `action_url`, its entry list `entry_list` where the submission built one (the post-`formdata` one), else the
+      # spec's. Each entry string {'name','value'} or file {'name','file'=>true,'filename','type', and 'handle'/'index'
+      # or 'bytes'}: a file's bytes read — only where its body carries them — through its `@file_picks` slot, else the
+      # VM's (an in-memory `new File([…])`).
+      def form_request(spec, action_url, entry_list)
+        entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
         list = entries.map {|e|
           next [e['name'].to_s, e['value'].to_s] unless e['file']
-          next [e['name'].to_s, e['filename'].to_s] unless multipart
 
-          path = entry_file_path(e)
-          [e['name'].to_s, e['filename'].to_s, e['type'].to_s, path ? File.binread(path) : e['bytes'].to_s.b]
+          [e['name'].to_s, e['filename'].to_s, e['type'].to_s, entry_file_path(e), e['bytes']&.to_s&.b]
         }
-        Native.encode_entry_list(list, enctype, encoding)
+        Native.form_request(action_url.to_s, spec['method'].to_s, spec['enctype'].to_s, spec['encoding'] || 'UTF-8', list)
       end
 
       # A threaded file entry's on-disk path, through the `@file_picks` slot recorded at `attach_file` time
@@ -10560,22 +10549,13 @@ module Capybara
       def submit_form_in_realm(realm_id, form_handle, submitter_handle, entry_list = nil)
         spec = @runtime.realm_call(realm_id, '__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
-        method = spec['method'].to_s.upcase
-        method = 'GET' if method.empty?
         target = spec['target'].to_s
-        action = spec['action'].to_s
-        enctype = spec['enctype'].to_s.empty? ? 'application/x-www-form-urlencoded' : spec['enctype'].to_s.downcase
-        entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
-        encoding = spec['encoding'] || 'UTF-8'
-        # GET → urlencoded query (enctype ignored); POST → enctype-encoded body.
-        get_query, = encode_entry_list(entries, 'application/x-www-form-urlencoded', encoding)
-        get_url = Native.form_action_url(action, get_query)
+        method, url, body, content_type = form_request(spec, spec['action'].to_s, entry_list)
         if frame_self_target?(target)
           if method == 'GET'
-            navigate_realm_self_get(realm_id, get_url)
+            navigate_realm_self_get(realm_id, url)
           else
-            body, content_type = encode_entry_list(entries, enctype, encoding)
-            navigate_realm_self_post(realm_id, resolve_against_current(action), body, content_type)
+            navigate_realm_self_post(realm_id, url, body, content_type)
           end
         elsif target_keyword(target) != TARGET_NAME || (chosen = choose_named_navigable(realm_id, target)) == :top
           log_console('warn', "nested-context form submit (target=#{target.inspect}) is not modeled")
@@ -10584,10 +10564,9 @@ module Capybara
           initiator = realm_referrer_initiator(realm_id)
           initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
           if method == 'GET'
-            navigate_realm_self_get(chosen, get_url, referrer: initiator)
+            navigate_realm_self_get(chosen, url, referrer: initiator)
           else
-            body, content_type = encode_entry_list(entries, enctype, encoding)
-            navigate_realm_self_post(chosen, action, body, content_type, referrer: initiator)
+            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator)
           end
         elsif chosen.nil?
           log_console('warn', "nested-context form submit (target=#{target.inspect}) into a new window is not modeled")

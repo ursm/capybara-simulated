@@ -213,8 +213,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
         .define_module("Simulated")?
         .define_module("Native")?;
     native.define_module_function("unicode_class_ranges", magnus::function!(unicode::class_ranges, 1))?;
-    // HTML's "encode the entry list" of a form the host submits, by its enctype (text_codec.rs, multipart.rs).
-    native.define_module_function("encode_entry_list", magnus::function!(text_codec::encode_entry_list_for_ruby, 3))?;
+    // A form the host submits, as its request: method, URL and body (text_codec.rs, multipart.rs).
+    native.define_module_function("form_request", magnus::function!(text_codec::form_request_for_ruby, 5))?;
     // An image resource's bytes decoded to RGBA, on whichever thread fetched them.
     native.define_module_function("decode_image", magnus::function!(image_decode::decode_for_ruby, 3))?;
     // A web font's file unwrapped from its WOFF / WOFF2 container.
@@ -236,8 +236,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("screen_size", magnus::function!(viewport::screen_size_for_ruby, 0))?;
     // The user agent string every request sends and the page's navigator reads (navigator.rs `USER_AGENT`).
     native.define_module_function("user_agent", magnus::function!(navigator::user_agent_for_ruby, 0))?;
-    // A GET form submission's URL: the action's query the entry list (url_ops.rs `mutated_action_url`), the page's too.
-    native.define_module_function("form_action_url", magnus::function!(url_ops::mutated_action_url_for_ruby, 2))?;
     // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one
     // (event_stream.rs).
     native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 0))?;
