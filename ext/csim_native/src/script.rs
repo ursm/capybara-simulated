@@ -285,25 +285,26 @@ fn javascript_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     rv.set_bool(crate::mime::extract(&header).is_some_and(|m| is_javascript_mime(&m.essence)));
 }
 
-// The destination a `<link rel=modulepreload>` fetches with, by its `as` (HTML "fetch and process the linked resource",
-// modulepreload): its potential destination's — `fetch` none — where that is a module preload destination (a
-// script-like one, `json`, `style`, `text`), `script` for an `as` that names none (missing, or no keyword); None for one
-// that names any other destination, which fetches nothing and fails (`as=image`).
-const POTENTIAL_DESTINATIONS: [&str; 24] = [
-    "fetch", "audio", "audioworklet", "document", "embed", "font", "frame", "iframe", "image", "json", "manifest", "object",
-    "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "text", "track", "video", "webidentity",
-    "worker", "xslt",
-];
+// The keywords of a `<link>`'s `as` (HTML): the preload destinations — what a `rel=preload` fetches — and the module
+// preload destinations — what a `rel=modulepreload` does (a script-like one, `json`, `style`, `text`).
+const PRELOAD_DESTINATIONS: [&str; 6] = ["fetch", "font", "image", "script", "style", "track"];
 const MODULE_PRELOAD_DESTINATIONS: [&str; 9] = ["audioworklet", "paintworklet", "script", "serviceworker", "sharedworker", "worker", "json", "style", "text"];
-fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
-    let Some(&named) = POTENTIAL_DESTINATIONS.iter().find(|d| d.eq_ignore_ascii_case(as_value)) else { return Some("script") };
-    MODULE_PRELOAD_DESTINATIONS.iter().copied().find(|&d| d == named)
+fn as_keyword(as_value: &str) -> Option<&'static str> {
+    PRELOAD_DESTINATIONS.iter().chain(&MODULE_PRELOAD_DESTINATIONS).copied().find(|d| d.eq_ignore_ascii_case(as_value))
 }
-// The destination a `<link rel=preload>` fetches with (HTML "fetch and process the linked resource", preload): the
-// potential destination its `as` names (ASCII case-insensitively), `fetch` none's — None where it names none (missing,
-// empty, no keyword), which fetches nothing (Chrome and Firefox: no request, no event).
+// The destination a `<link rel=modulepreload>` fetches with, by its `as` (HTML "fetch and process the linked resource",
+// modulepreload): the module preload destination it names, `script` for an `as` in no state (missing, or no keyword:
+// `as=audio` too); None for one naming a preload destination no module is (`image`, `fetch`), which fetches nothing and
+// fails.
+fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
+    let Some(named) = as_keyword(as_value) else { return Some("script") };
+    MODULE_PRELOAD_DESTINATIONS.contains(&named).then_some(named)
+}
+// The destination a `<link rel=preload>` fetches with (HTML "translate a preload destination"): the preload destination
+// its `as` names, `fetch` the empty one — None for any other (missing, empty, no keyword, a module's alone: `json`,
+// `worker`), which fetches nothing (Chrome and Firefox: no request, no event).
 fn preload_destination(as_value: &str) -> Option<&'static str> {
-    let named = POTENTIAL_DESTINATIONS.iter().copied().find(|d| d.eq_ignore_ascii_case(as_value))?;
+    let named = as_keyword(as_value).filter(|d| PRELOAD_DESTINATIONS.contains(d))?;
     Some(if named == "fetch" { "" } else { named })
 }
 // __dom.preloadDestination(as) -> `preload_destination`, null for none.
@@ -479,6 +480,8 @@ mod tests {
         assert_eq!(modulepreload_destination("fetch"), None);
         assert_eq!((preload_destination("Style"), preload_destination("fetch")), (Some("style"), Some("")));
         assert_eq!((preload_destination(""), preload_destination("bogus")), (None, None));
+        assert_eq!((preload_destination("audio"), preload_destination("worker")), (None, None));
+        assert_eq!((modulepreload_destination("audio"), modulepreload_destination("track")), (Some("script"), None));
         assert!(module_content("text/javascript; charset=utf-8", "script"));
         assert!(!module_content("text/javascript", "style") && !module_content("text/javascript", "json"));
         assert!(module_content("text/css", "style") && module_content("application/ld+json", "json"));

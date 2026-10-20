@@ -840,10 +840,12 @@ const REFLECT_ENUMS = {
   'HTMLInputElement.formEnctype': FORM_ENCTYPE,
   'HTMLInputElement.formMethod': { keywords: ['get', 'post'], missing: '', invalid: 'get' },
   'HTMLInputElement.colorSpace': { keywords: ['limited-srgb', 'display-p3'], missing: 'limited-srgb', invalid: 'limited-srgb' },
+  // (…the preload destinations and the module preload destinations — HTML: "Each of the union of preload destinations
+  // and module preload destinations is a keyword for this attribute"; ext/csim_native/src/script.rs `as_keyword`)
   'HTMLLinkElement.as': {
     keywords: [
-      'fetch', 'audio', 'document', 'embed', 'font', 'image', 'manifest', 'object', 'report', 'script', 'sharedworker', 'style',
-      'track', 'video', 'worker', 'xslt'
+      'fetch', 'font', 'image', 'script', 'style', 'track', 'json', 'text', 'audioworklet', 'paintworklet', 'serviceworker',
+      'sharedworker', 'worker'
     ]
   },
   'HTMLTemplateElement.shadowRootMode': { keywords: ['open', 'closed'] },

@@ -60478,3 +60478,366 @@ xhr/xmlhttprequest-sync-default-permissions-policy.tentative.sub.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+
+html/dom/reflection-metadata.html:
+- name: "link.as: IDL set to \"AUDIO\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"DOCUMENT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"EMBED\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"MANIFEST\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"OBJECT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"REPORT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"VIDEO\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"XSLT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"audio\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"document\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"embed\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"manifest\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"object\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"report\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"video\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: IDL set to \"xslt\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"AUDIO\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"DOCUMENT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"EMBED\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"MANIFEST\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"OBJECT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"REPORT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"VIDEO\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"XSLT\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"audio\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"document\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"embed\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"manifest\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"object\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"report\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"video\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+- name: "link.as: setAttribute() to \"xslt\""
+  reason: 'Holds the `as` keywords of the older HTML text, the potential destinations (elements-metadata.js: "fetch",
+    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
+    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
+    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
+    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
+    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
+    (no state, read as ""). CLAUDE.md rule 1, case 3.'
+fetch/api/request/destination/fetch-destination.https.html:
+- name: "HTMLLinkElement with rel=preload and as=audio fetches with a \"audio\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=document fetches with a \"document\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=font fetches with a \"font\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=image fetches with a \"image\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=json fetches with a \"json\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=manifest fetches with a \"manifest\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=script fetches with a \"script\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=sharedworker fetches with a \"sharedworker\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=track fetches with a \"track\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=video fetches with a \"video\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=worker fetches with a \"worker\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "HTMLLinkElement with rel=preload and as=xslt fetches with a \"xslt\" Request.destination"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
+- name: "[harness] TIMEOUT"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
+    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
+    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
+    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
+    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
+    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
+    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
