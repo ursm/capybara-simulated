@@ -15,6 +15,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "userInputNotify", user_input_notify, context_id);
     crate::dom::register(scope, ns, "userActivation", user_activation, context_id);
     crate::dom::register(scope, ns, "consumeActivation", consume_activation, context_id);
+    crate::dom::register(scope, ns, "showPickerRefusal", show_picker_refusal, context_id);
+    crate::dom::register(scope, ns, "isReadOnly", is_read_only, context_id);
 }
 
 impl RealmArena {
@@ -141,6 +143,48 @@ fn user_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 fn consume_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     rv.set_bool(realm(scope, cid).consume_activation(cid));
+}
+
+// What `showPicker()` refuses with (HTML's showPicker steps), in their order: a control that is not mutable — disabled
+// (an InvalidStateError), read-only — a document cross-origin with its top-level one (a SecurityError: a pure origin
+// compare, `document.domain` relaxing nothing; a file or a colour input exempt), and no transient activation (a
+// NotAllowedError); none consumes it.
+const PICKER_DISABLED: u32 = 1;
+const PICKER_READ_ONLY: u32 = 2;
+const PICKER_CROSS_ORIGIN: u32 = 3;
+const PICKER_NO_ACTIVATION: u32 = 4;
+// __dom.showPickerRefusal(control) -> the refusal (`PICKER_*`) of a `showPicker()` of the control, or 0 — its window's
+// activation consumed.
+fn show_picker_refusal(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_uint32(0) };
+    let arena = realm(scope, cid);
+    let Some(n) = arena.get(id) else { return rv.set_uint32(0) };
+    let input = n.is_html_named("input");
+    let exempt = input && matches!(n.input_type(), "file" | "color");
+    if arena.is_actually_disabled(id) {
+        return rv.set_uint32(PICKER_DISABLED);
+    }
+    if input && n.is_read_only() {
+        return rv.set_uint32(PICKER_READ_ONLY);
+    }
+    let top = std::iter::once(cid).chain(arena.ancestor_realms(cid)).last().unwrap_or(cid);
+    if !exempt && top != cid {
+        let ours = realm(scope, cid).location.origin_key(cid);
+        let dom = crate::dom::dom(scope);
+        let theirs = dom.arena.enter_known(top).map(|a| a.location.origin_key(top));
+        if theirs.is_none_or(|k| k != ours) {
+            return rv.set_uint32(PICKER_CROSS_ORIGIN);
+        }
+    }
+    rv.set_uint32(if realm(scope, cid).consume_activation(cid) { 0 } else { PICKER_NO_ACTIVATION });
+}
+
+// __dom.isReadOnly(nid) -> whether the element is read-only (element_state.rs `is_read_only`).
+fn is_read_only(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(realm(scope, cid).get(id).is_some_and(|n| n.is_read_only()));
 }
 
 #[cfg(test)]

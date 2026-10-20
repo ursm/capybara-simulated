@@ -108,6 +108,12 @@ fn dir_keyword(raw: &str) -> Option<Dir> {
     [("ltr", Dir::Ltr), ("rtl", Dir::Rtl), ("auto", Dir::Auto)].into_iter().find(|(k, _)| raw.eq_ignore_ascii_case(k)).map(|(_, d)| d)
 }
 impl NodeData {
+    // Whether it is read-only (HTML's `readonly`): the attribute set where it applies — a `<textarea>`'s, an `<input>`'s
+    // of a type it applies to (input_types.rs `READONLY`).
+    pub(crate) fn is_read_only(&self) -> bool {
+        self.plain_attr("readonly").is_some()
+            && (self.is_html_named("textarea") || (self.is_html_named("input") && self.input_has(crate::input_types::READONLY)))
+    }
     // An `<input>`'s type state: its `type` attribute, ASCII-lowercased, when that names one; else Text.
     pub(crate) fn input_type(&self) -> &'static str {
         crate::input_types::state(self.plain_attr("type"))

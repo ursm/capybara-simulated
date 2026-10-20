@@ -307,7 +307,7 @@ const STEP_MULTIPLE: u32 = 1 << 10; // a select's `multiple` removed
 const STEP_FRAME_MARGINS: u32 = 1 << 11; // a frame's `marginwidth` / `marginheight`
 const STEP_FRAME_SRC: u32 = 1 << 12; // a frame's `src` / `srcdoc`
 const STEP_MEDIA_SRC: u32 = 1 << 13; // a `src` set
-const STEP_PICTURE: u32 = 1 << 14; // a `<source>`'s, its `<picture>`'s image following
+const STEP_PICTURE: u32 = 1 << 14; // a `<picture>`'s `<source>`'s that selects or sizes its images: their boxes follow
 const STEP_HANDLER: u32 = 1 << 15; // an event handler content attribute
 const STEP_FORM_OWNER: u32 = 1 << 16; // `form`, `id`, `disabled`: form-associated custom elements' owners
 const STEP_FILES: u32 = 1 << 17; // an input become a file input: its files emptied
@@ -315,6 +315,7 @@ const STEP_BACKUP: u32 = 1 << 18; // a reaction enqueued: the backup element que
 const STEP_REMOVED: u32 = 1 << 19; // the attribute removed: its Attr node detached
 const STEP_POPOVER: u32 = 1 << 20; // a `popover` changed: a showing popover of another state now hidden
 const STEP_LINK_RESOURCE: u32 = 1 << 21; // a `<link>`'s resource may be another: fetched again, its `load` fired
+const STEP_PICTURE_SOURCE: u32 = 1 << 22; // …its `srcset` / `src`: its images' data updated too
 
 // __dom.attrWrite(element, how, a, b, c, d) -> `[steps, key, oldValue, localName]` of the change made (`how`, above):
 // what the bindings do for it (`STEP_*`), the key of the attribute, the value it had (null for none) and its local
@@ -579,7 +580,11 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let renavigates = !set || changed || (local == "src" && n.plain_attr("srcdoc").is_none());
     steps |= flag(frame && matches!(local, "src" | "srcdoc") && renavigates, STEP_FRAME_SRC);
     steps |= flag(local == "src" && set, STEP_MEDIA_SRC);
-    steps |= flag(tag == "source" && changed && set, STEP_PICTURE);
+    // (…a `<source>` a `<picture>` holds: its candidates, its `media` and `type`, and the dimensions its images take)
+    let picture = html && tag == "source" && changed && set && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.is_html_named("picture"));
+    let selects = matches!(local, "srcset" | "src");
+    steps |= flag(picture && (selects || matches!(local, "media" | "type" | "width" | "height")), STEP_PICTURE);
+    steps |= flag(picture && selects, STEP_PICTURE_SOURCE);
     steps |= flag(local.starts_with("on"), STEP_HANDLER);
     steps |= flag(changed && matches!(local, "form" | "id" | "disabled"), STEP_FORM_OWNER);
     // (…its state — auto, hint, manual (any other value), none — not its value: HTML's `popover` attribute change steps)
