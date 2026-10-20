@@ -2210,9 +2210,6 @@ dom/events/EventListener-invoke-legacy.html:
 dom/events/click-on-absolute-pseudo.html:
 - Click on pseudo-element that disappears on mousedown
 - "[harness] ERROR"
-dom/events/event-global-extra.window.js:
-- Listener from a different global
-- window.event and moving an element post-dispatch
 dom/events/relatedTarget.window.js:
 - Reset targets before activation behavior
 - Reset targets on early return

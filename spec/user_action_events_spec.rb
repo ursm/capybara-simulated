@@ -309,4 +309,22 @@ RSpec.describe 'User action events' do
     session.find('#src').drag_to(session.find('#z'), html5: true)
     expect(session.evaluate_script('__fx')).to eq(['dragstart none', 'dragover copy', 'dragover copy', 'drop copy', 'dragend move'])
   end
+
+  # HTML "clean up after running script" after each callback, inside DOM "inner invoke" — before the current event is
+  # restored: a microtask the first of a button's listeners queued runs before its second, and sees `window.event`.
+  it "runs a listener's microtasks before the next listener, while window.event is still the event" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.__order = [];
+      const b = document.getElementById('btn');
+      b.addEventListener('click', () => {
+        __order.push('l1');
+        Promise.resolve().then(() => __order.push('m1:' + (window.event ? window.event.type : 'none')));
+      });
+      b.addEventListener('click', () => __order.push('l2'));
+      document.body.addEventListener('click', () => __order.push('body'));
+    JS
+    session.find('#btn').click
+    expect(session.evaluate_script('__order')).to eq(%w[l1 m1:click l2 body])
+  end
 end

@@ -175,4 +175,23 @@ RSpec.describe "A node listener's window.event" do
     JS
     expect(got).to eq(%w[undefined undefined undefined event])
   end
+
+  it "follows a slotted node's path into the shadow tree and out of it" do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const host = document.getElementById('host');
+        const slot = host.attachShadow({mode: 'open'}).appendChild(document.createElement('slot'));
+        const child = host.appendChild(document.createElement('b'));
+        const seen = [];
+        const look = (name) => (e) => seen.push(name + ':' + (window.event === e ? 'event' : String(window.event)));
+        child.addEventListener('x', look('child'));
+        slot.addEventListener('x', look('slot'));
+        slot.parentNode.addEventListener('x', look('root'));
+        host.addEventListener('x', look('host'));
+        child.dispatchEvent(new Event('x', {bubbles: true}));
+        return seen;
+      })()
+    JS
+    expect(got).to eq(%w[child:event slot:undefined root:undefined host:event])
+  end
 end

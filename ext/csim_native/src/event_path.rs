@@ -74,8 +74,9 @@ fn closed_root(arena: &RealmArena, id: NodeId) -> bool {
     arena.get(id).is_some_and(|n| n.host.is_some() && n.shadow_is(crate::dom::SHADOW_CLOSED))
 }
 
-fn step_flags(arena: &RealmArena, id: NodeId, slot_closed: bool) -> u8 {
-    let in_shadow = arena.get(arena.root_of(id)).is_some_and(|n| n.host.is_some());
+// (…`root` the node's root, which the path builder follows as it goes rather than walking up to it a step)
+fn step_flags(arena: &RealmArena, id: NodeId, root: NodeId, slot_closed: bool) -> u8 {
+    let in_shadow = arena.get(root).is_some_and(|n| n.host.is_some());
     (closed_root(arena, id) as u8 * STEP_ROOT_CLOSED) | (slot_closed as u8 * STEP_SLOT_CLOSED) | (in_shadow as u8 * STEP_IN_SHADOW)
 }
 
@@ -91,13 +92,19 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
         node: target,
         target,
         related: retarget(arena, related, target),
-        flags: step_flags(arena, target, false),
+        flags: step_flags(arena, target, target_root, false),
     }];
     let (mut current, mut current_root) = (target, target_root);
     let mut slottable = assigned_slot(arena, target).map(|_| target);
     let mut slot_in_closed_tree = false;
     let mut parent = event_parent(arena, target, composed, target_root);
+    // (…the root of the step before: a parent shares it, a shadow root's host or a slottable's slot is in another tree)
+    let (mut prev, mut root) = (target, target_root);
     while let Some(p) = parent {
+        if host_of(arena, prev) == Some(p) || assigned_slot(arena, prev) == Some(p) {
+            root = arena.root_of(p);
+        }
+        prev = p;
         if slottable.take().is_some() && closed_root(arena, arena.root_of(p)) {
             slot_in_closed_tree = true;
         }
@@ -115,7 +122,7 @@ fn path(arena: &RealmArena, target: NodeId, related: Related, composed: bool) ->
             current = p;
             current_root = arena.root_of(p);
         }
-        steps.push(Step { node: p, target: current, related: rel, flags: step_flags(arena, p, slot_in_closed_tree) });
+        steps.push(Step { node: p, target: current, related: rel, flags: step_flags(arena, p, root, slot_in_closed_tree) });
         slot_in_closed_tree = false;
         parent = event_parent(arena, p, composed, target_root);
     }
