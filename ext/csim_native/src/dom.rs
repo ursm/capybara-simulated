@@ -322,7 +322,8 @@ pub(crate) const STATE_UPGRADED: u32 = 1 << 18;
 pub(crate) const STATE_XML_DOCUMENT: u32 = 1 << 19;
 // …and that its design mode is enabled (HTML §6.8.2 `designMode`): its document element an editing host.
 pub(crate) const STATE_DESIGN_MODE: u32 = 1 << 20;
-// …and, on a `<link>`, that it obtained nothing because its `media` did not match (link_resource.rs `link_plan`).
+// …and, on a `<link>`, that it obtained nothing because its `media` did not match (link_resource.rs `link_plan`) — the
+// engine's alone: no binding reads it (`linkMediaSkipped` answers it).
 pub(crate) const STATE_LINK_MEDIA_SKIPPED: u32 = 1 << 21;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its

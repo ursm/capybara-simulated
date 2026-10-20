@@ -8,7 +8,8 @@ require_relative 'support/poll_until'
 # `fetch`, `font`, `image`, `script`, `style`, `track`, ASCII case-insensitively) — and one whose `as` names none
 # (missing, empty, no keyword, `audio`, `worker`) fetches nothing and fires no event, as Chrome and Firefox make no
 # request for it, until a change of its `as` names one; nor does one whose `media` does not match, until it does. An
-# `as` set to the value it had changes nothing (Chrome: one request).
+# `as` set to the value it had changes nothing (Chrome: one request). A `data:` URL that does not parse is a network
+# error (Fetch "scheme fetch"), the preload's load an `error`.
 RSpec.describe 'a preload’s destination' do
   it 'fetches by its `as`, and nothing for one naming no destination' do
     requested = []
@@ -27,6 +28,7 @@ RSpec.describe 'a preload’s destination' do
         <link id=later rel=preload href="/later" onload="seen.push('later load')" onerror="seen.push('later error')">
         <link id=print rel=preload as="fetch" media="print" href="/print" onload="seen.push('print load')">
         <link id=same rel=preload as="script" href="/same" onload="seen.push('same load')">
+        <link rel=preload as="image" href="data:nocomma" onload="seen.push('bad data load')" onerror="seen.push('bad data error')">
         <script>
           setTimeout(() => {
             document.getElementById('later').as = 'script';
@@ -44,7 +46,7 @@ RSpec.describe 'a preload’s destination' do
     s.visit '/'
     # (…an `as` set to the value it had fetching nothing again: no second `same load` before the barrier's)
     got = poll_until { (seen = s.evaluate_script('window.seen')).include?('barrier load') && seen }
-    loads = %w[barrier fetch font later print same].map {|n| "#{n} load" }
+    loads = ['bad data error', *%w[barrier fetch font later print same].map {|n| "#{n} load" }]
     expect([got.sort, requested.sort]).to eq([loads, %w[/barrier /fetch /font /later /print /same]])
   end
 end
