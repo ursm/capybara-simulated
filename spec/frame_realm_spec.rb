@@ -186,7 +186,12 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "location").get.call(w).href')).to eq('SecurityError')
     expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "postMessage").value === w.postMessage ? 1 : null')).to eq('ok:number')
     expect(cross_window_eval('w.close.call === Function.prototype.call ? 1 : null')).to eq('ok:number')
-    expect(cross_window_eval('w[0]')).to eq('ok:undefined')
+    expect(cross_window_eval('w[0]')).to eq('SecurityError')
+    expect(cross_window_eval('w.then')).to eq('ok:undefined')
+    expect(cross_window_eval('w[Symbol.toStringTag]')).to eq('ok:undefined')
+    expect(cross_window_eval('w[Symbol.for("x")]')).to eq('SecurityError')
+    expect(cross_window_eval('w.postMessage.name + w.postMessage.length')).to eq('ok:string')
+    expect(cross_window_eval('(() => { try { w.postMessage("x", "not a url"); } catch (e) { return e instanceof DOMException ? e : null; } })()')).to eq('ok:object')
   end
 
   it 'exposes the cross-origin-safe properties without throwing (postMessage, closed)' do
