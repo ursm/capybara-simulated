@@ -107,4 +107,20 @@ RSpec.describe 'change on blur' do
     s.document.synchronize { s.evaluate_script('log.length') == 3 or raise Capybara::ExpectationNotMet }
     expect(s.evaluate_script('[log, document.activeElement.tagName]')).to eq([%w[change blur focusout], 'BODY'])
   end
+
+  # …one focused in a shadow tree too, where the host is what moved.
+  it "loses focus at the rendering update where a focused control's shadow host moves where it is not rendered" do
+    s = session_for(<<~HTML)
+      <div id=h hidden></div><div id=host></div>
+      <script>
+        window.log = [];
+        const input = host.attachShadow({mode: 'open'}).appendChild(document.createElement('input'));
+        input.addEventListener('blur', () => log.push('blur'));
+        input.focus();
+      </script>
+    HTML
+    s.execute_script('h.moveBefore(host, null)')
+    s.document.synchronize { s.evaluate_script('log.length') == 1 or raise Capybara::ExpectationNotMet }
+    expect(s.evaluate_script('[log, document.activeElement.tagName]')).to eq([['blur'], 'BODY'])
+  end
 end
