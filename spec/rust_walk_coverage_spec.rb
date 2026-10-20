@@ -567,7 +567,7 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # …and an `@font-face` with metric descriptors: its `size-adjust` scales every advance (a face of its own natively,
-  # `registerFontScaled`), its overrides the line box — 6 Ahem characters at 20px x 150% are 180 wide.
+  # font.rs `register_scaled`), its overrides the line box — 6 Ahem characters at 20px x 150% are 180 wide.
   it 'lays out text in a face with metric descriptors' do
     ahem = File.binread(File.join(__dir__, 'wpt/fonts/Ahem.ttf'))
     css = '@font-face { font-family: a150; src: url(/Ahem.ttf); size-adjust: 150%; ascent-override: 90%; }'
@@ -583,7 +583,7 @@ RSpec.describe 'Rust walk coverage' do
   end
 
   # A family whose `@font-face`s split a run by `unicode-range` — Ahem for A–Z, Lato at 120% for a–z, the system font for
-  # the rest — is one face natively (`registerFontStack`), each character measured by the first face covering it.
+  # the rest — is one face natively (font_resolve.rs `stack_handle`), each character measured by the first face covering it.
   it 'lays out text in a unicode-range split' do
     dir = File.join(__dir__, 'wpt/fonts')
     files = {'/Ahem.ttf' => File.binread("#{dir}/Ahem.ttf"), '/Lato.ttf' => File.binread("#{dir}/Lato-Medium.ttf")}

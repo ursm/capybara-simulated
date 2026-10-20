@@ -1128,6 +1128,7 @@ pub(crate) struct RealmState {
     // What a face of that list is read from, once asked (font_resolve.rs `indexed_file`), and the face each family stack
     // takes at a bucket (`family_face`) — both forgotten when the list moves.
     pub(crate) face_files: Vec<Option<Option<String>>>,
+    pub(crate) font_faces_list: Option<u64>,
     pub(crate) family_faces: std::collections::HashMap<String, std::collections::HashMap<String, crate::font_resolve::Resolved>>,
     // Its performance timeline's entry buffers, ids and registered observers (perf_timeline.rs).
     pub(crate) perf_timeline: crate::perf_timeline::PerfTimeline,

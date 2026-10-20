@@ -437,11 +437,14 @@ pub(crate) fn register_path(name: &str) -> i32 {
     h
 }
 
-// The face `handle` under an `@font-face` `size-adjust` of `scale`: every advance its table gives scaled, as
-// font-metrics.js `applyFaceMetrics` reshapes the table (a full-em wide character is no advance of the table's, and
-// stays one em there too). Its own handle, shared per (face, scale); the face's handle where the scale is 1, and -1 for
-// a face that is not registered.
+// The face `handle` under an `@font-face` `size-adjust` of `scale`: every advance its table gives scaled (a full-em wide
+// character is no advance of the table's, and stays one em there too) — `0%` making its text no width at all, as
+// Chrome's. Its own handle, shared per (face, scale); the face's handle where the scale is 1, and -1 for a face that is
+// not registered, or a scale that is no finite one of zero or more.
 pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
+    if !(scale.is_finite() && scale >= 0.0) {
+        return -1;
+    }
     if scale == 1.0 || handle < 0 {
         return handle;
     }
@@ -473,7 +476,7 @@ pub(crate) fn register_scaled(handle: i32, scale: f64) -> i32 {
     h
 }
 
-// A family stack whose `@font-face`s restrict their `unicode-range`s (font-metrics.js `faceStackFor`): the face
+// A family stack whose `@font-face`s restrict their `unicode-range`s (font_resolve.rs `stack_handle`): the face
 // `primary`'s own metrics — what a character no member covers is measured by, and what a `ch` is — and `members`, in
 // pick order.
 // Its own handle, shared per (primary, members); -1 for an unregistered primary.

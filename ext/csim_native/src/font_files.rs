@@ -1,7 +1,7 @@
 // The font files a realm's faces are read from, as its sources came to them: a downloaded face's URL fetched once, a
 // `local()` name looked up once per weight / style — each the file it gave, or none (a 404, a broken file, no such
 // font on this machine), so a relayout neither fetches nor asks fontconfig again. The realm's for as long as its
-// context lives; which face a family takes is font_faces.rs's.
+// context lives; which face a family takes is font_resolve.rs's.
 
 use std::collections::HashMap;
 

@@ -348,6 +348,37 @@ RSpec.describe 'web fonts' do
     expect(got).to eq(['error', ['loading:', 'loadingerror:Gone2']])
   end
 
+  # A `size-adjust` of 0% scales the face's every advance to nothing: its text has no width (Chrome: 0).
+  it 'lays text out at no width under a size-adjust of 0%' do
+    s = session
+    s.execute_script(<<~JS)
+      const style = document.createElement('style');
+      style.textContent = '@font-face { font-family: Zero; src: url(/ahem.ttf); size-adjust: 0%; }';
+      document.head.appendChild(style);
+      const el = document.createElement('span'); el.id = 'zero'; el.style.font = '20px Zero'; el.textContent = 'abc';
+      document.body.appendChild(el);
+    JS
+    expect(width(s, 'zero')).to eq(0)
+  end
+
+  # A face settles once in its set's loading cycle, however often its file is asked for again — the document's face
+  # list handed over anew after another document's was.
+  it "settles a face once in its set's cycle when the face list is handed over again" do
+    s = session
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [];
+      document.fonts.addEventListener('loadingdone', (e) => seen.push(e.fontfaces.length));
+      document.fonts.add(new FontFace('Twice', 'url(/ahem.ttf)'));
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = '20px Twice';
+      ctx.measureText('a');
+      document.implementation.createHTMLDocument('').fonts.size;
+      ctx.measureText('a');
+      setTimeout(() => done(seen), 50);
+    JS
+    expect(got).to eq([1])
+  end
+
   # ── which rules apply, and against what base ──
   it 'resolves a src against the stylesheet that declares it' do
     s = session('/nested.html')
