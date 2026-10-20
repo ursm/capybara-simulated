@@ -319,6 +319,19 @@ RSpec.describe 'web fonts' do
     expect(got).to eq('loaded')
   end
 
+  # A set's loading cycle is of the faces it holds: one loaded that no set holds settles on its own, and the document's
+  # set fires none of its events for it (Chrome: `p:error` alone, the set empty).
+  it 'loads a face no set holds without running a set loading cycle' do
+    s = session
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [], before = document.fonts.size;
+      for (const type of ['loading', 'loadingdone', 'loadingerror']) document.fonts.addEventListener(type, () => seen.push(type));
+      const f = new FontFace('X', 'url(/missing.ttf)');
+      f.load().catch(() => setTimeout(() => done([f.status, seen, document.fonts.size === before]), 50));
+    JS
+    expect(got).to eq(['error', [], true])
+  end
+
   # ── which rules apply, and against what base ──
   it 'resolves a src against the stylesheet that declares it' do
     s = session('/nested.html')
