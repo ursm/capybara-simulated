@@ -7,8 +7,7 @@ use crate::walk_reuse;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "layoutBuild", layout_build, context_id);
-    register(scope, ns, "walkFace", walk_face, context_id);
-    register(scope, ns, "fontMeasures", font_measures, context_id);
+    register(scope, ns, "walkFaces", walk_faces, context_id);
     register(scope, ns, "styleFaces", style_faces, context_id);
     register(scope, ns, "layoutDue", layout_due, context_id);
     register(scope, ns, "forgetLayout", forget_layout, context_id);
@@ -218,20 +217,59 @@ fn style_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.walkFace(family, bucket, handle, ascOverride, descOverride, gapOverride): the face the JS side resolved for a
-// family and a bucket, laid out by the metrics its file has (`FontMetrics::face`) or the `@font-face` overrides of
-// them given (NaN for none) — a handle below 0 where it resolves to none the layout can measure with.
-fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.walkFaces(wanted, resolve): the faces native asked for — the Rust walk's, or the style engine's font metrics'
+// — `[family, bucket, …]`, each resolved by the page side's `resolve(family, bucket)` (`[handle, ascOverride,
+// descOverride, gapOverride]`: the face's file, -1 for none, and the `@font-face` overrides of its metrics, NaN for
+// none) and learnt (`learn_face`). A face that yields no measure — no file native can read, or one with no vertical
+// metrics, as a colour emoji font has (`font-family: emoji`) — is learnt as the face its text FALLS BACK to: the next
+// family of the stack that does measure, else the default sans-serif, which a browser draws the letters with (Chrome:
+// `emoji, monospace` sets `abc def` in monospace). The walk lays it out with that rather than declining the page.
+// (Chrome keeps the emoji face's own space and line box — 62.6 and 19 for `abc def` alone, where this gives
+// sans-serif's 52.5 and 17 — which wants a per-character fallback this model does not have.)
+fn walk_faces(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Ok(wanted), Ok(resolve)) = (v8::Local::<v8::Array>::try_from(args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1))) else { return };
     let cid = realm_id(scope, &args);
-    let family = args.get(0).to_rust_string_lossy(scope);
-    let bucket = match args.get(1).to_rust_string_lossy(scope).as_str() {
+    let text = |scope: &mut v8::PinScope<'_, '_>, k: u32| wanted.get_index(scope, k).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default();
+    for k in (0..wanted.length().saturating_sub(1)).step_by(2) {
+        let (family, bucket) = (text(scope, k), text(scope, k + 1));
+        let fallbacks = crate::font_faces::serialized_family_list(&family).into_iter().skip(1).chain(std::iter::once("sans-serif".to_owned()));
+        let mut face = resolve_face(scope, resolve, &family, &bucket);
+        if !measures(face) {
+            for next in fallbacks {
+                face = resolve_face(scope, resolve, &next, &bucket);
+                if measures(face) {
+                    break;
+                }
+            }
+        }
+        learn_face(scope, cid, family, &bucket, face);
+    }
+}
+// …one family's face as the page side resolves it: its handle and its metric overrides (-1 and none where it answers
+// nothing, or throws).
+type Resolved = (i32, [Option<f64>; 3]);
+fn resolve_face(scope: &mut v8::PinScope<'_, '_>, resolve: v8::Local<'_, v8::Function>, family: &str, bucket: &str) -> Resolved {
+    let (Some(f), Some(b)) = (v8::String::new(scope, family), v8::String::new(scope, bucket)) else { return (-1, [None; 3]) };
+    let undefined = v8::undefined(scope).into();
+    v8::tc_scope!(let tc, scope);
+    let Some(answer) = resolve.call(tc, undefined, &[f.into(), b.into()]).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) else { return (-1, [None; 3]) };
+    let number = |tc: &mut v8::PinScope<'_, '_>, k: u32| answer.get_index(tc, k).and_then(|v| v.number_value(tc)).filter(|v| v.is_finite());
+    let handle = number(tc, 0).map_or(-1, |h| h as i32);
+    (handle, [number(tc, 1), number(tc, 2), number(tc, 3)])
+}
+// …whether native can lay a run out with it (`FontMetrics::face`).
+fn measures((handle, overrides): Resolved) -> bool {
+    crate::font::with_font(handle, |fm| fm.face(overrides).is_some()).unwrap_or(false)
+}
+// A face learnt for a family and a bucket, laid out by the metrics its file has (`FontMetrics::face`) or the
+// `@font-face` overrides of them — none the layout can measure with where it has no handle.
+fn learn_face(scope: &mut v8::PinScope<'_, '_>, cid: i32, family: String, bucket: &str, (handle, overrides): Resolved) {
+    let bucket = match bucket {
         "bold" => "bold",
         "italic" => "italic",
         "bold:italic" => "bold:italic",
         _ => "",
     };
-    let handle = args.get(2).int32_value(scope).unwrap_or(-1);
-    let overrides = [3, 4, 5].map(|i| args.get(i).number_value(scope).filter(|v| v.is_finite()));
     let metrics = crate::font::with_font(handle, |fm| fm.face(overrides)).flatten();
     let face = match metrics {
         Some((v, space, xh)) => Face { handle, asc: v.asc, desc: v.desc, gap: v.gap, space, xh: if xh > 0.0 { xh } else { 0.5 } },
@@ -250,14 +288,6 @@ fn walk_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             reuse.forget();
         }
     }
-}
-
-// __dom.fontMeasures(handle, ascOverride, descOverride, gapOverride) -> whether the face has metrics to lay a line out
-// by (`FontMetrics::face`): a colour emoji font has none, and its text falls back to the next family that has.
-fn font_measures(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let handle = args.get(0).int32_value(scope).unwrap_or(-1);
-    let overrides = [1, 2, 3].map(|i| args.get(i).number_value(scope).filter(|v| v.is_finite()));
-    rv.set_bool(crate::font::with_font(handle, |fm| fm.face(overrides).is_some()).unwrap_or(false));
 }
 
 // The rows a painter draws, a word each: a row the line made of several pieces across plain spaces (layout.rs, which keeps

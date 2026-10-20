@@ -413,15 +413,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "fontFacesSet", font_faces_set, context_id);
     crate::dom::register(scope, ns, "fontFacePick", font_face_pick, context_id);
     crate::dom::register(scope, ns, "fontFaceInfo", font_face_info, context_id);
-    crate::dom::register(scope, ns, "fontFamilyList", font_family_list_op, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
-}
-// __dom.fontFamilyList(stack) -> the families of a `font-family` value, each as a stack of that one family
-// (`serialized_family_list`).
-fn font_family_list_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let stack = args.get(0).to_rust_string_lossy(scope);
-    let items: Vec<v8::Local<v8::Value>> = serialized_family_list(&stack).iter().filter_map(|f| v8::String::new(scope, f)).map(Into::into).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // A `@font-face` descriptor's value as the engine parses and serializes it (CSS Fonts 4 §4, CSS Font Loading's FontFace
