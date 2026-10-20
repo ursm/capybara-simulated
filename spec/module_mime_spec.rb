@@ -7,8 +7,9 @@ require_relative 'support/poll_until'
 # A module script's response must be of the MIME type its kind's is — a JavaScript one for a script, a JSON one for a
 # JSON module, `text/css` for a CSS one, each that one alone — whoever answered it (HTML "fetch a single module
 # script"): a `modulepreload` of anything else fails, as its module would; one whose `as` names a destination no module
-# preload is (`image`) fetches nothing and fails, and one whose `media` does not match fetches nothing; and a module a service worker answers as `text/plain` is no module
-# either. (Chrome and the upstream WPT preload/modulepreload.html: `module1.js` as `style` or `json` fails.)
+# preload is (`image`) fetches nothing and fails, and one whose `media` does not match fetches nothing — until a change
+# of its `media` matches; and a module a service worker answers as `text/plain` is no module either. (Chrome and the
+# upstream WPT preload/modulepreload.html: `module1.js` as `style` or `json` fails.)
 RSpec.describe 'a module script’s MIME type' do
   let(:app) {
     worker = <<~JS
@@ -82,6 +83,31 @@ RSpec.describe 'a module script’s MIME type' do
       '/sheet.css:style load',
       'late load'
     ])
+  end
+
+  it 'fetches a modulepreload its media skipped once a change makes it match, and a stylesheet whatever its media' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.seen = [];
+      const link = (rel, href, as, media, label) => {
+        const l = document.createElement('link');
+        l.rel = rel;
+        l.href = href;
+        if (as) l.as = as;
+        l.media = media;
+        l.onload = () => seen.push(label + ' load');
+        l.onerror = () => seen.push(label + ' error');
+        document.head.appendChild(l);
+        return l;
+      };
+      const changed = link('modulepreload', '/mod.js?changed', null, 'not all', 'changed');
+      const removed = link('modulepreload', '/mod.js?removed', null, 'not all', 'removed');
+      link('stylesheet modulepreload', '/sheet.css', 'style', 'not all', 'both');
+      setTimeout(() => { changed.setAttribute('media', 'all'); removed.removeAttribute('media'); }, 100);
+    JS
+    got = poll_until { (s = session.evaluate_script('window.seen')).size == 3 && s }
+    expect(got.sort).to eq(['both load', 'changed load', 'removed load'])
   end
 
   it 'runs no module a service worker answers as text/plain' do
