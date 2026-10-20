@@ -22,7 +22,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // engine's edit of it alone (`editCommand`); text inserted (the selection deleted, for none); the selection's deletion,
 // backward or forward; a line break, a paragraph; a span carrying a CSS property (`commandStyle`); the block aligned
 // (its `text-align`); the styles cleared; a link; the clipboard's cut, copy and paste; markup — in a text control, its
-// text; in an editing host, the edit.
+// text; in an editing host, the edit; everything selected.
 #[derive(Clone, Copy)]
 enum Action {
     Edit,
@@ -39,6 +39,7 @@ enum Action {
     Copy,
     Paste,
     Html,
+    SelectAll,
 }
 impl Action {
     fn code(self) -> (u32, &'static str) {
@@ -57,6 +58,7 @@ impl Action {
             Action::Copy => (11, ""),
             Action::Paste => (12, ""),
             Action::Html => (13, ""),
+            Action::SelectAll => (14, ""),
         }
     }
 }
@@ -66,7 +68,7 @@ impl Action {
 // the `inputType` of the `input` event it fires (Input Events §5.1, as Chrome names each; '' for none: `unlink`'s
 // `input` carries none, `copy` fires no `input`), and what the bindings do for it (`Action`). (…`paste` among them, the
 // driver's clipboard read: Chrome refuses a page that)
-const COMMANDS: [(&str, bool, &str, Action); 31] = [
+const COMMANDS: [(&str, bool, &str, Action); 32] = [
     ("bold", false, "formatBold", Action::Edit),
     ("italic", false, "formatItalic", Action::Edit),
     ("underline", false, "formatUnderline", Action::Edit),
@@ -98,6 +100,7 @@ const COMMANDS: [(&str, bool, &str, Action); 31] = [
     ("cut", true, "deleteByCut", Action::Cut),
     ("copy", true, "", Action::Copy),
     ("paste", true, "insertFromPaste", Action::Paste),
+    ("selectall", true, "", Action::SelectAll),
 ];
 fn command(name: &str) -> Option<&'static (&'static str, bool, &'static str, Action)> {
     COMMANDS.iter().find(|(c, _, _, _)| c.eq_ignore_ascii_case(name))
@@ -119,32 +122,44 @@ fn command_support_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // selection's anchor is in (its own range's, a shadow tree's too — the anchor, which the engine's edits go by:
 // element_state.rs `editing_root` — a `contenteditable=true` nested in an editable element no root of its own, the
 // body in design mode), its kind deciding — a `plaintext-only` one takes the text commands alone (`TARGET_HOST`). None
-// for no range at all, and for `unlink` with one that selects nothing.
+// for no range at all, and for `unlink` with one that selects nothing. `selectAll` selects in any focused text control,
+// a readonly one's too, and in no host the document's body — its document element where it has none (Chrome; the
+// Editing draft's selectAll).
 const TARGET_NONE: u32 = 0;
 const TARGET_CONTROL: u32 = 1;
 const TARGET_HOST: u32 = 2;
 fn command_target(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>) -> (u32, Option<NodeId>) {
     let Some(support) = command_support(name) else { return (TARGET_NONE, None) };
+    let select_all = name.eq_ignore_ascii_case("selectall");
     let arena = realm(scope, cid);
     let control = active.filter(|&a| {
         arena.get(a).is_some_and(|n| n.is_html_named("textarea") || (n.is_html_named("input") && n.input_has(crate::input_types::TYPED)))
     });
     if let Some(control) = control {
         let n = arena.get(control).expect("filtered above");
-        let refused = support != 1 || n.is_read_only() || arena.is_actually_disabled(control);
+        let refused = support != 1 || (!select_all && n.is_read_only()) || arena.is_actually_disabled(control);
         let nothing_cut = name.eq_ignore_ascii_case("cut") && {
             let (sel, _) = arena.text_selection(control);
             sel.start == sel.end
         };
         return if refused || nothing_cut { (TARGET_NONE, None) } else { (TARGET_CONTROL, Some(control)) };
     }
-    let Some((anchor, collapsed)) = crate::selection::document_anchor(scope, cid, selection) else { return (TARGET_NONE, None) };
+    let page = |scope: &mut v8::PinScope<'_, '_>| -> (u32, Option<NodeId>) {
+        if !select_all {
+            return (TARGET_NONE, None);
+        }
+        let Some(doc) = crate::selection::document_of(scope, selection) else { return (TARGET_NONE, None) };
+        let arena = realm(scope, cid);
+        let root = arena.relative(doc, crate::dom::RELATIVE_BODY).or_else(|| arena.get(doc)?.children.iter().copied().find(|&c| arena.is_element(c)));
+        (if root.is_some() { TARGET_HOST } else { TARGET_NONE }, root)
+    };
+    let Some((anchor, collapsed)) = crate::selection::document_anchor(scope, cid, selection) else { return page(scope) };
     if name.eq_ignore_ascii_case("unlink") && collapsed {
         return (TARGET_NONE, None);
     }
     // (…the arena again: reading the selection needed the scope it was borrowed from)
     let arena = realm(scope, cid);
-    let Some(host) = arena.editing_root(anchor) else { return (TARGET_NONE, None) };
+    let Some(host) = arena.editing_root(anchor) else { return page(scope) };
     let plaintext = arena.get(host).and_then(|n| n.plain_attr("contenteditable")).is_some_and(|v| v.eq_ignore_ascii_case("plaintext-only"));
     if support != 1 && plaintext { (TARGET_NONE, None) } else { (TARGET_HOST, Some(host)) }
 }
@@ -159,7 +174,8 @@ fn command_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// How `execCommand` carries a command out (`commandPlan`): not at all (it answers false) — in a document with no
+// How `execCommand` carries a command out (`commandPlan`): everything in what `command_target` answers selected
+// (`selectAll`); not at all (it answers false) — in a document with no
 // browsing context, whose selection is no window's, nothing; the selection copied, whatever it is in; in a focused text
 // control, its `Action` — the ones a control takes: text typed, the selection's deletion, a line break (which an input
 // takes as nothing: true all the same, Chrome), markup's text (a textarea's or a free-text input's), and cut and paste
@@ -168,6 +184,7 @@ const STEP_NONE: u32 = 0;
 const STEP_COPY: u32 = 1;
 const STEP_CONTROL: u32 = 2;
 const STEP_HOST: u32 = 3;
+const STEP_SELECT_ALL: u32 = 4;
 fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: Option<NodeId>, selection: v8::Local<'_, v8::Value>, has_view: bool) -> (u32, Option<NodeId>) {
     let Some(&(_, _, _, action)) = command(name) else { return (STEP_NONE, None) };
     if !has_view {
@@ -175,6 +192,10 @@ fn command_plan(scope: &mut v8::PinScope<'_, '_>, cid: i32, name: &str, active: 
     }
     if matches!(action, Action::Copy) {
         return (STEP_COPY, None);
+    }
+    if matches!(action, Action::SelectAll) {
+        let (kind, node) = command_target(scope, cid, name, active, selection);
+        return if kind == TARGET_NONE { (STEP_NONE, None) } else { (STEP_SELECT_ALL, node) };
     }
     match command_target(scope, cid, name, active, selection) {
         (TARGET_HOST, host) => (STEP_HOST, host),

@@ -273,4 +273,31 @@ RSpec.describe 'execCommand in the selection’s editing host' do
     JS
     expect(got).to eq([false, false])
   end
+
+  # `selectAll` (the Editing draft's): a focused text control's value, the editing host's content, the body's — true in
+  # each (Chrome 155: `page true`, `host true`, `input true 0-4`). Chrome then moves the selection's ends to visible
+  # positions (`#text,0`–`BODY,3`); the draft's `selectAllChildren` ends, which cover the same content, are kept.
+  it 'selects all of a text control, an editing host or the page' do
+    s = simulated_session(->(_env) {
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><p id=p>page</p><div id=ce contenteditable><p>host</p></div><input id=i value=abcd>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sel = getSelection(), out = [document.queryCommandSupported('selectAll')];
+        sel.collapse(document.getElementById('p').firstChild, 1);
+        out.push(document.execCommand('selectAll'), sel.containsNode(document.getElementById('p')) && sel.containsNode(document.getElementById('ce')));
+        const ce = document.getElementById('ce');
+        ce.focus();
+        sel.collapse(ce.firstChild.firstChild, 1);
+        out.push(document.execCommand('selectAll'), sel.containsNode(ce.firstChild) && !sel.containsNode(document.getElementById('p')));
+        const i = document.getElementById('i');
+        i.focus();
+        i.setSelectionRange(1, 1);
+        out.push(document.execCommand('selectAll'), i.selectionStart, i.selectionEnd);
+        return out;
+      })()
+    JS
+    expect(got).to eq([true, true, true, true, true, true, 0, 4])
+  end
 end

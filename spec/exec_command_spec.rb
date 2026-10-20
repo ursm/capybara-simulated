@@ -124,7 +124,7 @@ RSpec.describe 'execCommand in an editing host' do
 
   # The commands it carries out are the ones `queryCommandSupported` answers for — `paste` among them, the driver's
   # clipboard read, which Chrome refuses a page — and `queryCommandEnabled` with a selection in an editing host, or in a
-  # text control the text ones only, none with none (Chrome's, but for `paste`).
+  # text control the text ones only, none with none but `selectAll`, which selects the page (Chrome's, but for `paste`).
   it 'answers which commands it supports and which the selection enables' do
     session = simulated_session(lambda {|_env|
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><div id=e contenteditable>hello</div><input id=t value=abc>']]
@@ -144,7 +144,12 @@ RSpec.describe 'execCommand in an editing host' do
         return out;
       })()
     JS
-    expect(got).to eq(['bold,BOLD,insertText,delete,copy,paste', '', 'bold,BOLD,insertText,delete,copy,paste', 'insertText,delete,copy,paste'])
+    expect(got).to eq([
+      'bold,BOLD,insertText,delete,copy,paste,selectAll',
+      'selectAll',
+      'bold,BOLD,insertText,delete,copy,paste,selectAll',
+      'insertText,delete,copy,paste,selectAll'
+    ])
   end
 
   # A command acts on its OWN document's selection — a frame document's asked from the parent its frame's, not the

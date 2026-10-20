@@ -303,6 +303,11 @@ pub(crate) fn document_anchor(scope: &mut v8::PinScope<'_, '_>, cid: i32, value:
     Some((if s.backward { s.end.0 } else { s.start.0 }, s.start == s.end))
 }
 
+// The document a selection (its state object, as `document_anchor` takes it) is of.
+pub(crate) fn document_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    handle(scope, value)?.document.get()
+}
+
 // Whether the document is a shadow-including inclusive ancestor of `nid` — where collapse, extend and setBaseAndExtent
 // take a point at all.
 fn in_document(arena: &RealmArena, sel: &SelectionHandle, nid: NodeId) -> bool {
