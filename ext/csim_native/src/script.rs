@@ -244,6 +244,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
     crate::dom::register(scope, ns, "moduleContent", module_content_op, context_id);
     crate::dom::register(scope, ns, "modulepreloadDestination", modulepreload_destination_op, context_id);
+    crate::dom::register(scope, ns, "preloadDestination", preload_destination_op, context_id);
     crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
     crate::dom::register(scope, ns, "classicScriptEncoding", classic_script_encoding_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
@@ -297,6 +298,21 @@ const MODULE_PRELOAD_DESTINATIONS: [&str; 9] = ["audioworklet", "paintworklet", 
 fn modulepreload_destination(as_value: &str) -> Option<&'static str> {
     let Some(&named) = POTENTIAL_DESTINATIONS.iter().find(|d| d.eq_ignore_ascii_case(as_value)) else { return Some("script") };
     MODULE_PRELOAD_DESTINATIONS.iter().copied().find(|&d| d == named)
+}
+// The destination a `<link rel=preload>` fetches with (HTML "fetch and process the linked resource", preload): the
+// potential destination its `as` names (ASCII case-insensitively), `fetch` none's — None where it names none (missing,
+// empty, no keyword), which fetches nothing (Chrome and Firefox: no request, no event).
+fn preload_destination(as_value: &str) -> Option<&'static str> {
+    let named = POTENTIAL_DESTINATIONS.iter().copied().find(|d| d.eq_ignore_ascii_case(as_value))?;
+    Some(if named == "fetch" { "" } else { named })
+}
+// __dom.preloadDestination(as) -> `preload_destination`, null for none.
+fn preload_destination_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let as_value = if args.get(0).is_null_or_undefined() { String::new() } else { args.get(0).to_rust_string_lossy(scope) };
+    match preload_destination(&as_value).and_then(|d| v8::String::new(scope, d)) {
+        Some(d) => rv.set(d.into()),
+        None => rv.set_null(),
+    }
 }
 // __dom.modulepreloadDestination(as) -> `modulepreload_destination`, null for none.
 fn modulepreload_destination_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -461,6 +477,8 @@ mod tests {
         assert_eq!(modulepreload_destination("worker"), Some("worker"));
         assert_eq!(modulepreload_destination("image"), None);
         assert_eq!(modulepreload_destination("fetch"), None);
+        assert_eq!((preload_destination("Style"), preload_destination("fetch")), (Some("style"), Some("")));
+        assert_eq!((preload_destination(""), preload_destination("bogus")), (None, None));
         assert!(module_content("text/javascript; charset=utf-8", "script"));
         assert!(!module_content("text/javascript", "style") && !module_content("text/javascript", "json"));
         assert!(module_content("text/css", "style") && module_content("application/ld+json", "json"));
