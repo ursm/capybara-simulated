@@ -65,6 +65,15 @@ pub(crate) fn service_worker_response_allowed(mode: &str, redirect: &str, respon
         || (redirect != "follow" && redirected))
 }
 
+// …and whether a subresource the page fetches may use it (a `destination` request, `mode` its element's, redirect mode
+// follow): one Fetch allows (`service_worker_response_allowed`) and — for every consumer but an image, which decodes what
+// it is given — an ok status, or an opaque one's (status 0, a no-cors answer the consumer cannot read): HTML "fetch a
+// classic script" / "obtain a stylesheet", the media resource's verification, a `<link>`'s fetch's success.
+pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type: &str, redirected: bool, status: u32) -> bool {
+    service_worker_response_allowed(mode, "follow", response_type, redirected)
+        && (destination == "image" || response_type == "opaque" || (200..=299).contains(&status))
+}
+
 // Fetch "main fetch" (§4.1) step 12's `same-origin` branch: whether a request in mode `same-origin` for `url` (absolute,
 // the Request's) from a client of origin `here` — its document's origin, serialized: an opaque one's "null" — is a
 // network error: an http(s) URL of another origin. (A `data:` / `blob:` URL is its own scheme fetch's to answer.)
@@ -365,6 +374,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
     crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
     crate::dom::register(scope, ns, "swResponseAllowed", sw_response_allowed_op, context_id);
+    crate::dom::register(scope, ns, "swSubresourceUsable", sw_subresource_usable_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -434,6 +444,12 @@ fn same_origin_mode_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Funct
 fn sw_response_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [mode, redirect, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
     rv.set_bool(service_worker_response_allowed(&mode, &redirect, &response_type, args.get(3).is_true()));
+}
+// __dom.swSubresourceUsable(destination, mode, type, redirected, status) -> `sw_subresource_usable`.
+fn sw_subresource_usable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let [destination, mode, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
+    let status = args.get(4).uint32_value(scope).unwrap_or(0);
+    rv.set_bool(sw_subresource_usable(&destination, &mode, &response_type, args.get(3).is_true(), status));
 }
 // __dom.corsRequest(el, module) -> [mode, credentials] of the request element `el` makes (`cors_request`, by its
 // `crossorigin` attribute) — one of no element (a module graph's root nobody's) as one of no attribute.
@@ -535,6 +551,9 @@ pub(crate) fn redirect_to_get_for_ruby(status: u32, method: magnus::RString) -> 
 pub(crate) fn service_worker_response_allowed_for_ruby(mode: String, redirect: String, response_type: String, redirected: bool) -> bool {
     service_worker_response_allowed(&mode, &redirect, &response_type, redirected)
 }
+pub(crate) fn sw_subresource_usable_for_ruby(destination: String, mode: String, response_type: String, redirected: bool, status: u32) -> bool {
+    sw_subresource_usable(&destination, &mode, &response_type, redirected, status)
+}
 pub(crate) fn cors_safelisted_method_for_ruby(method: magnus::RString) -> bool {
     cors_safelisted_method(&ruby_bytes(method))
 }
@@ -554,6 +573,16 @@ pub(crate) fn http_token_for_ruby(s: magnus::RString) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_subresource_uses_an_ok_or_opaque_answer_fetch_allows() {
+        assert!(sw_subresource_usable("audio", "no-cors", "opaque", false, 0));
+        assert!(!sw_subresource_usable("audio", "cors", "opaque", false, 0));
+        assert!(!sw_subresource_usable("video", "no-cors", "basic", false, 404));
+        assert!(sw_subresource_usable("image", "no-cors", "basic", false, 404));
+        assert!(!sw_subresource_usable("", "no-cors", "opaqueredirect", false, 0));
+        assert!(sw_subresource_usable("", "no-cors", "default", false, 200));
+    }
 
     #[test]
     fn a_service_worker_response_answers_only_the_requests_its_type_may() {
