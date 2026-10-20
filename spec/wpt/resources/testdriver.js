@@ -258,8 +258,9 @@
     } else if ((name === 'ArrowDown' || name === 'ArrowUp' || name === 'ArrowLeft' || name === 'ArrowRight') &&
                typeof W.__csimArrowKeyDefault === 'function') {
       // Arrow-key default on a focused radio (group navigation) / single-line select.
+      // (…as a step of the test's script, on the stack: no microtask checkpoint between a picked radio's listeners)
       var t = D() && D().activeElement;
-      if (t) W.__csimArrowKeyDefault(t, name);
+      if (t) W.__csimAsScriptSteps(function () { W.__csimArrowKeyDefault(t, name); });
     }
   }
 
