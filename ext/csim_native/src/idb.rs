@@ -605,7 +605,7 @@ const GENERATOR_EXHAUSTED: i32 = -1;
 fn generator(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let store = id_arg(scope, &args, 0);
     match with(|s| s.stores.get(&store).and_then(|st| st.current)) {
-        Some(n) if n > 2f64.powi(53) => rv.set_int32(GENERATOR_EXHAUSTED),
+        Some(n) if n > MAX_GENERATED => rv.set_int32(GENERATOR_EXHAUSTED),
         Some(n) => rv.set_double(n),
         None => rv.set_null(),
     }

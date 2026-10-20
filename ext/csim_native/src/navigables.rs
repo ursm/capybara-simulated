@@ -32,10 +32,13 @@ pub(crate) struct Navigables {
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
     // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made.
     windows: Vec<i32>,
-    // The realms whose contexts are disposed and not yet dropped: a child navigable whose container is in the document
-    // of one, or whose active document is one's, is stepped and counted no more — though it keeps its realm, so a
-    // `contentWindow` read of a frame in a discarded document stays null.
+    // The realms whose contexts are disposed — or being disposed: neutered (`neuterRealm`) on the way — and not yet
+    // dropped: a child navigable whose container is in the document of one, or whose active document is one's, is
+    // stepped and counted no more — though it keeps its realm, so a `contentWindow` read of a frame in a discarded
+    // document stays null. How many there are the bindings read with no call (`discardedRealms`): none is the common
+    // page's, whose `defaultView` reads ask nothing more.
     discarded: std::collections::HashSet<i32>,
+    discarded_count: crate::dom::SharedWord,
     // The realms whose documents are being unloaded now — their beforeunload / pagehide / unload firing (HTML's
     // "unload counter" above 0): a navigation of their navigable is ignored meanwhile ("navigate" step 13), so a
     // teardown handler re-navigating its own frame neither tears it down again nor wins over the navigation unloading it.
@@ -51,9 +54,10 @@ pub(crate) struct Navigables {
 }
 
 impl Navigables {
-    // Whether realm `cid` is a frame's whose NAVIGABLE is gone — its container left its document, the context disposed
-    // (`forget_navigables_of`), its container kept — not one a navigation of the frame replaced, whose navigable (and
-    // the WindowProxy a page holds of it) goes on in another realm.
+    // Whether realm `cid` is a frame's whose NAVIGABLE is gone — its container left its document, the context discarded
+    // (`discarded`), its container kept — not one a navigation of the frame replaced, whose navigable (and the
+    // WindowProxy a page holds of it) goes on in another realm. (One a navigation replaces reads so between its neutering
+    // and its successor's linking, where nothing of its own runs but its backup custom element reactions.)
     pub(crate) fn lost_navigable(&self, cid: i32) -> bool {
         self.discarded.contains(&cid) && self.containers.contains_key(&cid)
     }
@@ -71,6 +75,11 @@ impl RealmArena {
         let nav = &self.navigables;
         let parent = self.get(container).map(|n| n.realm)?;
         child.realm.filter(|r| !nav.discarded.contains(r) && !nav.discarded.contains(&parent))
+    }
+    // …and how many realms are discarded, for the bindings (`discarded_count`).
+    fn note_discarded(&mut self) {
+        let n = self.navigables.discarded.len();
+        self.navigables.discarded_count.set(u32::try_from(n).unwrap_or(u32::MAX));
     }
     fn note_linked(&mut self) {
         let frames = self.navigables.children.iter().filter(|&(&c, child)| self.stepped_realm(c, child).is_some()).count();
@@ -282,6 +291,7 @@ impl RealmArena {
         nav.documents.remove(&cid);
         if !dropped {
             nav.discarded.insert(cid);
+            self.note_discarded();
             self.note_linked();
         } else {
             nav.discarded.remove(&cid);
@@ -295,6 +305,7 @@ impl RealmArena {
             }
             nav.top_names.remove(&cid);
             nav.tops.remove(&cid);
+            self.note_discarded();
             let dead: Vec<NodeId> = self.navigables.children.keys().copied().filter(|&c| self.get(c).is_none()).collect();
             for container in dead {
                 self.navigables.children.remove(&container);
@@ -498,6 +509,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
+    let discarded = crate::dom::dom(scope).arena.navigables.discarded_count.store();
+    crate::dom::view_word(scope, ns, "discardedRealms", discarded);
 }
 
 // __dom.windowName() -> this realm's navigable's target name (`window.name`).
@@ -660,6 +673,31 @@ fn ancestor_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(crate::dom::realm(scope, cid).ancestor_unloading(realm));
 }
 
+// __dom.browsingContextDiscarded() -> whether the realm's window's browsing context is discarded — a removed frame's
+// (`lost_navigable`): its `closed` true, its document's `defaultView` none, through a reference captured before.
+fn browsing_context_discarded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.navigables.lost_navigable(cid));
+}
+
+// __dom.documentFullyActive() -> whether the realm's document is fully active (`fully_active`): what nothing waiting on
+// it — an image's data, a lock request — goes ahead without.
+fn document_fully_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.navigables.fully_active(cid));
+}
+
+// __dom.neuterRealm(realm): realm `realm`'s context is being disposed — its frame removed, or a navigation replacing it —
+// its document fully active no more from now on, before anything of its own runs again on the way (its backup custom
+// element reactions; `discard_realm` marks it so too, after them).
+fn neuter_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(cid) = args.get(0).int32_value(scope) else { return };
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.navigables.discarded.insert(cid);
+    arena.note_discarded();
+    arena.note_linked();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,24 +736,3 @@ mod tests {
     }
 }
 
-// __dom.browsingContextDiscarded() -> whether the realm's window's browsing context is discarded — a removed frame's
-// (`lost_navigable`): its `closed` true, its document's `defaultView` none, through a reference captured before.
-fn browsing_context_discarded(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::dom(scope).arena.navigables.lost_navigable(cid));
-}
-
-// __dom.documentFullyActive() -> whether the realm's document is fully active (`fully_active`): what nothing waiting on
-// it — an image's data, a lock request — goes ahead without.
-fn document_fully_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::dom(scope).arena.navigables.fully_active(cid));
-}
-
-// __dom.neuterRealm(realm): realm `realm`'s context is being disposed — its frame removed, or a navigation replacing it —
-// its document fully active no more from now on, before anything of its own runs again on the way (its backup custom
-// element reactions; `discard_realm` marks it so too, after them).
-fn neuter_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(cid) = args.get(0).int32_value(scope) else { return };
-    crate::dom::dom(scope).arena.navigables.discarded.insert(cid);
-}
