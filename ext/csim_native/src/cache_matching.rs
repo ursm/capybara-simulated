@@ -77,8 +77,40 @@ pub(crate) fn vary_has_star(vary: &str) -> bool {
     vary.split(',').any(|f| f.trim() == "*")
 }
 
+// Why a request may be no cache's key (Service Workers §5.4.4-5.4.6, `add`/`addAll`/`put`), or none (0): its URL's
+// scheme no http(s) one (`KEY_SCHEME`), its method no GET (`KEY_METHOD`).
+const KEY_SCHEME: u32 = 1;
+const KEY_METHOD: u32 = 2;
+pub(crate) fn key_refusal(url: &str, method: &str) -> u32 {
+    let scheme_ok = ada_url::Url::parse(url, None).is_ok_and(|u| matches!(u.protocol(), "http:" | "https:"));
+    if !scheme_ok {
+        KEY_SCHEME
+    } else if method != "GET" {
+        KEY_METHOD
+    } else {
+        0
+    }
+}
+// …and why a response may be held by none, or none (0): one `addAll` fetched that is a network error or of no ok status
+// (`RESPONSE_FAILED`), a partial one (`RESPONSE_PARTIAL`), one whose `Vary` names `*` (`RESPONSE_VARY_STAR`).
+const RESPONSE_FAILED: u32 = 1;
+const RESPONSE_PARTIAL: u32 = 2;
+const RESPONSE_VARY_STAR: u32 = 3;
+pub(crate) fn response_refusal(fetched: bool, response_type: &str, status: u32, vary: &str) -> u32 {
+    if fetched && (response_type == "error" || !(200..=299).contains(&status)) {
+        RESPONSE_FAILED
+    } else if status == 206 {
+        RESPONSE_PARTIAL
+    } else if vary_has_star(vary) {
+        RESPONSE_VARY_STAR
+    } else {
+        0
+    }
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "varyHasStar", vary_star_op, context_id);
+    crate::dom::register(scope, ns, "cacheKeyRefusal", key_refusal_op, context_id);
+    crate::dom::register(scope, ns, "cacheResponseRefusal", response_refusal_op, context_id);
 }
 fn text(scope: &mut v8::PinScope<'_, '_>, value: Option<v8::Local<'_, v8::Value>>) -> String {
     value.filter(|v| !v.is_null_or_undefined()).map(|v| v.to_rust_string_lossy(scope)).unwrap_or_default()
@@ -96,10 +128,17 @@ pub(crate) fn headers(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8:
     }
     out
 }
-// __dom.varyHasStar(vary) -> `vary_has_star`.
-fn vary_star_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let vary = args.get(0).to_rust_string_lossy(scope);
-    rv.set_bool(vary_has_star(&vary));
+// __dom.cacheKeyRefusal(url, method) -> `key_refusal`.
+fn key_refusal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (url, method) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    rv.set_uint32(key_refusal(&url, &method));
+}
+// __dom.cacheResponseRefusal(fetched, type, status, vary) -> `response_refusal`.
+fn response_refusal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let response_type = args.get(1).to_rust_string_lossy(scope);
+    let status = args.get(2).uint32_value(scope).unwrap_or(0);
+    let vary = text(scope, Some(args.get(3)));
+    rv.set_uint32(response_refusal(args.get(0).is_true(), &response_type, status, &vary));
 }
 
 #[cfg(test)]
@@ -121,5 +160,10 @@ mod tests {
         assert!(has_duplicate(&[entry("http://a/x#1", &[], ""), entry("http://a/x#2", &[], "")]));
         assert!(!has_duplicate(&[entry("http://a/x", &[("accept", "a")], "accept"), entry("http://a/x", &[("accept", "b")], "accept")]));
         assert!(vary_has_star("Accept, *") && !vary_has_star("Accept"));
+        assert_eq!([key_refusal("https://a/", "GET"), key_refusal("data:,x", "GET"), key_refusal("http://a/", "POST")], [0, KEY_SCHEME, KEY_METHOD]);
+        assert_eq!(response_refusal(true, "basic", 404, ""), RESPONSE_FAILED);
+        assert_eq!(response_refusal(false, "basic", 404, ""), 0);
+        assert_eq!(response_refusal(false, "basic", 206, ""), RESPONSE_PARTIAL);
+        assert_eq!(response_refusal(false, "basic", 200, "a, *"), RESPONSE_VARY_STAR);
     }
 }
