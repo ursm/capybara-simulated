@@ -439,7 +439,7 @@ module Capybara
         # those the page disposed before it went (`discarded_realm_ids`: a frame removed or navigated),
         # whose arenas, and their marks as discarded, lived on until now. Done from the main context
         # (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
-        ids = (@frame_realms&.keys || []) + discarded_realm_ids
+        ids = ((@frame_realms&.keys || []) + discarded_realm_ids).uniq
         if @ctx && !ids.empty?
           drops = ids.map {|id| "__dom.dropRealm(#{id.to_i});" }.join
           @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil

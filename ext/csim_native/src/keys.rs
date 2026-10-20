@@ -190,6 +190,14 @@ pub(crate) const IMPLICIT_SUBMIT: u32 = 1 << 8;
 pub(crate) const ENTER_ACTIVATES: u32 = 1 << 9;
 // Space on a button, a checkbox, a radio or a summary: its activation on the key's release.
 pub(crate) const SPACE_ACTIVATES: u32 = 1 << 10;
+// Tab with no Control / Meta / Alt held: focus moved to the next tabbable element (Shift: the previous one).
+pub(crate) const FOCUS_NAVIGATION: u32 = 1 << 11;
+// Control / Meta + A in a typeable element: all its content selected.
+pub(crate) const SELECT_ALL: u32 = 1 << 12;
+// Control / Meta + X, C, V: the clipboard's cut, copy and paste of the focused element's selection.
+pub(crate) const CUT: u32 = 1 << 13;
+pub(crate) const COPY: u32 = 1 << 14;
+pub(crate) const PASTE: u32 = 1 << 15;
 // The modifiers held, as `plan` takes them.
 pub(crate) const CTRL: u32 = 1;
 pub(crate) const META: u32 = 1 << 1;
@@ -230,6 +238,13 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     let link = tag == "a" && n.is_hyperlink();
     set(ENTER_ACTIVATES, is("Enter") && n.plain_attr("disabled").is_none() && (link || ((button || tag == "summary") && !chord)));
     set(SPACE_ACTIVATES, is(" ") && (check_or_radio || button || tag == "summary"));
+    set(FOCUS_NAVIGATION, is("Tab") && !chord);
+    let command = modifiers & (CTRL | META) != 0;
+    let letter = |l: u8| matches!(key, [u] if u8::try_from(*u).is_ok_and(|b| b.to_ascii_lowercase() == l));
+    set(SELECT_ALL, command && typeable && letter(b'a'));
+    set(CUT, command && letter(b'x'));
+    set(COPY, command && letter(b'c'));
+    set(PASTE, command && letter(b'v'));
     plan
 }
 
@@ -378,7 +393,7 @@ fn motion_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let modifiers = args.get(2).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(motion(crate::dom::realm(scope, cid), id, &key, modifiers));
 }
-// __dom.resolveKey(spec, shift) -> [key, code, keyCode, char (null for none), inputType (null for none), named]
+// __dom.resolveKey(spec, shift) -> [key, code, keyCode, char (null for none), inputType (null for none), named, charCode]
 // (`resolve`).
 fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let spec = crate::dom::utf16_arg(scope, args.get(0));
@@ -388,13 +403,17 @@ fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         Some(c) => crate::dom::utf16_value(scope, c),
         None => v8::null(scope).into(),
     };
-    let items: [v8::Local<v8::Value>; 6] = [
+    // (…the `keypress` char code of a key that produces a character: Enter's a carriage return, a printable one's its
+    // character's first code unit — Chrome's)
+    let char_code = if is_units(&k.key, "Enter") { 13 } else { k.char.as_ref().and_then(|c| c.first()).map_or(0, |&u| u32::from(u)) };
+    let items: [v8::Local<v8::Value>; 7] = [
         crate::dom::utf16_value(scope, &k.key),
         crate::dom::utf16_value(scope, &k.code),
         v8::Integer::new_from_unsigned(scope, k.key_code).into(),
         ch,
         k.input_type.and_then(|t| v8::String::new(scope, t)).map_or_else(|| v8::null(scope).into(), Into::into),
         v8::Boolean::new(scope, k.named).into(),
+        v8::Integer::new_from_unsigned(scope, char_code).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
