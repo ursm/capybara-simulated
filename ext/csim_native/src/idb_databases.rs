@@ -720,14 +720,15 @@ fn tx_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 }
 // The preconditions an IndexedDB method checks before it runs, each method's in the order its steps list them: its
 // transaction an upgrade transaction (InvalidStateError), its store not deleted (InvalidStateError), its index nor its
-// store deleted (InvalidStateError), its transaction active (TransactionInactiveError) or not finished
-// (InvalidStateError), not read-only (ReadOnlyError).
+// store deleted (InvalidStateError), its transaction active (TransactionInactiveError), not finished or neither
+// committing nor finished (InvalidStateError), not read-only (ReadOnlyError).
 const CHECK_UPGRADE: u32 = 1;
 const CHECK_STORE: u32 = 2;
 const CHECK_INDEX: u32 = 3;
 const CHECK_ACTIVE: u32 = 4;
 const CHECK_UNFINISHED: u32 = 5;
 const CHECK_WRITABLE: u32 = 6;
+const CHECK_UNCOMMITTED: u32 = 7;
 // __dom.idbCheck(tx, mode, store, index, checks) -> the first of `checks` — their codes four bits each, the first the
 // lowest — that fails, 0 where none does. A transaction gone is a finished one, its mode the one it was made with.
 fn check_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -741,11 +742,12 @@ fn check_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         let holds = match code {
             CHECK_UPGRADE => mode == VERSIONCHANGE,
             CHECK_STORE => reg.store_live(store),
-            CHECK_INDEX => crate::idb::index_live(&reg, store, index),
+            CHECK_INDEX => reg.index_live(store, index),
             CHECK_ACTIVE => state == ACTIVE,
             CHECK_UNFINISHED => state != FINISHED,
             CHECK_WRITABLE => mode != READONLY,
-            _ => true,
+            CHECK_UNCOMMITTED => state < COMMITTING,
+            _ => unreachable!("idbCheck: no check {code}"),
         };
         if !holds {
             return rv.set_uint32(code);

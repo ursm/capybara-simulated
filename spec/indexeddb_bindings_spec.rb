@@ -87,6 +87,22 @@ RSpec.describe 'IndexedDB bindings' do
     expect(out).to eq(['DataError', 'DataError', 'DataError', 1])
   end
 
+  it 'refuses a key cursor’s update and delete, and leaves the record as it was' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = probe(session, <<~JS)
+      const db = await open('key-cursor', (db) => db.createObjectStore('s'));
+      const tx = db.transaction('s', 'readwrite'), store = tx.objectStore('s');
+      store.put('a', 1);
+      const cursor = await settled(store.openKeyCursor());
+      const refused = [err(() => cursor.update('b')), err(() => cursor.delete())];
+      const value = await settled(store.get(1));
+      db.close();
+      return [...refused, value];
+    JS
+    expect(out).to eq(['InvalidStateError', 'InvalidStateError', 'a'])
+  end
+
   it 'writes, reads back through an index and a cursor, and reverts an aborted transaction' do
     session = simulated_session(app)
     session.visit '/'

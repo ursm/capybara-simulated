@@ -570,9 +570,12 @@ fn index_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let items = [name_value(scope, &name), key_path_value(scope, &key_path), v8::Boolean::new(scope, unique).into(), v8::Boolean::new(scope, multi_entry).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// Whether the store has the index — neither it nor its store deleted.
-pub(crate) fn index_live(reg: &Registry, store: u32, index: u32) -> bool {
-    reg.store_live(store) && reg.stores[&store].index_names.values().any(|&i| i == index)
+// Whether store `store` has index `index` — neither it nor its store deleted (beside `Registry::store_live`, which
+// cannot see a store's indexes).
+impl Registry {
+    pub(crate) fn index_live(&self, store: u32, index: u32) -> bool {
+        self.store_live(store) && self.stores[&store].index_names.values().any(|&i| i == index)
+    }
 }
 // __dom.idbWriteIndexes(store) -> [index, keyPath, multiEntry, …]: the indexes a record written into the store goes into —
 // those holding its records, a deleted one whose deletion has yet to run among them.
