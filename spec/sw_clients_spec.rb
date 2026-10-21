@@ -145,7 +145,9 @@ RSpec.describe 'Service Worker client enumeration' do
                  'try { navigator.serviceWorker.getRegistration().then(r => { __reg = !!r; }); } catch (_) {}' \
                  'try { navigator.serviceWorker.ready.then(() => { __rdy = true; }); } catch (_) {}' \
                  'window.addEventListener("message", e => {' \
-                 '  e.source.postMessage({origin: self.origin, controller: !!navigator.serviceWorker.controller,' \
+                 '  var sw = null, refused = null;' \
+                 '  try { sw = navigator.serviceWorker; } catch (err) { refused = err.name; }' \
+                 '  e.source.postMessage({origin: self.origin, refused: refused, controller: !!(sw && sw.controller),' \
                  '                        registration: __reg, ready: __rdy}, "*");' \
                  '});' \
                  '</script></body></html>'
@@ -387,10 +389,11 @@ RSpec.describe 'Service Worker client enumeration' do
     expect(urls.grep(/#a\z/)).to be_empty
   end
 
-  # An opaque-origin document gets no service-worker container at all in a real browser, so
-  # `ready` must never resolve for it — not merely "controller stays null". The registration
-  # synthesis sits AFTER the controller install on the same path, so guarding only the install
-  # left it with a registration it must not have.
+  # An opaque-origin document gets no service-worker container at all in a real browser — a
+  # sandboxed one's `navigator.serviceWorker` a SecurityError (Chrome, measured) — so `ready`
+  # must never resolve for it, not merely "controller stays null". The registration synthesis
+  # sits AFTER the controller install on the same path, so guarding only the install left it with
+  # a registration it must not have.
   it 'gives an opaque-origin frame no registration and never resolves its ready' do
     session = session_with_frames({'boxed' => '/scope/page.html?sandbox=allow-scripts#boxed'}, scope: '/')
     # The frame is cross-origin to us, so it has to report on itself.
@@ -403,6 +406,7 @@ RSpec.describe 'Service Worker client enumeration' do
     report = session.evaluate_script('globalThis.__boxed') or raise 'the sandboxed frame never reported'
 
     expect(report['origin']).to eq('null')
+    expect(report['refused']).to eq('SecurityError')
     expect(report['controller']).to be(false)
     expect(report['registration']).to be(false)
     expect(report['ready']).to be(false)

@@ -265,8 +265,9 @@ RSpec.describe 'Service Worker bindings' do
     session.visit '/controlled'
     expect(session.evaluate_script('[window.__early, navigator.serviceWorker.controller && navigator.serviceWorker.controller.scriptURL.replace(location.origin, "")]')).to eq([true, '/plain.js'])
     # …but not one its response sandboxes: its origin is an opaque one (Chrome: `self.origin` "null"), which no
-    # registration's scope is of.
+    # registration's scope is of — and it has no container at all (Chrome, measured: a SecurityError).
     session.visit '/sandboxed'
-    expect(session.evaluate_script('[self.origin, navigator.serviceWorker.controller]')).to eq(['null', nil])
+    probe = '[self.origin, (() => { try { navigator.serviceWorker; return "none"; } catch (e) { return e.name; } })()]'
+    expect(session.evaluate_script(probe)).to eq(['null', 'SecurityError'])
   end
 end
