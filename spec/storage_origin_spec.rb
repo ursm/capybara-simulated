@@ -47,7 +47,9 @@ RSpec.describe 'Web Storage origins' do
   it "keeps a frame of another origin's areas apart, and fires `storage` at the page's origin alone" do
     s = simulated_session(app)
     s.visit '/'
-    poll_until { s.evaluate_script('ready') == 2 }
+    # (…the page's own frame loaded: one of another origin is built as the page first reaches it, outside the WPT
+    # runner's universal server — bridge.entry.js `frameEagerEligible` — so its `ready` comes with the report asked of it)
+    poll_until { s.evaluate_script('ready') == 1 }
     s.execute_script("localStorage.setItem('k', 'changed')")
     s.execute_script("frames[0].postMessage('report', '*'); frames[1].postMessage('report', '*')")
     got = poll_until { r = s.evaluate_script('R'); r if r.size == 3 }
@@ -86,5 +88,52 @@ RSpec.describe 'Web Storage origins' do
     expect(first_party).to eq([['1p'], %w[3p 1p]])
     expect(s.within_frame('other') { s.evaluate_script('[Object.keys(localStorage), E]') }).to eq([['3p'], []])
     expect(s.within_frame('sub') { poll_until { r = s.evaluate_script('E'); r unless r.empty? } }).to eq(['1p'])
+  end
+
+  # Chrome's words for why, measured in headless Chrome (a `data:` frame, sandboxed or not, and an about:blank frame
+  # each made): its sandboxing first, whatever its URL, then a `data:` URL, then an origin it inherited.
+  let(:opaque) {
+    child = <<~JS.gsub("\n", ' ')
+      const r = [];
+      try { document.cookie } catch (e) { r.push(e.message) }
+      try { localStorage } catch (e) { r.push(e.message) }
+      const f = document.createElement('iframe'); document.documentElement.appendChild(f);
+      try { f.contentDocument.cookie } catch (e) { r.push(e.message) }
+      try { f.contentWindow.localStorage } catch (e) { r.push(e.message) }
+      parent.postMessage(r, '*');
+    JS
+    lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8">
+        <script>
+          window.R = [];
+          addEventListener('message', (e) => R.push(e.data));
+          const child = '<script>' + #{child.to_json} + '<\\/script>';
+          for (const sandbox of [null, 'allow-scripts']) {
+            const f = document.createElement('iframe');
+            if (sandbox) f.setAttribute('sandbox', sandbox);
+            f.src = 'data:text/html,' + encodeURIComponent(child);
+            document.documentElement.appendChild(f);
+          }
+        </script>
+      HTML
+    }
+  }
+
+  it 'refuses a document of an opaque origin its cookies and storage, in words for why it is opaque' do
+    s = simulated_session(opaque)
+    s.visit '/'
+    got = poll_until { r = s.evaluate_script('R'); r if r.size == 2 }
+    cookie  = "Failed to read the 'cookie' property from 'Document': "
+    storage = "Failed to read the 'localStorage' property from 'Window': "
+    sandboxed = "The document is sandboxed and lacks the 'allow-same-origin' flag."
+    data, sandboxed_frame = got.partition {|r| r.first.include?('data:') }
+    expect(data.first).to eq([
+      "#{cookie}Cookies are disabled inside 'data:' URLs.",
+      "#{storage}Storage is disabled inside 'data:' URLs.",
+      "#{cookie}Access is denied for this document.",
+      "#{storage}Access is denied for this document."
+    ])
+    expect(sandboxed_frame.first.first(2)).to eq(["#{cookie}#{sandboxed}", "#{storage}#{sandboxed}"])
   end
 end

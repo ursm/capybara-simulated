@@ -747,7 +747,8 @@ fn check_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             CHECK_UNFINISHED => state != FINISHED,
             CHECK_WRITABLE => mode != READONLY,
             CHECK_UNCOMMITTED => state < COMMITTING,
-            _ => unreachable!("idbCheck: no check {code}"),
+            // (…no check of the driver's, but `__dom` is a page's to call: a refusal, not a panic)
+            _ => false,
         };
         if !holds {
             return rv.set_uint32(code);

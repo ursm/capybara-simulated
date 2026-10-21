@@ -132,6 +132,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setLocationOrigin", set_location_origin, context_id);
     register(scope, ns, "setTargetHash", set_target_hash, context_id);
     register(scope, ns, "documentOrigin", document_origin, context_id);
+    register(scope, ns, "opaqueOriginCause", opaque_origin_cause, context_id);
     register(scope, ns, "frameOrigins", frame_origins_op, context_id);
     register(scope, ns, "cspSandboxesOrigin", csp_sandboxes_origin, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
@@ -153,6 +154,23 @@ fn document_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = realm_id(scope, &args);
     let origin = realm(scope, cid).location.origin().to_owned();
     rv.set(v8::String::new(scope, &origin).unwrap().into());
+}
+// __dom.opaqueOriginCause() -> why the calling realm's document's origin is opaque, as a refusal of its storage or its
+// cookies tells it: 0 it is not, 1 its document is sandboxed — first, whatever its URL — 2 its URL is a `data:` one's,
+// 3 it inherited one (an about:blank frame of a `data:` document).
+fn opaque_origin_cause(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let location = &realm(scope, cid).location;
+    let cause = if location.origin() != "null" {
+        0
+    } else if location.sandboxed {
+        1
+    } else if location.href().get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) {
+        2
+    } else {
+        3
+    };
+    rv.set_uint32(cause);
 }
 
 // The two origins of the document a frame of realm `cid`'s document loads at `url` ('' for none: about:blank), its
