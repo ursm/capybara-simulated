@@ -5780,7 +5780,6 @@ service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
 - Non-controlled resource loads
 service-workers/service-worker/sandboxed-iframe-navigator-serviceworker.https.html:
-- Accessing navigator.serviceWorker in sandboxed iframe should throw.
 - Switching iframe sandbox attribute while loading the iframe
 service-workers/service-worker/service-worker-csp-connect.https.html:
 - Fetch test for connect-src
