@@ -2672,8 +2672,6 @@ html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.pattern.html:
 - "== html/canvas/element/compositing/2d.composite.grid.no_filter.shadow.pattern-expected.html"
 html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.negativedir.html:
 - Negative dimensions do not affect the direction of the image
-html/canvas/element/drawing-images-to-the-canvas/2d.drawImage.nonexistent.html:
-- 'Canvas test: 2d.drawImage.nonexistent'
 html/canvas/element/fill-and-stroke-styles/2d.gradient.colorInterpolationMethod.html:
 - "== html/canvas/element/fill-and-stroke-styles/2d.gradient.colorInterpolationMethod-expected.html"
 html/canvas/element/fill-and-stroke-styles/2d.gradient.colormix.html:
