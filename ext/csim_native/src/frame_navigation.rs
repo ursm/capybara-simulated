@@ -211,8 +211,8 @@ impl crate::dom::RealmArena {
         snapshot.unwrap_or_else(|| self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned))
     }
 }
-// __dom.beginFrameNavigation(containerNid) — a navigation of the container begins (`begin`): a scripted one of it, or
-// the host's of one its document makes of itself.
+// __dom.beginFrameNavigation(containerNid) — a scripted navigation of the container begins (`begin`). (The host's carries
+// the attribute itself: browser.rb `frame_sandbox_now`.)
 fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);

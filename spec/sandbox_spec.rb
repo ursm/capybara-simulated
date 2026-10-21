@@ -212,14 +212,16 @@ RSpec.describe 'Sandboxing' do
     expect(s).to have_css('#at', text: '/landed')
   end
 
-  # …and a form a frame's document submits, which the host navigates: as the container said when it was submitted.
+  # …and a form a frame's document submits, which the host navigates: as the container said when it was submitted —
+  # not as it said when a navigation that made no document (a download) began.
   let(:submitting) {
     lambda {|env|
       case env['PATH_INFO']
       when '/form'
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><form id=form action="/b"><button name=btn value=1>send</button></form>']]
       when '/b' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><script>document.body.dataset.ran = "yes"</script>sent</body>']]
-      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe id=s src="/form"></iframe><iframe id=t src="/form"></iframe>']]
+      when '/download' then [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename=x.txt'}, ['x']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe id=s src="/form"></iframe><iframe id=t src="/form"></iframe><iframe id=u src="/form"></iframe>']]
       end
     }
   }
@@ -234,8 +236,15 @@ RSpec.describe 'Sandboxing' do
       document.getElementById('t').setAttribute('sandbox', 'allow-same-origin');
     JS
     s.within_frame('t') { s.click_button 'send' }
+    s.execute_script("document.getElementById('u').contentWindow.location.href = '/download'")
+    s.evaluate_script('1')
+    s.execute_script(<<~JS)
+      const frame = document.getElementById('u');
+      frame.setAttribute('sandbox', 'allow-same-origin');
+      frame.contentDocument.getElementById('form').submit();
+    JS
     at = ->(id) { s.evaluate_script("new URL(document.getElementById('#{id}').contentDocument.URL).pathname") }
-    expect(poll_until { [at.('s'), at.('t')] if at.('s') == '/b' && at.('t') == '/b' }).to eq(%w[/b /b])
-    expect(%w[s t].map {|id| s.evaluate_script("document.getElementById('#{id}').contentDocument.body.dataset.ran ?? 'no'") }).to eq(%w[no no])
+    expect(poll_until { %w[s t u].map(&at) if %w[s t u].all? {|id| at.(id) == '/b' } }).to eq(%w[/b /b /b])
+    expect(%w[s t u].map {|id| s.evaluate_script("document.getElementById('#{id}').contentDocument.body.dataset.ran ?? 'no'") }).to eq(%w[no no no])
   end
 end
