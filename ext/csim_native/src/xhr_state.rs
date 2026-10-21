@@ -5,8 +5,9 @@
 // whether the fetch in flight was terminated, the response type and override MIME type, the response's status, status
 // message and URL, and how often it was opened (a fetch, a delivery or a worker's answer of an earlier open() is
 // stale). The steps that read and change them — open(), send(),
-// abort()'s and the request error steps' state changes, the setters' checks — are here; the events they fire, the
-// fetch, the response body and the objects made of it are the bindings' (xhr.js). An XHR's object holds a handle on V8's
+// abort()'s and the request error steps' state changes, the setters' checks — are here, and which events each phase
+// fires in which state, and where a handler ends it (`Plan`, `xhrNext`); firing them, the fetch, the response body and
+// the objects made of it are the bindings' (xhr.js). An XHR's object holds a handle on V8's
 // C++ heap (`__dom.XhrBase`, as a header list's does: headers.rs) that owns the state.
 
 use std::cell::RefCell;
@@ -51,9 +52,103 @@ struct XhrState {
     status_text: Vec<u16>,
     response_url: Vec<u16>,
     generation: u32,
+    // The phases running — a handler of one's events may start another (abort(), a send() after open()) — by id.
+    plans: Vec<Plan>,
+    next_plan: u32,
 }
 
+// The events one phase of the request fires, in their order — send()'s loadstarts (§3.5.6), "process response" and what
+// follows it, the request error steps (§3.5.7) — each taken as it comes (`xhrNext`): an event for the bindings to fire,
+// the state the spec gives its handlers changed as it is taken, and the phase ended where one of the handlers made the
+// send stale (terminated it, opened the request again) or, past the DONE readystatechange, left it not DONE.
+struct Plan {
+    id: u32,
+    generation: u32,
+    ops: std::collections::VecDeque<Op>,
+}
+#[derive(Clone, Copy)]
+enum Op {
+    // An event: its type (`EV_*`), at the upload or the request, with the progress values `PROGRESS_*` names.
+    Fire(u32, bool, u32),
+    // The state changed — HEADERS_RECEIVED, LOADING, DONE — before the next event.
+    Ready(u32),
+    // The phase goes on only while the send is the request's; …and, past DONE, while it is DONE.
+    Current,
+    CurrentDone,
+    // The upload's terminal events, where one is still in progress (the upload-complete flag then set): progress, load
+    // and loadend for a body sent; `EV_*` and loadend for one cut short.
+    UploadSent,
+    UploadCut(u32),
+    // What the bindings do in the course of it: the response's facts kept (status, headers, body), or the body cut short.
+    Respond,
+    BodyError,
+}
+
+// The events, as `xhrNext` names their types (the bindings' `XHR_EVENTS`), and the progress values they carry.
+const EV_READYSTATECHANGE: u32 = 0;
+const EV_LOADSTART: u32 = 1;
+const EV_PROGRESS: u32 = 2;
+const EV_LOAD: u32 = 3;
+const EV_LOADEND: u32 = 4;
+const EV_ERROR: u32 = 5;
+const EV_ABORT: u32 = 6;
+const EV_TIMEOUT: u32 = 7;
+const PROGRESS_NONE: u32 = 0;
+const PROGRESS_START: u32 = 1; // 0 of 0, not computable
+const PROGRESS_UPLOAD_START: u32 = 2; // 0 of the body's size, computable
+const PROGRESS_UPLOAD_SENT: u32 = 3; // the body's size of it
+const PROGRESS_RESPONSE: u32 = 4; // what arrived, of the Content-Length
+// …and what `xhrNext` answers for the steps that are the bindings' own.
+const NEXT_DONE: i32 = -1;
+const NEXT_RESPOND: i32 = 1000;
+const NEXT_BODY_ERROR: i32 = 1001;
+
 impl XhrState {
+    // A phase begun, its id.
+    fn begin(&mut self, ops: Vec<Op>) -> u32 {
+        self.next_plan += 1;
+        let id = self.next_plan;
+        self.plans.push(Plan { id, generation: self.generation, ops: ops.into() });
+        id
+    }
+    // The next step of the phase `id`: an event (`type << 8 | upload << 4 | progress`), one of the bindings' own steps,
+    // or NEXT_DONE — the phase over, and forgotten.
+    fn next(&mut self, id: u32) -> i32 {
+        let Some(at) = self.plans.iter().position(|p| p.id == id) else { return NEXT_DONE };
+        loop {
+            let generation = self.plans[at].generation;
+            let Some(op) = self.plans[at].ops.pop_front() else { break };
+            let current = !self.aborted && generation == self.generation;
+            match op {
+                Op::Fire(ty, upload, progress) => return (ty << 8 | u32::from(upload) << 4 | progress) as i32,
+                Op::Ready(ready) => self.ready = ready,
+                Op::Current if !current => break,
+                Op::CurrentDone if !current || self.ready != DONE => break,
+                Op::Current | Op::CurrentDone => {}
+                Op::UploadSent | Op::UploadCut(_) => {
+                    if std::mem::replace(&mut self.upload_active, false) && !self.synchronous {
+                        let ops = &mut self.plans[at].ops;
+                        match op {
+                            Op::UploadSent => {
+                                for ty in [EV_LOADEND, EV_LOAD, EV_PROGRESS] {
+                                    ops.push_front(Op::Fire(ty, true, PROGRESS_UPLOAD_SENT));
+                                }
+                            }
+                            Op::UploadCut(reason) => {
+                                ops.push_front(Op::Fire(EV_LOADEND, true, PROGRESS_NONE));
+                                ops.push_front(Op::Fire(reason, true, PROGRESS_NONE));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Op::Respond => return NEXT_RESPOND,
+                Op::BodyError => return NEXT_BODY_ERROR,
+            }
+        }
+        self.plans.remove(at);
+        NEXT_DONE
+    }
     // The network error's response: status 0, no status message, no URL (the bindings drop its body and headers).
     fn clear_response(&mut self) {
         self.status = 0;
@@ -137,8 +232,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "xhrCurrent", current_op, context_id);
     crate::dom::register(scope, ns, "xhrInFlight", in_flight_op, context_id);
     crate::dom::register(scope, ns, "xhrTerminate", terminate_op, context_id);
+    crate::dom::register(scope, ns, "xhrLoadstarts", loadstarts_op, context_id);
+    crate::dom::register(scope, ns, "xhrRespond", respond_op, context_id);
+    crate::dom::register(scope, ns, "xhrErrorSteps", error_steps_op, context_id);
+    crate::dom::register(scope, ns, "xhrNext", next_op, context_id);
+    crate::dom::register(scope, ns, "xhrUploadSent", upload_sent_op, context_id);
     crate::dom::register(scope, ns, "xhrUnsend", unsend_op, context_id);
-    crate::dom::register(scope, ns, "xhrTakeUpload", take_upload_op, context_id);
     crate::dom::register(scope, ns, "xhrSetTimeout", set_timeout_op, context_id);
     crate::dom::register(scope, ns, "xhrSetWithCredentials", set_with_credentials_op, context_id);
     crate::dom::register(scope, ns, "xhrSetResponseType", set_response_type_op, context_id);
@@ -423,15 +522,112 @@ fn in_flight_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_bool((s.ready == OPENED && s.send) || s.ready == HEADERS_RECEIVED || s.ready == LOADING);
 }
 
-// __dom.xhrTerminate(state) — the request error steps' state: the fetch terminated, DONE with the network error's
-// response — set BEFORE the DONE readystatechange, whose handler must see it (abort-during-loading). Whether an upload
-// is in progress the bindings ask after that handler (`xhrTakeUpload`), which may have opened and sent again.
+// __dom.xhrTerminate(state) — the request error steps' state, with no events: a synchronous request's body cut short,
+// the fetch terminated, DONE with the network error's response (`xhrErrorSteps` the phase that fires them).
 fn terminate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = state(scope, args.get(0)) else { return };
     let mut s = s.borrow_mut();
     s.aborted = true;
     s.ready = DONE;
     s.clear_response();
+}
+
+// __dom.xhrLoadstarts(state) -> the phase of an asynchronous send()'s loadstarts (`xhrNext`): the request's, 0 of 0, and —
+// where its handler leaves the send the request's — the upload's, 0 of the body's size, where there is one to send.
+fn loadstarts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
+    let mut s = s.borrow_mut();
+    let mut ops = vec![Op::Fire(EV_LOADSTART, false, PROGRESS_START), Op::Current];
+    if s.upload_active {
+        ops.extend([Op::Fire(EV_LOADSTART, true, PROGRESS_UPLOAD_START), Op::Current]);
+    }
+    rv.set_double(f64::from(s.begin(ops)));
+}
+
+// __dom.xhrRespond(state, ok, bodyArrived, bodyCut) -> the phase of the fetch's outcome (XHR "process response" and the
+// events after it, `xhrNext`), or 0 for a synchronous request's network error — send()'s NetworkError, no events:
+// - a network error (not `ok`): DONE, its response the network error's, at once; then the DONE readystatechange, the
+//   upload's error and loadend where one is in progress, the request's error and loadend;
+// - a response: the upload's progress, load and loadend where one is in progress (an asynchronous request's: the body
+//   fully sent), the response's facts kept (`NEXT_RESPOND`), then — asynchronously — HEADERS_RECEIVED, LOADING where
+//   bytes arrived (`bodyArrived`), progress; then a body the network cut short (`bodyCut`) the bindings' to end
+//   (`NEXT_BODY_ERROR`: the request error steps, or send()'s NetworkError), else DONE, load and loadend.
+fn respond_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (ok, arrived, cut) = (args.get(1).is_true(), args.get(2).is_true(), args.get(3).is_true());
+    let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
+    let mut s = s.borrow_mut();
+    let ops = if !ok {
+        s.ready = DONE;
+        s.clear_response();
+        if s.synchronous {
+            s.upload_active = false;
+            return rv.set_int32(0);
+        }
+        vec![
+            Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE),
+            Op::Current,
+            Op::UploadCut(EV_ERROR),
+            Op::Current,
+            Op::Fire(EV_ERROR, false, PROGRESS_NONE),
+            Op::Fire(EV_LOADEND, false, PROGRESS_NONE),
+        ]
+    } else {
+        let mut ops = vec![Op::UploadSent, Op::Current, Op::Respond];
+        if !s.synchronous {
+            ops.extend([Op::Ready(HEADERS_RECEIVED), Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE), Op::Current]);
+            if arrived {
+                ops.extend([Op::Ready(LOADING), Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE), Op::Current]);
+            }
+            ops.extend([Op::Fire(EV_PROGRESS, false, PROGRESS_RESPONSE), Op::Current]);
+        }
+        if cut {
+            ops.push(Op::BodyError);
+        } else {
+            ops.extend([
+                Op::Ready(DONE),
+                Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE),
+                Op::CurrentDone,
+                Op::Fire(EV_LOAD, false, PROGRESS_RESPONSE),
+                Op::Fire(EV_LOADEND, false, PROGRESS_RESPONSE),
+            ]);
+        }
+        ops
+    };
+    rv.set_double(f64::from(s.begin(ops)));
+}
+
+// __dom.xhrErrorSteps(state, event) -> the phase of XHR's request error steps for `event` (EV_ABORT, EV_TIMEOUT,
+// EV_ERROR): the fetch terminated, DONE with the network error's response at once — the DONE readystatechange's handler
+// sees it (abort-during-loading) — then that readystatechange, the upload's `event` and loadend where one is still in
+// progress as its handler leaves it (one that opened and sent again has its own), the request's `event` and loadend.
+fn error_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let event = args.get(1).uint32_value(scope).filter(|e| matches!(*e, EV_ABORT | EV_TIMEOUT | EV_ERROR)).unwrap_or(EV_ABORT);
+    let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
+    let mut s = s.borrow_mut();
+    s.aborted = true;
+    s.ready = DONE;
+    s.clear_response();
+    let ops = vec![
+        Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE),
+        Op::UploadCut(event),
+        Op::Fire(event, false, PROGRESS_NONE),
+        Op::Fire(EV_LOADEND, false, PROGRESS_NONE),
+    ];
+    rv.set_double(f64::from(s.begin(ops)));
+}
+
+// __dom.xhrUploadSent(state) -> the phase of an upload sent before any response (a long poll's request, held once its
+// body is in): its progress, load and loadend where one is in progress — a later abort fires it none.
+fn upload_sent_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
+    rv.set_double(f64::from(s.borrow_mut().begin(vec![Op::UploadSent])));
+}
+
+// __dom.xhrNext(state, phase) -> the phase's next step (`XhrState::next`).
+fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(1).uint32_value(scope).unwrap_or(0);
+    let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(NEXT_DONE) };
+    rv.set_int32(s.borrow_mut().next(id));
 }
 
 // __dom.xhrUnsend(state) -> whether a DONE request went back to UNSENT, its response the network error's — abort()'s
@@ -445,13 +641,6 @@ fn unsend_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     s.ready = UNSENT;
     s.clear_response();
     rv.set_bool(true);
-}
-
-// __dom.xhrTakeUpload(state) -> whether an upload was in progress, which is complete now: its terminal events the
-// bindings' to fire, once (a later abort / timeout fires none: abort-during-loading).
-fn take_upload_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(s) = state(scope, args.get(0)) else { return rv.set_bool(false) };
-    rv.set_bool(std::mem::replace(&mut s.borrow_mut().upload_active, false));
 }
 
 // __dom.xhrSetTimeout(state, ms, inDocument) -> whether the timeout was set: not for a synchronous request from a
@@ -516,4 +705,48 @@ fn override_mime_type_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     s.override_mime = Some((essence, charset));
     rv.set_bool(true);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn steps(s: &mut XhrState, id: u32) -> Vec<i32> {
+        std::iter::from_fn(|| Some(s.next(id)).filter(|&n| n != NEXT_DONE)).collect()
+    }
+    const fn ev(ty: u32, upload: bool, progress: u32) -> i32 {
+        (ty << 8 | (upload as u32) << 4 | progress) as i32
+    }
+
+    // An asynchronous request with an upload: the upload's three, the response's facts, HEADERS_RECEIVED, LOADING,
+    // progress, DONE, load, loadend; its state DONE at the end.
+    #[test]
+    fn a_response_runs_its_events_in_order() {
+        let mut s = XhrState { ready: OPENED, send: true, upload_active: true, ..Default::default() };
+        let id = s.begin(vec![Op::UploadSent, Op::Current, Op::Respond, Op::Ready(HEADERS_RECEIVED), Op::Fire(EV_READYSTATECHANGE, false, 0), Op::Current, Op::Ready(DONE), Op::Fire(EV_READYSTATECHANGE, false, 0), Op::CurrentDone, Op::Fire(EV_LOAD, false, PROGRESS_RESPONSE)]);
+        assert_eq!(steps(&mut s, id), vec![
+            ev(EV_PROGRESS, true, PROGRESS_UPLOAD_SENT),
+            ev(EV_LOAD, true, PROGRESS_UPLOAD_SENT),
+            ev(EV_LOADEND, true, PROGRESS_UPLOAD_SENT),
+            NEXT_RESPOND,
+            ev(EV_READYSTATECHANGE, false, 0),
+            ev(EV_READYSTATECHANGE, false, 0),
+            ev(EV_LOAD, false, PROGRESS_RESPONSE),
+        ]);
+        assert_eq!(s.ready, DONE);
+        assert!(s.plans.is_empty());
+    }
+
+    // A handler that opens the request again ends the phase at its next check; the request error steps fire all of
+    // theirs, an upload's only where one is still in progress.
+    #[test]
+    fn a_stale_send_ends_its_phase() {
+        let mut s = XhrState { ready: OPENED, send: true, ..Default::default() };
+        let id = s.begin(vec![Op::Fire(EV_LOADSTART, false, PROGRESS_START), Op::Current, Op::Fire(EV_LOADSTART, true, PROGRESS_UPLOAD_START)]);
+        assert_eq!(s.next(id), ev(EV_LOADSTART, false, PROGRESS_START));
+        s.generation += 1;
+        assert_eq!(s.next(id), NEXT_DONE);
+        let id = s.begin(vec![Op::Fire(EV_READYSTATECHANGE, false, 0), Op::UploadCut(EV_ABORT), Op::Fire(EV_ABORT, false, 0)]);
+        assert_eq!(steps(&mut s, id), vec![ev(EV_READYSTATECHANGE, false, 0), ev(EV_ABORT, false, 0)]);
+    }
 }
