@@ -39,9 +39,9 @@ struct FrameNavigation {
     // The URL the navigation started with — the `src` attribute's value then, none where it had none (`Some(None)`):
     // what a beforeunload handler rewriting the attribute does not change.
     src: Option<Option<Vec<u16>>>,
-    // The container's `sandbox` attribute as its attributes were processed — what the document the navigation they
-    // began makes is sandboxed by (HTML "navigate": its sandboxing flags snapshot), whatever the attribute says by the
-    // time its response is in; none where it had none.
+    // The container's `sandbox` attribute as the navigation under way began (`begin`) — what the document it makes is
+    // sandboxed by (HTML "navigate": its sandboxing flags snapshot), whatever the attribute says by the time its response
+    // is in; none where it had none — taken by the document it makes.
     sandbox: Option<Option<String>>,
     history: Option<Vec<u16>>,
     reload: Option<Vec<u16>>,
@@ -150,7 +150,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameContentUrl", frame_content_url, context_id);
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
-    crate::dom::register(scope, ns, "frameSandbox", frame_sandbox, context_id);
+    crate::dom::register(scope, ns, "takeFrameSandbox", take_frame_sandbox, context_id);
     crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
@@ -197,13 +197,18 @@ fn begin(arena: &mut crate::dom::RealmArena, container: NodeId) {
     arena.frame_navigation(container).sandbox = Some(sandbox);
 }
 impl crate::dom::RealmArena {
-    // The `sandbox` attribute the document the container's navigation makes is sandboxed by: as its navigation began,
-    // else as it is (none: none).
+    // The `sandbox` attribute the document the container's navigation makes is sandboxed by: as the navigation under way
+    // began, else — one whose start took none, a host's — as it is (none: none).
     pub(crate) fn frame_sandbox(&self, container: NodeId) -> Option<String> {
         match self.frame_navigations.0.get(&container).and_then(|nav| nav.sandbox.clone()) {
             Some(snapshot) => snapshot,
             None => self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned),
         }
+    }
+    // …taken by the document it makes: the next navigation's its own.
+    fn take_frame_sandbox(&mut self, container: NodeId) -> Option<String> {
+        let snapshot = self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.sandbox.take());
+        snapshot.unwrap_or_else(|| self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned))
     }
 }
 // __dom.beginFrameNavigation(containerNid) — a navigation of the container begins (`begin`): a scripted one of it, or
@@ -213,11 +218,12 @@ fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     begin(crate::dom::realm(scope, cid), container);
 }
-// __dom.frameSandbox(containerNid) -> `RealmArena::frame_sandbox` (null: none).
-fn frame_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.takeFrameSandbox(containerNid) -> `RealmArena::take_frame_sandbox` (null: none): the document the navigation
+// makes being made.
+fn take_frame_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_null() };
     let cid = realm_id(scope, &args);
-    let sandbox = crate::dom::realm(scope, cid).frame_sandbox(container);
+    let sandbox = crate::dom::realm(scope, cid).take_frame_sandbox(container);
     match sandbox.and_then(|s| v8::String::new(scope, &s)) {
         Some(s) => rv.set(s.into()),
         None => rv.set_null(),

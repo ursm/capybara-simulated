@@ -211,4 +211,31 @@ RSpec.describe 'Sandboxing' do
     s.within_frame('f') { s.click_link 'go' }
     expect(s).to have_css('#at', text: '/landed')
   end
+
+  # …and a form a frame's document submits, which the host navigates: as the container said when it was submitted.
+  let(:submitting) {
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/form'
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><form id=form action="/b"><button name=btn value=1>send</button></form>']]
+      when '/b' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><script>document.body.dataset.ran = "yes"</script>sent</body>']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe id=s src="/form"></iframe><iframe id=t src="/form"></iframe>']]
+      end
+    }
+  }
+
+  it 'sandboxes the document a form in a frame submits as its container said then' do
+    s = simulated_session(submitting)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const frame = document.getElementById('s');
+      frame.setAttribute('sandbox', 'allow-same-origin');
+      frame.contentDocument.getElementById('form').submit();
+      document.getElementById('t').setAttribute('sandbox', 'allow-same-origin');
+    JS
+    s.within_frame('t') { s.click_button 'send' }
+    at = ->(id) { s.evaluate_script("new URL(document.getElementById('#{id}').contentDocument.URL).pathname") }
+    expect(poll_until { [at.('s'), at.('t')] if at.('s') == '/b' && at.('t') == '/b' }).to eq(%w[/b /b])
+    expect(%w[s t].map {|id| s.evaluate_script("document.getElementById('#{id}').contentDocument.body.dataset.ran ?? 'no'") }).to eq(%w[no no])
+  end
 end

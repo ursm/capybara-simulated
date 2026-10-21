@@ -10215,6 +10215,8 @@ module Capybara
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         frame_realm_host_call(parent, '__csimFrameNavigationBegins', handle) unless handle.zero?
+      rescue StandardError
+        nil
       end
       def consume_pending_frame_nav
         # Window-realm self-navs are realm navs too — drain them at every frame-nav
