@@ -1124,8 +1124,11 @@ module Capybara
         if url.to_s.empty?
           realm.call('__csimUpdateLocation', 'about:blank')
           realm.call('__csimSetAboutBaseURL', about_base.to_s)   unless about_base.to_s.empty?
-          doc_origin      ||= about_origin unless about_origin.to_s.empty?
-          location_origin ||= about_origin unless about_origin.to_s.empty?
+          unless about_origin.to_s.empty?
+            doc_origin      ||= about_origin
+            # (…an opaque one inherited with its key, `null|<key>`, which only the document's origin carries)
+            location_origin ||= about_origin.start_with?('null') ? 'null' : about_origin
+          end
         else
           realm.call('__csimUpdateLocation', url.to_s)
         end

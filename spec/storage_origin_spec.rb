@@ -91,7 +91,8 @@ RSpec.describe 'Web Storage origins' do
   end
 
   # Chrome's words for why, measured in headless Chrome (a `data:` frame, sandboxed or not, and an about:blank frame
-  # each made): its sandboxing first, whatever its URL, then a `data:` URL, then an origin it inherited.
+  # and popup each made): its sandboxing first, whatever its URL, then a `data:` URL, then an origin it inherited — a
+  # popup's as a frame's, same-origin to its opener.
   let(:opaque) {
     child = <<~JS.gsub("\n", ' ')
       const r = [];
@@ -100,6 +101,12 @@ RSpec.describe 'Web Storage origins' do
       const f = document.createElement('iframe'); document.documentElement.appendChild(f);
       try { f.contentDocument.cookie } catch (e) { r.push(e.message) }
       try { f.contentWindow.localStorage } catch (e) { r.push(e.message) }
+      if (location.hash !== '#sandboxed') {
+        const w = open();
+        try { w.localStorage } catch (e) { r.push(e.message) }
+        r.push(typeof w.document.title);
+        w.close();
+      }
       parent.postMessage(r, '*');
     JS
     lambda {|_env|
@@ -112,7 +119,7 @@ RSpec.describe 'Web Storage origins' do
           for (const sandbox of [null, 'allow-scripts']) {
             const f = document.createElement('iframe');
             if (sandbox) f.setAttribute('sandbox', sandbox);
-            f.src = 'data:text/html,' + encodeURIComponent(child);
+            f.src = 'data:text/html,' + encodeURIComponent(child) + (sandbox ? '#sandboxed' : '');
             document.documentElement.appendChild(f);
           }
         </script>
@@ -132,7 +139,9 @@ RSpec.describe 'Web Storage origins' do
       "#{cookie}Cookies are disabled inside 'data:' URLs.",
       "#{storage}Storage is disabled inside 'data:' URLs.",
       "#{cookie}Access is denied for this document.",
-      "#{storage}Access is denied for this document."
+      "#{storage}Access is denied for this document.",
+      "#{storage}Access is denied for this document.",
+      'string'
     ])
     expect(sandboxed_frame.first.first(2)).to eq(["#{cookie}#{sandboxed}", "#{storage}#{sandboxed}"])
   end
