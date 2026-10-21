@@ -1044,8 +1044,9 @@ module Capybara
         # document built from it; any other result (incl. the common undefined)
         # leaves the about:blank document, so only its side effects (e.g.
         # `parent.foo()`) take effect. A throwing script is reported and left as a
-        # no-op rather than aborting the frame build.
-        unless js_url_source.nil?
+        # no-op rather than aborting the frame build — and evaluated as nothing in a frame
+        # sandboxed against scripts, where scripting is disabled (script.rs `scriptsSandboxed`).
+        unless js_url_source.nil? || realm.eval('__dom.scriptsSandboxed(null)')
           begin
             result = realm.eval(js_url_source.to_s)
             realm.call('__csimLoadDocument', result, 'text/html') if result.is_a?(String)

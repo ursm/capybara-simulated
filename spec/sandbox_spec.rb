@@ -59,4 +59,49 @@ RSpec.describe 'Sandboxing' do
     ])
     expect(got['#same-origin']).to eq(['string', 'http://www.example.com', 'object', 'object'])
   end
+
+  # A document sandboxed against scripts has scripting disabled (HTML "scripting is disabled"): its scripts do not run,
+  # its event handler content attributes compile to nothing, a `javascript:` URL of its evaluates nothing, and its
+  # `<noscript>` content is markup — the frame's container's attribute as its navigation began, not as it is when the
+  # response comes in. Chrome's figures, measured, with the unsandboxed frame beside it.
+  let(:scripts) {
+    frame = <<~HTML.gsub("\n", '')
+      <body><script>document.body.dataset.ran = 'yes'</script>
+      <p id=p onclick="document.body.dataset.clicked = 'yes'">p</p>
+      <noscript><b>no</b></noscript>
+      <a id=a href="javascript:document.body.dataset.js = 'yes'">a</a></body>
+    HTML
+    lambda {|_env|
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8">
+        <script>
+          for (const [id, sandbox] of [['sandboxed', 'allow-same-origin'], ['scripted', null], ['switched', 'allow-same-origin']]) {
+            const f = document.createElement('iframe');
+            f.id = id;
+            if (sandbox !== null) f.setAttribute('sandbox', sandbox);
+            f.srcdoc = #{frame.to_json.gsub('</', '<\\/')};
+            document.documentElement.appendChild(f);
+            if (id === 'switched') f.setAttribute('sandbox', 'allow-same-origin allow-scripts');
+          }
+          window.report = (id) => {
+            const d = document.getElementById(id).contentDocument;
+            const onclick = d.getElementById('p').onclick === null;
+            d.getElementById('p').click();
+            d.getElementById('a').click();
+            return [d.body.dataset.ran, onclick, d.body.dataset.clicked, d.querySelector('noscript').children.length];
+          };
+        </script>
+      HTML
+    }
+  }
+
+  it 'disables scripting in a document sandboxed against scripts, as its navigation began' do
+    s = simulated_session(scripts)
+    s.visit '/'
+    expect(s.evaluate_script("report('sandboxed')")).to eq([nil, true, nil, 1])
+    expect(s.evaluate_script("report('scripted')")).to eq(['yes', false, 'yes', 0])
+    expect(s.evaluate_script("document.getElementById('scripted').contentDocument.body.dataset.js")).to eq('yes')
+    expect(s.evaluate_script("document.getElementById('sandboxed').contentDocument.body.dataset.js")).to be_nil
+    expect(s.evaluate_script("report('switched')")).to eq([nil, true, nil, 1])
+  end
 end

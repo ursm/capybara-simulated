@@ -454,7 +454,10 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
-        let scripting = args.get(2).boolean_value(scope);
+        // (…its scripting flag off, too, in a document sandboxed against scripts: HTML "scripting is disabled", which a
+        // `<noscript>`'s content is then parsed as markup for)
+        let cid = crate::dom::realm_id(scope, &args);
+        let scripting = args.get(2).boolean_value(scope) && !crate::dom::realm(scope, cid).scripts_sandboxed(cid);
         let iframe_srcdoc = args.get(3).boolean_value(scope);
         let declarative = args.get(4).boolean_value(scope);
         let opts = TreeBuilderOpts { scripting_enabled: scripting, iframe_srcdoc, ..Default::default() };

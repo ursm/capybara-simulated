@@ -5779,8 +5779,6 @@ service-workers/service-worker/resource-timing-fetch-variants.https.html:
 service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
 - Non-controlled resource loads
-service-workers/service-worker/sandboxed-iframe-navigator-serviceworker.https.html:
-- Switching iframe sandbox attribute while loading the iframe
 service-workers/service-worker/service-worker-csp-connect.https.html:
 - Fetch test for connect-src
 - Redirected fetch test for connect-src

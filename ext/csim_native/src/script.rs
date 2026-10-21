@@ -86,13 +86,20 @@ pub(crate) const BY_PARSER: u32 = 1;
 pub(crate) const BY_PARSER_LIST: u32 = 2;
 
 impl RealmArena {
+    // Whether realm `realm`'s document is sandboxed against scripts (its sandboxed scripts browsing context flag, HTML
+    // §7.6.5), which disables scripting in it: no script of its runs, no event handler content attribute of its
+    // compiles, no `javascript:` URL of its is evaluated.
+    pub(crate) fn scripts_sandboxed(&self, realm: i32) -> bool {
+        self.realm_state(realm).is_some_and(|s| s.location.sandbox & crate::sandbox::SCRIPTS != 0)
+    }
     // HTML "prepare the script element" — for one no parser is preparing (its children changed, it was connected, its
     // `src` set), and for the parser's import maps — as far as the element decides it: an "already started" one, one with
     // neither a `src` nor child text, one not connected, and one whose type runs as nothing here (a data block,
     // speculation rules) do nothing; any other is "already started" from here (and run by the after-parse pass's
     // reckoning), and does nothing as a classic script marked `nomodule`, fires `error` with an empty `src` — an import
     // map with any, there being no external import maps — and else runs, or registers its import map.
-    // (…and, `scripting` false — its node document has no browsing context — "already started" and nothing more: step 19)
+    // (…and, `scripting` false — its node document has no browsing context — or its document sandboxed against scripts,
+    // "already started" and nothing more: step 19, "scripting is disabled")
     // (…the parser's script — `by` it, not `BY_SCRIPT` — is "already started" here from its creation, as the insertion
     // the parser makes prepares nothing, so what says it has been prepared is its having run; and one of the lists runs
     // connected or not: the parser prepared it at its end tag, connected, and one an earlier script removed since is
@@ -124,6 +131,7 @@ impl RealmArena {
             return PREPARE_NONE;
         }
         let nomodule = ty == CLASSIC && n.plain_attr("nomodule").is_some();
+        let scripting = scripting && !self.scripts_sandboxed(n.realm);
         if let Some(n) = self.get_mut_quietly(id) {
             n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN;
         }
@@ -232,8 +240,18 @@ fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
+// __dom.scriptsSandboxed(nid) -> `scripts_sandboxed` of the realm node `nid` is in — of the calling realm for null.
+fn scripts_sandboxed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let id = crate::dom::nid_arg(scope, &args, 0);
+    let arena = crate::dom::realm(scope, cid);
+    let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
+    rv.set_bool(arena.scripts_sandboxed(realm));
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
+    crate::dom::register(scope, ns, "scriptsSandboxed", scripts_sandboxed_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
     crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);

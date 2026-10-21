@@ -39,6 +39,10 @@ struct FrameNavigation {
     // The URL the navigation started with — the `src` attribute's value then, none where it had none (`Some(None)`):
     // what a beforeunload handler rewriting the attribute does not change.
     src: Option<Option<Vec<u16>>>,
+    // The container's `sandbox` attribute as its attributes were processed — what the document the navigation they
+    // began makes is sandboxed by (HTML "navigate": its sandboxing flags snapshot), whatever the attribute says by the
+    // time its response is in; none where it had none.
+    sandbox: Option<Option<String>>,
     history: Option<Vec<u16>>,
     reload: Option<Vec<u16>>,
     // When the element's last `load` fired, on the virtual clock: a navigation begun at that same instant waits a
@@ -146,6 +150,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameContentUrl", frame_content_url, context_id);
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
+    crate::dom::register(scope, ns, "frameSandbox", frame_sandbox, context_id);
     crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
 
@@ -174,12 +179,28 @@ fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
 // URLs have moved since, or the `src` was set on it while it was in no document.
 pub(crate) fn process_src(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
     let refused = src_nested(arena, container);
+    let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
+    let nav = arena.frame_navigation(container);
+    nav.sandbox = Some(sandbox);
     if refused {
-        arena.frame_navigation(container).flags |= SRC_REFUSED;
-    } else if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
+        nav.flags |= SRC_REFUSED;
+    } else {
         nav.flags &= !SRC_REFUSED;
     }
     refused
+}
+// __dom.frameSandbox(containerNid) -> the `sandbox` attribute the document the container's navigation makes is
+// sandboxed by: as its attributes were last processed, else as it is (null: none).
+fn frame_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let snapshot = arena.frame_navigations.0.get(&container).and_then(|nav| nav.sandbox.clone());
+    let sandbox = snapshot.unwrap_or_else(|| arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned));
+    match sandbox.and_then(|s| v8::String::new(scope, &s)) {
+        Some(s) => rv.set(s.into()),
+        None => rv.set_null(),
+    }
 }
 // __dom.processFrameSrc(containerNid) -> whether `process_src` refused the frame's `src`.
 fn process_frame_src(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
