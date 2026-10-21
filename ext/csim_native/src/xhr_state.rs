@@ -41,7 +41,12 @@ struct XhrState {
     timeout: u32,
     with_credentials: bool,
     send: bool,
-    upload_active: bool,
+    // XHR's upload listener flag (an asynchronous send() of a body: its upload's events to fire — none of a request
+    // opened again since), upload complete flag, and whether the body was reported sent (its progress, load and
+    // loadend fired once: a long poll's as it parks, not again with its response).
+    upload_listener: bool,
+    upload_complete: bool,
+    upload_sent: bool,
     upload_total: f64,
     send_start: Option<f64>,
     timing_start: f64,
@@ -125,21 +130,24 @@ impl XhrState {
                 Op::Current if !current => break,
                 Op::CurrentDone if !current || self.ready != DONE => break,
                 Op::Current | Op::CurrentDone => {}
-                Op::UploadSent | Op::UploadCut(_) => {
-                    if std::mem::replace(&mut self.upload_active, false) {
+                // (…XHR's processRequestEndOfBody: the upload complete, and its events where the listener flag is set —
+                // whatever the request error steps did to the flag before)
+                Op::UploadSent => {
+                    self.upload_complete = true;
+                    if self.upload_listener && !std::mem::replace(&mut self.upload_sent, true) {
                         let ops = &mut self.plans[at].ops;
-                        match op {
-                            Op::UploadSent => {
-                                for ty in [EV_LOADEND, EV_LOAD, EV_PROGRESS] {
-                                    ops.push_front(Op::Fire(ty, true, PROGRESS_UPLOAD_SENT));
-                                }
-                            }
-                            Op::UploadCut(reason) => {
-                                ops.push_front(Op::Fire(EV_LOADEND, true, PROGRESS_NONE));
-                                ops.push_front(Op::Fire(reason, true, PROGRESS_NONE));
-                            }
-                            _ => {}
+                        for ty in [EV_LOADEND, EV_LOAD, EV_PROGRESS] {
+                            ops.push_front(Op::Fire(ty, true, PROGRESS_UPLOAD_SENT));
                         }
+                    }
+                }
+                // (…the request error steps' 6: an upload not yet complete completed, its `reason` and loadend where the
+                // listener flag is set)
+                Op::UploadCut(reason) => {
+                    if !std::mem::replace(&mut self.upload_complete, true) && self.upload_listener {
+                        let ops = &mut self.plans[at].ops;
+                        ops.push_front(Op::Fire(EV_LOADEND, true, PROGRESS_NONE));
+                        ops.push_front(Op::Fire(reason, true, PROGRESS_NONE));
                     }
                 }
                 Op::Respond => return NEXT_RESPOND,
@@ -286,7 +294,7 @@ fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         WITH_CREDENTIALS => rv.set_bool(s.with_credentials),
         ASYNC => rv.set_bool(!s.synchronous),
         SEND => rv.set_bool(s.send),
-        UPLOAD_ACTIVE => rv.set_bool(s.upload_active),
+        UPLOAD_ACTIVE => rv.set_bool(!s.upload_complete),
         RESPONSE_TYPE => rv.set_uint32(s.response_type as u32),
         UPLOAD_TOTAL => rv.set_double(s.upload_total),
         TIMING_START => rv.set_double(s.timing_start),
@@ -332,7 +340,14 @@ fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         (STATUS_TEXT, Value::Text(t)) => s.status_text = t,
         (RESPONSE_URL, Value::Text(t)) => s.response_url = t,
         (URL, Value::Text(t)) => s.url = t,
-        (UPLOAD_ACTIVE, Value::Flag(on)) => s.upload_active = on,
+        // (…send()'s upload: the listener flag set for an asynchronous one, the complete flag unset; or the upload
+        // complete with no events of it)
+        (UPLOAD_ACTIVE, Value::Flag(true)) => {
+            s.upload_listener = !s.synchronous;
+            s.upload_complete = false;
+            s.upload_sent = false;
+        }
+        (UPLOAD_ACTIVE, Value::Flag(false)) => s.upload_complete = true,
         _ => {}
     }
 }
@@ -418,7 +433,7 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     s.aborted = false;
     s.send = false;
     // (…and the upload listener flag unset: an upload of the send before fires nothing past this open())
-    s.upload_active = false;
+    s.upload_listener = false;
     s.clear_response();
     let was_opened = s.ready == OPENED;
     s.ready = OPENED;
@@ -544,7 +559,7 @@ fn loadstarts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
     let mut s = s.borrow_mut();
     let mut ops = vec![Op::Fire(EV_LOADSTART, false, PROGRESS_START), Op::Current];
-    if s.upload_active {
+    if s.upload_listener && !s.upload_complete {
         ops.extend([Op::Fire(EV_LOADSTART, true, PROGRESS_UPLOAD_START), Op::Current]);
     }
     rv.set_double(f64::from(s.begin(ops)));
@@ -566,20 +581,13 @@ fn respond_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         s.ready = DONE;
         s.clear_response();
         if s.synchronous {
-            s.upload_active = false;
+            s.upload_complete = true;
             return rv.set_int32(0);
         }
         error_steps(EV_ERROR)
     } else {
-        // (…a synchronous request's upload complete with no events of it)
-        let upload = if s.synchronous {
-            s.upload_active = false;
-            vec![]
-        } else {
-            vec![Op::UploadSent, Op::Current]
-        };
-        let mut ops = upload;
-        ops.push(Op::Respond);
+        // (…a synchronous request's upload complete with no events of it: no listener flag)
+        let mut ops = vec![Op::UploadSent, Op::Current, Op::Respond];
         if !s.synchronous {
             ops.extend([Op::Ready(HEADERS_RECEIVED), Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE), Op::Current]);
             if arrived {
@@ -733,7 +741,7 @@ mod tests {
     // progress, DONE, load, loadend; its state DONE at the end.
     #[test]
     fn a_response_runs_its_events_in_order() {
-        let mut s = XhrState { ready: OPENED, send: true, upload_active: true, ..Default::default() };
+        let mut s = XhrState { ready: OPENED, send: true, upload_listener: true, ..Default::default() };
         let id = s.begin(vec![Op::UploadSent, Op::Current, Op::Respond, Op::Ready(HEADERS_RECEIVED), Op::Fire(EV_READYSTATECHANGE, false, 0), Op::Current, Op::Ready(DONE), Op::Fire(EV_READYSTATECHANGE, false, 0), Op::CurrentDone, Op::Fire(EV_LOAD, false, PROGRESS_RESPONSE)]);
         assert_eq!(steps(&mut s, id), vec![
             ev(EV_PROGRESS, true, PROGRESS_UPLOAD_SENT),

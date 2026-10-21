@@ -66,4 +66,20 @@ RSpec.describe 'XHR event phases' do
     JS
     expect(got.first).to eq('load 6/6')
   end
+
+  # The upload listener flag and the upload complete flag are two: a request sent again from an abort's DONE handler has
+  # its own upload's load, though the abort's steps marked an upload complete.
+  it 'fires the upload of a request sent again from an abort handler' do
+    got = run(<<~JS)
+      const x = new XMLHttpRequest();
+      x.open('POST', '/ok');
+      let again = false;
+      x.onreadystatechange = () => { if (x.readyState === 4 && !again) { again = true; x.open('POST', '/ok'); x.send('wxyz'); } };
+      x.upload.addEventListener('load', (e) => __log.push('upload load ' + e.loaded));
+      x.onload = () => { __done = true; };
+      x.send('abc');
+      x.abort();
+    JS
+    expect(got).to eq(['upload load 4'])
+  end
 end
