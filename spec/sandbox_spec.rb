@@ -108,7 +108,8 @@ RSpec.describe 'Sandboxing' do
   # A frame's sandboxing is its container's `sandbox` attribute as each navigation of it BEGAN — a form submitted into
   # it, a link targeting it, its `src` set, its document's `location` set — whatever the attribute says by the time the
   # response is in; and a navigation its document makes of itself is sandboxed by its response's CSP too. Chrome's
-  # figures, measured (the attribute set before the form / link navigation, after the `location` / `src` one).
+  # figures, measured (the attribute set before the form / link navigation, after the `location` / `src` one — a blob:
+  # URL's too, which the host hands back to the container's realm to navigate).
   let(:navigations) {
     b = '<!DOCTYPE html><meta charset="utf-8"><body><script>document.body.dataset.ran = "yes";' \
         'let ls; try { localStorage; ls = "ok"; } catch (e) { ls = e.name; }' \
@@ -121,13 +122,15 @@ RSpec.describe 'Sandboxing' do
       <iframe id=l src="/plain"></iframe>
       <iframe id=k src="/plain"></iframe>
       <iframe id=c src="/plain"></iframe>
+      <iframe id=bg src="/plain"></iframe>
+      <iframe id=bh sandbox="allow-same-origin" src="/plain"></iframe>
       <form id=ff target=f action="/b"><input name=form value=f></form>
       <form id=fg target=g action="/b"><input name=form value=g></form>
       <a id=link target=h href="/b?link">l</a>
       <script>
         window.R = {};
         addEventListener('message', (e) => { R[e.data[0]] = e.data[1]; });
-        const [f, g, h, l, k, c] = ['f', 'g', 'h', 'l', 'k', 'c'].map((id) => document.getElementById(id));
+        const [f, g, h, l, k, c, bg, bh] = ['f', 'g', 'h', 'l', 'k', 'c', 'bg', 'bh'].map((id) => document.getElementById(id));
         window.go = () => {
           f.setAttribute('sandbox', 'allow-same-origin allow-scripts');
           g.setAttribute('sandbox', 'allow-same-origin');
@@ -140,6 +143,13 @@ RSpec.describe 'Sandboxing' do
           k.src = '/b?src';
           k.setAttribute('sandbox', 'allow-same-origin');
           c.contentWindow.location.href = '/b?csp';
+          const blob = URL.createObjectURL(new Blob(
+            ['<!DOCTYPE html><body><script>document.body.dataset.ran = "yes"<' + '/script></body>'], {type: 'text/html'}
+          ));
+          bg.contentWindow.location.href = blob;
+          bg.setAttribute('sandbox', 'allow-same-origin');
+          bh.contentWindow.location.href = blob;
+          bh.setAttribute('sandbox', 'allow-same-origin allow-scripts');
         };
         window.ran = (id) => document.getElementById(id).contentDocument?.body?.dataset.ran ?? 'unread';
       </script>
@@ -162,6 +172,9 @@ RSpec.describe 'Sandboxing' do
     s.execute_script('go()')
     got = poll_until { r = s.evaluate_script('R'); r if r.size == 5 }
     expect(%w[f g h l k].map {|id| s.evaluate_script("ran('#{id}')") }).to eq(%w[yes unread yes yes yes])
+    blob = ->(id) { s.evaluate_script("document.getElementById('#{id}').contentDocument?.URL.startsWith('blob:')") }
+    expect(poll_until { blob.('bg') && blob.('bh') }).to be(true)
+    expect(%w[bg bh].map {|id| s.evaluate_script("ran('#{id}')") }).to eq(%w[yes unread])
     expect(got.keys).not_to include('form=g')
     expect(got['csp']).to eq(['null', 'SecurityError'])
   end

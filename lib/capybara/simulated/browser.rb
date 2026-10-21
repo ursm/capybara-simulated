@@ -10253,7 +10253,7 @@ module Capybara
             # location.replace should overwrite.
             navigate_realm_self_get(realm_id, url, record: false, referrer: referrer)
           else
-            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url)
+            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, sandbox)
           end
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")

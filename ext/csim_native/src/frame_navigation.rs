@@ -211,12 +211,20 @@ impl crate::dom::RealmArena {
         snapshot.unwrap_or_else(|| self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned))
     }
 }
-// __dom.beginFrameNavigation(containerNid) — a scripted navigation of the container begins (`begin`). (The host's carries
-// the attribute itself: browser.rb `frame_sandbox_now`.)
+// __dom.beginFrameNavigation(containerNid[, begun]) — a navigation of the container begins (`begin`): a scripted one, or
+// the host's, which carries the attribute it began with (`begun`, `[attribute]`: browser.rb `frame_sandbox_now`).
 fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let begun = v8::Local::<v8::Array>::try_from(args.get(1)).ok().map(|a| {
+        let v = a.get_index(scope, 0).filter(|v| !v.is_null_or_undefined());
+        v.map(|v| v.to_rust_string_lossy(scope))
+    });
     let cid = realm_id(scope, &args);
-    begin(crate::dom::realm(scope, cid), container);
+    let arena = crate::dom::realm(scope, cid);
+    match begun {
+        Some(sandbox) => arena.frame_navigation(container).sandbox = Some(sandbox),
+        None => begin(arena, container),
+    }
 }
 // __dom.takeFrameSandbox(containerNid) -> `RealmArena::take_frame_sandbox` (null: none): the document the navigation
 // makes being made.
