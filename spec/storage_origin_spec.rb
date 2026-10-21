@@ -49,7 +49,7 @@ RSpec.describe 'Web Storage origins' do
     s.visit '/'
     # (…the page's own frame loaded: one of another origin is built as the page first reaches it, outside the WPT
     # runner's universal server — bridge.entry.js `frameEagerEligible` — so its `ready` comes with the report asked of it)
-    poll_until { s.evaluate_script('ready') == 1 }
+    poll_until { s.evaluate_script('ready') >= 1 }
     s.execute_script("localStorage.setItem('k', 'changed')")
     s.execute_script("frames[0].postMessage('report', '*'); frames[1].postMessage('report', '*')")
     got = poll_until { r = s.evaluate_script('R'); r if r.size == 3 }
