@@ -17,8 +17,9 @@ pub(crate) struct RealmLocation {
     target_hash: Option<String>,
     document_origin: Option<String>,
     origin_key: Option<String>,
-    // Whether its document's origin is a NEW opaque one — sandboxed — which every frame it makes inherits.
-    pub(crate) sandboxed: bool,
+    // Its document's active sandboxing flag set (sandbox.rs), which every frame it makes inherits — its origin a NEW
+    // opaque one where that has the sandboxed origin flag.
+    pub(crate) sandbox: u32,
 }
 
 const HREF: usize = 0;
@@ -39,7 +40,7 @@ impl Default for RealmLocation {
             target_hash: None,
             document_origin: None,
             origin_key: None,
-            sandboxed: false,
+            sandbox: 0,
         }
     }
 }
@@ -73,18 +74,26 @@ impl RealmLocation {
         self.origin_override.as_deref().unwrap_or(&self.parts[ORIGIN])
     }
     // Its document's origin is `text`: an origin's serialization, "null" a new opaque one (sandboxed), `null|<key>` an
-    // opaque one inherited with its key (a sandboxed creator's frame's) — none: its location's.
+    // opaque one inherited with its key (an opaque creator's frame's) — none: its location's.
     fn set_document_origin(&mut self, text: Option<String>) {
         match text.as_deref().and_then(|t| t.strip_prefix("null|")) {
             Some(key) => {
                 self.origin_key = Some(key.to_owned());
                 self.document_origin = Some("null".to_owned());
             }
-            None => {
-                self.sandboxed |= text.as_deref() == Some("null");
-                self.document_origin = text;
-            }
+            None => self.document_origin = text,
         }
+    }
+    // Its document's sandboxing is `flags` — its origin a new opaque one where they have the sandboxed origin flag.
+    fn set_sandbox(&mut self, flags: u32) {
+        self.sandbox = flags;
+        if self.sandboxed_origin() {
+            self.document_origin = Some("null".to_owned());
+        }
+    }
+    // Whether its document's origin is a new opaque one its sandboxing made.
+    pub(crate) fn sandboxed_origin(&self) -> bool {
+        self.sandbox & crate::sandbox::ORIGIN != 0
     }
     // The key its origin is matched by — what a BroadcastChannel is scoped to, a postMessage's target origin matched
     // against: a tuple origin's serialization, an opaque one's a token of the realm `cid` that has it (its own, made
@@ -134,7 +143,11 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "documentOrigin", document_origin, context_id);
     register(scope, ns, "opaqueOriginCause", opaque_origin_cause, context_id);
     register(scope, ns, "frameOrigins", frame_origins_op, context_id);
-    register(scope, ns, "cspSandboxesOrigin", csp_sandboxes_origin, context_id);
+    register(scope, ns, "cspSandboxing", csp_sandboxing, context_id);
+    register(scope, ns, "popupOrigins", popup_origins_op, context_id);
+    register(scope, ns, "setSandbox", set_sandbox, context_id);
+    register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
+    register(scope, ns, "sandbox", sandbox, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
     register(scope, ns, "originStorageKey", origin_storage_key, context_id);
@@ -163,7 +176,7 @@ fn opaque_origin_cause(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let location = &realm(scope, cid).location;
     let cause = if location.origin() != "null" {
         0
-    } else if location.sandboxed {
+    } else if location.sandboxed_origin() {
         1
     } else if location.href().get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) {
         2
@@ -173,21 +186,26 @@ fn opaque_origin_cause(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set_uint32(cause);
 }
 
-// The two origins of the document a frame of realm `cid`'s document loads at `url` ('' for none: about:blank), its
-// container's `sandbox` attribute `sandbox` and its response's Content-Security-Policy `csp` (None for none) — what the
-// new realm is seeded with, None for each it takes from its URL:
-//   its document's (HTML "determine the origin"): a new opaque one ("null") where it is sandboxed — by its container, by
-//   its response, or by this document, whose sandboxing every frame it makes inherits (step 1); else, inherited from this
-//   document — an opaque one with its key (`null|<key>`), which no serialization carries — for an about: or javascript:
-//   URL, or a blob: URL this realm made (the origin of the document that made it); else its URL's;
+// What a document realm `cid`'s document creates is seeded with before it loads: its sandboxing flag set (sandbox.rs),
+// and its two origins, None for each it takes from its URL —
+//   its document's (HTML "determine the origin"): a new opaque one ("null") where its sandboxing has the sandboxed
+//   origin flag; else, inherited from this document — an opaque one with its key (`null|<key>`), which no serialization
+//   carries — for an about: or javascript: URL, or a blob: URL this realm made (the origin of the document that made
+//   it); else its URL's;
 //   its location's (`location.origin`): "null" for an opaque URL — about:, javascript:, none — though the document's is
 //   inherited; else its URL's, sandboxed or not.
-pub(crate) fn frame_origins(arena: &mut RealmArena, cid: i32, url: &str, sandbox: Option<&str>, csp: Option<&str>) -> (Option<String>, Option<&'static str>) {
+#[derive(Debug, PartialEq)]
+pub(crate) struct Creation {
+    pub(crate) document: Option<String>,
+    pub(crate) location: Option<&'static str>,
+    pub(crate) sandbox: u32,
+}
+fn creation(arena: &mut RealmArena, cid: i32, url: &str, sandbox: u32) -> Creation {
     let scheme = |s: &str| url.get(..s.len()).is_some_and(|p| p.eq_ignore_ascii_case(s));
     let opaque_url = url.is_empty() || scheme("about:") || scheme("javascript:");
     let own_blob = scheme("blob:") && arena.blob_urls.made_by(url, cid);
     let location = &mut arena.location;
-    let document = if location.sandboxed || crate::sandbox::opaque_origin(csp, sandbox) {
+    let document = if sandbox & crate::sandbox::ORIGIN != 0 {
         Some("null".to_owned())
     } else if opaque_url || own_blob {
         let origin = location.origin().to_owned();
@@ -195,29 +213,79 @@ pub(crate) fn frame_origins(arena: &mut RealmArena, cid: i32, url: &str, sandbox
     } else {
         None
     };
-    (document, opaque_url.then_some("null"))
+    Creation { document, location: opaque_url.then_some("null"), sandbox }
 }
-// __dom.cspSandboxesOrigin(csp) -> whether a document whose response's Content-Security-Policy is `csp` has an opaque
-// origin (`sandbox::opaque_origin`) — a top-level document's, which no container sandboxes.
-fn csp_sandboxes_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// …a frame's, loading `url` ('' for none: about:blank), its container's `sandbox` attribute `sandbox` and its response's
+// Content-Security-Policy `csp` (None for none): sandboxed by either, and by this document, whose flags every frame it
+// makes takes on (HTML "determine the creation sandboxing flags").
+pub(crate) fn frame_origins(arena: &mut RealmArena, cid: i32, url: &str, sandbox: Option<&str>, csp: Option<&str>) -> Creation {
+    let flags = arena.location.sandbox | crate::sandbox::sandboxing(csp, sandbox);
+    creation(arena, cid, url, flags)
+}
+// …and an about:blank popup's: sandboxed as this document is where its sandbox propagates to the auxiliary browsing
+// contexts it opens — no `allow-popups-to-escape-sandbox` — else not at all, its origin then this document's.
+pub(crate) fn popup_origins(arena: &mut RealmArena, cid: i32) -> Creation {
+    let own = arena.location.sandbox;
+    let flags = if own & crate::sandbox::PROPAGATES_TO_AUXILIARY != 0 { own } else { 0 };
+    creation(arena, cid, "", flags)
+}
+// __dom.cspSandboxing(csp) -> the sandboxing flags a document whose response's Content-Security-Policy is `csp` has —
+// a top-level document's, which no container sandboxes.
+fn csp_sandboxing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let csp = args.get(0).to_rust_string_lossy(scope);
-    rv.set_bool(crate::sandbox::opaque_origin(Some(&csp), None));
+    rv.set_uint32(crate::sandbox::sandboxing(Some(&csp), None));
 }
-// __dom.frameOrigins(url, sandbox, csp) -> `[document, location]` of `frame_origins`, each null for its URL's.
-fn frame_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
-    let url = text(scope, 0).unwrap_or_default();
-    let (sandbox, csp) = (text(scope, 1), text(scope, 2));
-    let cid = realm_id(scope, &args);
-    let (document, location) = frame_origins(realm(scope, cid), cid, &url, sandbox.as_deref(), csp.as_deref());
+// `[document, location, sandbox]` of a `Creation`, each origin null for its URL's.
+fn creation_value<'s>(scope: &mut v8::PinScope<'s, '_>, created: Creation) -> v8::Local<'s, v8::Value> {
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-    for text in [document.as_deref(), location] {
+    for text in [created.document.as_deref(), created.location] {
         items.push(match text.and_then(|t| v8::String::new(scope, t)) {
             Some(t) => t.into(),
             None => v8::null(scope).into(),
         });
     }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    items.push(v8::Integer::new_from_unsigned(scope, created.sandbox).into());
+    v8::Array::new_with_elements(scope, &items).into()
+}
+// __dom.frameOrigins(url, sandbox, csp) -> `frame_origins`.
+fn frame_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
+    let url = text(scope, 0).unwrap_or_default();
+    let (sandbox, csp) = (text(scope, 1), text(scope, 2));
+    let cid = realm_id(scope, &args);
+    let created = frame_origins(realm(scope, cid), cid, &url, sandbox.as_deref(), csp.as_deref());
+    let value = creation_value(scope, created);
+    rv.set(value);
+}
+// __dom.popupOrigins() -> `popup_origins`.
+fn popup_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let created = popup_origins(realm(scope, cid), cid);
+    let value = creation_value(scope, created);
+    rv.set(value);
+}
+// __dom.setSandbox(flags) — the calling realm's document's active sandboxing flag set, before it loads
+// (`RealmLocation::set_sandbox`).
+fn set_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let flags = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.set_sandbox(flags);
+}
+// __dom.takeOpenerOrigins(opener) — the calling realm's about:blank popup document seeded from the document of realm
+// `opener` that opened it (`popup_origins`): its two origins and its sandboxing.
+fn take_opener_origins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let opener = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let created = popup_origins(realm(scope, opener), opener);
+    let location = &mut realm(scope, cid).location;
+    location.set_sandbox(created.sandbox);
+    location.set_document_origin(created.document);
+    location.origin_override = created.location.map(str::to_owned);
+}
+// __dom.sandbox() -> the calling realm's document's active sandboxing flag set.
+fn sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(realm(scope, cid).location.sandbox);
 }
 
 // __dom.setDocumentOrigin(text) — the calling realm's document's origin (`set_document_origin`; null: its location's).
@@ -532,21 +600,40 @@ mod tests {
     fn a_frame_document_takes_its_origins() {
         let mut arena = RealmArena::default();
         arena.location = at("http://a.test/p");
+        let origins = |arena: &mut RealmArena, url: &str, sandbox: Option<&str>, csp: Option<&str>| {
+            let c = frame_origins(arena, 0, url, sandbox, csp);
+            (c.document, c.location)
+        };
         let inherited = (Some("http://a.test".to_owned()), Some("null"));
         for url in ["", "about:blank#x", "JAVASCRIPT:void 0"] {
-            assert_eq!(frame_origins(&mut arena, 0, url, None, None), inherited, "{url}");
+            assert_eq!(origins(&mut arena, url, None, None), inherited, "{url}");
         }
         for url in ["http://b.test/", "data:,x", "blob:http://a.test/0000"] {
-            assert_eq!(frame_origins(&mut arena, 0, url, None, None), (None, None), "{url}");
+            assert_eq!(origins(&mut arena, url, None, None), (None, None), "{url}");
         }
-        assert_eq!(frame_origins(&mut arena, 0, "http://b.test/", Some(""), None), (Some("null".to_owned()), None));
-        assert_eq!(frame_origins(&mut arena, 0, "", Some("allow-same-origin"), None), inherited);
-        assert_eq!(frame_origins(&mut arena, 0, "http://a.test/", None, Some("sandbox")), (Some("null".to_owned()), None));
-        // (…an opaque origin inherited, its key with it; a sandboxed creator's frames each a new one)
+        assert_eq!(origins(&mut arena, "http://b.test/", Some(""), None), (Some("null".to_owned()), None));
+        assert_eq!(origins(&mut arena, "", Some("allow-same-origin"), None), inherited);
+        assert_eq!(origins(&mut arena, "http://a.test/", None, Some("sandbox")), (Some("null".to_owned()), None));
+        assert_eq!(frame_origins(&mut arena, 0, "", Some("allow-scripts"), None).sandbox, crate::sandbox::sandboxing(None, Some("allow-scripts")));
+        // (…an opaque origin inherited, its key with it; a sandboxed creator's frames each a new one, its flags theirs)
         arena.location.set_document_origin(Some("null|k".to_owned()));
-        assert_eq!(frame_origins(&mut arena, 0, "", None, None), (Some("null|k".to_owned()), Some("null")));
-        arena.location.set_document_origin(Some("null".to_owned()));
-        assert_eq!(frame_origins(&mut arena, 0, "", None, None), (Some("null".to_owned()), Some("null")));
+        assert_eq!(origins(&mut arena, "", None, None), (Some("null|k".to_owned()), Some("null")));
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-scripts"));
+        assert_eq!(origins(&mut arena, "", None, None), (Some("null".to_owned()), Some("null")));
+        assert_eq!(frame_origins(&mut arena, 0, "", Some("allow-forms"), None).sandbox & crate::sandbox::FORMS, 0 | crate::sandbox::FORMS);
+    }
+
+    #[test]
+    fn a_popup_is_sandboxed_as_its_opener_unless_it_escapes() {
+        let mut arena = RealmArena::default();
+        arena.location = at("http://a.test/p");
+        assert_eq!(popup_origins(&mut arena, 0), Creation { document: Some("http://a.test".to_owned()), location: Some("null"), sandbox: 0 });
+        arena.location.set_document_origin(Some("null|k".to_owned()));
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-scripts allow-popups"));
+        let propagated = popup_origins(&mut arena, 0);
+        assert_eq!((propagated.document.as_deref(), propagated.sandbox), (Some("null"), arena.location.sandbox));
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-scripts allow-popups allow-popups-to-escape-sandbox"));
+        assert_eq!(popup_origins(&mut arena, 0), Creation { document: Some("null|k".to_owned()), location: Some("null"), sandbox: 0 });
     }
 
     #[test]

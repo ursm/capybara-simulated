@@ -573,7 +573,7 @@ module Capybara
         # cross-window scripting/adoption need no cross-isolate RPC. The opener's realm
         # id wires the popup's window.opener. Falls through to the separate-VM aux path
         # (cross-origin, or a URL we don't yet realm-load).
-        if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id, about_base: about_base, about_origin: about_origin))
+        if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id, about_base: about_base))
           return rid
         end
         open_aux_window(

@@ -340,10 +340,10 @@ impl RealmArena {
     // The navigable a target name chooses from realm `current`'s (HTML "find a navigable by target name", its order the
     // UA's — Chrome's, FrameTree::FindFrameForNavigation): the current navigable and its descendants first, then the rest
     // of its top-level traversable's, each in tree order — the containers of a document's child navigables in
-    // shadow-including tree order (a frame in a shadow tree is one: Chrome finds it). One of the rest a document under a
-    // `sandbox` may not navigate ("allowed by sandboxing to navigate": its own navigable and its descendants alone, and
-    // its top-level traversable where every sandbox around it grants `allow-top-navigation`) — Chrome leaves it as it
-    // was.
+    // shadow-including tree order (a frame in a shadow tree is one: Chrome finds it). One of the rest a sandboxed
+    // document may not navigate ("allowed by sandboxing to navigate": with the sandboxed navigation browsing context flag,
+    // its own navigable and its descendants alone, and its top-level traversable where its sandboxing lets it navigate
+    // that — `allow-top-navigation`, or `…-by-user-activation`) — Chrome leaves it as it was.
     pub(crate) fn find_navigable(&self, current: i32, name: &[u16]) -> Chosen {
         if name.is_empty() {
             return Chosen::None;
@@ -359,12 +359,13 @@ impl RealmArena {
         if top == current {
             return Chosen::None;
         }
+        use crate::sandbox::{NAVIGATION, TOP_LEVEL_NAVIGATION, TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION};
+        let sandbox = self.realm_state(current).map_or(0, |s| s.location.sandbox);
+        let top_allowed = sandbox & TOP_LEVEL_NAVIGATION == 0 || sandbox & TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION == 0;
         match self.find_in(top, None, name) {
             None => Chosen::None,
-            Some(Chosen::Navigable(_, None)) if self.sandboxes_around(current).all(|s| allows_top_navigation(&s)) => {
-                Chosen::Navigable(Some(top), None)
-            }
-            Some(found) if self.sandboxes_around(current).next().is_none() => found,
+            Some(Chosen::Navigable(_, None)) if top_allowed => Chosen::Navigable(Some(top), None),
+            Some(found) if sandbox & NAVIGATION == 0 => found,
             Some(_) => Chosen::Blocked,
         }
     }
@@ -388,34 +389,21 @@ impl RealmArena {
     // Whether a service worker may control a navigation of the navigable `container` frames — realm `realm`'s own where
     // none: where the environment it makes is a secure context (HTML §8.1.3.5, its top-level creation URL's — the top-
     // level traversable's document's: `url_ops::secure_top_level`) and its document's origin is no opaque one a sandbox
-    // makes it — the container's own `sandbox` attribute, one around it, or the sandboxing of a document it is in, which
-    // every frame of its inherits (`RealmLocation::sandboxed`: a CSP `sandbox` too) — (Service Workers' "Match Service
-    // Worker Registration" finds none for an opaque origin: a sandboxed frame without `allow-same-origin` is
+    // makes it — the container's own `sandbox` attribute, or the sandboxing of the document it is in, which every frame
+    // of its takes on (`RealmLocation::sandbox`: its containers' and a CSP `sandbox` too) — (Service Workers' "Match
+    // Service Worker Registration" finds none for an opaque origin: a sandboxed frame without `allow-same-origin` is
     // uncontrolled).
     pub(crate) fn sw_may_control_navigation(&self, realm: i32, container: Option<NodeId>) -> bool {
         // (…the document the frame is in, for a frame's — its own realm's container's for a realm's own navigation)
-        let (around, own) = match container.and_then(|c| self.get(c)) {
-            Some(n) => (Some(n.realm), n.is_html_named("iframe").then(|| n.plain_attr("sandbox").map(str::to_owned)).flatten()),
-            None => (self.live_container(realm).and_then(|c| self.get(c)).map(|n| n.realm), None),
-        };
+        let frame = container.or_else(|| self.live_container(realm)).and_then(|c| self.get(c));
+        let around = frame.map(|n| n.realm);
+        let own = frame.filter(|n| n.is_html_named("iframe")).and_then(|n| n.plain_attr("sandbox"));
         let top = self.top_level_realm(around.unwrap_or(realm));
         if !self.realm_state(top).is_some_and(|s| crate::url_ops::secure_top_level(s.location.href())) {
             return false;
         }
-        let attributes: Vec<String> = match container {
-            Some(_) => own.into_iter().chain(around.into_iter().flat_map(|r| self.sandboxes_around(r))).collect(),
-            None => self.sandboxes_around(realm).collect(),
-        };
-        let documents = around.into_iter().flat_map(|r| std::iter::once(r).chain(self.ancestor_realms(r)));
-        !attributes.iter().any(|s| crate::sandbox::opaque_origin(None, Some(s)))
-            && !documents.into_iter().any(|r| self.realm_state(r).is_some_and(|s| s.location.sandboxed))
-    }
-    // The `sandbox` attributes of the containers realm `realm`'s document and its ancestors' sit in, innermost first —
-    // each sets the sandboxed navigation browsing context flag of every document in its frame (HTML §7.6.5, "iframe
-    // sandboxing flag set", which a nested document's active sandboxing flag set takes on from its container's document).
-    fn sandboxes_around(&self, realm: i32) -> impl Iterator<Item = String> + '_ {
-        std::iter::successors(self.live_container(realm), |&c| self.get(c).and_then(|n| self.live_container(n.realm)))
-            .filter_map(|c| self.get(c).and_then(|n| n.is_html_named("iframe").then(|| n.plain_attr("sandbox").map(str::to_owned)).flatten()))
+        let inherited = around.and_then(|r| self.realm_state(r)).map_or(0, |s| s.location.sandbox);
+        (inherited | crate::sandbox::sandboxing(None, own)) & crate::sandbox::ORIGIN == 0
     }
 }
 
@@ -425,14 +413,6 @@ fn sw_may_control_navigation_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Func
     let container = crate::node_handle::nid_of(scope, args.get(0));
     let cid = crate::dom::realm_id(scope, &args);
     rv.set_bool(crate::dom::dom(scope).arena.sw_may_control_navigation(cid, container));
-}
-
-// Whether a `sandbox` attribute grants its documents navigating their top-level traversable (`allow-top-navigation`, or
-// `allow-top-navigation-by-user-activation`: the activation it asks for is not modelled here).
-fn allows_top_navigation(tokens: &str) -> bool {
-    tokens
-        .split(['\t', '\n', '\x0c', '\r', ' '])
-        .any(|t| t.eq_ignore_ascii_case("allow-top-navigation") || t.eq_ignore_ascii_case("allow-top-navigation-by-user-activation"))
 }
 
 // The keyword a navigable target name is, ASCII case-insensitively (HTML "valid navigable target name or keyword"): the

@@ -79,6 +79,9 @@ module Capybara
       # `postMessage` / `window.open` so the Driver can route to the target.
       attr_accessor :window_handle
 
+      # An about:blank URL: its own document whatever its query or fragment (HTML "matches about:blank").
+      ABOUT_BLANK = %r{\Aabout:blank(?:[?#]|\z)}i
+
       # Sticky window after timers finish: keep polling? true so a
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
       # before its own default_max_wait_time kicks in. Counted in poll
@@ -7390,12 +7393,12 @@ module Capybara
       # works (dom/nodes/remove-and-adopt-thcrash). Returns nil to fall back to the
       # separate-VM aux-window path. First stage: about:blank only (a non-blank
       # same-origin URL still takes the aux path until realm URL-loading lands).
-      def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil, about_origin: nil)
+      def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil)
         return nil unless url.nil?
         consume_user_activation(opener_realm_id)
         @runtime.create_window_realm(
           '', '', 'text/html',
-          window_name: name, opener_id: opener_realm_id, about_base: about_base, about_origin: about_origin
+          window_name: name, opener_id: opener_realm_id, about_base: about_base
         )
       end
 
@@ -10792,7 +10795,7 @@ module Capybara
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle)
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s)
         return unless unload_frame_document(parent, realm_id)
 
         new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
@@ -11151,7 +11154,7 @@ module Capybara
         return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
 
         invalidate_find_cache
-        if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+        if url.to_s.match?(ABOUT_BLANK)
           reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
           return
         end
@@ -11224,7 +11227,7 @@ module Capybara
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle])
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s)
         return unless unload_frame_document(parent, old_id)
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
@@ -11298,7 +11301,7 @@ module Capybara
           # `location = 'about:blank'` and navigating an iframe to about:blank
           # both land here. Mirrors rack_fetch's non-http(s) guard. (Narrow to
           # about:blank specifically — about:srcdoc carries its own markup.)
-          if url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+          if url.to_s.match?(ABOUT_BLANK)
             @current_url = url.to_s
             record_response(200, {'content-type' => 'text/html'})
             boot_response_into_ctx('')
@@ -11428,7 +11431,7 @@ module Capybara
         drop_document_websockets
         # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
         # its creator's policy container, the policies with it)
-        @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+        @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
         @runtime.rebuild_ctx
         # The lifecycle steps queued on the outgoing page's event loop are the new page's to run.
         @sw_steps_queued.each do |h|
@@ -11480,7 +11483,7 @@ module Capybara
           opts['controller'] = controller if controller
         end
         creator, @creator = @creator, nil
-        if creator && @current_url.to_s.match?(%r{\Aabout:blank(?:[?#]|\z)}i)
+        if creator && @current_url.to_s.match?(ABOUT_BLANK)
           opts['creatorOrigin'] = creator[:origin]
           opts['aboutBase']     = creator[:base]
         end

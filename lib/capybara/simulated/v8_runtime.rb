@@ -459,7 +459,7 @@ module Capybara
       # / module state, exactly like the main page's per-visit rebuild. `parent_id`
       # keeps the new realm's `parent`/`top` wired to the owning realm, and `seed`
       # is what the container gives the document, seeded as on the first build
-      # (`__csimFrameSeed`: its viewport and margins, and the container itself, whose
+      # (`__csimFrameSeed`: its viewport and margins, its origins and sandboxing, and the container itself, whose
       # navigable the new realm is linked to as it is made). The Browser then re-points
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id = nil, seed = nil)
@@ -471,7 +471,7 @@ module Capybara
         # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.)
         dispose_frame_realm_tree(old_id)
         seed ||= {}
-        create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], nil, nil, nil, nil, seed['viewport'], client_id, seed['margins'])
+        create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], seed['docOrigin'], seed['locationOrigin'], nil, nil, seed['viewport'], client_id, seed['margins'], seed['sandbox'])
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
@@ -494,8 +494,7 @@ module Capybara
         dispose_frame_realm_tree(old_id)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_name: meta[:window_name],
-          about_base: meta[:about_base], about_origin: meta[:about_origin]
+          opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base]
         )
       end
 
@@ -853,8 +852,8 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, container, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0) {
+          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, container, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins, frame_sandbox) }
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -916,7 +915,7 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -991,9 +990,10 @@ module Capybara
         realm.call('__csimFrameViewportChanged', frame_viewport)
         # …and the container's `marginwidth` / `marginheight`, which the framed body's first style already reads.
         realm.call('__csimFrameMarginsChanged', *frame_margins) if frame_margins
-        # Seed the frame's document origin (opaque/inherited) BEFORE the document
-        # loads, so its load-time scripts read the right self.origin. nil → a
-        # real-URL frame whose origin is its own location origin.
+        # Seed the frame's sandboxing and its document origin (opaque/inherited) BEFORE the
+        # document loads, so its load-time scripts read the right self.origin and run (or
+        # not) under its sandbox. nil → a real-URL frame whose origin is its own location origin.
+        realm.eval_void("__dom.setSandbox(#{frame_sandbox.to_i});") unless frame_sandbox.to_i.zero?
         realm.call('__csimSetDocumentOrigin', frame_doc_origin.to_s) unless frame_doc_origin.nil?
         # The frame's location.origin (opaque "null" for about:blank / srcdoc /
         # javascript:); decoupled from the location string so navigation is intact.
@@ -1090,7 +1090,7 @@ module Capybara
       # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
       # same-isolate Document (cross-window adoptNode works). The single isolate also
       # makes a same-origin window far cheaper than today's isolate-per-window.
-      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil, about_origin: nil)
+      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil)
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
         # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
@@ -1117,18 +1117,15 @@ module Capybara
         # `window.open()` with no URL opens about:blank — that IS the new document's URL, and a
         # realm built from the snapshot would otherwise keep reporting the OPENER's (making the
         # popup a phantom duplicate of its opener everywhere a document URL is read, the service-
-        # worker client set included). Its ORIGIN and its BASE url are inherited from the opener,
-        # exactly as an empty <iframe>'s are (create_frame_realm's frame_about_base): the origin
-        # so the popup isn't cross-origin to the window that opened it, the base so relative
+        # worker client set included). Its ORIGINS and its sandboxing are the engine's from the
+        # opener's (realm_location.rs `popup_origins`), and its BASE url is inherited from the
+        # opener, exactly as an empty <iframe>'s is (create_frame_realm's frame_about_base): the
+        # origin so the popup isn't cross-origin to the window that opened it, the base so relative
         # resolution inside it still targets the opener's document.
         if url.to_s.empty?
           realm.call('__csimUpdateLocation', 'about:blank')
           realm.call('__csimSetAboutBaseURL', about_base.to_s)   unless about_base.to_s.empty?
-          unless about_origin.to_s.empty?
-            doc_origin      ||= about_origin
-            # (…an opaque one inherited with its key, `null|<key>`, which only the document's origin carries)
-            location_origin ||= about_origin.start_with?('null') ? 'null' : about_origin
-          end
+          realm.eval_void("__dom.takeOpenerOrigins(#{opener_id.to_i});") unless opener_id.nil?
         else
           realm.call('__csimUpdateLocation', url.to_s)
         end
@@ -1150,7 +1147,7 @@ module Capybara
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
-        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, about_origin: about_origin}
+        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base}
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
