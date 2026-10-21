@@ -347,7 +347,10 @@ fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
             s.upload_complete = false;
             s.upload_sent = false;
         }
-        (UPLOAD_ACTIVE, Value::Flag(false)) => s.upload_complete = true,
+        (UPLOAD_ACTIVE, Value::Flag(false)) => {
+            s.upload_complete = true;
+            s.upload_sent = true;
+        }
         _ => {}
     }
 }
