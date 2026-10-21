@@ -126,7 +126,7 @@ impl XhrState {
                 Op::CurrentDone if !current || self.ready != DONE => break,
                 Op::Current | Op::CurrentDone => {}
                 Op::UploadSent | Op::UploadCut(_) => {
-                    if std::mem::replace(&mut self.upload_active, false) && !self.synchronous {
+                    if std::mem::replace(&mut self.upload_active, false) {
                         let ops = &mut self.plans[at].ops;
                         match op {
                             Op::UploadSent => {
@@ -143,7 +143,11 @@ impl XhrState {
                     }
                 }
                 Op::Respond => return NEXT_RESPOND,
-                Op::BodyError => return NEXT_BODY_ERROR,
+                // (…the phase's last step: it ends with it)
+                Op::BodyError => {
+                    self.plans.remove(at);
+                    return NEXT_BODY_ERROR;
+                }
             }
         }
         self.plans.remove(at);
@@ -413,6 +417,8 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     s.synchronous = !asynchronous;
     s.aborted = false;
     s.send = false;
+    // (…and the upload listener flag unset: an upload of the send before fires nothing past this open())
+    s.upload_active = false;
     s.clear_response();
     let was_opened = s.ready == OPENED;
     s.ready = OPENED;
@@ -546,8 +552,8 @@ fn loadstarts_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 
 // __dom.xhrRespond(state, ok, bodyArrived, bodyCut) -> the phase of the fetch's outcome (XHR "process response" and the
 // events after it, `xhrNext`), or 0 for a synchronous request's network error — send()'s NetworkError, no events:
-// - a network error (not `ok`): DONE, its response the network error's, at once; then the DONE readystatechange, the
-//   upload's error and loadend where one is in progress, the request's error and loadend;
+// - a network error (not `ok`): DONE, its response the network error's, at once; then the request error steps' events
+//   for `error` (`error_steps`, each fired whatever a handler of one does — XHR "handle errors");
 // - a response: the upload's progress, load and loadend where one is in progress (an asynchronous request's: the body
 //   fully sent), the response's facts kept (`NEXT_RESPOND`), then — asynchronously — HEADERS_RECEIVED, LOADING where
 //   bytes arrived (`bodyArrived`), progress; then a body the network cut short (`bodyCut`) the bindings' to end
@@ -563,16 +569,17 @@ fn respond_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             s.upload_active = false;
             return rv.set_int32(0);
         }
-        vec![
-            Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE),
-            Op::Current,
-            Op::UploadCut(EV_ERROR),
-            Op::Current,
-            Op::Fire(EV_ERROR, false, PROGRESS_NONE),
-            Op::Fire(EV_LOADEND, false, PROGRESS_NONE),
-        ]
+        error_steps(EV_ERROR)
     } else {
-        let mut ops = vec![Op::UploadSent, Op::Current, Op::Respond];
+        // (…a synchronous request's upload complete with no events of it)
+        let upload = if s.synchronous {
+            s.upload_active = false;
+            vec![]
+        } else {
+            vec![Op::UploadSent, Op::Current]
+        };
+        let mut ops = upload;
+        ops.push(Op::Respond);
         if !s.synchronous {
             ops.extend([Op::Ready(HEADERS_RECEIVED), Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE), Op::Current]);
             if arrived {
@@ -607,13 +614,17 @@ fn error_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     s.aborted = true;
     s.ready = DONE;
     s.clear_response();
-    let ops = vec![
+    rv.set_double(f64::from(s.begin(error_steps(event))));
+}
+// The request error steps' events for `event`, each fired whatever a handler of one does: the DONE readystatechange, the
+// upload's `event` and loadend where one is still in progress as its handler leaves it, the request's `event` and loadend.
+fn error_steps(event: u32) -> Vec<Op> {
+    vec![
         Op::Fire(EV_READYSTATECHANGE, false, PROGRESS_NONE),
         Op::UploadCut(event),
         Op::Fire(event, false, PROGRESS_NONE),
         Op::Fire(EV_LOADEND, false, PROGRESS_NONE),
-    ];
-    rv.set_double(f64::from(s.begin(ops)));
+    ]
 }
 
 // __dom.xhrUploadSent(state) -> the phase of an upload sent before any response (a long poll's request, held once its
