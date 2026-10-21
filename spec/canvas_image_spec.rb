@@ -2883,4 +2883,34 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
     JS
     expect(got).to eq('TypeError')
   end
+
+  # HTML "check the usability of the image argument" asks an ImageBitmap only whether it is detached: one of a canvas
+  # never drawn on is good, transparent black — drawn (a `copy` clears what it covers), patterned, copied (Chrome 155
+  # alike). A canvas too large for any bitmap is bad, not failing: drawn as nothing, as Chrome draws it.
+  it 'draws a blank ImageBitmap as transparent black, and nothing of a canvas too large for a bitmap' do
+    session = simulated_session(app)
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const oc = new OffscreenCanvas(3, 2);
+      oc.getContext('2d');
+      const blank = oc.transferToImageBitmap();
+      const c = document.createElement('canvas');
+      c.width = c.height = 4;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = 'red';
+      ctx.fillRect(0, 0, 4, 4);
+      ctx.globalCompositeOperation = 'copy';
+      ctx.drawImage(blank, 0, 0, 1, 1);
+      const drawn = Array.from(ctx.getImageData(0, 0, 1, 1).data).join();
+      const pattern = ctx.createPattern(blank, 'repeat') !== null;
+      const huge = document.createElement('canvas');
+      huge.width = huge.height = 100000;
+      ctx.globalCompositeOperation = 'source-over';
+      let hugeDraw;
+      try { ctx.drawImage(huge, 0, 0); hugeDraw = 'nothing'; } catch (e) { hugeDraw = e.name; }
+      createImageBitmap(blank).then((b) => done([drawn, pattern, b.width + 'x' + b.height, hugeDraw]), (e) => done(e.name));
+    JS
+    expect(got).to eq(['0,0,0,0', true, '3x2', 'nothing'])
+  end
 end
