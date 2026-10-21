@@ -216,14 +216,12 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbCompare", compare_op, context_id);
     register(scope, ns, "idbInRange", in_range_op, context_id);
     register(scope, ns, "idbStore", store_info, context_id);
-    register(scope, ns, "idbStoreLive", store_live, context_id);
     register(scope, ns, "idbIndexCreate", index_create, context_id);
     register(scope, ns, "idbIndexDelete", index_delete, context_id);
     register(scope, ns, "idbIndexRetire", index_retire, context_id);
     register(scope, ns, "idbIndexRename", index_rename, context_id);
     register(scope, ns, "idbIndexId", index_id, context_id);
     register(scope, ns, "idbIndex", index_info, context_id);
-    register(scope, ns, "idbIndexLive", index_live, context_id);
     register(scope, ns, "idbWriteIndexes", write_indexes, context_id);
     register(scope, ns, "idbGenerator", generator, context_id);
     register(scope, ns, "idbKeyRefusal", key_refusal, context_id);
@@ -482,11 +480,6 @@ fn store_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let items = [name_value(scope, &name), key_path_value(scope, &key_path), v8::Boolean::new(scope, auto_increment).into(), names_value(scope, index_names)];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.idbStoreLive(store) -> whether it is its database's still (not deleted).
-fn store_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let store = id_arg(scope, &args, 0);
-    rv.set_bool(with(|s| s.store_live(store)));
-}
 // What `createIndex()` refuses (§4.5), in the order its steps check: an index of the name (ConstraintError), a key path
 // that is not valid (SyntaxError), a list key path that is multiEntry (InvalidAccessError).
 const INDEX_EXISTS: i32 = -1;
@@ -577,10 +570,9 @@ fn index_info(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let items = [name_value(scope, &name), key_path_value(scope, &key_path), v8::Boolean::new(scope, unique).into(), v8::Boolean::new(scope, multi_entry).into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.idbIndexLive(store, index) -> whether the store has it (neither it nor its store deleted).
-fn index_live(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (store, index) = (id_arg(scope, &args, 0), id_arg(scope, &args, 1));
-    rv.set_bool(with(|s| s.store_live(store) && s.stores[&store].index_names.values().any(|&i| i == index)));
+// Whether the store has the index — neither it nor its store deleted.
+pub(crate) fn index_live(reg: &Registry, store: u32, index: u32) -> bool {
+    reg.store_live(store) && reg.stores[&store].index_names.values().any(|&i| i == index)
 }
 // __dom.idbWriteIndexes(store) -> [index, keyPath, multiEntry, …]: the indexes a record written into the store goes into —
 // those holding its records, a deleted one whose deletion has yet to run among them.

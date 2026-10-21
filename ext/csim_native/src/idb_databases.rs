@@ -545,6 +545,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "idbTransaction", transaction, context_id);
     register(scope, ns, "idbFinished", finished, context_id);
     register(scope, ns, "idbTxState", tx_state, context_id);
+    register(scope, ns, "idbCheck", check_op, context_id);
     register(scope, ns, "idbTxEnter", tx_enter, context_id);
     register(scope, ns, "idbTxLeave", tx_leave, context_id);
     register(scope, ns, "idbTxRequest", tx_request, context_id);
@@ -716,6 +717,41 @@ fn tx_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         t.state = state;
     }
     rv.set_uint32(was);
+}
+// The preconditions an IndexedDB method checks before it runs, each method's in the order its steps list them: its
+// transaction an upgrade transaction (InvalidStateError), its store not deleted (InvalidStateError), its index nor its
+// store deleted (InvalidStateError), its transaction active (TransactionInactiveError) or not finished
+// (InvalidStateError), not read-only (ReadOnlyError).
+const CHECK_UPGRADE: u32 = 1;
+const CHECK_STORE: u32 = 2;
+const CHECK_INDEX: u32 = 3;
+const CHECK_ACTIVE: u32 = 4;
+const CHECK_UNFINISHED: u32 = 5;
+const CHECK_WRITABLE: u32 = 6;
+// __dom.idbCheck(tx, mode, store, index, checks) -> the first of `checks` — their codes four bits each, the first the
+// lowest — that fails, 0 where none does. A transaction gone is a finished one, its mode the one it was made with.
+fn check_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (tx, mode, store, index) = (u32_arg(scope, &args, 0), u32_arg(scope, &args, 1), u32_arg(scope, &args, 2), u32_arg(scope, &args, 3));
+    let mut checks = u32_arg(scope, &args, 4);
+    let reg = lock();
+    let state = reg.transactions.get(&tx).map_or(FINISHED, |t| t.state);
+    while checks != 0 {
+        let code = checks & 0xF;
+        checks >>= 4;
+        let holds = match code {
+            CHECK_UPGRADE => mode == VERSIONCHANGE,
+            CHECK_STORE => reg.store_live(store),
+            CHECK_INDEX => crate::idb::index_live(&reg, store, index),
+            CHECK_ACTIVE => state == ACTIVE,
+            CHECK_UNFINISHED => state != FINISHED,
+            CHECK_WRITABLE => mode != READONLY,
+            _ => true,
+        };
+        if !holds {
+            return rv.set_uint32(code);
+        }
+    }
+    rv.set_uint32(0);
 }
 // __dom.idbTxEnter(tx): active while a request's event's listeners run, where it was inactive.
 fn tx_enter(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
