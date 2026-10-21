@@ -620,7 +620,8 @@ mod tests {
         assert_eq!(origins(&mut arena, "", None, None), (Some("null|k".to_owned()), Some("null")));
         arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-scripts"));
         assert_eq!(origins(&mut arena, "", None, None), (Some("null".to_owned()), Some("null")));
-        assert_eq!(frame_origins(&mut arena, 0, "", Some("allow-forms"), None).sandbox & crate::sandbox::FORMS, 0 | crate::sandbox::FORMS);
+        // (…what this document restricts restricted still, whatever the frame's attribute lifts)
+        assert!(frame_origins(&mut arena, 0, "", Some("allow-forms"), None).sandbox & crate::sandbox::FORMS != 0);
     }
 
     #[test]

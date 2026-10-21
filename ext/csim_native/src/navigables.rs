@@ -343,7 +343,8 @@ impl RealmArena {
     // shadow-including tree order (a frame in a shadow tree is one: Chrome finds it). One of the rest a sandboxed
     // document may not navigate ("allowed by sandboxing to navigate": with the sandboxed navigation browsing context flag,
     // its own navigable and its descendants alone, and its top-level traversable where its sandboxing lets it navigate
-    // that — `allow-top-navigation`, or `…-by-user-activation`) — Chrome leaves it as it was.
+    // that — `allow-top-navigation`, or `…-by-user-activation` with its window's transient activation) — Chrome leaves
+    // it as it was.
     pub(crate) fn find_navigable(&self, current: i32, name: &[u16]) -> Chosen {
         if name.is_empty() {
             return Chosen::None;
@@ -360,8 +361,11 @@ impl RealmArena {
             return Chosen::None;
         }
         use crate::sandbox::{NAVIGATION, TOP_LEVEL_NAVIGATION, TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION};
+        // (…its top-level traversable as its window's transient activation lets it: without one, where its sandboxing
+        // has no sandboxed top-level navigation without user activation flag; with one, no such flag with user activation)
         let sandbox = self.realm_state(current).map_or(0, |s| s.location.sandbox);
-        let top_allowed = sandbox & TOP_LEVEL_NAVIGATION == 0 || sandbox & TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION == 0;
+        let flag = if self.transiently_activated(current) { TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION } else { TOP_LEVEL_NAVIGATION };
+        let top_allowed = sandbox & flag == 0;
         match self.find_in(top, None, name) {
             None => Chosen::None,
             Some(Chosen::Navigable(_, None)) if top_allowed => Chosen::Navigable(Some(top), None),
@@ -397,13 +401,13 @@ impl RealmArena {
         // (…the document the frame is in, for a frame's — its own realm's container's for a realm's own navigation)
         let frame = container.or_else(|| self.live_container(realm)).and_then(|c| self.get(c));
         let around = frame.map(|n| n.realm);
-        let own = frame.filter(|n| n.is_html_named("iframe")).and_then(|n| n.plain_attr("sandbox"));
+        let own = container.or_else(|| self.live_container(realm)).filter(|_| frame.is_some_and(|n| n.is_html_named("iframe"))).and_then(|c| self.frame_sandbox(c));
         let top = self.top_level_realm(around.unwrap_or(realm));
         if !self.realm_state(top).is_some_and(|s| crate::url_ops::secure_top_level(s.location.href())) {
             return false;
         }
         let inherited = around.and_then(|r| self.realm_state(r)).map_or(0, |s| s.location.sandbox);
-        (inherited | crate::sandbox::sandboxing(None, own)) & crate::sandbox::ORIGIN == 0
+        (inherited | crate::sandbox::sandboxing(None, own.as_deref())) & crate::sandbox::ORIGIN == 0
     }
 }
 

@@ -1397,13 +1397,21 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let ns = args.get(2).int32_value(scope).unwrap_or(1);
         let local = args.get(3).to_rust_string_lossy(scope);
         let form = crate::dom::nid_arg(scope, &args, 4);
-        let opts = TreeBuilderOpts { scripting_enabled: true, quirks_mode: quirks_mode(args.get(5).int32_value(scope)), ..Default::default() };
+        // (…its scripting flag the context's node document's: off for one with no browsing context — a DOMParser's, a
+        // `createHTMLDocument` one's — or one sandboxed against scripts, a `<noscript>`'s content then markup: HTML "parse
+        // HTML from a string", "scripting is disabled")
+        let context_doc = crate::node_handle::nid_of(scope, args.get(6));
+        let cid = crate::dom::realm_id(scope, &args);
+        let arena = crate::dom::realm(scope, cid);
+        let scripting = context_doc.is_some_and(|d| {
+            arena.document_states.has_browsing_context(d) && !arena.get(d).is_some_and(|n| arena.scripts_sandboxed(n.realm))
+        });
+        let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode: quirks_mode(args.get(5).int32_value(scope)), ..Default::default() };
         let name = QualName::new(None, namespace_of(ns), LocalName::from(local.as_str()));
         let declarative = args.get(8).boolean_value(scope);
         let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative), 1, form.is_some().then_some(2), opts);
-        let initial_state = Some(builder.tokenizer_state_for_context_elem(true));
+        let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
         let tokenizer = Tokenizer::new(builder, TokenizerOpts { initial_state, discard_bom: false, ..Default::default() });
-        let cid = crate::dom::realm_id(scope, &args);
         // (…re-rooted in this scope, as the build's other handles are)
         let doc = v8::Local::<v8::Object>::try_from(args.get(6)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(7)).ok().map(|d| v8::Local::new(scope, d)).or(doc);

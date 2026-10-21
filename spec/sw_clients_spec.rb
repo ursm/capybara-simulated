@@ -390,10 +390,10 @@ RSpec.describe 'Service Worker client enumeration' do
   end
 
   # An opaque-origin document gets no service-worker container at all in a real browser — a
-  # sandboxed one's `navigator.serviceWorker` a SecurityError (Chrome, measured) — so `ready`
-  # must never resolve for it, not merely "controller stays null". The registration synthesis
-  # sits AFTER the controller install on the same path, so guarding only the install left it with
-  # a registration it must not have.
+  # sandboxed one's `navigator.serviceWorker` a SecurityError (Chrome, measured) — so neither a
+  # registration nor `ready` can reach it from its own script. (That the host's wiring installs no
+  # controller in it either — `__csim_swSetControllerDirect`'s guard — is what the CSP-sandboxed
+  # example below holds: its ping never reaches the worker.)
   it 'gives an opaque-origin frame no registration and never resolves its ready' do
     session = session_with_frames({'boxed' => '/scope/page.html?sandbox=allow-scripts#boxed'}, scope: '/')
     # The frame is cross-origin to us, so it has to report on itself.

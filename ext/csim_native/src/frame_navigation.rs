@@ -151,6 +151,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
     crate::dom::register(scope, ns, "frameSandbox", frame_sandbox, context_id);
+    crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
 
@@ -179,9 +180,8 @@ fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
 // URLs have moved since, or the `src` was set on it while it was in no document.
 pub(crate) fn process_src(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
     let refused = src_nested(arena, container);
-    let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
+    begin(arena, container);
     let nav = arena.frame_navigation(container);
-    nav.sandbox = Some(sandbox);
     if refused {
         nav.flags |= SRC_REFUSED;
     } else {
@@ -189,14 +189,35 @@ pub(crate) fn process_src(arena: &mut crate::dom::RealmArena, container: NodeId)
     }
     refused
 }
-// __dom.frameSandbox(containerNid) -> the `sandbox` attribute the document the container's navigation makes is
-// sandboxed by: as its attributes were last processed, else as it is (null: none).
+// A navigation of the container begins — its attributes processed, a scripted navigation of it, one its document makes
+// of itself: the `sandbox` attribute it has now is what the document it makes is sandboxed by (HTML "navigate", its
+// sandboxing flags snapshot), whatever it says by the time the response is in.
+fn begin(arena: &mut crate::dom::RealmArena, container: NodeId) {
+    let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
+    arena.frame_navigation(container).sandbox = Some(sandbox);
+}
+impl crate::dom::RealmArena {
+    // The `sandbox` attribute the document the container's navigation makes is sandboxed by: as its navigation began,
+    // else as it is (none: none).
+    pub(crate) fn frame_sandbox(&self, container: NodeId) -> Option<String> {
+        match self.frame_navigations.0.get(&container).and_then(|nav| nav.sandbox.clone()) {
+            Some(snapshot) => snapshot,
+            None => self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned),
+        }
+    }
+}
+// __dom.beginFrameNavigation(containerNid) — a navigation of the container begins (`begin`): a scripted one of it, or
+// the host's of one its document makes of itself.
+fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    begin(crate::dom::realm(scope, cid), container);
+}
+// __dom.frameSandbox(containerNid) -> `RealmArena::frame_sandbox` (null: none).
 fn frame_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_null() };
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let snapshot = arena.frame_navigations.0.get(&container).and_then(|nav| nav.sandbox.clone());
-    let sandbox = snapshot.unwrap_or_else(|| arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned));
+    let sandbox = crate::dom::realm(scope, cid).frame_sandbox(container);
     match sandbox.and_then(|s| v8::String::new(scope, &s)) {
         Some(s) => rv.set(s.into()),
         None => rv.set_null(),

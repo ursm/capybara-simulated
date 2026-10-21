@@ -104,4 +104,111 @@ RSpec.describe 'Sandboxing' do
     expect(s.evaluate_script("document.getElementById('sandboxed').contentDocument.body.dataset.js")).to be_nil
     expect(s.evaluate_script("report('switched')")).to eq([nil, true, nil, 1])
   end
+
+  # A frame's sandboxing is its container's `sandbox` attribute as each navigation of it BEGAN — a form submitted into
+  # it, a link targeting it, its `src` set, its document's `location` set — whatever the attribute says by the time the
+  # response is in; and a navigation its document makes of itself is sandboxed by its response's CSP too. Chrome's
+  # figures, measured (the attribute set before the form / link navigation, after the `location` / `src` one).
+  let(:navigations) {
+    b = '<!DOCTYPE html><meta charset="utf-8"><body><script>document.body.dataset.ran = "yes";' \
+        'let ls; try { localStorage; ls = "ok"; } catch (e) { ls = e.name; }' \
+        'parent.postMessage([location.search.slice(1), [self.origin, ls]], "*");</script></body>'
+    page = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8">
+      <iframe name=f id=f sandbox="allow-same-origin" src="/plain"></iframe>
+      <iframe name=g id=g src="/plain"></iframe>
+      <iframe name=h id=h sandbox="allow-same-origin" src="/plain"></iframe>
+      <iframe id=l src="/plain"></iframe>
+      <iframe id=k src="/plain"></iframe>
+      <iframe id=c src="/plain"></iframe>
+      <form id=ff target=f action="/b"><input name=form value=f></form>
+      <form id=fg target=g action="/b"><input name=form value=g></form>
+      <a id=link target=h href="/b?link">l</a>
+      <script>
+        window.R = {};
+        addEventListener('message', (e) => { R[e.data[0]] = e.data[1]; });
+        const [f, g, h, l, k, c] = ['f', 'g', 'h', 'l', 'k', 'c'].map((id) => document.getElementById(id));
+        window.go = () => {
+          f.setAttribute('sandbox', 'allow-same-origin allow-scripts');
+          g.setAttribute('sandbox', 'allow-same-origin');
+          h.setAttribute('sandbox', 'allow-same-origin allow-scripts');
+          document.getElementById('ff').submit();
+          document.getElementById('fg').submit();
+          document.getElementById('link').click();
+          l.contentWindow.location.href = '/b?location';
+          l.setAttribute('sandbox', 'allow-same-origin');
+          k.src = '/b?src';
+          k.setAttribute('sandbox', 'allow-same-origin');
+          c.contentWindow.location.href = '/b?csp';
+        };
+        window.ran = (id) => document.getElementById(id).contentDocument?.body?.dataset.ran ?? 'unread';
+      </script>
+    HTML
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/plain' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>plain</body>']]
+      when '/b'
+        headers = {'content-type' => 'text/html'}
+        headers['content-security-policy'] = 'sandbox allow-scripts' if env['QUERY_STRING'] == 'csp'
+        [200, headers, [b]]
+      else [200, {'content-type' => 'text/html'}, [page]]
+      end
+    }
+  }
+
+  it 'sandboxes a frame as its container said when each navigation of it began, and by its response' do
+    s = simulated_session(navigations)
+    s.visit '/'
+    s.execute_script('go()')
+    got = poll_until { r = s.evaluate_script('R'); r if r.size == 5 }
+    expect(%w[f g h l k].map {|id| s.evaluate_script("ran('#{id}')") }).to eq(%w[yes unread yes yes yes])
+    expect(got.keys).not_to include('form=g')
+    expect(got['csp']).to eq(['null', 'SecurityError'])
+  end
+
+  # A fragment's `<noscript>` is markup where scripting is disabled for the context's node document — one with no
+  # browsing context, a DOMParser's or a `createHTMLDocument` one's (Chrome, measured).
+  it "parses a fragment's noscript as markup where its document has scripting disabled" do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p>x']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const parsed = new DOMParser().parseFromString('', 'text/html');
+        parsed.body.innerHTML = '<noscript><b>x</b></noscript>';
+        const made = document.implementation.createHTMLDocument('');
+        made.body.insertAdjacentHTML('beforeend', '<noscript><b>x</b></noscript>');
+        document.body.innerHTML = '<noscript><b>x</b></noscript>';
+        return [parsed, made, document].map((d) => d.querySelector('noscript').children.length);
+      })()
+    JS
+    expect(got).to eq([1, 1, 0])
+  end
+
+  # `allow-top-navigation-by-user-activation` lets a sandboxed document navigate its top-level traversable only with its
+  # window's transient activation (HTML "allowed by sandboxing to navigate"): a script of its at load is refused, a
+  # click is not.
+  let(:top_navigation) {
+    frame = '<!DOCTYPE html><body><a id=go target=top href="/landed">go</a>' \
+            '<script>window.opened = open("/refused", "top") === null;</script></body>'
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/frame' then [200, {'content-type' => 'text/html'}, [frame]]
+      when '/landed', '/refused' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><p id=at>#{env['PATH_INFO']}"]]
+      else
+        [200, {'content-type' => 'text/html'}, [
+          '<!DOCTYPE html><script>name = "top"</script>' \
+          '<iframe id=f sandbox="allow-scripts allow-same-origin allow-top-navigation-by-user-activation" src="/frame"></iframe>'
+        ]]
+      end
+    }
+  }
+
+  it 'lets a document sandboxed but for top navigation by user activation navigate its top only once activated' do
+    s = simulated_session(top_navigation)
+    s.visit '/'
+    s.within_frame('f') { expect(s.evaluate_script('window.opened')).to be(false) }
+    expect(s.current_path).to eq('/')
+    s.within_frame('f') { s.click_link 'go' }
+    expect(s).to have_css('#at', text: '/landed')
+  end
 end

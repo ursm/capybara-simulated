@@ -10210,6 +10210,11 @@ module Capybara
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
         (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s]]
+        # (…the navigation beginning now: the container's `sandbox` attribute as it is now is what the document it makes is
+        # sandboxed by, whatever it says when the response is in)
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        frame_realm_host_call(parent, '__csimFrameNavigationBegins', handle) unless handle.zero?
       end
       def consume_pending_frame_nav
         # Window-realm self-navs are realm navs too — drain them at every frame-nav
@@ -10527,7 +10532,7 @@ module Capybara
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
           # does the single utf8_text re-tag, matching the network path below.
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
-                                   response_content_type(sw['headers'] || {}), restore_state: restore, client_id: rid)
+                                   response_content_type(sw['headers'] || {}), restore_state: restore, client_id: rid, csp: response_csp(sw['headers'] || {}))
           return
         end
         env = rack_env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
@@ -10540,7 +10545,7 @@ module Capybara
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
         return if download_response?(headers)
-        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore)
+        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, csp: response_csp(headers))
       end
       # Serialize + route a form submitted inside frame realm `realm_id`. We
       # serialize in the INITIATING realm (so shadow-tree controls are excluded
@@ -10659,7 +10664,7 @@ module Capybara
                                                      origin_null: redirect_taints_origin?(origin_null, initiator, get_url, next_url),
                                                      resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
           end
-          return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
+          return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}))
         end
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url))
         response = dispatch_navigation_request(
@@ -10684,7 +10689,7 @@ module Capybara
         if download_response?(headers)
           return save_downloaded_response(get_url, headers, resp_body)
         end
-        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid)
+        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers))
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
@@ -10738,7 +10743,7 @@ module Capybara
                                                      site_seed: site, origin_null: taint, resulting_client_id: next_rid)
           end
           tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
-          reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid)
+          reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}))
           return
         end
         # The initiator is the FRAME's own document (an iframe srcdoc one's container's — `realm_referrer_initiator`; still alive — the rebuild is below), not the
@@ -10779,7 +10784,7 @@ module Capybara
           return
         end
         tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
-        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid)
+        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers))
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
       # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
@@ -10791,11 +10796,12 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, client_id: nil)
+      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, client_id: nil, csp: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s)
+        # (…none where its container is gone: no document of it made unsandboxed, as an empty seed would)
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp) or return
         return unless unload_frame_document(parent, realm_id)
 
         new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
@@ -11173,7 +11179,7 @@ module Capybara
           save_downloaded_response(url, headers, body)
           return
         end
-        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry)
+        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry, csp: response_csp(headers))
       end
 
       def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
@@ -11202,7 +11208,7 @@ module Capybara
           save_downloaded_response(url, headers, resp_body)
           return
         end
-        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry)
+        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry, csp: response_csp(headers))
       end
 
       # Tear down a frame's realm and rebuild it from `html`, then re-point the
@@ -11223,11 +11229,11 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last)
+      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, csp: nil)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s)
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp) or return
         return unless unload_frame_document(parent, old_id)
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
@@ -11473,8 +11479,8 @@ module Capybara
         end
         opts['touch'] = true if @touch_input
         opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
-        csp = (@last_response_headers || {}).select {|k, _| k.to_s.casecmp?('content-security-policy') }.map {|_, v| header_text(v) }
-        opts['csp'] = csp.join(',') unless csp.empty?
+        csp = response_csp(@last_response_headers || {})
+        opts['csp'] = csp if csp
         # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
         # navigation went to the network, as a navigation does not yet wait for its activation)
         if @current_url.to_s.match?(%r{\Ahttps?://}i)
@@ -12308,6 +12314,11 @@ module Capybara
       # around it), each byte the code point it is.
       def header_text(value)
         AssetCache.combined(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+      end
+      # …and a response's Content-Security-Policy as script reads it — its headers' fields joined, none where it has none.
+      def response_csp(headers)
+        csp = headers.select {|k, _| k.to_s.casecmp?('content-security-policy') }.map {|_, v| header_text(v) }
+        csp.join(',') unless csp.empty?
       end
 
       # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
