@@ -101,4 +101,21 @@ RSpec.describe 'Fetch Request semantics' do
     session.document.synchronize { raise Capybara::ExpectationNotMet unless session.evaluate_script('window.got.sb') }
     expect(session.evaluate_script('window.got')).to eq('top' => 'http://www.example.com/y', 'sb' => 'about:client')
   end
+
+  # A stream body taken from the source Request is a stream body as init's is: a mode other than "same-origin" or "cors"
+  # refuses it (Fetch "new Request", inputOrInitBody), and the refusal leaves the source's body unused.
+  it "refuses a source Request's stream body in no-cors mode" do
+    session = simulated_session(app)
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const src = new Request('/x', {method: 'POST', body: new ReadableStream(), duplex: 'half'});
+        let thrown = null;
+        try { new Request(src, {mode: 'no-cors'}); } catch (e) { thrown = e.constructor.name; }
+        const copy = new Request(src);
+        return [thrown, copy.body !== null];
+      })()
+    JS
+    expect(got).to eq(['TypeError', true])
+  end
 end

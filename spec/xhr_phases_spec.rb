@@ -14,6 +14,7 @@ RSpec.describe 'XHR event phases' do
   let(:app) {
     lambda do |env|
       raise 'boom' if env['PATH_INFO'] == '/boom'
+      next [200, {'content-type' => 'text/plain'}, ["#{env['CONTENT_TYPE']} #{env['rack.input'].read}"]] if env['PATH_INFO'] == '/echo-type'
       [200, {'content-type' => 'text/plain'}, [env['PATH_INFO'] == '/' ? '<!doctype html><body>' : 'ok']]
     end
   }
@@ -114,5 +115,16 @@ RSpec.describe 'XHR event phases' do
       x.send('é😀');
     JS
     expect(got).to eq([6])
+  end
+
+  # XHR's body union has no ReadableStream member: a stream is stringified, and sent as text/plain as any other value.
+  it 'sends a ReadableStream body as its string, typed text/plain' do
+    got = run(<<~JS)
+      const x = new XMLHttpRequest();
+      x.open('POST', '/echo-type');
+      x.onloadend = () => { __log.push(x.responseText); __done = true; };
+      x.send(new ReadableStream());
+    JS
+    expect(got).to eq(['text/plain;charset=UTF-8 [object ReadableStream]'])
   end
 end
