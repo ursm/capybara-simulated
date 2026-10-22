@@ -200,5 +200,31 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
     JS
     expect(out).to eq([true, 1, 'rgb(1, 1, 1)', false, 1, 'TypeError', 2, 'rgb(2, 2, 2)', false, false, false, 2])
   end
-end
 
+  # The list is the engine's alone, the array a view of it: it reads as an array does — its keys, a spread, `splice`, an
+  # expando kept beside the indices — and holds its sheets, which no other reference keeps, through a collection.
+  it 'reads as an array and holds its sheets through a collection' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const mk = (n) => { const s = new CSSStyleSheet(); s.replaceSync('#target { color: rgb(' + n + ', 0, 0) !important }'); return s; };
+        const list = document.adoptedStyleSheets;
+        list.push(mk(1), mk(2), mk(3));
+        list.tag = 'kept';
+        const out = [Object.keys(list).join(), [...list].length, Object.getOwnPropertyDescriptor(list, 'length').value];
+        out.push(list.splice(1, 1).length, list.length, list.indexOf(list[1]));
+        return out;
+      })()
+    JS
+    runtime = session.driver.browser.instance_variable_get(:@runtime)
+    3.times { runtime.ctx.low_memory_notification }
+    out += session.evaluate_script(<<~JS)
+      (() => {
+        const list = document.adoptedStyleSheets;
+        return [list.length, getComputedStyle(document.getElementById('target')).color, list.tag, Array.isArray(list)];
+      })()
+    JS
+    expect(out).to eq(['0,1,2,tag', 3, 3, 1, 2, 1, 2, 'rgb(3, 0, 0)', 'kept', true])
+  end
+end

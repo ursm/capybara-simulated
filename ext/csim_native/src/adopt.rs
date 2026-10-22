@@ -1,9 +1,11 @@
 // DOM "adopt" (§4.5)'s walk: each of a subtree's shadow-including inclusive descendants — a host's shadow tree after the
 // host, before its children; not a template's contents, which go into the new document's inert template document (the
 // bindings') — given its new node document, and its custom element registry association what HTML has it be in it
-// ("adopt" step 3.2 and the registry's adopting steps). What a node adopted has to do besides is the bindings': the
-// names of its elements the new realm's named properties answer by, its templates' contents, its shadow roots' adopted
-// stylesheets; the walk hands back the nodes that may have something to do.
+// ("adopt" step 3.2 and the registry's adopting steps), and a shadow root's adopted stylesheets dropped across documents
+// (construct-stylesheets: "adopting a shadow host will empty adoptedStyleSheets" — every one of them was constructed in
+// the document it leaves). What a node adopted has to do besides is the bindings': the names of its elements the new
+// realm's named properties answer by and its templates' contents; the walk hands back the nodes that may have something
+// to do.
 
 use crate::ce_reactions::{FIRST_REGISTRY, NULL, TRACKING, UNSET};
 use crate::dom::{nid_arg, nodes_value, realm, realm_id, NodeId, NodeKind};
@@ -23,7 +25,7 @@ const CROSS: u32 = 2;
 const CROSS_REGISTRY: u32 = 3;
 
 // __dom.adoptInto(rootNid, document, kind, windowRegistry) -> the nodes of the walk with steps of the bindings' to run, as
-// `nodes_value` answers: across documents, the elements with an `id` or a `name`, the templates and the shadow roots; of
+// `nodes_value` answers: across documents, the elements with an `id` or a `name` and the templates; of
 // template contents, the templates. `document` is the node document each node gets; `kind` what the adopt is (`CROSS`,
 // …); `windowRegistry` the document's window registry's code (0: none).
 fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -34,13 +36,14 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let registry_change = kind == CROSS_REGISTRY;
     let window = args.get(3).uint32_value(scope).unwrap_or(UNSET);
     let cid = realm_id(scope, &args);
-    let (handles, registries, steps) = {
+    let (handles, registries, steps, shadow_roots) = {
         let arena = realm(scope, cid);
         let reactions = &arena.ce_reactions;
         let scoped = |code: u32| code >= FIRST_REGISTRY && !reactions.is_window_registry(code);
         let mut handles: Vec<*const NodeHandle> = Vec::new();
         let mut registries: Vec<(*const NodeHandle, u32)> = Vec::new();
         let mut steps: Vec<NodeId> = Vec::new();
+        let mut shadow_roots: Vec<NodeId> = Vec::new();
         // (…in tree order, each node with its parent's association as the walk left it — none for one with no parent or an
         // exclusive fragment's child — which a null element is asked for)
         let association = |p: NodeId| arena.get(p).filter(|pn| !(pn.kind == NodeKind::Fragment && pn.host.is_none())).and_then(|pn| pn.link.handle()).map(|h| h.registry());
@@ -83,15 +86,22 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
                 decided = Some(next);
             }
             let template = n.is_html_named("template");
-            if (kind == CONTENTS && template) || (cross && (shadow_root || template || n.plain_attr("id").is_some() || n.plain_attr("name").is_some())) {
+            if (kind == CONTENTS && template) || (cross && (template || n.plain_attr("id").is_some() || n.plain_attr("name").is_some())) {
                 steps.push(id);
+            }
+            if cross && shadow_root {
+                shadow_roots.push(id);
             }
             let own = (!(n.kind == NodeKind::Fragment && n.host.is_none())).then_some(decided.unwrap_or(UNSET));
             stack.extend(n.children.iter().rev().map(|&c| (c, own)));
             stack.extend(n.shadow_root.map(|sr| (sr, own)));
         }
-        (handles, registries, steps)
+        (handles, registries, steps, shadow_roots)
     };
+    let sheets = &mut crate::dom::dom(scope).arena.adopted_sheets;
+    for sr in shadow_roots {
+        sheets.remove(&sr);
+    }
     // (…the references set once the arena is let go of: setting one needs the scope)
     for h in handles {
         // SAFETY: the handles of the nodes walked, which the arena holds while they are in its trees; nothing between the

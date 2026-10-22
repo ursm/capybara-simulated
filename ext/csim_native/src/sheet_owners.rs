@@ -214,7 +214,7 @@ pub(crate) struct CascadeKey {
 }
 
 // __dom.cascadeRekey(docNid) -> where the document's cascade is made of other sheets than the realm last
-// handed its style engine (`CascadeKey`, its adopted sheets the store's — `adoptedSheetsSet`): the `<style>` / `<link>`
+// handed its style engine (`CascadeKey`, its adopted sheets the store's — dom.rs `AdoptedSheets`): the `<style>` / `<link>`
 // elements whose sheets take part, in tree order (`sheetSet`'s), the realm's rule-set generation moved (`GEN_CASCADE`) —
 // else null, nothing to hand it.
 fn cascade_rekey_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
