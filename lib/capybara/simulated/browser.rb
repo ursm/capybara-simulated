@@ -7989,7 +7989,8 @@ module Capybara
               'tao'         => result['tao'],
               'redirected'  => result['redirected'] == true,
               'status'      => result['status'].to_i,
-              'encoded'     => result['encoded'].to_i
+              'encoded'     => result['encoded'].to_i,
+              'delayMs'     => server_delay_ms_of(result['headers'])
             }
           end
           return nil unless resource_loaded?(result) && result['status'].to_i < 400
