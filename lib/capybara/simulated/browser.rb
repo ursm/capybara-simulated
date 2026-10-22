@@ -10637,18 +10637,34 @@ module Capybara
         return unless request
 
         method, url, body, content_type = request
+        keyword = target_keyword(target)
         if frame_self_target?(target)
           if method == 'GET'
             navigate_realm_self_get(realm_id, url)
           else
             navigate_realm_self_post(realm_id, url, body, content_type)
           end
-        elsif target_keyword(target) != TARGET_NAME || (chosen = choose_named_navigable(realm_id, target)) == :top
-          log_console('warn', "nested-context form submit (target=#{target.inspect}) is not modeled")
+          return
+        end
+        chosen = keyword == TARGET_BLANK ? nil : choose_named_navigable(realm_id, target)
+        return if chosen == :blocked
+
+        # (…its Referer the submitting document's, under the policy `noreferrer` sets)
+        initiator = realm_referrer_initiator(realm_id)
+        initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
+        if chosen == :top
+          # (…the page's: `_top`, a frame's `_parent` whose parent it is, or the name a top-level window has)
+          source, policy = initiator
+          in_top_context do
+            from_document(realm_id) do
+              if method == 'GET'
+                navigate(url, referer: source, referrer_policy: policy, initiator: source)
+              else
+                navigate_post(url, body, content_type, referer: source, referrer_policy: policy, initiator: source)
+              end
+            end
+          end
         elsif chosen.is_a?(Integer)
-          # (…its Referer the submitting document's, under the policy `noreferrer` sets)
-          initiator = realm_referrer_initiator(realm_id)
-          initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
           if method == 'GET'
             navigate_realm_self_get(chosen, url, referrer: initiator)
           else
@@ -10658,11 +10674,18 @@ module Capybara
           log_console('warn', "nested-context form submit (target=#{target.inspect}) into a new window is not modeled")
         end
       end
-      # The navigable a target name chooses from realm `realm_id`'s browsing context (navigables.rs `findNavigable`): a
-      # frame's realm — made now, where its navigable has no document yet — `:top` (its top-level traversable's, `_top`'s),
-      # `:blocked` (one its sandbox keeps it from navigating), or nil (none has the name).
+      # The navigable a target name — or `_top` / `_parent` — chooses from realm `realm_id`'s browsing context
+      # (navigables.rs `findNavigable`, `keyword_navigable`): a frame's realm — made now, where its navigable has no
+      # document yet — `:top` (its top-level traversable's), `:blocked` (one its sandbox keeps it from navigating), or nil
+      # (none has the name).
       def choose_named_navigable(realm_id, target)
-        case (realm = @runtime.realm_call(realm_id, '__csimFindNamedFrame', target.to_s).to_i)
+        keyword = target_keyword(target)
+        realm = if [TARGET_TOP, TARGET_PARENT].include?(keyword)
+          @runtime.realm_call(realm_id, '__csimKeywordNavigable', keyword)
+        else
+          @runtime.realm_call(realm_id, '__csimFindNamedFrame', target.to_s)
+        end
+        case (realm = realm.to_i)
         when -1 then :blocked
         when -2 then :top
         else realm.positive? ? realm : nil

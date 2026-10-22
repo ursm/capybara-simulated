@@ -95,4 +95,24 @@ RSpec.describe "a form submission's request" do
     poll_until { session.evaluate_script('i.contentDocument.body.textContent') == '/moved?q=pv' }
     expect(session).to have_current_path('/')
   end
+
+  # A frame's form targeting `_top` navigates the page, and one targeting `_parent` its parent — the page where that
+  # is the frame's parent (Chrome); none where the frame's sandbox keeps it from navigating the page.
+  {
+    'top'                => ['<iframe srcdoc="<form id=f action=/t target=_top><input name=q value=1></form>"></iframe>', '/t?q=1'],
+    'parent'             => ['<iframe srcdoc="<form id=f action=/p target=_parent><input name=q value=2></form>"></iframe>', '/p?q=2'],
+    'sandboxed (no top)' => ['<iframe sandbox="allow-scripts allow-forms allow-same-origin" srcdoc="<form id=f action=/s target=_top><input name=q value=3></form>"></iframe>', '/']
+  }.each do |name, (frame, path)|
+    it "navigates the navigable a frame's form's #{name} target chooses" do
+      app = lambda {|env|
+        next html.("<body>#{env['PATH_INFO']}") unless env['PATH_INFO'] == '/'
+
+        html.("<body>#{frame}")
+      }
+      session = simulated_session(app)
+      session.visit '/'
+      session.within_frame(0) { session.execute_script('f.submit()') }
+      expect(session).to have_current_path(path)
+    end
+  end
 end
