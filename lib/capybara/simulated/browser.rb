@@ -3200,7 +3200,19 @@ module Capybara
       # list JS already constructed (post-`formdata`, so a handler's append/delete
       # is honoured); when absent (the Enter implicit-submit path) we build it from
       # the form's own controls.
+      # …the current document's navigation, for what its response would download (`from_document`).
       def submit_form_handle(form_handle, submitter_handle, entry_list = nil)
+        from_document(@current_realm_id.to_i) { submit_form_handle_in_document(form_handle, submitter_handle, entry_list) }
+      end
+      # A navigation the document of realm `realm` makes, run with it its source (`@download_source`): what a download its
+      # response is may be saved by (`save_downloaded_response`).
+      def from_document(realm)
+        saved, @download_source = @download_source, realm
+        yield
+      ensure
+        @download_source = saved
+      end
+      def submit_form_handle_in_document(form_handle, submitter_handle, entry_list)
         invalidate_find_cache
         spec = dom_call('__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
@@ -10191,7 +10203,7 @@ module Capybara
           nil
         elsif initiator
           source, policy = realm_referrer_initiator(initiator.to_i)
-          in_top_context { navigate(url, referer: source, referrer_policy: policy, initiator: source, replace: replace) }
+          in_top_context { from_document(initiator.to_i) { navigate(url, referer: source, referrer_policy: policy, initiator: source, replace: replace) } }
         elsif @current_realm_id
           # A JS-driven `location.*` from inside a `within_frame` block
           # navigates the FRAME, not the top page (same as a self-targeted
@@ -10199,7 +10211,7 @@ module Capybara
           # untouched.
           navigate_frame(url)
         else
-          navigate(url, replace: replace)
+          from_document(0) { navigate(url, replace: replace) }
         end
       end
       # A nested browsing context navigating its OWN `location` (the frame's
@@ -10218,7 +10230,7 @@ module Capybara
         policy = '' if frame_document_origin_opaque?(initiator_realm)
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
-        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s], frame_sandbox_now(realm_id)]
+        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s], frame_sandbox_now(realm_id), initiator_realm]
       end
       # The `sandbox` attribute frame realm `realm_id`'s container has as a navigation of it begins — what the document it
       # makes is sandboxed by, whatever the attribute says when the response is in — as `[attribute]` (its value, nil for
@@ -10237,11 +10249,13 @@ module Capybara
         return if @pending_frame_nav.nil? || @pending_frame_nav.empty?
         navs = @pending_frame_nav
         @pending_frame_nav = nil
-        navs.each do |realm_id, (url, referrer, sandbox)|
+        navs.each do |realm_id, (url, referrer, sandbox, initiator)|
           invalidate_find_cache
           # (…sandboxed as the container said when the navigation began: what its document's seed takes, a document it
-          # does not make — a download, a refused unload — leaving nothing behind)
+          # does not make — a download, a refused unload — leaving nothing behind; and made by the initiator's document,
+          # what a download its response is may be saved by)
           @navigation_sandbox = sandbox
+          @download_source    = initiator
           # If this frame is on the entered `within_frame` stack, navigate it
           # through `navigate_frame` — it does the full fetch (redirects /
           # downloads / cookies) AND updates `@frame_stack` / `@current_realm_id`
@@ -10268,6 +10282,7 @@ module Capybara
           log_console('warn', "frame self-navigation failed: #{e.message}")
         ensure
           @navigation_sandbox = nil
+          @download_source    = nil
         end
       end
       # A same-origin WINDOW realm (window.open in this isolate) navigating itself
@@ -11169,7 +11184,7 @@ module Capybara
       # within it — its Referer the browsing context it was followed in.
       def navigate_top_from_page(url)
         source, policy = current_referrer_initiator
-        navigate(url, referer: source, referrer_policy: policy)
+        from_document(@current_realm_id.to_i) { navigate(url, referer: source, referrer_policy: policy) }
       end
 
       # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
@@ -11802,11 +11817,13 @@ module Capybara
         cd && cd.to_s.match?(/(?:^|;)\s*(attachment|filename\s*=)/i)
       end
 
-      # …a frame's navigation's (`realm`, the frame realm) refused where its document is sandboxed against downloads — no
-      # `allow-downloads` (HTML "allowed to download": the target's sandboxing flags).
+      # …refused where the navigation's source — the realm whose document made it (`@download_source`, none for the
+      # driver's own) — or its target — a frame's (`realm`, the frame realm), none for the top-level one — is sandboxed
+      # against downloads: no `allow-downloads` (HTML "allowed to download", navigables.rs `download_allowed`).
       def save_downloaded_response(url, headers, body, realm: nil)
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
-        return if realm && @runtime.realm_call(realm.to_i, '__csimDownloadsSandboxed') == true
+        source = @download_source || realm
+        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i)
 
         filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?

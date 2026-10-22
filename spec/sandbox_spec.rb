@@ -451,4 +451,40 @@ RSpec.describe 'Sandboxing' do
       ENV['CSIM_DOWNLOADS_DIR'] = prev
     end
   end
+
+  # "Allowed to download" asks both ends of the navigation: the document that made it — a top-level one its response's
+  # CSP sandboxes — and the navigable it targets, a frame's as its container's `sandbox` attribute is now, whatever its
+  # document was made with (Chrome's figures, measured).
+  it 'downloads as both the navigating document and the frame it targets allow' do
+    Dir.mktmpdir do |dir|
+      prev = ENV['CSIM_DOWNLOADS_DIR']
+      ENV['CSIM_DOWNLOADS_DIR'] = dir
+      s = simulated_session(lambda {|env|
+        case env['PATH_INFO']
+        when '/attachment' then [200, {'content-type' => 'text/plain', 'content-disposition' => "attachment; filename=#{env['QUERY_STRING']}.txt"}, ['x']]
+        when '/blank' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p>blank']]
+        when '/boxed' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts'}, ['<!DOCTYPE html><p>boxed']]
+        else
+          [200, {'content-type' => 'text/html'}, [
+            '<!DOCTYPE html><iframe name=removed sandbox="allow-same-origin" src="/blank"></iframe>' \
+            '<iframe name=added src="/blank"></iframe>' \
+            '<a id=r target=removed href="/attachment?removed">r</a><a id=a target=added href="/attachment?added">a</a>'
+          ]]
+        end
+      })
+      s.visit '/'
+      s.execute_script(<<~JS)
+        document.querySelector('iframe[name=removed]').removeAttribute('sandbox');
+        document.querySelector('iframe[name=added]').setAttribute('sandbox', 'allow-same-origin');
+      JS
+      s.click_link 'r'
+      s.click_link 'a'
+      s.visit '/boxed'
+      s.execute_script("location.href = '/attachment?boxed'")
+      s.evaluate_script('1')
+      expect(poll_until { Dir.children(dir) if Dir.children(dir).any? }).to eq(['removed.txt'])
+    ensure
+      ENV['CSIM_DOWNLOADS_DIR'] = prev
+    end
+  end
 end
