@@ -84,4 +84,18 @@ RSpec.describe 'a nested document navigating itself' do
     poll_until { hits.any? }
     expect(hits).to eq(['/fs?q=2'])
   end
+
+  # A removed frame's whole tree is unloaded before any of it is destroyed: an unload handler of one frame still reaches
+  # its sibling's document, unloaded but not gone (Chrome, measured: the sibling `closed` false, its body readable).
+  it "unloads a removed frame's whole tree before destroying any of it" do
+    leaf = '<!DOCTYPE html><meta charset=utf-8><body>leaf'
+    g2 = '<!DOCTYPE html><meta charset=utf-8><script>onunload = () => { const s = parent.frames[0]; ' \
+         'top.seen = [s.closed, s.document.body.textContent]; }</script>'
+    c = %(<!DOCTYPE html><meta charset=utf-8><iframe srcdoc="#{leaf}"></iframe><iframe srcdoc="#{g2.gsub('"', '&quot;')}"></iframe>)
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><iframe id=c srcdoc="#{c.gsub('&', '&amp;').gsub('"', '&quot;')}"></iframe>)]] })
+    s.visit '/'
+    poll_until { s.evaluate_script('c.contentWindow?.frames?.[1]?.document?.readyState') == 'complete' }
+    s.execute_script('c.remove()')
+    expect(s.evaluate_script('top.seen')).to eq([false, 'leaf'])
+  end
 end
