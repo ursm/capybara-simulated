@@ -497,7 +497,7 @@ module Capybara
         dispose_frame_realm_tree(old_id)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base]
+          opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base], window_key: meta[:window_key]
         )
       end
 
@@ -1095,13 +1095,15 @@ module Capybara
       # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
       # same-isolate Document (cross-window adoptNode works). The single isolate also
       # makes a same-origin window far cheaper than today's isolate-per-window.
-      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil)
+      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil, window_key: nil)
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
         # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
         # top-page path — top === self here, so neither default branch fits. That a script may close it, and the
-        # realm that opened it (its `window.opener`), are the engine's: `setSteppedWindow` below.
-        realm.eval_void('globalThis.__csimIsWindowRealm = true;')
+        # realm that opened it (its `window.opener`), are the engine's (`setSteppedWindow` below), by the window's key:
+        # the realm of its first document, which a document it navigates to keeps (window.js `windowKey`).
+        window_key ||= realm.id
+        realm.eval_void("globalThis.__csimIsWindowRealm = true; globalThis.__csimWindowKey = #{window_key.to_i};")
         # `window.open()` with no URL opens about:blank — that IS the new document's URL, and a
         # realm built from the snapshot would otherwise keep reporting the OPENER's (making the
         # popup a phantom duplicate of its opener everywhere a document URL is read, the service-
@@ -1131,11 +1133,11 @@ module Capybara
         # Register with the page's (main) realm's stepped windows so `drainChildRealms`
         # steps THIS realm's event loop too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
-        ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true, #{opener_id.nil? ? 'undefined' : opener_id.to_i});")
+        ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true, #{opener_id.nil? ? 'undefined' : opener_id.to_i}, #{window_key.to_i});")
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
-        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base}
+        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil

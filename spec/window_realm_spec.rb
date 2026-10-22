@@ -37,6 +37,28 @@ RSpec.describe 'same-isolate window realms' do
       expect(result).to eq([true, false, false, true, true, nil, 42])
     end
 
+    # The window is the same one across a navigation of its own, which replaces its realm: a reference held from before it
+    # still closes it and reads its opener, a disowned opener stays disowned, and a removed frame's `opener = null`
+    # disowns no other window's.
+    it 'keeps its closed and opener state across a navigation of its own' do
+      s.execute_script(<<~JS)
+        window.w = window.open();
+        window.v = window.open();
+        v.opener = null;
+        var f = document.body.appendChild(document.createElement('iframe'));
+        var fw = f.contentWindow;
+        f.remove();
+        fw.opener = null;
+        var page = '<script>window.seen = [opener === null ? null : opener === window.opener]<\/script>';
+        var url = URL.createObjectURL(new Blob([page], {type: 'text/html'}));
+        w.location.href = url;
+        v.location.href = url;
+      JS
+      s.evaluate_script('1')
+      result = s.evaluate_script('(function () { var before = [w.opener === window, w.closed, v.opener]; w.close(); return before.concat([w.closed]) })()')
+      expect(result).to eq([true, false, nil, true])
+    end
+
     it 'is a real same-isolate window whose document is reachable' do
       result = s.evaluate_script(<<~JS)
         (function () {

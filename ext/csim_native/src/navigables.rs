@@ -7,7 +7,7 @@
 // is the realm the container node is in — the one it was adopted into. The realms themselves are the host's, which
 // tells this side which realm a container's navigable is in (`setFrameRealm`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, RealmArena};
 
@@ -32,31 +32,36 @@ pub(crate) struct Navigables {
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
     // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made; none closed.
     windows: Vec<i32>,
-    // …and the realm whose document made each: its "one permitted sandboxed navigator", which may navigate it though its
-    // sandboxing lets it navigate no other top-level traversable.
+    // Each such window by its KEY — the realm of its first document, which a document it navigates to replaces (a new
+    // realm) while the window stays the one window: what a reference to it held across the navigation still asks about
+    // — and its realm now.
+    window_keys: HashMap<i32, i32>,
+    window_realms: HashMap<i32, i32>,
+    // …the realm whose document made each: its "one permitted sandboxed navigator", which may navigate it though its
+    // sandboxing lets it navigate no other top-level traversable — and its `opener`.
     openers: HashMap<i32, i32>,
     // …which a script may close, as no other top-level traversable (HTML "script-closable": one a script created), and
     // those it has: no longer stepped, their realms lingering inert, their proxies reporting them closed.
-    opened: std::collections::HashSet<i32>,
-    closed: std::collections::HashSet<i32>,
+    opened: HashSet<i32>,
+    closed: HashSet<i32>,
     // The windows whose page disowned their opener (`opener = null`): theirs is null from then on (HTML "disown its
     // opener"), a window another isolate made included — its realm 0.
-    disowned: std::collections::HashSet<i32>,
+    disowned: HashSet<i32>,
     // The realms whose contexts are disposed — or being disposed: neutered (`neuterRealm`) on the way — and not yet
     // dropped: a child navigable whose container is in the document of one, or whose active document is one's, is
     // stepped and counted no more — though it keeps its realm, so a `contentWindow` read of a frame in a discarded
     // document stays null. How many there are the bindings read with no call (`discardedRealms`): none is the common
     // page's, whose `defaultView` reads ask nothing more.
-    discarded: std::collections::HashSet<i32>,
+    discarded: HashSet<i32>,
     discarded_count: crate::dom::SharedWord,
     // The realms whose documents are being unloaded now — their beforeunload / pagehide / unload firing (HTML's
     // "unload counter" above 0): a navigation of their navigable is ignored meanwhile ("navigate" step 13), so a
     // teardown handler re-navigating its own frame neither tears it down again nor wins over the navigation unloading it.
-    unloading: std::collections::HashSet<i32>,
+    unloading: HashSet<i32>,
     // …and those whose documents are being asked whether they may be unloaded — their beforeunload firing, the unload
     // counter raised as well ("check if unloading is canceled"), a navigation ignored as above — but not unloaded yet:
     // a frame of one re-navigated from it is asked itself, where a frame of one being unloaded was asked with it.
-    prompting: std::collections::HashSet<i32>,
+    prompting: HashSet<i32>,
     // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
@@ -268,46 +273,55 @@ impl RealmArena {
         }
         "null".to_owned()
     }
-    // A window `window.open` made in this isolate (realm `realm`) the page's event loop steps now (`on`) — `opener` the
-    // realm whose document made it — or no more: closed, or its context discarded.
-    pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool, opener: Option<i32>) {
+    // A window `window.open` made in this isolate (realm `realm`, the window `key` — its own for its first document) the
+    // page's event loop steps now (`on`) — `opener` the realm whose document made it — or no more: its context discarded.
+    // One a script closed is stepped no more, whatever document it navigated to after.
+    pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool, opener: Option<i32>, key: i32) {
         let nav = &mut self.navigables;
         nav.windows.retain(|&w| w != realm);
-        nav.openers.remove(&realm);
         if on {
-            nav.windows.push(realm);
-            nav.opened.insert(realm);
+            nav.window_keys.insert(realm, key);
+            nav.window_realms.insert(key, realm);
+            nav.opened.insert(key);
             if let Some(opener) = opener {
-                nav.openers.insert(realm, opener);
+                nav.openers.insert(key, opener);
+            }
+            if !nav.closed.contains(&key) {
+                nav.windows.push(realm);
             }
         }
         self.note_linked();
     }
-    // `window.close()` of realm `realm`'s window: a window a script opened closed — stepped no more, its opener kept, as a
-    // closed window's proxy still reports it — and whether it was (any other ignores it, as a browser does a tab the user
-    // opened).
-    pub(crate) fn close_window(&mut self, realm: i32) -> bool {
+    // The key of realm `realm`'s window: its own, for a realm that is no window's or its first document's.
+    fn window_key(&self, realm: i32) -> i32 {
+        self.navigables.window_keys.get(&realm).copied().unwrap_or(realm)
+    }
+    // `window.close()` of window `key`: one a script opened closed — stepped no more, its opener kept, as a closed
+    // window's proxy still reports it — and whether it was (any other ignores it, as a browser does a tab the user opened).
+    pub(crate) fn close_window(&mut self, key: i32) -> bool {
         let nav = &mut self.navigables;
-        if !nav.opened.contains(&realm) || !nav.closed.insert(realm) {
+        if !nav.opened.contains(&key) || !nav.closed.insert(key) {
             return false;
         }
-        nav.windows.retain(|&w| w != realm);
+        if let Some(&realm) = nav.window_realms.get(&key) {
+            nav.windows.retain(|&w| w != realm);
+        }
         self.note_linked();
         true
     }
-    pub(crate) fn window_closed(&self, realm: i32) -> bool {
-        self.navigables.closed.contains(&realm)
+    pub(crate) fn window_closed(&self, key: i32) -> bool {
+        self.navigables.closed.contains(&key)
     }
-    // The realm whose document opened realm `realm`'s window in this isolate, None for none — and whether its page
-    // disowned it.
-    pub(crate) fn window_opener(&self, realm: i32) -> Option<i32> {
-        self.navigables.openers.get(&realm).copied()
+    // The realm whose document opened window `key` in this isolate, None for none or for one its page disowned.
+    pub(crate) fn window_opener(&self, key: i32) -> Option<i32> {
+        let nav = &self.navigables;
+        if nav.disowned.contains(&key) { None } else { nav.openers.get(&key).copied() }
     }
-    pub(crate) fn disown_opener(&mut self, realm: i32) {
-        self.navigables.disowned.insert(realm);
+    pub(crate) fn disown_opener(&mut self, key: i32) {
+        self.navigables.disowned.insert(key);
     }
-    pub(crate) fn opener_disowned(&self, realm: i32) -> bool {
-        self.navigables.disowned.contains(&realm)
+    pub(crate) fn opener_disowned(&self, key: i32) -> bool {
+        self.navigables.disowned.contains(&key)
     }
 
     // Whether realm `realm`'s document is in the page's browsing-context tree: the page's own (realm 0), or the active
@@ -343,10 +357,6 @@ impl RealmArena {
             nav.unloading.remove(&cid);
             nav.prompting.remove(&cid);
             nav.windows.retain(|&w| w != cid);
-            nav.openers.remove(&cid);
-            nav.opened.remove(&cid);
-            nav.closed.remove(&cid);
-            nav.disowned.remove(&cid);
             if let Some(container) = nav.containers.remove(&cid) {
                 if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
                     child.realm = None;
@@ -420,7 +430,7 @@ impl RealmArena {
         // the window it made itself, whose permitted sandboxed navigator it is)
         let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
         let windows = std::iter::once(0).chain(self.navigables.windows.iter().copied()).filter(|&w| w != top && !self.is_dropped(w));
-        for window in windows.filter(|w| !sandboxed || self.navigables.openers.get(w) == Some(&current)) {
+        for window in windows.filter(|&w| !sandboxed || self.navigables.openers.get(&self.window_key(w)) == Some(&current)) {
             match self.find_in(window, None, name) {
                 None => continue,
                 Some(Chosen::Navigable(_, None)) => return Chosen::Window(window),
@@ -774,37 +784,40 @@ fn realm_in_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_bool(crate::dom::realm(scope, cid).realm_in_tree(realm));
 }
 
-// __dom.setSteppedWindow(realm, on, opener) — a window `window.open` made in this isolate stepped by the page's event loop
-// (`on`), the realm `opener` its maker (none where undefined), or no more (`RealmArena::set_stepped_window`).
+// __dom.setSteppedWindow(realm, on, opener, key) — a window `window.open` made in this isolate stepped by the page's event
+// loop (`on`), the realm `opener` its maker (none where undefined), the window `key` (the realm's own where undefined),
+// or no more (`RealmArena::set_stepped_window`).
 fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return };
     let on = args.get(1).is_true();
     let opener = args.get(2).int32_value(scope).filter(|_| args.get(2).is_int32());
+    let key = args.get(3).int32_value(scope).filter(|_| args.get(3).is_int32()).unwrap_or(realm);
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).set_stepped_window(realm, on, opener);
+    crate::dom::realm(scope, cid).set_stepped_window(realm, on, opener, key);
 }
 
-// __dom.closeWindow(realm) -> whether the realm's window, one a script opened, closed (`close_window`).
+// The ops below take a window by its key (`window_keys`): `__csimWindowKey` where the host set one, else the realm's id.
+// __dom.closeWindow(key) -> whether the window, one a script opened, closed (`close_window`).
 fn close_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).close_window(realm));
 }
-// __dom.windowClosed(realm) -> whether a script closed the realm's window (`window_closed`).
+// __dom.windowClosed(key) -> whether a script closed the window (`window_closed`).
 fn window_closed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).window_closed(realm));
 }
-// __dom.windowOpener(realm) -> the realm that opened the realm's window in this isolate, -1 for none, -2 for one its page
-// disowned (`window_opener`, `opener_disowned`).
+// __dom.windowOpener(key) -> the realm that opened the window in this isolate, -1 for none, -2 for one its page disowned
+// (`window_opener`, `opener_disowned`).
 fn window_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_int32(-1) };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     rv.set_int32(if arena.opener_disowned(realm) { -2 } else { arena.window_opener(realm).unwrap_or(-1) });
 }
-// __dom.disownOpener(realm) — the realm's window's page set its `opener` to null (`disown_opener`).
+// __dom.disownOpener(key) — the window's page set its `opener` to null (`disown_opener`).
 fn disown_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return };
     let cid = realm_id(scope, &args);
