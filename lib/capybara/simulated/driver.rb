@@ -568,6 +568,12 @@ module Capybara
           open_aux_window(resolved || 'about:blank', name: name, source: opener_browser, activation_realm: opener_realm_id, referrer: referrer, referrer_policy: referrer_policy)
           return nil
         end
+        # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
+        # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
+        if !name.to_s.empty? && (existing = @aux_windows.find {|w| w[:name] == name.to_s })
+          navigate_window(existing[:browser], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy)
+          return existing[:handle]
+        end
         # Same-origin window → a realm in the opener's isolate (shared heap); the
         # returned realm-id context becomes a native WindowProxy on the JS side, so
         # cross-window scripting/adoption need no cross-isolate RPC. The opener's realm

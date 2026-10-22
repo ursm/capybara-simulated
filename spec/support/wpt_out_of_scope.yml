@@ -28830,15 +28830,6 @@ cookies/schemeful-same-site/schemeful-iframe-subresource.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-cookies/schemeful-same-site/schemeful-navigation.tentative.html:
-- name: Navigate cross-scheme
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Navigate same-scheme
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 cookies/schemeful-same-site/schemeful-websockets.sub.tentative.html:
 - name: Cross-scheme WebSockets are cross-site
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

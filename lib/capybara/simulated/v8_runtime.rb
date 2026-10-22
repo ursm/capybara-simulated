@@ -1046,12 +1046,13 @@ module Capybara
         # scope). Per HTML, only a STRING result navigates the frame to a new
         # document built from it; any other result (incl. the common undefined)
         # leaves the about:blank document, so only its side effects (e.g.
-        # `parent.foo()`) take effect. A throwing script is reported and left as a
-        # no-op rather than aborting the frame build — and evaluated as nothing in a frame
-        # sandboxed against scripts, where scripting is disabled (document-origin.js `__csimScriptsSandboxed`).
+        # `parent.foo()`) take effect — run as every javascript: URL is (url-parse.js `__csimEvaluateJavascriptSource`:
+        # a top-level Script, an object result never walked, a throw reported at the frame's `onerror`) — and
+        # evaluated as nothing in a frame sandboxed against scripts, where scripting is disabled
+        # (document-origin.js `__csimScriptsSandboxed`).
         unless js_url_source.nil? || realm.call('__csimScriptsSandboxed')
           begin
-            result = realm.eval(js_url_source.to_s)
+            result = realm.call('__csimEvaluateJavascriptSource', js_url_source.to_s)
             realm.call('__csimLoadDocument', result, 'text/html') if result.is_a?(String)
           rescue StandardError => e
             @browser.log_console('warn', "javascript: URL frame threw: #{e.message}")

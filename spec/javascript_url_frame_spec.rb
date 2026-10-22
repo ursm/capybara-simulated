@@ -76,4 +76,31 @@ RSpec.describe 'a javascript: URL' do
     expect(poll_until { (t = s.evaluate_script('typeof popv')) == 'number' && t }).to eq('number')
     expect(s.current_url).to eq('http://www.example.com/a.html')
   end
+
+  # …in the navigable a window open or a hyperlink's target chooses — a new window's about:blank, a named window's
+  # document — not as a URL of its text, nor in the document that chose it (Chrome: `[wopen][named:…/a.html]`, and
+  # `[link:…/a.html]` for the link).
+  it 'runs in the window the window open steps or a link target choose' do
+    app = ->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/a.html' ? '<!DOCTYPE html><meta charset="utf-8"><body>A' : '<!DOCTYPE html><meta charset="utf-8"><a id=l target=nm href="javascript:document.title += \'[link]\'; void 0">l</a>']] }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(%q{window.w1 = open("javascript:document.title = '[wopen]'; void 0"); window.nm = open('/a.html', 'nm');})
+    s.has_css?('#none', wait: 0.3)
+    expect(s.evaluate_script('[w1.location.href, w1.document.title]')).to eq(['about:blank', '[wopen]'])
+    # (…`open('', 'nm')`'s window the one named so, which a javascript: URL's open does not replace)
+    expect(s.evaluate_script(%q{open("javascript:document.title += '[named]'; void 0", 'nm') === nm})).to be(true)
+    s.find('#l').click
+    s.has_css?('#none', wait: 0.3)
+    title = s.within_window(s.windows.last) { poll_until { (t = s.evaluate_script('document.title')) == '[named][link]' && t } }
+    expect([s.windows.size, title]).to eq([2, '[named][link]'])
+  end
+
+  # …and a throw in it reported as the document's, at line 1, column 1 where it carries no location of its own (Chrome:
+  # a SyntaxError and a thrown 5 alike).
+  it 'reports a throw in it as its document’s' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/e.html'
+    s.execute_script(%q{window.errs = []; onerror = (m, f, l, c) => { errs.push([f, l, c]); }; location.href = 'javascript:)'; setTimeout(() => { location.href = 'javascript:throw 5'; }, 10);})
+    expect(poll_until { (e = s.evaluate_script('errs')).size == 2 && e }).to eq([['http://www.example.com/e.html', 1, 1]] * 2)
+  end
 end
