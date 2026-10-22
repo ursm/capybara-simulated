@@ -7566,8 +7566,10 @@ module Capybara
       # A throwing `load` handler (or a frame build that throws while the document's
       # subresources are flushed) is the page's problem, not the driver's — but it has
       # to be VISIBLE, or the page simply looks half-wired with no explanation.
-      def fire_own_window_load
-        @runtime.call('__csimFireWindowLoad')
+      # (…`delayable` false for an auxiliary window its opener fires the load of: one in the background, whose browser
+      # neither steps nor delivers its images, fires it with nothing to wait for — HTML would have it wait for them)
+      def fire_own_window_load(delayable: true)
+        @runtime.call('__csimFireWindowLoad', delayable)
       rescue StandardError => e
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
       end

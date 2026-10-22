@@ -106,4 +106,23 @@ RSpec.describe 'an image its server delays' do
     poll_until { session.evaluate_script('log.length') >= 4 }
     expect(session.evaluate_script('log')).to eq(['image', 'frame true 100', 'iframe', 'page'])
   end
+
+  # …and a frame removed while its image delays it delays the page's load no more: the page's fires.
+  it 'fires the page load once a frame whose image delayed it is removed' do
+    frame = '<!DOCTYPE html><meta charset="utf-8"><img src="/i.png">'
+    app = lambda {|env|
+      next delayed_png if env['PATH_INFO'] == '/i.png'
+      next [200, {'content-type' => 'text/html'}, [frame]] if env['PATH_INFO'] == '/f'
+
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><script>window.log = []</script>
+        <iframe id="f" src="/f"></iframe>
+        <script>addEventListener('load', () => log.push('page')); setTimeout(() => { f.remove(); log.push('removed') }, 100)</script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 2 }
+    expect([session.evaluate_script('log'), session.evaluate_script('document.readyState')]).to eq([%w[removed page], 'complete'])
+  end
 end
