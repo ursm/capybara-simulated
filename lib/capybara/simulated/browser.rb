@@ -10232,6 +10232,12 @@ module Capybara
         # navigating in one turn both apply — a single slot would drop one.
         (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s], frame_sandbox_now(realm_id), initiator_realm]
       end
+      # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
+      # another realm's — one the navigation's own made, nested in it.
+      def navigation_sandbox(realm)
+        sandbox_realm, sandbox = @navigation_sandbox
+        sandbox if realm && sandbox_realm == realm.to_i
+      end
       # The `sandbox` attribute frame realm `realm_id`'s container has as a navigation of it begins — what the document it
       # makes is sandboxed by, whatever the attribute says when the response is in — as `[attribute]` (its value, nil for
       # none), carried with the navigation to the document it makes; nil where there is no container to ask.
@@ -10253,7 +10259,7 @@ module Capybara
           invalidate_find_cache
           # (…sandboxed as the container said when the navigation began: what its document's seed and a download its
           # response is take, a document it does not make — a refused unload — leaving nothing behind)
-          @navigation_sandbox = sandbox
+          saved_sandbox, @navigation_sandbox = @navigation_sandbox, [realm_id, sandbox]
           # If this frame is on the entered `within_frame` stack, navigate it
           # through `navigate_frame` — it does the full fetch (redirects /
           # downloads / cookies) AND updates `@frame_stack` / `@current_realm_id`
@@ -10282,7 +10288,7 @@ module Capybara
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")
         ensure
-          @navigation_sandbox = nil
+          @navigation_sandbox = saved_sandbox
         end
       end
       # A same-origin WINDOW realm (window.open in this isolate) navigating itself
@@ -10835,7 +10841,7 @@ module Capybara
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         # (…none where its container is gone: no document of it made unsandboxed, as an empty seed would)
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, @navigation_sandbox) or return
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, navigation_sandbox(realm_id)) or return
         return unless unload_frame_document(parent, realm_id)
 
         new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
@@ -11267,7 +11273,7 @@ module Capybara
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp, @navigation_sandbox) or return
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp, navigation_sandbox(old_id)) or return
         return unless unload_frame_document(parent, old_id)
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
@@ -11823,7 +11829,7 @@ module Capybara
       def save_downloaded_response(url, headers, body, realm: nil)
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         source = @download_source || realm
-        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, @navigation_sandbox)
+        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, navigation_sandbox(realm))
 
         filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?
