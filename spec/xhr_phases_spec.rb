@@ -102,4 +102,17 @@ RSpec.describe 'XHR event phases' do
     JS
     expect(got).to eq(%w[ok ok ok])
   end
+
+  # An upload's size is its body's bytes on the wire: a text body's in UTF-8, so `é` is two and an emoji four.
+  it "reports a text body's upload size in UTF-8 bytes" do
+    got = run(<<~JS)
+      const x = new XMLHttpRequest();
+      x.open('POST', '/echo');
+      x.upload.onloadstart = () => {};
+      x.upload.onload = (e) => __log.push(e.total);
+      x.onloadend = () => { __done = true; };
+      x.send('é😀');
+    JS
+    expect(got).to eq([6])
+  end
 end
