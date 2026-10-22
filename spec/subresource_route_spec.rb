@@ -29,4 +29,35 @@ RSpec.describe 'a subresource request route' do
     expect(poll_until { (v = s.evaluate_script('seen')).size == 2 && v }.sort).to eq(['blob load', 'data load'])
     expect(s.evaluate_script("['a', 'b'].map((id) => getComputedStyle(document.getElementById(id)).color)")).to eq(['rgb(1, 2, 3)', 'rgb(4, 5, 6)'])
   end
+
+  # …a blob: sheet a page revokes from its `load` handler stays its sheet, as a loaded one does (Chrome: its rule and
+  # its color kept, a later `<style>` and all).
+  it 'keeps a loaded blob: sheet its URL is revoked after' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p id=a>a</p>']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.done = false;
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = URL.createObjectURL(new Blob(['#a { color: rgb(9, 9, 9) }'], { type: 'text/css' }));
+      l.onload = () => { URL.revokeObjectURL(l.href); document.head.appendChild(document.createElement('style')).textContent = 'b {}'; done = true; };
+      document.head.appendChild(l);
+    JS
+    poll_until { s.evaluate_script('done') }
+    expect(s.evaluate_script("[getComputedStyle(document.getElementById('a')).color, document.querySelector('link').sheet.cssRules.length]")).to eq(['rgb(9, 9, 9)', 1])
+  end
+
+  # …and a worker's `importScripts` of a blob: URL runs its blob (Chrome: `b`).
+  it 'imports a blob: script into a worker' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      const lib = URL.createObjectURL(new Blob(['self.b = "b";']));
+      const w = new Worker(URL.createObjectURL(new Blob([`onmessage = (e) => { try { importScripts(e.data); postMessage(self.b); } catch (x) { postMessage(x.name); } };`])));
+      w.onmessage = (e) => { window.got = e.data; };
+      w.postMessage(lib);
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq('b')
+  end
 end

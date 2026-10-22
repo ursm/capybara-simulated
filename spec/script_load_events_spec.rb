@@ -6,8 +6,9 @@ require_relative 'support/session_teardown'
 # against its document's base URL. Chrome 155 on this page: `onerror TypeError | classic load | module load true |
 # onerror RangeError | mthrow load | missing error`. A module that does not parse — the script's, or one it imports — is
 # no failed fetch: Chrome reports its SyntaxError and fires `load`; one importing a module that cannot be fetched fires
-# `error`, as does one served as no JavaScript MIME type (`text/plain`), which never runs. (A module's throw and parse error are logged, not yet reported: the host evaluates the graph and the thrown
-# value does not cross back — the `onerror` Chrome adds for each.)
+# `error`, as does one served as no JavaScript MIME type (`text/plain`), which never runs. A module's throw is reported
+# before its `load`, as a classic one's is. (A module's parse error is logged, not yet reported — the `onerror` Chrome
+# adds for each SyntaxError.)
 RSpec.describe 'script load events' do
   let(:page) {
     <<~HTML
@@ -43,7 +44,7 @@ RSpec.describe 'script load events' do
     })
     s.visit '/'
     expect(s.evaluate_async_script('setTimeout(() => arguments[0](log), 10)')).to eq(
-      ['onerror TypeError', 'classic load', 'module load true', 'mthrow load', 'missing error', 'syntax load', 'depsyntax load', 'depmissing error', 'plain error false']
+      ['onerror TypeError', 'classic load', 'module load true', 'onerror RangeError', 'mthrow load', 'missing error', 'syntax load', 'depsyntax load', 'depmissing error', 'plain error false']
     )
   end
 

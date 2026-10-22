@@ -1197,16 +1197,17 @@ module Capybara
         return true if m == MODULE_PARSE_FAILED
         begin
           instantiate_native_module(m, url, target, handles)
-          m.evaluate
+          # (…its evaluation's rejection — a top-level throw, a top-level await's — reported at its window, `error`
+          # event and all, as HTML "run a module script" reports it: the realm's own `__csimReportError`)
+          m.evaluate(report: '__csimReportError')
         rescue ModuleFetchFailed
           return false
         rescue ModuleParseFailed
           nil   # (…logged as it was parsed)
         rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
-          # A top-level module throw belongs on the page console
-          # (trace-visible diagnostics), like a classic script's error —
-          # not just safe_call's truncated stderr warn. ScriptTerminatedError
-          # deliberately propagates (a watchdog terminate must escalate).
+          # What the evaluation's report does not reach — its graph's failure to link (an export none of its modules
+          # has) — belongs on the page console (trace-visible diagnostics), not just safe_call's truncated stderr warn.
+          # ScriptTerminatedError deliberately propagates (a watchdog terminate must escalate).
           @browser.log_console('error', "module evaluate error in #{url}: #{e.message}")
         end
         true
