@@ -1287,7 +1287,7 @@ module Capybara
         src = nil if src && !inline_src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         return handles[url] = nil unless src
         return compile_inline_module(src, url_s, target) if inline_src
-        @browser.note_source_map(url_s, src)
+        @browser.note_module_source_map(url_s, src)
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory
         # compilation cache holds the bytecode keyed by source — skip

@@ -2540,14 +2540,19 @@ module Capybara
         @stack_resolver ||= StackResolver.new(self)
       end
 
-      # The source map script `url` names in its `sourceMappingURL` comment, read out of its text (`text`: the whole of
-      # it, or its tail from the comment on) as it runs — a script with no such comment forgets one it had.
-      def note_source_map(url, text)
-        directive = StackResolver.mapping_url(text)
-        directive ? (@source_maps ||= {})[url.to_s] = directive : @source_maps&.delete(url.to_s)
+      # The source map module `url` names in its `sourceMappingURL` comment, read out of its text `src` as it is
+      # compiled — a module with no such comment forgets one it had.
+      def note_module_source_map(url, src)
+        directive = StackResolver.mapping_url(src)
+        directive ? (@module_source_maps ||= {})[url.to_s] = directive : @module_source_maps&.delete(url.to_s)
       end
-      # …the one it named, or nil.
-      def source_map_of(url) = @source_maps&.[](url.to_s)
+      # …the one script `url` named as it ran — a module's, or a classic script's, which the bridge keeps (`noteSourceMap`)
+      # — or nil.
+      def source_map_of(url)
+        @module_source_maps&.[](url.to_s) || @runtime.call('__csimSourceMapOf', url.to_s)
+      rescue StandardError
+        nil
+      end
 
       def log_network(method, url, status, **extra) = @trace&.log_network(method, url, status, **extra)
 

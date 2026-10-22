@@ -17,6 +17,7 @@ RSpec.describe Capybara::Simulated::StackResolver do
     expect(described_class.mapping_url("//@ sourceMappingURL=old.map")).to eq('old.map')
     expect(described_class.mapping_url("//# sourceMappingURL=a.map\nx()")).to be_nil
     expect(described_class.mapping_url('x()')).to be_nil
+    expect(described_class.mapping_url("x()\n//# sourceMappingURL=data:application/json;base64,e30=")).to be_nil
   end
 
   it 'notes each script’s map as it runs and fetches only that' do

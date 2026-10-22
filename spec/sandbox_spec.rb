@@ -101,7 +101,9 @@ RSpec.describe 'Sandboxing' do
     s.visit '/'
     expect(s.evaluate_script("report('sandboxed')")).to eq([nil, true, nil, 1])
     expect(s.evaluate_script("report('scripted')")).to eq(['yes', false, 'yes', 0])
-    expect(s.evaluate_script("document.getElementById('scripted').contentDocument.body.dataset.js")).to eq('yes')
+    # (…the javascript: URL's string result — an assignment's value — replacing the document: Chrome, measured, `yes` at
+    # about:srcdoc)
+    expect(s.evaluate_script("[document.getElementById('scripted').contentDocument.body.textContent, document.getElementById('scripted').contentDocument.URL]")).to eq(['yes', 'about:srcdoc'])
     expect(s.evaluate_script("document.getElementById('sandboxed').contentDocument.body.dataset.js")).to be_nil
     expect(s.evaluate_script("report('switched')")).to eq([nil, true, nil, 1])
   end

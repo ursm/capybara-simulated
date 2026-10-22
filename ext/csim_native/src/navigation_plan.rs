@@ -42,6 +42,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "planSubmission", plan_submission, context_id);
     register(scope, ns, "planDownload", plan_download, context_id);
     register(scope, ns, "supersedePlanned", supersede_planned, context_id);
+    register(scope, ns, "navigationPlanned", navigation_planned, context_id);
     register(scope, ns, "takeNavigation", take_navigation, context_id);
     register(scope, ns, "takeSubmission", take_submission, context_id);
     register(scope, ns, "takeDownload", take_download, context_id);
@@ -86,6 +87,13 @@ fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // and the submission planned before it taken by none.
 fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     plan(scope, &args).supersede();
+}
+
+// __dom.navigationPlanned() -> whether a navigation or a submission is planned, which the host is yet to take: one a
+// javascript: URL's script planned outranks the document its string result would make (url-parse.js `runJavascriptURL`).
+fn navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let plan = plan(scope, &args);
+    rv.set_bool(plan.navigation.is_some() || plan.submission.is_some());
 }
 
 // __dom.takeNavigation(newWindowOnly) -> [url, target, opener, referrerPolicy, blob] of the navigation planned, which the

@@ -12,7 +12,9 @@ module Capybara
     # fingerprinted; identical URL → identical map).
     #
     # Frames of a script that named no map (snapshot stubs, eval'd app inline
-    # scripts, any URL that is no script the page ran) pass through unchanged.
+    # scripts, any URL that is no script the page ran) pass through unchanged,
+    # as do a script's whose map is inline (a data: URL): reading one would cost
+    # every run of it a scan of the map's whole length.
     class StackResolver
       # Matches `(URL:LINE:COL)` inside V8 stack frames. URLs can contain
       # `:` (e.g. `:port`), so the URL class includes `:` and the engine
@@ -24,12 +26,14 @@ module Capybara
       @@maps = {}
       @@lock = Mutex.new
 
-      # The URL a script's text names in its last `sourceMappingURL` comment (`//# …` or the older `//@ …`), with only
-      # white space after it; nil for none.
+      # The URL a script's text names in a `sourceMappingURL` comment (`//# …`, or the older `//@ …`) closing it — with
+      # nothing but white space after, within its last 512 characters — or nil; never an inline data: one, whose whole
+      # length a read would cost (the bridge's twin: `sourceMappingURLOf`).
       def self.mapping_url(text)
-        text = text.to_s
-        at = text.rindex('sourceMappingURL=')
-        at && text[[at - 8, 0].max..][/\/\/[#@]\s*sourceMappingURL=(\S+)\s*\z/, 1]
+        tail = text.to_s
+        tail = tail[-512..] if tail.length > 512
+        url  = tail[%r{//[#@]\s*sourceMappingURL=(\S+)\s*\z}, 1]
+        url unless url.nil? || url.start_with?('data:')
       end
 
       # Drop the fetched source maps (part of `Browser.clear_http_cache`).
@@ -66,14 +70,14 @@ module Capybara
         "#{pos.source}:#{pos.line}:#{pos.column}"
       end
 
-      # The map a frame's script named in its `sourceMappingURL` comment as it ran (`Browser#note_source_map`) — kept by
-      # that map's URL, resolved against the script's — or nil for a script that named none. Nothing else is ever
-      # requested, as a browser guesses no `<url>.map`: a frame's URL may be its DOCUMENT's (an inline script's), which a
-      # request would run the app's action for again.
+      # The map a frame's script named in its `sourceMappingURL` comment as it ran (`Browser#source_map_of`), fetched and
+      # kept for the process by its URL, resolved against the script's — or nil for a script that named none. Nothing else
+      # is ever requested, as a browser guesses no `<url>.map`: a frame's URL may be its DOCUMENT's (an inline script's),
+      # which a request would run the app's action for again.
       def load_map(url)
         directive = @browser.source_map_of(url)
         return nil unless directive
-        map_url = directive.start_with?('data:') ? directive : @browser.resolve_against(directive, url)
+        map_url = @browser.resolve_against(directive, url)
         return @@maps[map_url] if @@maps.key?(map_url)
         @@lock.synchronize {
           return @@maps[map_url] if @@maps.key?(map_url)
@@ -81,17 +85,13 @@ module Capybara
         }
       end
 
-      # …a data: one decoded, any other fetched.
       def build_map(map_url)
-        body = map_url.start_with?('data:') ? decode_data_url(map_url) : @browser.rack_fetch_body(map_url)
+        body = @browser.rack_fetch_body(map_url)
         return nil unless body
         Sourcemap.new(JSON.parse(body))
       rescue JSON::ParserError, ArgumentError
         nil
       end
-
-      # A source map given inline, by Fetch's data: URL processor (the engine's): its body, or nil.
-      def decode_data_url(uri) = Native.data_url(uri)&.last
     end
   end
 end
