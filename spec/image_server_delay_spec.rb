@@ -20,7 +20,8 @@ RSpec.describe 'an image its server delays' do
         <!DOCTYPE html><meta charset="utf-8"><body><img id="i" src="/i.png">
         <script>
           window.log = [];
-          i.onload = () => log.push(['img', Math.round(performance.now())]);
+          const start = performance.now();
+          i.onload = () => log.push(['img', Math.round(performance.now() - start)]);
           addEventListener('load', () => log.push(['window', i.complete, i.naturalWidth]));
         </script>
       HTML
@@ -32,6 +33,31 @@ RSpec.describe 'an image its server delays' do
     expect(img[0]).to eq('img')
     expect(img[1]).to be >= 500
     expect(win).to eq(['window', true, 100])
+  end
+
+  it 'delays the load event no more once a later load supersedes it' do
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/i.png'    then delayed_png
+      when '/fast.png' then [200, {'content-type' => 'image/png'}, [png]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><meta charset="utf-8"><body><img id="i" src="/i.png">
+          <script>
+            window.log = [];
+            const start = performance.now();
+            i.src = '/fast.png';
+            addEventListener('load', () => log.push(['window', i.complete, Math.round(performance.now() - start)]));
+          </script>
+        HTML
+      end
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 1 }
+    type, complete, at = session.evaluate_script('log[0]')
+    expect([type, complete]).to eq(['window', true])
+    expect(at).to be < 500
   end
 
   it 'pins no bitmap when its page navigates away before it arrives' do
