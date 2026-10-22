@@ -441,5 +441,27 @@ RSpec.describe 'image decode' do
     JS
     expect(got).to eq(['red', 'blue', 50, 100, 100, 50])
   end
-end
 
+  # An image's response status is no part of whether it is an image (HTML "update the image data": an error response's
+  # image is shown — Chrome, measured: `load`, 100 wide, for a 404 carrying a PNG); a body that decodes to none breaks it.
+  it 'shows an image an error response carries, and breaks on one that carries none' do
+    png = File.binread(File.join(__dir__, 'wpt/images/anim-gr.png'))
+    s = simulated_session(lambda {|env|
+      next [404, {'content-type' => 'image/png'}, [png]] if env['PATH_INFO'] == '/png404'
+      next [404, {'content-type' => 'text/html'}, ['Not Found']] if env['PATH_INFO'] == '/html404'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']]
+    })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      Promise.all(['/png404', '/html404'].map((u) => new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve('load ' + img.naturalWidth);
+        img.onerror = () => resolve('error');
+        img.src = u;
+      }))).then(done);
+    JS
+    expect(got).to eq(['load 100', 'error'])
+  end
+end

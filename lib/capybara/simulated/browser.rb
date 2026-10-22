@@ -7984,7 +7984,7 @@ module Capybara
                               cookie_cross_site: client.cookie_cross_site)
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
-          # after; a 404 is a response too (the element breaks, the entry keeps the status).
+          # after; a 404 is a response too, the entry keeping its status.
           if result
             Thread.current[:csim_image_meta] = {
               'contentType' => result['headers'].find {|k, _| k.to_s.casecmp?('content-type') }&.last,
@@ -7995,7 +7995,9 @@ module Capybara
               'delayMs'     => server_delay_ms_of(result['headers'])
             }
           end
-          return nil unless resource_loaded?(result) && result['status'].to_i < 400
+          # (…its status no part of whether it is an image: HTML "update the image data" — an image an error response
+          # carries is shown, Chrome's too; a body that decodes to none is a broken one)
+          return nil unless resource_loaded?(result)
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         else
@@ -8218,7 +8220,9 @@ module Capybara
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
-          return nil unless resource_loaded?(result) && result['status'].to_i < 400
+          # (…its status no part of whether it is an image: HTML "update the image data" — an image an error response
+          # carries is shown, Chrome's too; a body that decodes to none is a broken one)
+          return nil unless resource_loaded?(result)
           bytes = result['body_raw'].to_s
           bytes.empty? ? nil : bytes
         end
