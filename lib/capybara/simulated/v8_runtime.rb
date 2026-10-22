@@ -131,9 +131,10 @@ module Capybara
         # rusty drains microtasks at call-depth zero (V8's default kAuto
         # policy), so a returned eval/call has already run its end-of-script
         # microtasks.
-        def eval(src)          = @ctx.eval(src)
-        def eval_void(src)     = @ctx.eval_void(src)
-        def call(name, *args)  = @ctx.call(name, *args)
+        def eval(src)                               = @ctx.eval(src)
+        def eval_void(src)                          = @ctx.eval_void(src)
+        def eval_primitive(src, filename: '<eval>') = @ctx.eval_primitive(src, filename: filename)
+        def call(name, *args)                       = @ctx.call(name, *args)
 
         # Record every attach so `create_context` can replay them: the bridge
         # in a per-frame realm reaches the same Ruby host fns as the main
@@ -1552,6 +1553,11 @@ module Capybara
           # side effect of eval, independent of the completion value.
           c.eval_void("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
         })
+        # A javascript: URL's source (url-parse.js `runJavascriptURL`), run as a top-level Script, as HTML runs it — its
+        # declarations the global's wherever they sit — its completion value handed back only where it is a primitive:
+        # a string replaces the document, and an object it ends with (`javascript:window.open(…)`'s Window) is never
+        # walked. A throw is rethrown as the value thrown, which the caller reports.
+        c.attach('__csim_runJavascriptURL', ->(label, body) { c.eval_primitive(body.to_s, filename: label.to_s) })
         install_run_script_dispatcher(c)
       end
 
@@ -1598,16 +1604,6 @@ module Capybara
               if (body.length >= threshold) return cached(label, body);
               if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
               indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
-            };
-            // …and a javascript: URL's source, run the same way (url-parse.js `runJavascriptURL`), its completion value
-            // returned — the fast path's; a top-level Script's run by the host hands none back, so a long, lexical or
-            // strict one's string result replaces no document.
-            globalThis.__csim_runScriptValue = function (label, body) {
-              if (body.length >= threshold || LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) {
-                runEval(label, body);
-                return undefined;
-              }
-              return indirectEval(body + '\\n//# sourceURL=' + label);
             };
           })();
         JS

@@ -730,6 +730,9 @@ module Capybara
         # base, not the aux's (which would double a shared path segment).
         navigate_window(b, current_browser.resolve_document_url(url), source: current_browser)
       end
+      # A cross-window `w.location = 'javascript:…'`: evaluated in the target window's document (Browser
+      # `run_javascript_url_from`), by a document of origin `origin`, as HTML navigates to a javascript: URL.
+      def window_run_javascript_url(handle, href, origin) = (b = window_browser(handle)) && b.run_javascript_url_from(href, origin)
       # A cross-window `w.history.back()/forward()/go(n)`: traverse the target
       # window's history. The opener's VM is the one executing, so a non-active
       # target can rebuild eagerly (like `navigate_window`); an active target

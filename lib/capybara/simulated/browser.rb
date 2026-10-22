@@ -7489,6 +7489,13 @@ module Capybara
         nil
       end
       def set_window_location(handle, url) = (@driver.window_set_location(handle.to_s, url.to_s) if @driver.respond_to?(:window_set_location))
+      # …to a javascript: URL `href`, by a document of origin `origin`: evaluated in that window's document.
+      def run_window_javascript_url(handle, href, origin) = (@driver.window_run_javascript_url(handle.to_s, href.to_s, origin.to_s) if @driver.respond_to?(:window_run_javascript_url))
+      # The target side: a javascript: URL another window's document of origin `origin` navigates this one to, evaluated
+      # in this window's document where it is of that origin (url-parse.js `__csimRunJavascriptURLFrom`).
+      def run_javascript_url_from(href, origin)
+        @runtime.call('__csimRunJavascriptURLFrom', href.to_s, origin.to_s)
+      end
       def window_history_go(handle, delta) = (@driver.respond_to?(:window_history_go) ? @driver.window_history_go(handle.to_s, delta.to_i) : false)
       def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
       def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))
