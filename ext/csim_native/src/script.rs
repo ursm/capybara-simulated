@@ -240,18 +240,9 @@ fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.scriptsSandboxed(nid) -> `scripts_sandboxed` of the realm node `nid` is in — of the calling realm for null.
-fn scripts_sandboxed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let id = crate::dom::nid_arg(scope, &args, 0);
-    let arena = crate::dom::realm(scope, cid);
-    let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
-    rv.set_bool(arena.scripts_sandboxed(realm));
-}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
-    crate::dom::register(scope, ns, "scriptsSandboxed", scripts_sandboxed_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
     crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);

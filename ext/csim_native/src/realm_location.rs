@@ -151,7 +151,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "popupOrigins", popup_origins_op, context_id);
     register(scope, ns, "setSandbox", set_sandbox, context_id);
     register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
-    register(scope, ns, "modalsSandboxed", modals_sandboxed, context_id);
+    register(scope, ns, "sandboxed", sandboxed_op, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
     register(scope, ns, "originStorageKey", origin_storage_key, context_id);
@@ -286,11 +286,18 @@ fn take_opener_origins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     location.set_document_origin(created.document);
     location.origin_override = created.location.map(str::to_owned);
 }
-// __dom.modalsSandboxed() -> whether the calling realm's document is sandboxed against modals (its sandboxed modals flag
-// — no `allow-modals`), which shows no simple dialog and prints nothing.
-fn modals_sandboxed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.sandboxed(flag, nid) -> whether the document of the realm node `nid` is in — the calling realm's for null — is
+// sandboxed by `flag` (`SANDBOXED_*`, the bindings' names for sandbox.rs's flags): against scripts (scripting disabled —
+// no script of its runs, no event handler content attribute compiles, no javascript: URL is evaluated), forms (no form
+// submits: HTML "submit" step 4), modals (no simple dialog shows, nothing prints) or downloads (none is saved).
+const SANDBOXED_FLAGS: [u32; 4] = [crate::sandbox::SCRIPTS, crate::sandbox::FORMS, crate::sandbox::MODALS, crate::sandbox::DOWNLOADS];
+fn sandboxed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(&flag) = args.get(0).uint32_value(scope).and_then(|i| SANDBOXED_FLAGS.get(i as usize)) else { return rv.set_bool(false) };
+    let id = nid_arg(scope, &args, 1);
     let cid = realm_id(scope, &args);
-    rv.set_bool(realm(scope, cid).sandboxed(cid, crate::sandbox::MODALS));
+    let arena = realm(scope, cid);
+    let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
+    rv.set_bool(arena.sandboxed(realm, flag));
 }
 
 // __dom.setDocumentOrigin(text) — the calling realm's document's origin (`set_document_origin`; null: its location's).
@@ -517,7 +524,10 @@ fn effective_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn set_domain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let value = args.get(2).to_rust_string_lossy(scope);
     let doc = crate::node_handle::nid_of(scope, args.get(0));
-    let effective = doc.and_then(|doc| document_effective_domain(scope, Some(doc), args.get(1)));
+    // (…a document sandboxed — its sandboxed document.domain browsing context flag, whatever it allows (step 2) — refused
+    // as an opaque origin's is, in the same words (Chrome, measured))
+    let sandboxed = other_realm(scope, args.get(1), |l, _| l.sandbox & crate::sandbox::DOCUMENT_DOMAIN != 0).unwrap_or(false);
+    let effective = doc.filter(|_| !sandboxed).and_then(|doc| document_effective_domain(scope, Some(doc), args.get(1)));
     // (…no document, no effective domain: an opaque origin's refusal)
     let (why, host) = match domain_to_set(effective.as_deref(), &value) {
         Ok(host) => {

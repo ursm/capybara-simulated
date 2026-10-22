@@ -547,7 +547,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
     crate::dom::register(scope, ns, "keywordNavigable", keyword_navigable, context_id);
-    crate::dom::register(scope, ns, "formsSandboxed", forms_sandboxed, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
     crate::dom::register(scope, ns, "childRealms", child_realms, context_id);
@@ -635,15 +634,6 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let keyword = args.get(0).uint32_value(scope).unwrap_or(TARGET_TOP);
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
-}
-// __dom.formsSandboxed(formNid) -> whether the form's node document is sandboxed against forms (its sandboxed forms
-// browsing context flag — no `allow-forms`), which submit nothing (HTML "submit" step 4).
-fn forms_sandboxed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let id = crate::dom::nid_arg(scope, &args, 0);
-    let arena = crate::dom::realm(scope, cid);
-    let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
-    rv.set_bool(arena.sandboxed(realm, crate::sandbox::FORMS));
 }
 // __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm]: the navigable the target name chooses
 // from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the realm its

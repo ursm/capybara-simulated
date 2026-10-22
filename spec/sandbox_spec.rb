@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
+require 'tmpdir'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
@@ -407,5 +408,47 @@ RSpec.describe 'Sandboxing' do
     s.execute_script("window.w = open(); w.name = 'p'; w.eval(\"open('/landed?p', 'p')\")")
     s.evaluate_script('1')
     expect(s.current_path).to eq('/')
+  end
+
+  # A sandboxed document may not set `document.domain`, whatever its sandbox allows (its sandboxed document.domain
+  # browsing context flag — Chrome's words, measured).
+  it 'refuses a sandboxed document a document.domain write' do
+    frame = "<script>try { document.domain = document.domain; window.got = 'set'; } catch (e) { window.got = e.message; }</script>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><iframe sandbox='allow-scripts allow-same-origin' srcdoc=\"#{frame}\"></iframe><iframe srcdoc=\"#{frame}\"></iframe>"]] })
+    s.visit '/'
+    expect(s.evaluate_script('[frames[0].got, frames[1].got]')).to eq([
+      "Failed to set the 'domain' property on 'Document': Assignment is forbidden for sandboxed iframes.", 'set'
+    ])
+  end
+
+  # …nor download anything without `allow-downloads` (HTML "allowed to download"): a `<a download>` of its saves
+  # nothing, nor does a navigation of it to an attachment — beside an unsandboxed frame's, which does.
+  it 'downloads nothing from a document sandboxed against downloads' do
+    Dir.mktmpdir do |dir|
+      prev = ENV['CSIM_DOWNLOADS_DIR']
+      ENV['CSIM_DOWNLOADS_DIR'] = dir
+      frame = ->(name) { "<a id=a download=#{name}-link.txt href='/file'>a</a><a id=n href='/attachment?#{name}'>n</a>" }
+      s = simulated_session(lambda {|env|
+        case env['PATH_INFO']
+        when '/file' then [200, {'content-type' => 'text/plain'}, ['x']]
+        when '/attachment' then [200, {'content-type' => 'text/plain', 'content-disposition' => "attachment; filename=#{env['QUERY_STRING']}-nav.txt"}, ['x']]
+        else
+          [200, {'content-type' => 'text/html'}, [
+            "<!DOCTYPE html><iframe id=boxed sandbox='allow-scripts allow-same-origin' srcdoc=\"#{frame.('boxed')}\"></iframe>" \
+            "<iframe id=open srcdoc=\"#{frame.('open')}\"></iframe>"
+          ]]
+        end
+      })
+      s.visit '/'
+      %w[boxed open].each do |id|
+        s.within_frame(id) do
+          s.find('#a').click
+          s.find('#n').click
+        end
+      end
+      expect(poll_until { Dir.children(dir).sort if Dir.children(dir).size == 2 }).to eq(%w[open-link.txt open-nav.txt])
+    ensure
+      ENV['CSIM_DOWNLOADS_DIR'] = prev
+    end
   end
 end

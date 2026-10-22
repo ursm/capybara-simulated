@@ -10706,7 +10706,7 @@ module Capybara
                                                    resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
         end
         if download_response?(headers)
-          return save_downloaded_response(get_url, headers, resp_body)
+          return save_downloaded_response(get_url, headers, resp_body, realm: realm_id)
         end
         reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers))
       end
@@ -10799,7 +10799,7 @@ module Capybara
                                                    site_seed: site, origin_null: taint, resulting_client_id: next_rid)
         end
         if download_response?(headers)
-          save_downloaded_response(url, headers, resp_body)
+          save_downloaded_response(url, headers, resp_body, realm: realm_id)
           return
         end
         tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
@@ -11195,7 +11195,7 @@ module Capybara
           return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
         end
         if download_response?(headers)
-          save_downloaded_response(url, headers, body)
+          save_downloaded_response(url, headers, body, realm: entry[:realm_id])
           return
         end
         reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry, csp: response_csp(headers))
@@ -11224,7 +11224,7 @@ module Capybara
           end
         end
         if download_response?(headers)
-          save_downloaded_response(url, headers, resp_body)
+          save_downloaded_response(url, headers, resp_body, realm: entry[:realm_id])
           return
         end
         reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry, csp: response_csp(headers))
@@ -11802,8 +11802,11 @@ module Capybara
         cd && cd.to_s.match?(/(?:^|;)\s*(attachment|filename\s*=)/i)
       end
 
-      def save_downloaded_response(url, headers, body)
+      # …a frame's navigation's (`realm`, the frame realm) refused where its document is sandboxed against downloads — no
+      # `allow-downloads` (HTML "allowed to download": the target's sandboxing flags).
+      def save_downloaded_response(url, headers, body, realm: nil)
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
+        return if realm && @runtime.realm_call(realm.to_i, '__csimDownloadsSandboxed') == true
 
         filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?
