@@ -82,4 +82,24 @@ RSpec.describe 'XHR event phases' do
     JS
     expect(got).to eq(['upload load 4'])
   end
+
+  # Every way a request ends unsets its send flag, so an abort() after it leaves it UNSENT with `withCredentials`
+  # settable again (Chrome: each case `ok`).
+  it 'unsets the send flag as a request ends — a response, a network error, a synchronous one' do
+    got = run(<<~JS)
+      const settable = (x) => { x.abort(); try { x.withCredentials = true; return 'ok'; } catch (e) { return e.name; } };
+      const sync = new XMLHttpRequest();
+      sync.open('GET', '/ok', false);
+      sync.send();
+      __log.push(settable(sync));
+      let pending = 2;
+      for (const path of ['/ok', '/boom']) {
+        const x = new XMLHttpRequest();
+        x.open('GET', path);
+        x.onloadend = () => setTimeout(() => { __log.push(settable(x)); if (--pending === 0) __done = true; });
+        x.send();
+      }
+    JS
+    expect(got).to eq(%w[ok ok ok])
+  end
 end

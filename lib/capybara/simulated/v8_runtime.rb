@@ -1189,7 +1189,7 @@ module Capybara
         # evaluated script's fetch options win — a deferred import() from an
         # earlier script picks up the later script's credentials/root. Spec wants
         # per-referring-script options; no vendored test observes the difference.
-        module_sw_ctxs[realm_key(target)] = sw&.merge(root: url.to_s)
+        module_sw_ctxs[realm_key(target)] = sw&.merge(root: inline_src ? nil : url.to_s)
         m = native_module_for(url, inline_src, target, handles)
         return false unless m
         return true if m == MODULE_PARSE_FAILED
@@ -1249,8 +1249,10 @@ module Capybara
         nil
       end
 
+      # The module script of `url` — or, `inline_src` given, the inline one whose base URL `url` is: a script of its own
+      # each time, in no module map (HTML "create a JavaScript module script"), its `import.meta.url` that base URL.
       def native_module_for(url, inline_src, target, handles)
-        return handles[url] if handles.key?(url)
+        return handles[url] if !inline_src && handles.key?(url)
         url_s = url.to_s
         src   = inline_src
         if src.nil? && (sw = module_sw_ctxs[realm_key(target)])
@@ -1284,6 +1286,7 @@ module Capybara
         # module at all, whoever answered it: HTML "fetch a single module script")
         src = nil if src && !inline_src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         return handles[url] = nil unless src
+        return compile_inline_module(src, url_s, target) if inline_src
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory
         # compilation cache holds the bytecode keyed by source — skip
@@ -1299,7 +1302,7 @@ module Capybara
         # applies to frame-realm compiles too. On a cold rebuild
         # `@compiled_module_urls` is cleared and everything returns to the
         # `cached_data` path.
-        if inline_src.nil? && @compiled_module_urls.key?(url_s)
+        if @compiled_module_urls.key?(url_s)
           m = target.compile_module(body, filename: url_s)
         else
           sha     = Digest::SHA256.hexdigest(body)
@@ -1309,12 +1312,24 @@ module Capybara
           if cached.nil? || m.cache_rejected?
             ScriptCache.queue_warm(target, sha, url_s, body, version, kind: :module, stale: !cached.nil?)
           end
-          @compiled_module_urls[url_s] = true if inline_src.nil?
+          @compiled_module_urls[url_s] = true
         end
         handles[url] = m
       rescue RustyRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
         handles[url] = MODULE_PARSE_FAILED
+      end
+      def compile_inline_module(src, url, target)
+        body    = RuntimeShared.utf8_text(src)
+        sha     = Digest::SHA256.hexdigest(body)
+        version = self.class.cached_data_version_tag
+        cached  = ScriptCache.lookup(sha, version, kind: :module)
+        m       = target.compile_module(body, filename: url, cached_data: cached)
+        ScriptCache.queue_warm(target, sha, url, body, version, kind: :module, stale: !cached.nil?) if cached.nil? || m.cache_rejected?
+        m
+      rescue RustyRacer::ParseError => e
+        @browser.log_console('error', "module parse error in #{url}: #{e.message}")
+        MODULE_PARSE_FAILED
       end
 
       def instantiate_native_module(m, importer_url, target, handles)

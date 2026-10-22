@@ -109,6 +109,12 @@ const NEXT_RESPOND: i32 = 1000;
 const NEXT_BODY_ERROR: i32 = 1001;
 
 impl XhrState {
+    // DONE, the send flag unset — as every way a request ends leaves it ("handle response end-of-body", the request
+    // error steps): a later abort() takes it to UNSENT, where `withCredentials` may be set again.
+    fn done(&mut self) {
+        self.ready = DONE;
+        self.send = false;
+    }
     // A phase begun, its id.
     fn begin(&mut self, ops: Vec<Op>) -> u32 {
         self.next_plan += 1;
@@ -126,6 +132,7 @@ impl XhrState {
             let current = !self.aborted && generation == self.generation;
             match op {
                 Op::Fire(ty, upload, progress) => return (ty << 8 | u32::from(upload) << 4 | progress) as i32,
+                Op::Ready(DONE) => self.done(),
                 Op::Ready(ready) => self.ready = ready,
                 Op::Current if !current => break,
                 Op::CurrentDone if !current || self.ready != DONE => break,
@@ -553,8 +560,7 @@ fn terminate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(s) = state(scope, args.get(0)) else { return };
     let mut s = s.borrow_mut();
     s.aborted = true;
-    s.ready = DONE;
-    s.send = false;
+    s.done();
     s.upload_complete = true;
     s.clear_response();
 }
@@ -584,7 +590,7 @@ fn respond_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
     let mut s = s.borrow_mut();
     let ops = if !ok {
-        s.ready = DONE;
+        s.done();
         s.clear_response();
         if s.synchronous {
             s.upload_complete = true;
@@ -626,7 +632,7 @@ fn error_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(s) = state(scope, args.get(0)) else { return rv.set_int32(0) };
     let mut s = s.borrow_mut();
     s.aborted = true;
-    s.ready = DONE;
+    s.done();
     s.clear_response();
     rv.set_double(f64::from(s.begin(error_steps(event))));
 }
@@ -758,7 +764,7 @@ mod tests {
             ev(EV_READYSTATECHANGE, false, 0),
             ev(EV_LOAD, false, PROGRESS_RESPONSE),
         ]);
-        assert_eq!(s.ready, DONE);
+        assert_eq!((s.ready, s.send), (DONE, false));
         assert!(s.plans.is_empty());
     }
 
