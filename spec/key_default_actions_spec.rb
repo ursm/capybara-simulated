@@ -67,4 +67,23 @@ RSpec.describe 'Key default actions' do
     s.find('#f').send_keys([:control, 'a'], [:control, 'v'])
     expect(s.evaluate_script('[e.value, f.value, getSelection().toString()]')).to eq(['x@y.z', 'new@b.c', ''])
   end
+
+  # `set` on an editing host types its value as `send_keys` does, key by key through the same pipeline: each key's
+  # keypress with its `code`, a line feed Enter — a paragraph inserted, not a line feed character — and Shift, a
+  # modifier held as a chord holds it (`[:shift, 'ab']`), the same keys.
+  it 'types a contenteditable value key by key as send_keys does' do
+    s = session_of('<div id=ed contenteditable>old</div>')
+    s.execute_script(<<~JS)
+      window.L = [];
+      for (const t of ['keydown', 'keypress', 'beforeinput', 'input', 'keyup']) {
+        ed.addEventListener(t, (e) => L.push(t + ':' + (e.code ?? e.inputType)));
+      }
+    JS
+    s.find('#ed').set("a\nb")
+    got = s.evaluate_script('[L, ed.innerHTML]')
+    expect(got[0].first(5)).to eq(%w[keydown:KeyA keypress:KeyA beforeinput:insertText input:insertText keyup:KeyA])
+    expect(got[0]).to include('beforeinput:insertParagraph', 'input:insertParagraph')
+    expect(got[1]).not_to include('old')
+    expect(got[1]).not_to include("\n")
+  end
 end
