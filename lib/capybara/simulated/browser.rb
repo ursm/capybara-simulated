@@ -8834,7 +8834,7 @@ module Capybara
           end
           outbox << {handle: handle, kind: 'sw_eval', ok: true}
         else
-          module_fetch = worker_module_fetch(handle, controller.to_i)
+          module_fetch = worker_module_fetch(handle, controller.to_i, url.to_s)
           rt.accept_dynamic_imports(url.to_s, module_fetch)
           if module_worker
             run_worker_module(rt, body, url.to_s, handle, outbox, module_fetch)
@@ -9186,11 +9186,27 @@ module Capybara
       rescue ModuleScriptUnavailable, RustyRacer::ParseError, RustyRacer::RuntimeError => e
         outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
       end
-      # …the fetch of a module worker `handle` imports, statically or by `import()`: its source — through the service
-      # worker that controls it (`controller`), a module script request of the worker's (destination 'script', mode
-      # 'cors', its client the worker), the network where that answers nothing.
-      private def worker_module_fetch(handle, controller)
+      # …the fetch of a module worker `handle` (of `worker_url`) imports, statically or by `import()` — HTML "fetch a single
+      # module script": a request of mode 'cors' whose client is the worker, through the service worker that controls it
+      # (`controller`), the network where that answers nothing; a `blob:` one's bytes the window's registry holds (read
+      # here, on the worker's thread: blob_registry.rs), a `data:` one's its own — each a 2xx response of a JavaScript MIME
+      # type, or none at all. Its source and its URL — the response's, a redirect's end, which its own imports resolve
+      # against and its `import.meta.url` reports.
+      private def worker_module_fetch(handle, controller, worker_url)
         lambda do |abs|
+          if abs.start_with?('blob:')
+            maker = Native.blob_registry_partition(@blob_window, abs)&.first
+            bytes = maker && Native.blob_registry_get(maker, abs)
+            raise ModuleScriptUnavailable, abs unless bytes
+
+            next [bytes, abs]
+          end
+          if abs.start_with?('data:')
+            mime, bytes = Native.data_url(abs)
+            raise ModuleScriptUnavailable, abs unless bytes && js_mime_type?(mime)
+
+            next [bytes, abs]
+          end
           r = controller.positive? && abs.match?(%r{\Ahttps?://}i) ? sw_direct_fetch(controller, JSON.generate(
             method: 'GET', url: abs, headers: {}, body_b64: '', mode: 'cors', destination: 'script',
             credentials: 'same-origin', clientId: sw_worker_client_id(handle)
@@ -9198,15 +9214,15 @@ module Capybara
           if r && !r['fallthrough']
             raise ModuleScriptUnavailable, abs if r['networkError'] || !sw_response_allowed?(r, 'cors')
 
-            r = {'status' => r['status'], 'headers' => r['headers'] || {}, 'body' => Base64.decode64(r['body_b64'].to_s)}
+            r = {'status' => r['status'], 'headers' => r['headers'] || {}, 'body' => Base64.decode64(r['body_b64'].to_s), 'url' => r['url']}
           else
-            r = rack_fetch('GET', abs, '', {}, 'follow')
+            r = rack_fetch('GET', abs, '', {}, 'follow', 'cors', client_url: worker_url)
             raise ModuleScriptUnavailable, abs unless resource_loaded?(r)
           end
           ct = r['headers'].find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
           raise ModuleScriptUnavailable, abs unless (200..299).cover?(r['status'].to_i) && js_mime_type?(ct)
 
-          r['body'].to_s
+          [r['body'].to_s, r['url'].to_s.empty? ? abs : r['url'].to_s]
         end
       end
       # (…a module script the graph cannot have: unfetched, failed, or of no JavaScript MIME type)

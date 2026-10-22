@@ -69,7 +69,11 @@ module Capybara
       def accept_dynamic_imports(url, fetch_import)
         @fetch_import = fetch_import
         @ctx.dynamic_import_resolver = lambda do |specifier, referrer, _initiating|
-          resolved = resolve_specifier(specifier.to_s, (referrer || url).to_s)
+          # (…a classic script's referrer no URL — none, or the name it was evaluated under: `<eval>` — the worker's own its
+          # base, the URL its script was run from)
+          ref  = referrer.to_s
+          base = ref.match?(/\A[a-z][a-z0-9+.-]*:/i) ? ref : url
+          resolved = resolve_specifier(specifier.to_s, base)
           module_for(resolved).tap {|m| link(m, resolved) if m.status == :uninstantiated }
         end
       end
@@ -81,18 +85,24 @@ module Capybara
           module_for(resolve_specifier(spec.to_s, (ref || url).to_s))
         end
       end
+      # (…the module `resolved` names, one however often it is imported: its source and its URL — the response's, a
+      # redirect's end, which a fetch answering a pair gives and the module's own imports resolve against — fetched once)
       def module_for(resolved)
-        (@modules ||= {})[resolved] ||= @ctx.compile_module(RuntimeShared.utf8_text(@fetch_import.call(resolved).to_s.dup), filename: resolved)
-      end
-      def resolve_specifier(spec, base)
-        if spec.match?(%r{\A[a-z]+://}i)
-          spec
-        elsif spec.start_with?('/', './', '../')
-          # (…parsed as the page parses a URL, url_ops.rs)
-          Native.url_parts(spec, base)&.first || spec
-        else
-          raise "Failed to resolve module specifier '#{spec}'"
+        @modules ||= {}
+        @modules[resolved] ||= begin
+          src, final = @fetch_import.call(resolved)
+          final = final.to_s.empty? ? resolved : final.to_s
+          @modules[final] ||= @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: final)
         end
+      end
+      # (…a URL, or a path-relative specifier parsed against the importing module's URL — none where that is no base, a
+      # blob: or data: one's — any other a resolution failure)
+      def resolve_specifier(spec, base)
+        resolved =
+          if spec.match?(%r{\A[a-z][a-z0-9+.-]*:}i) then spec
+          elsif spec.start_with?('/', './', '../') then Native.url_parts(spec, base)&.first
+          end
+        resolved or raise "Failed to resolve module specifier '#{spec}'"
       end
     end
   end

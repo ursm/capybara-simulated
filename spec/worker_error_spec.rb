@@ -90,4 +90,35 @@ RSpec.describe 'Worker errors' do
     JS
     expect(got.sort).to eq(['/bad.js module Event', '/dyn.js classic net', '/dyn.js module net', '/static.js module net'])
   end
+
+  # A module's URL is its response's — a redirect's end — which its own imports resolve against and `import.meta.url`
+  # reports; a data: module imports a data: one; and a blob: module's relative import has no base to resolve against, so
+  # its graph fails.
+  it "resolves a module's imports against its response URL, a blob: module's relative one against none" do
+    app = lambda do |env|
+      js = ->(body) { [200, {'content-type' => 'text/javascript'}, [body]] }
+      case env['PATH_INFO']
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8>']]
+      when '/r/go.js' then [302, {'location' => '/sub/real.js'}, []]
+      when '/sub/real.js' then js.call("import './dep.js'; postMessage(new URL(import.meta.url).pathname);")
+      when '/sub/dep.js' then js.call("postMessage('dep');")
+      when '/root.js' then js.call("import '/r/go.js';")
+      else [404, {'content-type' => 'text/plain'}, ['nope']]
+      end
+    end
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], log = [];
+      const blob = URL.createObjectURL(new Blob(["import './sub/dep.js';"], {type: 'text/javascript'}));
+      const data = 'data:text/javascript,' + encodeURIComponent("import 'data:text/javascript,postMessage(1)';");
+      for (const [name, u] of [['redirect', '/root.js'], ['data', data], ['blob', blob]]) {
+        const w = new Worker(u, {type: 'module'});
+        w.onmessage = (e) => log.push(`${name} ${e.data}`);
+        w.onerror = (e) => log.push(`${name} ${e.constructor.name}`);
+      }
+      setTimeout(() => done(log), 500);
+    JS
+    expect(got.sort).to eq(['blob Event', 'data 1', 'redirect /sub/real.js', 'redirect dep'])
+  end
 end
