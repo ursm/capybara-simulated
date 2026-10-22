@@ -7534,9 +7534,10 @@ module Capybara
         # images are the only pending work) and the tick gates re-check every poll, so this is a
         # short deferral, never a stall. Matches a real browser: window `load` fires after every
         # <img> settles — one its server delayed too, which the realm holds on a page timer until
-        # its virtual arrival (the timer keeps the settle loop going meanwhile).
+        # its virtual arrival (the timer keeps the settle loop going meanwhile) — and after every frame's
+        # document fired its own, which the frame's images delay likewise (`__csimPageLoadDelayed`).
         deliver_image_loads
-        return false if image_loads_pending? || (@runtime.call('__csimImagesDelayingLoad') rescue false)
+        return false if image_loads_pending? || (@runtime.call('__csimPageLoadDelayed') rescue false)
 
         @window_load_due = false
         # An AUXILIARY window's first load is its opener's to fire — ONE-SHOT, because

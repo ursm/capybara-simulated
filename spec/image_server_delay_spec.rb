@@ -85,4 +85,25 @@ RSpec.describe 'an image its server delays' do
     expect(session.evaluate_script('sessionStorage.landed || null')).to be_nil
     expect(session.driver.browser.instance_variable_get(:@transfer_buffers)).to be_empty
   end
+
+  # A frame's images delay its document's load event as the page's do, and its document's load delays its container's
+  # and so the page's: the image, then the frame's window, then the iframe, then the page (HTML "delay the load event").
+  it "delays a frame's load, its container's and the page's until the frame's image arrives" do
+    frame = '<!DOCTYPE html><meta charset="utf-8"><img id="i" src="/i.png"><script>' \
+            'onload = () => top.log.push("frame " + i.complete + " " + i.naturalWidth); i.onload = () => top.log.push("image")</script>'
+    app = lambda {|env|
+      next delayed_png if env['PATH_INFO'] == '/i.png'
+      next [200, {'content-type' => 'text/html'}, [frame]] if env['PATH_INFO'] == '/f'
+
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><script>window.log = []</script>
+        <iframe src="/f" onload="log.push('iframe')"></iframe>
+        <script>addEventListener('load', () => log.push('page'))</script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 4 }
+    expect(session.evaluate_script('log')).to eq(['image', 'frame true 100', 'iframe', 'page'])
+  end
 end
