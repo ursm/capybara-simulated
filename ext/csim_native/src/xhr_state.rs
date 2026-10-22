@@ -546,13 +546,16 @@ fn in_flight_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_bool((s.ready == OPENED && s.send) || s.ready == HEADERS_RECEIVED || s.ready == LOADING);
 }
 
-// __dom.xhrTerminate(state) — the request error steps' state, with no events: a synchronous request's body cut short,
-// the fetch terminated, DONE with the network error's response (`xhrErrorSteps` the phase that fires them).
+// __dom.xhrTerminate(state) — the request error steps' state, with no events: a synchronous request's body cut short
+// or timed out, the fetch terminated, DONE with the network error's response, its send flag unset and its upload
+// complete (`xhrErrorSteps` the phase that fires them).
 fn terminate_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = state(scope, args.get(0)) else { return };
     let mut s = s.borrow_mut();
     s.aborted = true;
     s.ready = DONE;
+    s.send = false;
+    s.upload_complete = true;
     s.clear_response();
 }
 
