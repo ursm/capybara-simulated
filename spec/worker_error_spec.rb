@@ -40,4 +40,23 @@ RSpec.describe 'Worker errors' do
       'echo hi'
     ])
   end
+
+  # One its Worker's `error` did not cancel is reported again at the global the Worker is in — an ErrorEvent of the
+  # same message and place, its `error` null — and a canceled one is not (HTML "runtime script errors"; Chrome fires the
+  # page's `onerror` after the Worker's).
+  it "reports a worker's uncanceled exception again at the page" do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const log = [];
+      window.onerror = (message, filename, lineno, colno, error) => {
+        log.push(['page', message, filename.replace(location.origin, ''), lineno, error].join(' | '));
+        return true;
+      };
+      new Worker('/boom.js').onerror = (e) => log.push('worker ' + e.message);
+      new Worker('/boom.js').onerror = (e) => { e.preventDefault(); log.push('canceled ' + e.message); };
+      setTimeout(() => done(log), 500);
+    JS
+    expect(got.sort).to eq(['canceled Error: boom', 'page | Error: boom | /boom.js | 2 | ', 'worker Error: boom'])
+  end
 end
