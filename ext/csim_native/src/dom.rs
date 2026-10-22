@@ -1262,6 +1262,8 @@ impl RealmArena {
     // whose handlers held its global (as the step running in it ends, where one is).
     pub(crate) fn discard_realm(&mut self, cid: i32) {
         self.observers.drop_realm(cid);
+        // (…its image fetches aborted, as a discarded document's are: their elements let go)
+        self.forget_image_fetches_of(cid);
         self.forget_navigables_of(cid, false);
         self.discard_timers(cid);
         self.discard_resize_observers(cid);

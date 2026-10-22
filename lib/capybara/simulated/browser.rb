@@ -7846,10 +7846,9 @@ module Capybara
         @image_load_pending.positive?
       end
 
-      # Hand every finished async image load to its realm. The id→element map is realm-local
-      # (each realm evaluates its own bridge), so the result is offered to the main realm first
-      # and then to each frame realm until one consumes it; an id nobody knows (its page died)
-      # is dropped. Returns the number delivered.
+      # Hand every finished async image load to its realm: the one that began it, which the engine
+      # keeps for the request (`__csimImageFetchRealm`); an id no realm has (its page died) is
+      # dropped. Returns the number delivered.
       def deliver_image_loads
         finished = nil
         @image_load_lock.synchronize do
@@ -7862,21 +7861,14 @@ module Capybara
         n = 0
         finished.each do |id, slot|
           payload = image_result_payload(slot[:result])
-          consumed = false
-          begin
-            consumed = @runtime.call('__csimApplyAsyncImage', id, payload) == true
-          rescue StandardError
-            nil
-          end
-          unless consumed
-            @runtime.frame_realm_ids.each do |rid|
-              begin
-                consumed = @runtime.realm_call(rid, '__csimApplyAsyncImage', id, payload) == true
-                break if consumed
-              rescue StandardError
-                nil
-              end
+          consumed = begin
+            rid = @runtime.call('__csimImageFetchRealm', id).to_i
+            if rid.zero? then @runtime.call('__csimApplyAsyncImage', id, payload) == true
+            elsif rid.positive? then @runtime.realm_call(rid, '__csimApplyAsyncImage', id, payload) == true
+            else false
             end
+          rescue StandardError
+            false
           end
           # Nobody consumed it (its page is gone): reclaim the stashed bitmap, or every
           # navigated-away image on an image-heavy run pins its RGBA buffer until teardown.

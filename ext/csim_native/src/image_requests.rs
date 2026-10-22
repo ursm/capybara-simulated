@@ -123,6 +123,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
     crate::dom::register(scope, ns, "imageFetchBegin", fetch_begin, context_id);
     crate::dom::register(scope, ns, "imageFetchTake", fetch_take, context_id);
+    crate::dom::register(scope, ns, "imageFetchRealm", fetch_realm, context_id);
     crate::dom::register(scope, ns, "imageArrival", arrival, context_id);
     crate::dom::register(scope, ns, "imagesDelayLoad", delay_load, context_id);
 }
@@ -286,6 +287,12 @@ fn fetch_take(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         v8::Number::new(scope, start).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.imageFetchRealm(id) -> the realm that began the host's request `id` — the one to hand its result to — or -1 for
+// none (a request of a realm gone, or of a page left).
+fn fetch_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    rv.set_int32(crate::dom::dom(scope).arena.image_fetches.get(&id).map_or(-1, |f| f.realm));
 }
 // __dom.imageArrival(img, load, on) — load `load`'s result, which the calling realm took, is held back by its server's
 // delay (`on`), or arrived.
