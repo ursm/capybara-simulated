@@ -81,6 +81,10 @@ impl Navigables {
     fn fully_active(&self, cid: i32) -> bool {
         !self.discarded.contains(&cid)
     }
+    // …and whether `doc` is: the document of some realm whose document is.
+    fn document_fully_active(&self, doc: NodeId) -> bool {
+        self.documents.iter().any(|(&cid, &d)| d == doc && self.fully_active(cid))
+    }
 }
 
 impl RealmArena {
@@ -881,11 +885,17 @@ fn browsing_context_discarded(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     rv.set_bool(crate::dom::dom(scope).arena.navigables.lost_navigable(cid));
 }
 
-// __dom.documentFullyActive() -> whether the realm's document is fully active (`fully_active`): what nothing waiting on
-// it — an image's data, a lock request — goes ahead without.
+// __dom.documentFullyActive([docNid]) -> whether the realm's document is fully active (`fully_active`): what nothing
+// waiting on it — an image's data, a lock request — goes ahead without; or, given one, whether that document is,
+// whichever realm asks.
 fn document_fully_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let doc = (args.length() > 0).then(|| nid_arg(scope, &args, 0));
     let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::dom(scope).arena.navigables.fully_active(cid));
+    let navigables = &crate::dom::dom(scope).arena.navigables;
+    rv.set_bool(match doc {
+        Some(doc) => doc.is_some_and(|doc| navigables.document_fully_active(doc)),
+        None => navigables.fully_active(cid),
+    });
 }
 
 // __dom.neuterRealm(realm): realm `realm`'s context is being disposed — its frame removed, or a navigation replacing it —

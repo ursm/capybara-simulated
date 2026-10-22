@@ -6155,8 +6155,8 @@ web-locks/non-secure-context.any.js:
 web-locks/query-ordering.https.html:
 - Requests appear in state in order made.
 webmessaging/event.origin.sub.htm:
-- 'Test Description: event.origin returns the origin of the message.'
 - "[harness] ERROR"
+- "[harness] no subtests"
 webmessaging/message-channels/worker-post-after-close.any.js:
 - "[dedicatedworker] MessageChannel/MessagePort should not work after a worker self.close()"
 - "[dedicatedworker] [harness] TIMEOUT"

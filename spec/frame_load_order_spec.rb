@@ -80,10 +80,10 @@ RSpec.describe 'the load of a document with frames' do
     expect(session.evaluate_script('log')).to eq(%w[fload:/g fload:/h wload])
   end
 
-  # A navigation that supersedes a frame's initial one — `srcdoc` set as the page is parsed — owes its own `load`, which
-  # the superseded one's leaves owed. Chrome: "fload,fload,wload" — the initial about:blank document's `load` too, which
-  # this driver drops (a gap of its own).
-  it "waits for the load of a navigation that superseded the frame's initial one" do
+  # A frame its attributes navigate to about:blank fires its `load` as it is inserted (HTML "process the iframe
+  # attributes": at once, not on a task), and a navigation that follows — `srcdoc` set as the page is parsed — owes its
+  # own, which the page's waits for. Chrome: "fload,fload,wload".
+  it "fires a blank frame's load as it is inserted, and waits for the load of the navigation after it" do
     app = lambda {|_env|
       html.(<<~HTML)
         <body><script>var log = []; addEventListener('load', () => log.push('wload'));</script>
@@ -94,6 +94,32 @@ RSpec.describe 'the load of a document with frames' do
     session = simulated_session(app)
     session.visit '/'
     poll_until { session.evaluate_script('log').include?('wload') }
-    expect(session.evaluate_script('log')).to eq(%w[fload wload])
+    expect(session.evaluate_script('log')).to eq(%w[fload fload wload])
+  end
+
+  # …inside the call that inserted it, so a listener added after that call misses it. Chrome and Firefox:
+  # "before,load-in-append,after,micro,wload".
+  it "fires a blank frame's load inside the insertion" do
+    app = lambda {|_env|
+      html.(<<~HTML)
+        <body><script>
+          var log = [];
+          addEventListener('load', () => log.push('wload'));
+          const i = document.createElement('iframe');
+          i.onload = () => log.push('load-in-append');
+          log.push('before');
+          document.body.appendChild(i);
+          log.push('after');
+          const j = document.createElement('iframe');
+          document.body.appendChild(j);
+          j.onload = () => log.push('late-listener');
+          Promise.resolve().then(() => log.push('micro'));
+        </script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log').include?('wload') }
+    expect(session.evaluate_script('log')).to eq(%w[before load-in-append after micro wload])
   end
 end

@@ -2864,7 +2864,7 @@ RSpec.describe 'Canvas / ImageData / OffscreenCanvas' do
         const again = await createImageBitmap(bm);
         window.got = [bm.width, Array.from(ctx.getImageData(0, 0, 2, 1).data), again.width, structuredClone(bm).height];
       };
-      frame.src = '/';
+      frame.srcdoc = '<p>f';
     JS
     got = Timeout.timeout(5) { sleep 0.05 until (v = session.evaluate_script('window.got')); v }
     expect(got).to eq([2, [255, 0, 0, 255, 0, 255, 0, 255], 2, 1])

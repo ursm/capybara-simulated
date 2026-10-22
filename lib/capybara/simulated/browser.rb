@@ -1408,7 +1408,7 @@ module Capybara
           elsif @current_url != submit_baseline_url
             # Already navigated; nothing more to do.
           else
-            submit_form_handle(action['formHandle'], action['submitter'], action['entryList'])
+            submit_form_spec(action['spec'])
           end
         when 'download'
           save_download(action['url'].to_s, action['filename'].to_s)
@@ -1870,9 +1870,9 @@ module Capybara
       # is never taken and the form never actually navigates / POSTs.
       def consume_pending_form_submit
         pending = @runtime.call('__csimTakePendingFormSubmit')
-        return unless pending.is_a?(Hash) && pending['formHandle'].to_i.positive?
+        return unless pending.is_a?(Hash)
         # (…the main document's plan, which a frame's submission is routed past: its form submitted as that document's)
-        in_top_context { submit_form_handle(pending['formHandle'].to_i, pending['submitterHandle'], pending['entryList']) }
+        in_top_context { submit_form_spec(pending) }
       end
 
       # Pin the URL the page is at as a user action BEGINS — the FIRST line of
@@ -2108,7 +2108,7 @@ module Capybara
         return if form_handle.zero?
         # (…none its document's sandbox refuses: `form.submit()`'s steps, which this one's are)
         return if dom_call('__csimFormSubmissionRefused', form_handle)
-        submit_form_handle(form_handle, nil)
+        submit_form_spec(dom_call('__csimFormSerialize', form_handle, 0))
       end
 
       def title
@@ -3210,8 +3210,9 @@ module Capybara
       # is honoured); when absent (the Enter implicit-submit path) we build it from
       # the form's own controls.
       # …the current document's navigation, for what its response would download (`from_document`).
-      def submit_form_handle(form_handle, submitter_handle, entry_list = nil)
-        from_document(@current_realm_id.to_i) { submit_form_handle_in_document(form_handle, submitter_handle, entry_list) }
+      # A form's submission, its request as it was submitted (`__csimFormSerialize`): the navigation it makes.
+      def submit_form_spec(spec)
+        from_document(@current_realm_id.to_i) { submit_form_spec_in_document(spec) }
       end
       # A navigation the document of realm `realm` makes, run with it its source (`@download_source`): what a download its
       # response is may be saved by (`save_downloaded_response`).
@@ -3221,14 +3222,13 @@ module Capybara
       ensure
         @download_source = saved
       end
-      def submit_form_handle_in_document(form_handle, submitter_handle, entry_list)
+      def submit_form_spec_in_document(spec)
         invalidate_find_cache
-        spec = dom_call('__csimFormSerialize', form_handle, submitter_handle || 0)
         return unless spec.is_a?(Hash)
         action     = spec['action'].to_s
         action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
         action_url = parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s
-        request = form_request(spec, action_url, entry_list)
+        request = form_request(spec, action_url)
         return unless request
 
         method, url, body, content_type = request
@@ -3287,13 +3287,11 @@ module Capybara
 
       # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET — or
       # nil where it submits nothing (its action no URL), the engine's (text_codec.rs `form_request`): `spec` the form's
-      # (`__csimFormSerialize`), its action resolved as `action_url`, its entry list `entry_list` where the submission
-      # built one (the post-`formdata` one), else the spec's. Each entry string {'name','value'} or file
+      # (`__csimFormSerialize`), its action resolved as `action_url`. Each entry string {'name','value'} or file
       # {'name','file'=>true,'filename','type', and 'handle'/'index' or 'bytes'}: a file's bytes read — only where its
       # body carries them — through its `@file_picks` slot, else the VM's (an in-memory `new File([…])`).
-      def form_request(spec, action_url, entry_list)
-        entries = entry_list.is_a?(Array) ? entry_list : (spec['entries'] || [])
-        list = entries.map {|e|
+      def form_request(spec, action_url)
+        list = (spec['entries'] || []).map {|e|
           next [e['name'].to_s, e['value'].to_s] unless e['file']
 
           [e['name'].to_s, e['filename'].to_s, e['type'].to_s, entry_file_path(e), e['bytes']&.to_s&.b]
@@ -10439,10 +10437,10 @@ module Capybara
         @pending_frame_submit = nil
         realm_ids.each do |realm_id|
           next unless @runtime.frame_realm_alive?(realm_id)
-          sub = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
-          next unless sub.is_a?(Hash) && sub['formHandle']
+          spec = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
+          next unless spec.is_a?(Hash)
           invalidate_find_cache
-          submit_form_in_realm(realm_id, sub['formHandle'], sub['submitterHandle'], sub['entryList'])
+          submit_form_in_realm(realm_id, spec)
         rescue StandardError => e
           log_console('warn', "nested-context form submission failed: #{e.message}")
         end
@@ -10638,11 +10636,9 @@ module Capybara
       #     the frame from navigating it).
       # `_parent` / `_top` / `_blank` and a new window from a nested context aren't
       # modeled (no in-scope need) — logged rather than dropped.
-      def submit_form_in_realm(realm_id, form_handle, submitter_handle, entry_list = nil)
-        spec = @runtime.realm_call(realm_id, '__csimFormSerialize', form_handle, submitter_handle || 0)
-        return unless spec.is_a?(Hash)
+      def submit_form_in_realm(realm_id, spec)
         target  = spec['target'].to_s
-        request = form_request(spec, spec['action'].to_s, entry_list)
+        request = form_request(spec, spec['action'].to_s)
         return unless request
 
         method, url, body, content_type = request

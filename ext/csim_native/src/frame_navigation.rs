@@ -135,6 +135,7 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "frameBuildsEagerly", frame_builds_eagerly, context_id);
+    crate::dom::register(scope, ns, "frameNavigatesToBlank", frame_navigates_to_blank, context_id);
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameLoadsOwed", frame_loads_owed, context_id);
@@ -581,6 +582,48 @@ fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url]).into());
 }
 
+// The URL a container's navigation goes to, as its attributes give it: the one the navigation under way started with,
+// else its `src` — none where it has none.
+fn navigated_src(nav: Option<&FrameNavigation>, node: &crate::dom::NodeData) -> Option<String> {
+    match nav.and_then(|n| n.src.as_ref()) {
+        Some(started) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
+        None => node.plain_attr("src").map(str::to_owned),
+    }
+}
+
+// __dom.frameNavigatesToBlank(container) -> whether the container's attributes navigate it to about:blank (HTML "shared
+// attribute processing steps for iframe and frame elements": no `srcdoc`, and a `src` that is none, empty, failing to
+// parse against its node document's base, or a URL that matches about:blank) — on its initial insertion, the iframe
+// load event steps run at once, not on a task ("process the iframe attributes").
+fn frame_navigates_to_blank(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let doc = crate::node_handle::handle_of(scope, args.get(0))
+        // SAFETY: the handle lives while the object, an argument, does.
+        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
+        .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let nav = arena.frame_navigations.0.get(&container);
+    if nav.is_some_and(|n| n.contents[CONTENT_NAV].is_some()) {
+        return;
+    }
+    let Some(node) = arena.get(container) else { return };
+    if node.plain_attr("srcdoc").is_some() {
+        return;
+    }
+    let src = navigated_src(nav, node).unwrap_or_default();
+    if src.is_empty() {
+        return rv.set_bool(true);
+    }
+    let root = arena.root_of(container);
+    let Some(doc) = doc.or_else(|| arena.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return };
+    let blank = arena.parse_document_url(doc, &src).is_none_or(|url| {
+        url.protocol() == "about:" && url.pathname() == "blank" && url.username().is_empty() && url.password().is_empty() && url.host().is_empty()
+    });
+    rv.set_bool(blank);
+}
+
 // __dom.frameBuildsEagerly(container, allHostsLocal) -> whether a frame container's document is built as it connects,
 // not when its `contentWindow` is first read: one a navigation carries a response for, a `srcdoc` one, and one whose URL
 // — the one its navigation started with, else its `src` — is a document of its own to run: a data:, blob: or
@@ -609,11 +652,7 @@ fn frame_builds_eagerly(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     if node.plain_attr("srcdoc").is_some() {
         return rv.set_bool(true);
     }
-    let src = match nav.and_then(|n| n.src.as_ref()) {
-        Some(started) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
-        None => node.plain_attr("src").map(str::to_owned),
-    };
-    let Some(src) = src else { return };
+    let Some(src) = navigated_src(nav, node) else { return };
     let s = src.trim_matches(|c: char| c.is_whitespace() || c == '\u{FEFF}');
     let scheme = |prefix: &str| s.get(..prefix.len()).is_some_and(|p| p.eq_ignore_ascii_case(prefix));
     if scheme("data:") || scheme("blob:") || scheme("javascript:") {

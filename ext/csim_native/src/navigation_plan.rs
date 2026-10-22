@@ -1,7 +1,8 @@
 // What a realm's document planned for its navigable (HTML "plan to navigate"), which the host takes as the task — or the
 // user's action — ends: a navigation (a hyperlink followed, its target and opener, the referrer policy its `rel` sets,
 // a `blob:` one's bytes taken as it is planned for a new window, whose page may revoke the URL first), a form's
-// submission (its form, its submitter and the entry list its `formdata` event left), and a download. A navigation of
+// submission (its request as it was submitted: HTML "submit" builds it before it plans the navigation, so a page that
+// changes the form or moves it to another document after `submit()` changes nothing it sends), and a download. A navigation of
 // the top-level document supersedes the navigation or submission planned before it: the later is taken (Chrome navigates
 // to `/b` for `form.submit(); location.href = '/b'`, to the form's for the other order). A frame's are its container's
 // (frame_navigation.rs).
@@ -16,12 +17,8 @@ pub(crate) struct Navigation {
     blob: Option<v8::Global<v8::Value>>,
 }
 
-// (…its form and its submitter held as the page's objects are, as the page may drop them before the host takes it)
-pub(crate) struct Submission {
-    form: v8::Global<v8::Value>,
-    submitter: v8::Global<v8::Value>,
-    entries: Option<v8::Global<v8::Value>>,
-}
+// (…its request the bindings' record of it — action, method, enctype, target, rel, encoding and entries — held as made)
+pub(crate) struct Submission(v8::Global<v8::Value>);
 
 #[derive(Default)]
 pub(crate) struct NavigationPlan {
@@ -64,16 +61,14 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     plan(scope, &args).navigation = Some(Navigation { url, target, opener, referrer_policy, blob });
 }
 
-// __dom.planSubmission(form, submitter, entries): a form's submission planned — its submitter null for none, `entries`
-// the FormData its `formdata` event left, null for a submission that built none — after `supersedePlanned` where it
-// navigates the top-level document.
+// __dom.planSubmission(request): a form's submission planned, its request as the bindings made it as it was submitted
+// (form-fields.js `__csimFormSerialize`) — after `supersedePlanned` where it navigates the top-level document.
 fn plan_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if crate::node_handle::nid_of(scope, args.get(0)).is_none() {
+    if !args.get(0).is_object() {
         return;
     }
-    let (form, submitter) = (v8::Global::new(scope, args.get(0)), v8::Global::new(scope, args.get(1)));
-    let entries = (!args.get(2).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(2)));
-    plan(scope, &args).submission = Some(Submission { form, submitter, entries });
+    let request = v8::Global::new(scope, args.get(0));
+    plan(scope, &args).submission = Some(Submission(request));
 }
 
 // __dom.planDownload(url, filename): a hyperlink's download planned.
@@ -120,13 +115,11 @@ fn take_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Array::new_with_elements(scope, &[url.into(), target.into(), opener, policy.into(), blob]).into());
 }
 
-// __dom.takeSubmission() -> [form, submitter, entries] of the submission planned, which the realm plans no more, or null.
+// __dom.takeSubmission() -> the request of the submission planned, which the realm plans no more, or null.
 fn take_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
-    let Some(s) = plan(scope, &args).submission.take() else { return };
-    let (form, submitter) = (v8::Local::new(scope, s.form), v8::Local::new(scope, s.submitter));
-    let entries = s.entries.map_or_else(|| v8::null(scope).into(), |e| v8::Local::new(scope, e));
-    rv.set(v8::Array::new_with_elements(scope, &[form, submitter, entries]).into());
+    let Some(Submission(request)) = plan(scope, &args).submission.take() else { return };
+    rv.set(v8::Local::new(scope, request));
 }
 
 // __dom.takeDownload() -> [url, filename] of the download planned, which the realm plans no more, or null.
