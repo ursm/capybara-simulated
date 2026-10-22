@@ -3204,13 +3204,8 @@ module Capybara
 
       attr_reader :context_gen
 
-      # Pulls the serialised form-state out of JS, encodes it, and
-      # drives the Rack app via `navigate` (for GET) or a POST. `entry_list` is the
-      # list JS already constructed (post-`formdata`, so a handler's append/delete
-      # is honoured); when absent (the Enter implicit-submit path) we build it from
-      # the form's own controls.
-      # …the current document's navigation, for what its response would download (`from_document`).
-      # A form's submission, its request as it was submitted (`__csimFormSerialize`): the navigation it makes.
+      # A form's submission, its request as it was submitted (`__csimFormSerialize`): the navigation it makes — `navigate`
+      # for a GET, a POST else — the current document's, for what its response would download (`from_document`).
       def submit_form_spec(spec)
         from_document(@current_realm_id.to_i) { submit_form_spec_in_document(spec) }
       end
@@ -3225,8 +3220,8 @@ module Capybara
       def submit_form_spec_in_document(spec)
         invalidate_find_cache
         return unless spec.is_a?(Hash)
-        action     = spec['action'].to_s
-        action_url = action.empty? ? (current_browsing_context_url || @default_host) : resolve_against_current(action)
+        # (…its action resolved as it was submitted: the document's URL where it has none)
+        action_url = resolve_against_current(spec['action'].to_s)
         action_url = parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s
         request = form_request(spec, action_url)
         return unless request

@@ -74,4 +74,25 @@ RSpec.describe "a form submission's request" do
     expect(session).to have_current_path('/')
     expect(session.evaluate_script('i.contentDocument.body.textContent')).to eq('frame')
   end
+
+  # …and is its node document's to plan, whichever realm's code submits it: a form the page made and moved into a frame's
+  # document navigates the frame, not the page (Chrome).
+  it "navigates the navigable of the form's document" do
+    app = lambda {|env|
+      next html.("<body>#{env['PATH_INFO']}?#{env['QUERY_STRING']}") unless env['PATH_INFO'] == '/'
+
+      html.('<body><iframe id="i"></iframe>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      const g = document.createElement('form');
+      g.action = '/moved';
+      g.innerHTML = '<input name="q" value="pv">';
+      i.contentDocument.body.appendChild(g);
+      g.submit();
+    JS
+    poll_until { session.evaluate_script('i.contentDocument.body.textContent') == '/moved?q=pv' }
+    expect(session).to have_current_path('/')
+  end
 end

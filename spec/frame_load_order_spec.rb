@@ -122,4 +122,35 @@ RSpec.describe 'the load of a document with frames' do
     poll_until { session.evaluate_script('log').include?('wload') }
     expect(session.evaluate_script('log')).to eq(%w[before load-in-append after micro wload])
   end
+
+  # …and, parsed, before the parser goes on: its load sees none of what follows it, and a frame after it is still to be
+  # parsed. Chrome: "fl:false,after" and "f1,f2,after:true".
+  it "fires a parsed blank frame's load before what follows it is parsed" do
+    app = lambda {|_env|
+      html.(<<~HTML)
+        <body><script>var log = [];</script>
+        <iframe id="f1" onload="log.push('fl:' + !!document.getElementById('later')); document.getElementById('f2')?.remove()"></iframe>
+        <p id="later">x</p>
+        <iframe id="f2" onload="log.push('f2')"></iframe>
+        <script>log.push('after:' + !!document.getElementById('f2'));</script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    expect(session.evaluate_script('log')).to eq(['fl:false', 'f2', 'after:true'])
+  end
+
+  # A `document.write` from that load is no markup insertion a custom element constructor makes: it writes, the
+  # document opened for it (Chrome: "fl,wrote").
+  it "lets a parsed blank frame's load write to the document" do
+    app = lambda {|_env|
+      html.(<<~HTML)
+        <body><script>var log = [];</script>
+        <iframe onload="log.push('fl'); try { document.write('<p>w</p>'); log.push('wrote'); } catch (e) { log.push(e.name); }"></iframe>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    expect(session.evaluate_script('log')).to eq(%w[fl wrote])
+  end
 end

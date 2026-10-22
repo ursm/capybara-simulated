@@ -485,11 +485,13 @@ const CE_DEFINED: u32 = 1 << 1;
 const OBSERVED: u32 = 1 << 2;
 const IN_BROWSING_CONTEXT: u32 = 1 << 3;
 // What `htmlRunBuilt` answers for a build that PAUSED (`Pause`), the rest of its batch built once the bindings have
-// acted and ask for it: a custom element it constructed went in — they connect what it inserted — or a customizable
-// select's node went in or was popped — they run its selectedness and mirror it into its `<selectedcontent>`.
+// acted and ask for it: a custom element it constructed went in — they connect what it inserted — a customizable
+// select's node went in or was popped — they run its selectedness and mirror it into its `<selectedcontent>` — or a
+// frame container went in — they connect what it inserted, its load fired at once where it navigates to about:blank.
 const CUSTOM_ELEMENT_INSERTED: i32 = -2;
 const SELECT_NODE_INSERTED: i32 = -3;
 const SELECT_NODE_POPPED: i32 = -4;
+const FRAME_INSERTED: i32 = -5;
 
 // Whether a token's attributes hold `customelementregistry` (no namespace): the element's registry the null one, and no
 // constructor run for it.
@@ -594,6 +596,7 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         }
         let (status, stepped) = match paused {
             Some(Pause::CustomElement) => (CUSTOM_ELEMENT_INSERTED, None),
+            Some(Pause::Frame) => (FRAME_INSERTED, None),
             Some(Pause::Select(node, false)) => (SELECT_NODE_INSERTED, Some(node)),
             Some(Pause::Select(node, true)) => (SELECT_NODE_POPPED, Some(node)),
             None => (status, None),
@@ -755,12 +758,14 @@ pub(crate) struct Build<'s> {
 }
 
 // Where a live document's build pauses for the bindings: after a custom element it constructed went in — connected
-// before the next start tag's constructor runs — or at a customizable select's node (`select_node`), inserted or popped
+// before the next start tag's constructor runs — at a customizable select's node (`select_node`), inserted or popped
 // (`true`): the select's selectedness run and its `<selectedcontent>` made to mirror it as the parser goes, the steps
-// the bindings' (custom-elements.js).
+// the bindings' (custom-elements.js) — or after a frame container went in: its post-connection steps run before the
+// parser goes on, a load they fire at once (HTML "process the iframe attributes") seeing none of what follows it.
 enum Pause {
     CustomElement,
     Select(crate::dom::NodeId, bool),
+    Frame,
 }
 
 // Whether `node`, just inserted or `popped`, is a customizable select's node the bindings act on: a `<selectedcontent>`
@@ -1013,6 +1018,8 @@ impl<'s> Build<'s> {
                     self.paused = Some(Pause::CustomElement);
                 } else if live.browsing_context && select_node(arena, child, false) {
                     self.paused = Some(Pause::Select(child, false));
+                } else if live.browsing_context && arena.get(child).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame")) {
+                    self.paused = Some(Pause::Frame);
                 }
             }
         }
