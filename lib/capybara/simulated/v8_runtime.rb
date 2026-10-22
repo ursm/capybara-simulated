@@ -1599,6 +1599,16 @@ module Capybara
               if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
               indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
+            // …and a javascript: URL's source, run the same way (url-parse.js `runJavascriptURL`), its completion value
+            // returned — the fast path's; a top-level Script's run by the host hands none back, so a long, lexical or
+            // strict one's string result replaces no document.
+            globalThis.__csim_runScriptValue = function (label, body) {
+              if (body.length >= threshold || LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) {
+                runEval(label, body);
+                return undefined;
+              }
+              return indirectEval(body + '\\n//# sourceURL=' + label);
+            };
           })();
         JS
       end

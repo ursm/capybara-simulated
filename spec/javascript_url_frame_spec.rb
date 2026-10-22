@@ -6,7 +6,7 @@ require_relative 'support/poll_until'
 
 # A `javascript:` URL frame's script runs in the frame's initial about:blank document (HTML "evaluate a javascript:
 # URL"): its URL is about:blank, and its base URL its creator's, so a relative URL there resolves against the parent.
-RSpec.describe 'a javascript: URL frame' do
+RSpec.describe 'a javascript: URL' do
   include PollUntil
 
   it 'runs in an about:blank document of its creator’s base URL' do
@@ -43,5 +43,14 @@ RSpec.describe 'a javascript: URL frame' do
     s.visit '/dir/p.html'
     a = 'http://www.example.com/dir/a.html'
     expect(poll_until { (g = s.evaluate_script('window.got')).size == 2 && g }).to eq([[a, 'A'], [a, a, 'JS2']])
+  end
+
+  # …its source a classic script, as a `<script>`'s: a top-level `let` and `var` both the global's (Chrome: `number`
+  # for each, from a link of the top-level page).
+  it 'runs its source as a classic script, its declarations global' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><a id=a href="javascript:let lx = 1; var vx = 2; void 0">a</a>']] })
+    s.visit '/'
+    s.find('#a').click
+    expect(poll_until { (t = s.evaluate_script('[typeof lx, typeof vx]')) == %w[number number] && t }).to eq(%w[number number])
   end
 end
