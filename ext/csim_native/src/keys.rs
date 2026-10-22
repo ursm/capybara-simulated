@@ -166,6 +166,33 @@ pub(crate) fn modifier(name: &[u16]) -> Option<(&'static str, &'static str, u32)
     MODIFIERS.iter().find(|m| m.0 == name).map(|&(_, key, code, key_code)| (key, code, key_code))
 }
 
+// A chord's parts (`[:control, :shift, 'a']`), read as a keyboard presses them: the modifiers before its key — every
+// part a modifier names up to the last that names none, a name that is neither dropped — held while it is pressed,
+// their bits (`CTRL` …) and keys in the order pressed; and its key, None where every part is a modifier
+// (`[:control]`). A key of more than one character that names no key is a text, typed a character at a time with the
+// modifiers held (`unfold`: `[:shift, 'side']` is S, I, D, E).
+pub(crate) struct Chord {
+    pub(crate) modifiers: u32,
+    pub(crate) keys: Vec<(&'static str, &'static str, u32)>,
+    pub(crate) key: Vec<u16>,
+    pub(crate) unfold: bool,
+}
+pub(crate) fn chord(parts: &[Vec<u16>]) -> Chord {
+    let last = parts.iter().rposition(|p| modifier(p).is_none());
+    let keys: Vec<_> = parts[..last.unwrap_or(parts.len())].iter().filter_map(|p| modifier(p)).collect();
+    let modifiers = keys.iter().fold(0, |bits, &(key, ..)| {
+        bits | match key {
+            "Control" => CTRL,
+            "Meta" => META,
+            "Alt" => ALT,
+            _ => SHIFT,
+        }
+    });
+    let key = last.map_or_else(Vec::new, |i| parts[i].clone());
+    let unfold = key.len() > 1 && !resolve(&key, false).named;
+    Chord { modifiers, keys, key, unfold }
+}
+
 // What pressing a key on an element does besides its events, each where its events are not canceled (`plan`): the
 // element's facts the rest is decided by, and the default actions that apply.
 // (…the element a text can be typed into: an editing host's, or an `<input>` / `<textarea>` with no `readonly` or
@@ -359,7 +386,7 @@ fn is_units(units: &[u16], ascii: &str) -> bool {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "resolveKey", resolve_op, context_id);
-    crate::dom::register(scope, ns, "modifierKey", modifier_op, context_id);
+    crate::dom::register(scope, ns, "keyChord", chord_op, context_id);
     crate::dom::register(scope, ns, "keyPlan", plan_op, context_id);
     crate::dom::register(scope, ns, "keyEdit", edit_op, context_id);
     crate::dom::register(scope, ns, "keyMotion", motion_op, context_id);
@@ -426,12 +453,26 @@ fn resolve_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.modifierKey(name) -> [key, code, keyCode] of the modifier `name` names, null for none (`modifier`).
-fn modifier_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = crate::dom::utf16_arg(scope, args.get(0));
-    let Some((key, code, key_code)) = modifier(&name) else { return rv.set_null() };
-    let items: [v8::Local<v8::Value>; 3] =
-        [v8::String::new(scope, key).unwrap().into(), v8::String::new(scope, code).unwrap().into(), v8::Integer::new_from_unsigned(scope, key_code).into()];
+// __dom.keyChord(parts) -> [modifiers, [key, code, keyCode, …] of each modifier pressed, key, unfold] (`chord`).
+fn chord_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let parts: Vec<Vec<u16>> = match v8::Local::<v8::Array>::try_from(args.get(0)) {
+        Ok(a) => (0..a.length()).map(|i| a.get_index(scope, i).map_or_else(Vec::new, |v| crate::dom::utf16_arg(scope, v))).collect(),
+        Err(_) => Vec::new(),
+    };
+    let c = chord(&parts);
+    let keys: Vec<v8::Local<v8::Value>> = c
+        .keys
+        .iter()
+        .flat_map(|&(key, code, key_code)| {
+            [v8::String::new(scope, key).unwrap().into(), v8::String::new(scope, code).unwrap().into(), v8::Integer::new_from_unsigned(scope, key_code).into()]
+        })
+        .collect();
+    let items: [v8::Local<v8::Value>; 4] = [
+        v8::Integer::new_from_unsigned(scope, c.modifiers).into(),
+        v8::Array::new_with_elements(scope, &keys).into(),
+        crate::dom::utf16_value(scope, &c.key),
+        v8::Boolean::new(scope, c.unfold).into(),
+    ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
@@ -442,6 +483,23 @@ mod tests {
     fn key(s: &str) -> (String, String, u32, Option<String>, Option<&'static str>) {
         let k = resolve(&units(s), false);
         (String::from_utf16_lossy(&k.key), String::from_utf16_lossy(&k.code), k.key_code, k.char.map(|c| String::from_utf16_lossy(&c)), k.input_type)
+    }
+
+    #[test]
+    fn a_chord_holds_its_modifiers_while_its_key_is_pressed() {
+        let parts = |ps: &[&str]| ps.iter().map(|p| units(p)).collect::<Vec<_>>();
+        let c = chord(&parts(&["control", "SHIFT", "a"]));
+        assert_eq!(c.modifiers, CTRL | SHIFT);
+        assert_eq!(c.keys, [("Control", "ControlLeft", 17), ("Shift", "ShiftLeft", 16)]);
+        assert_eq!((String::from_utf16_lossy(&c.key), c.unfold), ("a".into(), false));
+        // (…every part a modifier: the chord's key none, its modifiers pressed and released alone)
+        let c = chord(&parts(&["cmd", "alt"]));
+        assert_eq!((c.modifiers, c.keys.len(), c.key.len()), (META | ALT, 2, 0));
+        // (…a modifier after the key held for none, and a name before it that is none dropped)
+        let c = chord(&parts(&["bogus", "shift", "side", "ctrl"]));
+        assert_eq!((c.modifiers, String::from_utf16_lossy(&c.key), c.unfold), (SHIFT, "side".into(), true));
+        // (…a key's name is no text to unfold)
+        assert!(!chord(&parts(&["control", "enter"])).unfold);
     }
 
     #[test]
