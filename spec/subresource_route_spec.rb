@@ -73,4 +73,29 @@ RSpec.describe 'a subresource request route' do
     JS
     expect(poll_until { s.evaluate_script('window.got') }).to eq('b')
   end
+
+  # …and a declarative shadow root's adopted style sheet is fetched as every sheet is: one served as no CSS under
+  # `nosniff` gives no rules, a blob:'s applies.
+  it 'fetches an adopted style sheet as every style sheet' do
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/plain.css' then [200, {'content-type' => 'text/plain', 'x-content-type-options' => 'nosniff'}, ['p { color: rgb(1, 1, 1) }']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const blob = URL.createObjectURL(new Blob(['p { color: rgb(2, 2, 2) }'], { type: 'text/css' }));
+        const color = (href) => {
+          const wrap = document.body.appendChild(document.createElement('div'));
+          wrap.setHTMLUnsafe(`<div><template shadowrootmode=open shadowrootadoptedstylesheets="${href}"><p>x</p></template></div>`);
+          return getComputedStyle(wrap.firstChild.shadowRoot.querySelector('p')).color;
+        };
+        return [color('/plain.css'), color(blob)];
+      })()
+    JS
+    expect(got).to eq(['rgb(0, 0, 0)', 'rgb(2, 2, 2)'])
+  end
 end
