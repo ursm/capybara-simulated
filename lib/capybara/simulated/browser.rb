@@ -10197,6 +10197,7 @@ module Capybara
         policy = '' if frame_document_origin_opaque?(initiator_realm)
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
+        supersede_frame_navigation(realm_id)
         (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s], frame_sandbox_now(realm_id), initiator_realm]
       end
       # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
@@ -10310,7 +10311,16 @@ module Capybara
       # realm id so two frames reloading in one turn both apply.
       def frame_reload_self(realm_id)
         return if realm_id.nil? || realm_id.zero?
+        supersede_frame_navigation(realm_id)
         (@pending_frame_reload ||= []) << realm_id
+      end
+      # A frame's navigation planned — to a URL, a reload, a form's submission — replaces the one it had planned before
+      # (HTML "navigate": a later navigation of a navigable aborts its ongoing one): `href = …` and then `reload()` in one
+      # task reloads the document it is at (Chrome, measured: the reload's document, not the href's).
+      private def supersede_frame_navigation(realm_id)
+        @pending_frame_nav&.delete(realm_id)
+        @pending_frame_reload&.delete(realm_id)
+        @pending_frame_submit&.delete(realm_id)
       end
       def consume_pending_frame_reload
         return if @pending_frame_reload.nil? || @pending_frame_reload.empty?
@@ -10358,6 +10368,7 @@ module Capybara
       # form's `submit()` is still on the V8 stack.
       def frame_submit_self(realm_id)
         return if realm_id.nil? || realm_id.zero?
+        supersede_frame_navigation(realm_id)
         (@pending_frame_submit ||= []) << realm_id
       end
       def consume_pending_frame_submit

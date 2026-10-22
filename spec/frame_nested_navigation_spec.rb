@@ -43,4 +43,26 @@ RSpec.describe 'a nested document navigating itself' do
     sleep 0.2
     expect(poll_until { s.evaluate_script('document.getElementById("f").contentDocument.URL') }).to eq('about:blank')
   end
+
+  # A frame's later navigation replaces the one it planned before (HTML "navigate"): `href = …` then `reload()` in one
+  # task reloads the document the frame is at, and `reload()` then `href = …` goes to the URL (Chrome, measured: A, then
+  # B, for the same two orders).
+  it 'lets a later navigation of a frame replace the one it planned before' do
+    hits = []
+    pages = {'/' => '<!DOCTYPE html><meta charset="utf-8"><iframe id=f src="/a"></iframe>'}
+    s = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO']) { "<!DOCTYPE html><meta charset=\"utf-8\"><p>#{env['PATH_INFO']}" }]]
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script('f.contentDocument?.body?.textContent') == '/a' }
+    hits.clear
+    s.execute_script("const w = f.contentWindow; w.location.href = '/b'; w.location.reload();")
+    poll_until { hits.include?('/a') }
+    expect([hits, s.evaluate_script('f.contentDocument.body.textContent')]).to eq([['/a'], '/a'])
+    hits.clear
+    s.execute_script("const w = f.contentWindow; w.location.reload(); w.location.href = '/c';")
+    poll_until { s.evaluate_script('f.contentDocument.body.textContent') == '/c' }
+    expect(hits).to eq(['/c'])
+  end
 end
