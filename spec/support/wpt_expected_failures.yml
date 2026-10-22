@@ -1820,8 +1820,6 @@ css/css-transitions/animations/animate-with-color-mix.html:
 - Transition from srgb to color-mix
 css/css-transitions/animations/transition-timing-function.html:
 - Ensure that transition easing functions are properly applied.
-css/css-transitions/before-load-001.html:
-- 'CSS Transitions Test: Transitioning before load event'
 css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is re-parented
 - Transitions are canceled when an element is re-parented to the same node

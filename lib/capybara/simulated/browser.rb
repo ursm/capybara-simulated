@@ -3554,7 +3554,7 @@ module Capybara
       def dispose
         # (…its blob URL registry first, process-global as the transfers are — blob_registry.rs — so a teardown step
         # that raises leaves no entry another window of the session would find)
-        Native.blob_registry_clear(@blob_window)
+        Native.blob_window_dispose(@blob_window)
         # An aux window's background app requests are the same boundary hazard
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
         # reset, so without this they'd cross into the next test untouched).
@@ -7535,9 +7535,10 @@ module Capybara
         # settle loop stays alive on `image_loads_pending?` (with a brief GVL-yielding park when
         # images are the only pending work) and the tick gates re-check every poll, so this is a
         # short deferral, never a stall. Matches a real browser: window `load` fires after every
-        # <img> settles.
+        # <img> settles — one its server delayed too, which the realm holds on a page timer until
+        # its virtual arrival (the timer keeps the settle loop going meanwhile).
         deliver_image_loads
-        return false if image_loads_pending?
+        return false if image_loads_pending? || (@runtime.call('__csimImagesDelayingLoad') rescue false)
 
         @window_load_due = false
         # An AUXILIARY window's first load is its opener's to fire — ONE-SHOT, because

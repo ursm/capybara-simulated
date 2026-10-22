@@ -47,6 +47,11 @@ pub(crate) fn window_new(session: u64) -> u64 {
 pub(crate) fn clear(window: u64) {
     lock().remove(&window);
 }
+// …and the window itself, disposed: its entries and the session it was of.
+pub(crate) fn window_dispose(window: u64) {
+    clear(window);
+    SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).remove(&window);
+}
 // …the URL `url` named whole — its fragment and all (`revoked_key`'s, as the bindings key a revoke) — no more.
 pub(crate) fn delete(window: u64, url: magnus::RString) {
     let url = url_text(url);

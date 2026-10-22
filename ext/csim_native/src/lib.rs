@@ -240,6 +240,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // (…and a window's blob URL registry, which its contexts enter and resolve their URLs in: blob_registry.rs)
     native.define_module_function("blob_window_new", magnus::function!(blob_registry::window_new, 1))?;
     native.define_module_function("blob_registry_clear", magnus::function!(blob_registry::clear, 1))?;
+    native.define_module_function("blob_window_dispose", magnus::function!(blob_registry::window_dispose, 1))?;
     native.define_module_function("blob_registry_delete", magnus::function!(blob_registry::delete, 2))?;
     native.define_module_function("blob_registry_revoke_owner", magnus::function!(blob_registry::revoke_owner, 2))?;
     native.define_module_function("blob_registry_copy", magnus::function!(blob_registry::copy, 4))?;
