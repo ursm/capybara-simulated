@@ -10318,12 +10318,13 @@ module Capybara
       # A frame's navigation planned — to a URL, a reload, a form's submission — replaces the one it had planned before
       # (HTML "navigate": a later navigation of a navigable aborts its ongoing one): `href = …` and then `reload()` in one
       # task reloads the document it is at (Chrome, measured: the reload's document, not the href's).
-      # (…a form's submission its realm's plan as well, taken there and dropped: a navigation that leaves the realm in place
-      # — one that ends as a download — must not leave it to a later drain)
-      private def supersede_frame_navigation(realm_id)
+      # (…a form's submission its realm's plan as well, taken there and dropped, where another kind of navigation replaces
+      # it: one that leaves the realm in place — one that ends as a download — must not leave it to a later drain. A later
+      # submission replaced the plan itself, in the realm, before its slot is asked for: `submitted`.)
+      private def supersede_frame_navigation(realm_id, submitted: false)
         @pending_frame_nav&.delete(realm_id)
         @pending_frame_reload&.delete(realm_id)
-        return unless @pending_frame_submit&.delete(realm_id)
+        return unless @pending_frame_submit&.delete(realm_id) && !submitted
 
         @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit') if @runtime.frame_realm_alive?(realm_id)
       rescue StandardError
@@ -10375,7 +10376,7 @@ module Capybara
       # form's `submit()` is still on the V8 stack.
       def frame_submit_self(realm_id)
         return if realm_id.nil? || realm_id.zero?
-        supersede_frame_navigation(realm_id)
+        supersede_frame_navigation(realm_id, submitted: true)
         (@pending_frame_submit ||= []) << realm_id
       end
       def consume_pending_frame_submit

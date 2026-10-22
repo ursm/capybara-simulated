@@ -65,4 +65,23 @@ RSpec.describe 'a nested document navigating itself' do
     poll_until { s.evaluate_script('f.contentDocument.body.textContent') == '/c' }
     expect(hits).to eq(['/c'])
   end
+
+  # …and a frame's form submitted twice in one task submits what the later submission planned.
+  it 'submits the later of two submissions a frame makes in one task' do
+    hits = []
+    pages = {
+      '/'  => '<!DOCTYPE html><meta charset="utf-8"><iframe id=f src="/a"></iframe>',
+      '/a' => '<!DOCTYPE html><meta charset="utf-8"><form id=fm action="/fs"><input name=q value=1></form>'
+    }
+    s = simulated_session(lambda {|env|
+      hits << env['PATH_INFO'] + (env['QUERY_STRING'].empty? ? '' : "?#{env['QUERY_STRING']}")
+      [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '<!DOCTYPE html><meta charset="utf-8"><p>done')]]
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script('f.contentDocument?.getElementById("fm") != null') }
+    hits.clear
+    s.execute_script("const d = f.contentDocument; d.getElementById('fm').submit(); d.querySelector('[name=q]').value = '2'; d.getElementById('fm').submit();")
+    poll_until { hits.any? }
+    expect(hits).to eq(['/fs?q=2'])
+  end
 end
