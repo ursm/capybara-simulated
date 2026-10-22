@@ -52,6 +52,19 @@ impl Pixels {
     }
 }
 
+// An image's fetch the host makes on a thread of its own (dom-nodes.js `_finishImageLoadFromNetwork`): the realm that
+// began it — whose document's load it delays, and which takes its result, wherever the element went meanwhile — the
+// element — held, as an element whose image is being fetched is kept from being collected — the load it is for, its URL
+// and when it began — what its Resource Timing entry reports — until the host hands the result back (`imageFetchTake`).
+pub(crate) struct HostFetch {
+    realm: i32,
+    node: NodeId,
+    element: v8::Global<v8::Value>,
+    load: u32,
+    src: String,
+    start: f64,
+}
+
 // What a load's result is.
 const RESULT_BROKEN: u32 = 0;
 const RESULT_IMAGE: u32 = 1;
@@ -78,6 +91,25 @@ impl RealmArena {
     pub(crate) fn image_density(&self, id: NodeId) -> f64 {
         self.image(id).map(|r| r.density).filter(|&d| d > 0.0 && d.is_finite()).unwrap_or(1.0)
     }
+    // …realm `realm`'s fetches and held-back results forgotten with its nodes: a node id a later page reuses is no image
+    // of theirs, and its realm's document delays nothing any more.
+    pub(crate) fn forget_image_fetches_of(&mut self, realm: i32) {
+        self.image_fetches.retain(|_, f| f.realm != realm);
+        self.image_arrivals.retain(|a| a.0 != realm);
+    }
+    // Whether load `load` is `id`'s current one (no later one superseded — aborted — it).
+    fn image_load_current(&self, id: NodeId, load: u32) -> bool {
+        self.image(id).is_some_and(|r| r.load == load)
+    }
+    // Whether realm `realm`'s images delay its document's load event (HTML: an image's fetch in progress does): a
+    // current load the host is fetching — or, `arrivals_only`, none of those, the host counting them itself — or whose
+    // result its server's delay holds back. A load a later one superseded delays nothing: aborted, it is in progress no
+    // more.
+    fn images_delay_load(&self, realm: i32, arrivals_only: bool) -> bool {
+        let current = |node: NodeId, load: u32| self.get(node).is_some() && self.image_load_current(node, load);
+        (!arrivals_only && self.image_fetches.values().any(|f| f.realm == realm && current(f.node, f.load)))
+            || self.image_arrivals.iter().any(|&(r, node, load)| r == realm && current(node, load))
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -89,6 +121,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageUrl", url, context_id);
     crate::dom::register(scope, ns, "imageLoad", current_load, context_id);
     crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
+    crate::dom::register(scope, ns, "imageFetchBegin", fetch_begin, context_id);
+    crate::dom::register(scope, ns, "imageFetchTake", fetch_take, context_id);
+    crate::dom::register(scope, ns, "imageArrival", arrival, context_id);
+    crate::dom::register(scope, ns, "imagesDelayLoad", delay_load, context_id);
 }
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
@@ -214,4 +250,64 @@ fn url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>
 fn current_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(0) };
     rv.set_uint32(crate::dom::dom(scope).arena.image(id).map_or(0, |r| r.load));
+}
+
+// __dom.imageFetchBegin(img, id, load, src, start) — the host fetches load `load` of `img`'s on a thread of its own, as
+// request `id`, `src` begun at `start` (`HostFetch`).
+fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(node) = element(scope, args.get(0)) else { return };
+    let id = args.get(1).uint32_value(scope).unwrap_or(0);
+    let load = args.get(2).uint32_value(scope).unwrap_or(0);
+    let src = args.get(3).to_rust_string_lossy(scope);
+    let start = args.get(4).number_value(scope).unwrap_or(0.0);
+    let realm = crate::dom::realm_id(scope, &args);
+    let element = v8::Global::new(scope, args.get(0));
+    crate::dom::dom(scope).arena.image_fetches.insert(id, HostFetch { realm, node, element, load, src, start });
+}
+// __dom.imageFetchTake(id) -> [img, load, src, start] of the host's request `id`, which it hands back — null where it is
+// no request the calling realm began (the host offers it to each realm in turn), or one whose element is gone.
+fn fetch_take(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(f) = arena.image_fetches.get(&id) else { return rv.set_null() };
+    if arena.get(f.node).is_none() {
+        arena.image_fetches.remove(&id);
+        return rv.set_null();
+    }
+    if f.realm != cid {
+        return rv.set_null();
+    }
+    let HostFetch { element, load, src, start, .. } = arena.image_fetches.remove(&id).expect("a fetch found above");
+    let items: [v8::Local<v8::Value>; 4] = [
+        v8::Local::new(scope, &element),
+        v8::Integer::new_from_unsigned(scope, load).into(),
+        v8::String::new(scope, &src).map_or_else(|| v8::undefined(scope).into(), Into::into),
+        v8::Number::new(scope, start).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.imageArrival(img, load, on) — load `load`'s result, which the calling realm took, is held back by its server's
+// delay (`on`), or arrived.
+fn arrival(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(node) = element(scope, args.get(0)) else { return };
+    let load = args.get(1).uint32_value(scope).unwrap_or(0);
+    let on = args.get(2).is_true();
+    let realm = crate::dom::realm_id(scope, &args);
+    let arena = &mut crate::dom::dom(scope).arena;
+    if on {
+        // (…and those of elements gone with their realm dropped: none delays anything any more)
+        let mut arrivals = std::mem::take(&mut arena.image_arrivals);
+        arrivals.retain(|&(_, n, _)| arena.get(n).is_some());
+        arrivals.push((realm, node, load));
+        arena.image_arrivals = arrivals;
+    } else if let Some(i) = arena.image_arrivals.iter().position(|&a| a == (realm, node, load)) {
+        arena.image_arrivals.remove(i);
+    }
+}
+// __dom.imagesDelayLoad(arrivalsOnly) -> whether the calling realm's images delay its document's load (`images_delay_load`).
+fn delay_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let arrivals_only = args.get(0).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.images_delay_load(cid, arrivals_only));
 }

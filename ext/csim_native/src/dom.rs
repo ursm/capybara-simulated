@@ -906,6 +906,10 @@ pub(crate) struct RealmArena {
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
     // Each image element's current request, from its first load (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
+    // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
+    // result back (image_requests.rs `HostFetch`), and the results whose server delay is yet to run out.
+    pub(crate) image_fetches: std::collections::HashMap<u32, crate::image_requests::HostFetch>,
+    pub(crate) image_arrivals: Vec<(i32, NodeId, u32)>,
     // The video elements' decoded frames (media.rs `mediaFrame`): each one's first, which a canvas draws — none until a
     // video decodes, and none again once a load fails.
     pub(crate) video_frames: std::collections::HashMap<NodeId, crate::image_requests::Pixels>,
@@ -1225,6 +1229,7 @@ impl RealmArena {
         self.state = RealmState { faces, sheets, state_epoch: state_epoch + 1, ..RealmState::default() };
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
+        self.forget_image_fetches_of(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
@@ -1295,6 +1300,7 @@ impl RealmArena {
         }
         self.observers.drop_realm(cid);
         self.free_realm_nodes(cid);
+        self.forget_image_fetches_of(cid);
         self.forget_navigables_of(cid, true);
         self.forget_freed_scroll_events();
         self.forget_freed_frame_navigations();
