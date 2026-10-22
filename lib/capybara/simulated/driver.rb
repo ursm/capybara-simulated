@@ -587,12 +587,6 @@ module Capybara
         )
       end
 
-      # The storage-partition site a blob: URL was created in (its creator's top-level
-      # site), or nil for an unknown / revoked / unpartitioned URL — the window registries'
-      # (blob_registry.rs `partition`), its fragment aside, as a fetch of it resolves.
-      def blob_partition_site_of(url)
-        Native.blob_registry_partition(url.to_s)&.last
-      end
 
       # The Browser whose window's registry is number `window` — the window a blob URL's
       # maker is in — among the open, the primary and the parked ones.
@@ -603,8 +597,10 @@ module Capybara
       # Is this blob: URL in a different storage partition than `accessor`'s top-level
       # site? Unknown blobs (no entry) are treated as same-partition (no extra gating
       # beyond the existing same-origin behaviour).
+      # (…the storage-partition site the URL was created in — its creator's top-level site, in a window of the
+      # accessor's session: blob_registry.rs `partition`, its fragment aside, as a fetch of it resolves)
       def cross_partition_blob?(url, accessor)
-        site = blob_partition_site_of(url)
+        site = Native.blob_registry_partition(accessor.blob_window, url.to_s)&.last
         !site.nil? && site != accessor.blob_partition_site
       end
 
@@ -617,7 +613,7 @@ module Capybara
       # URL is in.) Falls back to the accessor's own store for an unpartitioned URL
       # (worker / legacy path).
       def blob_bytes_for(url, accessor)
-        maker = Native.blob_registry_partition(url.to_s)&.first
+        maker = Native.blob_registry_partition(accessor.blob_window, url.to_s)&.first
         creator = (maker && browser_of_blob_window(maker)) || accessor
         creator.respond_to?(:read_blob_for_window) ? creator.read_blob_for_window(url) : nil
       end

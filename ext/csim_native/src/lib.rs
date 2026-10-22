@@ -238,7 +238,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("data_url", magnus::function!(data_url::process_for_ruby, 1))?;
     native.define_module_function("blob_url_key", magnus::function!(blob_urls::entry_key_for_ruby, 1))?;
     // (…and a window's blob URL registry, which its contexts enter and resolve their URLs in: blob_registry.rs)
-    native.define_module_function("blob_window_new", magnus::function!(blob_registry::window_new, 0))?;
+    native.define_module_function("blob_window_new", magnus::function!(blob_registry::window_new, 1))?;
     native.define_module_function("blob_registry_clear", magnus::function!(blob_registry::clear, 1))?;
     native.define_module_function("blob_registry_delete", magnus::function!(blob_registry::delete, 2))?;
     native.define_module_function("blob_registry_revoke_owner", magnus::function!(blob_registry::revoke_owner, 2))?;
@@ -246,8 +246,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("blob_registry_forget_copies", magnus::function!(blob_registry::forget_copies, 1))?;
     native.define_module_function("blob_registry_get", magnus::function!(blob_registry::get_for_ruby, 2))?;
     native.define_module_function("blob_registry_set_site", magnus::function!(blob_registry::set_site, 3))?;
-    native.define_module_function("blob_registry_partition", magnus::function!(blob_registry::partition, 1))?;
-    native.define_module_function("blob_registry_revoke_partitioned", magnus::function!(blob_registry::revoke_partitioned, 2))?;
+    native.define_module_function("blob_registry_partition", magnus::function!(blob_registry::partition, 2))?;
     // The display a window starts out filling (viewport.rs `SCREEN`), the page's `screen` too.
     native.define_module_function("screen_size", magnus::function!(viewport::screen_size_for_ruby, 0))?;
     // The user agent string every request sends and the page's navigator reads (navigator.rs `USER_AGENT`).

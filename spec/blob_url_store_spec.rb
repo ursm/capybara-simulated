@@ -205,4 +205,17 @@ RSpec.describe 'the blob URL store' do
     JS
     expect(poll_until { s.evaluate_script('window.got') }).to eq(%w[failed failed])
   end
+
+  # Two Capybara sessions are two browsers: a page of one revoking a blob URL a page of the other made — the same origin,
+  # the same site — revokes nothing there.
+  it 'lets no other session revoke a blob URL' do
+    app = ->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] }
+    one, two = simulated_session(app), simulated_session(app)
+    one.visit '/'
+    two.visit '/'
+    url = one.evaluate_script("URL.createObjectURL(new Blob(['ONE']))")
+    two.execute_script("URL.revokeObjectURL(#{url.to_json})")
+    one.execute_script("window.got = null; fetch(#{url.to_json}).then((r) => r.text()).then((t) => { window.got = t; }, () => { window.got = 'failed'; });")
+    expect(poll_until { one.evaluate_script('window.got') }).to eq('ONE')
+  end
 end

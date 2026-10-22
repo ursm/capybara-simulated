@@ -4,7 +4,7 @@
 // none where no other context could resolve it yet, the entry then only the marker a revoke anywhere clears, its bytes
 // filled in as one comes to (a worker made: `markers` / `fill`) — its type, and the context that made it (a worker's
 // `w:<handle>`, a realm's `r:<id>`), which revokes it as it goes, and its storage partition — its maker's top-level
-// site, from which alone another window resolves or revokes it (`partition`, `revoke_partitioned`); or a copy of a blob:
+// site, from which alone another window of its session resolves or revokes it (`partition`); or a copy of a blob:
 // document's, which the window's next page lets go of. The isolate's own store (blob_urls.rs) holds the blob.
 
 use std::collections::HashMap;
@@ -23,17 +23,25 @@ struct Entry {
     site: Option<String>,
 }
 
+// (…each window's entries, and the session — the Capybara session's storage partition — it belongs to: another
+// window's URL is resolved or revoked across that session's windows alone, never another session's)
 type Windows = HashMap<u64, HashMap<String, Entry>>;
 static REGISTRY: LazyLock<Mutex<Windows>> = LazyLock::new(Default::default);
+static SESSIONS: LazyLock<Mutex<HashMap<u64, u64>>> = LazyLock::new(Default::default);
+fn session_of(window: u64) -> Option<u64> {
+    SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).get(&window).copied()
+}
 
 fn lock() -> MutexGuard<'static, Windows> {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-// A new window's registry, the process's, never one a window before had.
-pub(crate) fn window_new() -> u64 {
+// A new window's registry, the process's, never one a window before had — of the session `session`.
+pub(crate) fn window_new(session: u64) -> u64 {
     static LAST: AtomicU64 = AtomicU64::new(0);
-    LAST.fetch_add(1, Ordering::Relaxed) + 1
+    let window = LAST.fetch_add(1, Ordering::Relaxed) + 1;
+    SESSIONS.lock().unwrap_or_else(|e| e.into_inner()).insert(window, session);
+    window
 }
 // …its every entry gone (the window reset or disposed).
 pub(crate) fn clear(window: u64) {
@@ -87,27 +95,14 @@ pub(crate) fn set_site(window: u64, url: magnus::RString, site: magnus::RString)
         entry.site = Some(site);
     }
 }
-// …the window whose context made the URL `url` resolves to (`entry_key`: its fragment aside) and its storage partition,
-// whichever window that is — or nil for none (revoked, never made, or a copy alone).
-pub(crate) fn partition(url: magnus::RString) -> Option<(u64, String)> {
-    let url = entry_key(&url_text(url));
-    lock().iter().find_map(|(&window, entries)| entries.get(&url).and_then(|e| e.site.clone()).map(|site| (window, site)))
+// …the window of window `asker`'s session whose context made the URL `url` resolves to (`entry_key`: its fragment aside)
+// and its storage partition — or nil for none (revoked, never made, a copy alone, or another session's).
+pub(crate) fn partition(asker: u64, url: magnus::RString) -> Option<(u64, String)> {
+    let (url, session) = (entry_key(&url_text(url)), session_of(asker));
+    lock().iter().filter(|(w, _)| session_of(**w) == session).find_map(|(&window, entries)| {
+        entries.get(&url).and_then(|e| e.site.clone()).map(|site| (window, site))
+    })
 }
-// …`url` (named whole, as a revoke names it) revoked from a context whose top-level site is `site`: refused where
-// another partition's context made it — nil (cross-partition.https: "shouldn't be revocable from a cross-partition
-// iframe/worker") — else its entry gone from the window whose context made it, which it answers, its own isolate's copy
-// that window's to drop; 0 where no window's context made it.
-pub(crate) fn revoke_partitioned(url: magnus::RString, site: magnus::RString) -> Option<u64> {
-    let (url, site) = (url_text(url), url_text(site));
-    let mut reg = lock();
-    let Some((&window, entries)) = reg.iter_mut().find(|(_, e)| e.get(&url).is_some_and(|e| e.site.is_some())) else { return Some(0) };
-    if entries.get(&url).and_then(|e| e.site.as_deref()) != Some(site.as_str()) {
-        return None;
-    }
-    entries.remove(&url);
-    Some(window)
-}
-
 fn url_text(s: magnus::RString) -> String {
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
     String::from_utf8_lossy(unsafe { s.as_slice() }).into_owned()

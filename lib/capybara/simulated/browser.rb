@@ -558,7 +558,7 @@ module Capybara
         # This window's blob URL registry, the engine's (blob_registry.rs): what the blob URLs its contexts — its realms,
         # its workers' isolates, which see none of the page isolate's store (blob_urls.rs) — made resolve to, each
         # revoked as the context that made it goes; and the copies of a blob: document's booted here.
-        @blob_window = Native.blob_window_new
+        @blob_window = Native.blob_window_new(@session_partition)
         # Postmessage transferable-buffer store. Large Uint8Array /
         # ArrayBuffer payloads cross isolates as a Ruby-side byte ID
         # rather than a JSON base64 string, so peak JS heap stays flat.
@@ -3552,6 +3552,9 @@ module Capybara
       # stores this window issued (the transfer registry is process-wide). Runs
       # while the runtime is still alive so the transferDrop call lands.
       def dispose
+        # (…its blob URL registry first, process-global as the transfers are — blob_registry.rs — so a teardown step
+        # that raises leaves no entry another window of the session would find)
+        Native.blob_registry_clear(@blob_window)
         # An aux window's background app requests are the same boundary hazard
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
         # reset, so without this they'd cross into the next test untouched).
@@ -3561,8 +3564,6 @@ module Capybara
         reset_event_sources
         reset_hijacked_fetches
         reset_websockets
-        # (…and its blob URL registry, process-global as the transfers are: blob_registry.rs)
-        Native.blob_registry_clear(@blob_window)
         @window_inbox.clear
         @broadcast_inbox.clear
         @bc_queue.clear
@@ -8409,15 +8410,16 @@ module Capybara
       def fail_blob_document(url) = commit_error_document(url.to_s)
 
       # A user-initiated `URL.revokeObjectURL`. Storage-partitioned + cross-isolate:
-      # the Driver vetoes a cross-partition revoke (a same-origin but cross-top-level-
-      # site context can't revoke the blob — cross-partition.https) and, for a
-      # same-partition revoke, invalidates the blob in the CREATOR's isolate too so
-      # every window stops resolving it (the blob may have been created in another
-      # window). (Context-teardown revokes go through revoke_owned_blobs, not here.)
+      # a cross-partition revoke does nothing (a same-origin but cross-top-level-site
+      # context can't revoke the blob — cross-partition.https: the site its maker in a
+      # window of this session recorded, blob_registry.rs `partition`), and a
+      # same-partition one invalidates the blob in the MAKER's isolate too so every
+      # window stops resolving it (the blob may have been created in another window).
+      # (Context-teardown revokes go through revoke_owned_blobs, not here.)
       def blob_unregister(url)
-        maker = Native.blob_registry_revoke_partitioned(url.to_s, blob_partition_site)
-        return nil if maker.nil?
-        @driver.drop_blob_in_window(maker, url.to_s, self) if maker != @blob_window && @driver.respond_to?(:drop_blob_in_window)
+        maker, site = Native.blob_registry_partition(@blob_window, url.to_s)
+        return nil if site && site != blob_partition_site
+        @driver.drop_blob_in_window(maker, url.to_s, self) if maker && maker != @blob_window && @driver.respond_to?(:drop_blob_in_window)
         drop_local_blob(url)
         nil
       end
