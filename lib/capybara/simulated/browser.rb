@@ -3319,9 +3319,10 @@ module Capybara
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
         referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
         hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
+        @history_before_navigation = nil if depth.zero?
         unless from_history || depth > 0
           capture_outgoing_form_state
-          record_history({method: :post, url: url, body: body, content_type: content_type})
+          record_navigation_history({method: :post, url: url, body: body, content_type: content_type})
         end
         # A controlled top-level POST navigation (form submission) goes to the SW's fetch
         # event first — same model as `navigate` (the SW reads the body via
@@ -3346,11 +3347,8 @@ module Capybara
 
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
+          return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
           @current_url = url
-          if download_response?(sw_headers)
-            save_downloaded_response(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)])
-            return
-          end
           record_response(sw['status'] || 200, sw_headers)
           boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
           return
@@ -3380,7 +3378,7 @@ module Capybara
           end
         end
         if download_response?(headers)
-          save_downloaded_response(url, headers, resp_body)
+          download_in_place(url, headers, resp_body)
           restore_flushed_nav_intents
           return
         end
@@ -11339,9 +11337,10 @@ module Capybara
             boot_response_into_ctx('')
             return
           end
+          @history_before_navigation = nil if depth.zero?
           unless from_history || depth > 0
             capture_outgoing_form_state
-            replace ? replace_history({method: :get, url: url}) : record_history({method: :get, url: url})
+            record_navigation_history({method: :get, url: url}, replace: replace)
           end
           # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
@@ -11369,10 +11368,8 @@ module Capybara
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
               return navigate(carry_fragment(url, resolve_location(loc, url)), depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
+            return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
             @current_url = url
-            if download_response?(sw_headers)
-              return save_downloaded_response(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)])
-            end
             record_response(sw['status'] || 200, sw_headers)
             boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
             return
@@ -11401,15 +11398,12 @@ module Capybara
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
-          # Track the navigated URL even for download-shaped responses
-          # so an aux window opened on a binary asset (PDF / image
-          # opened via `target=_blank`) still reports `current_url`
-          # correctly to within_window assertions.
+          # A response that downloads makes no document: a window that has one stays at it, its URL its document's
+          # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
+          # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
+          # which within_window assertions read.
+          return download_in_place(url, headers, body) if download_response?(headers)
           @current_url = url
-          if download_response?(headers)
-            save_downloaded_response(url, headers, body)
-            return
-          end
           record_response(status, headers)
           html         = read_rack_body(body)
           # Full-reload navigation rebuilds the JS Context from the warm
@@ -11424,6 +11418,29 @@ module Capybara
           # flushed is still live and still means what its timers asked for.
           restore_flushed_nav_intents if depth.zero?
         end
+      end
+      # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
+      # kept, for a response that turns out to make no document (`download_in_place`).
+      private def record_navigation_history(entry, replace: false)
+        @history_before_navigation = [@history.dup, @history_idx] if window_has_document?
+        replace ? replace_history(entry) : record_history(entry)
+      end
+      # A navigation's response that downloads makes no document: a window that has one stays at it — its URL and its
+      # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a).
+      # One that has none yet — an aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports
+      # the URL it was opened on, which within_window assertions read.
+      private def download_in_place(url, headers, body)
+        if window_has_document?
+          @history, @history_idx = @history_before_navigation if @history_before_navigation
+        else
+          @current_url = url
+        end
+        @history_before_navigation = nil
+        save_downloaded_response(url, headers, body)
+        nil
+      end
+      private def window_has_document?
+        !(@current_url.to_s.empty? || @current_url == 'about:blank')
       end
 
       # Rebuild the JS Context and load `html` into it. Called from

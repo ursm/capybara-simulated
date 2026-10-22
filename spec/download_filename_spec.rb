@@ -41,4 +41,27 @@ RSpec.describe 'a download' do
     end
     expect(Dir.children(@dir).sort).to eq(%w[badé.txt café.txt escape.txt plain.txt été.csv].sort)
   end
+
+  # A navigation whose response downloads makes no document, so the window stays at the one it has: its URL, and its
+  # session history, whose reload reloads that document (Chrome, measured: /a, /dl, then /a again) — for a form's POST
+  # as for a GET.
+  it 'leaves the window at its document, its URL and history, when a navigation downloads' do
+    hits = []
+    s = simulated_session(lambda {|env|
+      hits << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
+      next [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename="d.txt"'}, ['x']] if env['PATH_INFO'] == '/dl'
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><form id=fm method=post action="/dl"></form>']]
+    })
+    s.visit '/a'
+    hits.clear
+    s.execute_script("location.href = '/dl'")
+    s.evaluate_script('1')
+    expect(s.current_path).to eq('/a')
+    s.refresh
+    s.execute_script("fm.submit()")
+    s.evaluate_script('1')
+    expect(s.current_path).to eq('/a')
+    s.refresh
+    expect(hits).to eq(['GET /dl', 'GET /a', 'POST /dl', 'GET /a'])
+  end
 end
