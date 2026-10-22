@@ -555,18 +555,10 @@ module Capybara
         # @worker_init_lock alongside @worker_initializing.
         @worker_busy = 0
         @worker_init_lock = Mutex.new
-        # Cross-isolate `blob:` store. Worker isolates can't see the
-        # page isolate's blob URL store (blob_urls.rs), so we mirror bytes here and
-        # workers resolve them through a host fn.
-        @blob_registry = {}
-        @blob_registry_lock = Mutex.new
-        # url => owning worker handle, for blob URLs created INSIDE a worker. A
-        # worker's blob URL store dies with it, so terminating the worker revokes
-        # them (url-lifetime "Terminating worker revokes its URLs").
-        @blob_owners = {}
-        # …and the URLs whose bytes a blob: document booted into this window holds a copy of (`boot_blob_document`): its
-        # document's, gone with it as the next page begins (`forget_blob_copies`) — the creator's URL itself left alone.
-        @blob_copies = []
+        # This window's blob URL registry, the engine's (blob_registry.rs): what the blob URLs its contexts — its realms,
+        # its workers' isolates, which see none of the page isolate's store (blob_urls.rs) — made resolve to, each
+        # revoked as the context that made it goes; and the copies of a blob: document's booted here.
+        @blob_window = Native.blob_window_new
         # Postmessage transferable-buffer store. Large Uint8Array /
         # ArrayBuffer payloads cross isolates as a Ruby-side byte ID
         # rather than a JSON base64 string, so peak JS heap stays flat.
@@ -3518,7 +3510,7 @@ module Capybara
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
-        @blob_registry_lock.synchronize { @blob_registry.clear; @blob_owners.clear; @blob_copies.clear }
+        Native.blob_registry_clear(@blob_window)
         # Drop volatile entries from the class-level HTTP asset cache
         # so test-local DB state (TranslationOverride, etc.) reaches
         # the app on subsequent visits. Fingerprinted assets
@@ -8326,54 +8318,23 @@ module Capybara
         }
       end
 
-      # `bytes` is nil when no other context could resolve the URL — the entry is
-      # then only the existence marker a revoke anywhere clears.
-      def blob_register(url, bytes, owner_realm = nil)
-        # Tag the creating context so the URL is revoked when that context goes
-        # away: a WORKER (separate thread, tagged via Thread.current) when it
-        # terminates ("Terminating worker"), or a FRAME REALM (owner_realm passed
-        # from JS createObjectURL) when the iframe is removed ("Removing an
-        # iframe"), or the main realm (no owner passed: realm 0) when a new page
-        # begins in it (File API's unloading document cleanup steps — the runtime's
-        # `rebuild_ctx`). Namespaced ('w:' / 'r:') so a worker handle and a realm id
-        # never collide.
-        worker = Thread.current[:csim_worker_handle]
-        key = worker ? "w:#{worker}" : "r:#{owner_realm.to_i}"
-        @blob_registry_lock.synchronize do
-          @blob_registry[url.to_s] = bytes.to_s.b
-          # (…a re-registration taking the URL over from any prior owner, else revoking that context would wrongly
-          # revoke a URL another one owns now)
-          @blob_owners[url.to_s] = key
-        end
-        # Record the blob's STORAGE PARTITION (this window's top-level site) in the
-        # Driver-level store so another window can resolve it only from the same
-        # partition (blob URL partitioning). Keyed by the creating Browser so the
-        # bytes are read back from wherever they live (the creator's isolate).
+      # The number of this window's blob URL registry (blob_registry.rs), which its contexts enter and resolve their
+      # URLs in.
+      attr_reader :blob_window
+
+      # A blob URL a context of this window made (its entry the context entered in the registry): its STORAGE
+      # PARTITION (this window's top-level site) recorded in the Driver-level store, so another window resolves or
+      # revokes it only from the same partition (blob URL partitioning) — keyed by the creating Browser, so the bytes
+      # are read back from wherever they live (the creator's isolate).
+      def blob_register(url)
         @driver.register_blob_partition(url.to_s, self, blob_partition_site) if @driver.respond_to?(:register_blob_partition)
         nil
       end
 
-      def blob_resolve(url)
-        # A same-partition blob created in another window/isolate is spec-fetchable
-        # cross-window, but resolving its bytes means a real-time cross-isolate read
-        # (+ worker round-trips for the worker variants) that races the per-example
-        # timeout under suite load — flaky in the gate. So we only resolve a blob from
-        # THIS window's registry; the cross-window same-partition fetch is a backlog
-        # item (cross-partition.https "fetched from a same-partition {iframe,worker}").
-        key = Native.blob_url_key(url.to_s)
-        @blob_registry_lock.synchronize { @blob_registry[key] }
-      end
-
-      # The SITE (scheme + registrable domain) of this window's top-level document.
-      # Storage partitioning keys a blob URL on its creator's top-level site, so a
-      # same-origin iframe embedded in a cross-site top-level context is a DIFFERENT
-      # partition and can't reach the blob. Registrable domain is approximated as the
-      # host's last two dot-labels — correct for the single-label public suffixes our
-      # in-process hosts use (web-platform.test / not-web-platform.test / *.com); a
-      # full Public Suffix List isn't warranted here.
-      # This document's partition "site" (scheme + registrable domain) for Blob-URL / storage
-      # partitioning. A blob: document derives from its inner origin; data:/about: (no host) →
-      # '' (an opaque origin, never same-partition with a real one). See registrable_site.
+      # The SITE (scheme + registrable domain, the engine's: `registrable_site`) of this window's top-level document —
+      # what storage partitioning keys a blob URL on: its creator's top-level site, so a same-origin iframe embedded in a
+      # cross-site top-level context is a DIFFERENT partition and can't reach the blob. A blob: document derives from its
+      # inner origin; data:/about: (no host) '' (an opaque origin, never same-partition with a real one).
       def blob_partition_site
         registrable_site(@current_url) || ''
       end
@@ -8409,18 +8370,13 @@ module Capybara
         # Make the blob URL fetchable from the document we're about to load — a blob:
         # document that fetches itself (or a media `src` first-party load) snapshots
         # the bytes SYNCHRONOUSLY at fetch() time, which runs DURING boot below, so the
-        # bytes must be registered in this window's @blob_registry FIRST. No partition
-        # entry — the blob keeps its original storage partition; this only makes it
-        # first-party-fetchable in the window it was navigated into.
-        # (…no copy to let go of as the boot begins this page: a window sent to the same blob document again keeps it)
-        # (…by the key a lookup resolves it by, its fragment excluded: blob_urls.rs `entry_key`)
-        key = Native.blob_url_key(url.to_s)
-        @blob_registry_lock.synchronize { @blob_copies.delete(key); @blob_registry[key] = bytes }
-        boot_response_into_ctx(bytes)
-        # (…its document's copy, which the next page to begin here lets go of — noted after the boot, which begins this one)
-        @blob_registry_lock.synchronize { @blob_copies << key }
-        # Adopt into the in-VM store too, so a LATER resolve keeps the correct content
-        # type (a bytes-only @blob_registry entry resolves as application/octet-stream).
+        # bytes are entered in this window's registry as its new page begins — after the
+        # outgoing one's URLs and copies are let go of, before its document loads. No
+        # partition entry — the blob keeps its original storage partition; this only makes it
+        # first-party-fetchable in the window it was navigated into; a copy, which the next
+        # page to begin here lets go of.
+        boot_response_into_ctx(bytes) { Native.blob_registry_copy(@blob_window, url.to_s, bytes, content_type.to_s) }
+        # Adopt into the in-VM store too, so the document's blob resolves as the blob it is.
         @runtime.call('__csimAdoptBlobBytes', url.to_s, bytes, content_type.to_s) rescue nil
       end
 
@@ -8445,10 +8401,10 @@ module Capybara
         nil
       end
 
-      # Forget a blob URL in THIS isolate: its validity marker / bytes in
-      # @blob_registry and its in-VM store entry. Called for a local revoke and, via
+      # Forget a blob URL in THIS isolate: its entry in the window's registry and
+      # its in-VM store entry. Called for a local revoke and, via
       # the Driver, when another same-partition window revokes a blob this isolate
-      # created. The @blob_registry removal is the AUTHORITATIVE invalidation
+      # created. The registry removal is the AUTHORITATIVE invalidation
       # (resolveBlobBytes gates on it cross-realm); the in-VM `__csimDropBlob` is a
       # same-thread V8 call, so it's skipped on a worker thread — a worker's
       # `revokeObjectURL` forwards here on the WORKER thread, and calling a
@@ -8456,7 +8412,7 @@ module Capybara
       # are thread-bound). The stale in-VM entry is harmless: resolveBlobBytes returns
       # null once the registry marker is gone.
       def drop_local_blob(url)
-        @blob_registry_lock.synchronize { @blob_registry.delete(url.to_s); @blob_owners.delete(url.to_s) }
+        Native.blob_registry_delete(@blob_window, url.to_s)
         return if Thread.current[:csim_worker_handle]   # worker thread: the registry removal above is enough
         @runtime.call('__csimDropBlob', url.to_s) rescue nil
       end
@@ -8464,11 +8420,7 @@ module Capybara
       # Revoke every blob URL owned by a context that's going away (its blob URL
       # store is part of the global being torn down).
       def revoke_owned_blobs(key)
-        revoked = @blob_registry_lock.synchronize do
-          urls = @blob_owners.select {|_url, owner| owner == key }.keys
-          urls.each {|url| @blob_registry.delete(url); @blob_owners.delete(url) }
-          urls
-        end
+        revoked = Native.blob_registry_revoke_owner(@blob_window, key)
         if @driver.respond_to?(:unregister_blob_partition)
           revoked.each {|url| @driver.unregister_blob_partition(url) }
         end
@@ -8477,14 +8429,9 @@ module Capybara
       # "r:#{owner_realm.to_i}") so a marshalled Float/String id still matches.
       def revoke_worker_blobs(handle) = revoke_owned_blobs("w:#{handle.to_i}")
       def revoke_realm_blobs(realm_id) = revoke_owned_blobs("r:#{realm_id.to_i}")
-      # The copies the last blob: document booted here held (`@blob_copies`) let go of — but a URL a realm of this window
+      # The copies the last blob: document booted here held let go of — but a URL a realm of this window
       # has since made its own, which its owner's revocation governs.
-      def forget_blob_copies
-        @blob_registry_lock.synchronize do
-          @blob_copies.each {|url| @blob_registry.delete(url) unless @blob_owners.key?(url) }
-          @blob_copies.clear
-        end
-      end
+      def forget_blob_copies = Native.blob_registry_forget_copies(@blob_window)
 
       # ── postMessage transferable-buffer registry ───────────────────
       #
@@ -9220,10 +9167,10 @@ module Capybara
           end
           bytes = @runtime.call('__csimReadBlobBytes', u)
           # A blob the isolate's store has none of — one a worker's isolate created — is in the
-          # cross-context `@blob_registry` where its creator registered its bytes, so fall back to it.
+          # window's registry where its creator entered its bytes, so fall back to it.
           # (A frame realm's is in the isolate's store, which `__csimReadBlobBytes` reads whichever
           # realm made it: `new Worker(blobURL)` from a data: iframe.)
-          bytes = blob_resolve(u) if bytes.nil? || bytes.empty?
+          bytes = Native.blob_registry_get(@blob_window, u) if bytes.nil? || bytes.empty?
           return nil if bytes.nil? || bytes.empty?
           return bytes
         end
@@ -11479,6 +11426,8 @@ module Capybara
         # its creator's policy container, the policies with it)
         @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
         @runtime.rebuild_ctx
+        # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
+        yield if block_given?
         # The lifecycle steps queued on the outgoing page's event loop are the new page's to run.
         @sw_steps_queued.each do |h|
           @runtime.call('__csim_swQueueStep', h)

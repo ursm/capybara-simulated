@@ -213,8 +213,8 @@ module Capybara
         '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
         '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], !!a[1], a[2] || 'same-origin', realm: a[3], referrer_policy: a[4], opaque: a[5] == true) },
         '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], !!a[1], a[2] || 'same-origin', realm: a[3], referrer_policy: a[4], opaque: a[5] == true) },
-        '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0], a[1], a[2]); nil },
-        '__csim_blobResolve'         => ->(b, *a) { b.blob_resolve(a[0]) },
+        '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0]); nil },
+        '__csimBlobWindow'           => ->(b, *_a) { b.blob_window },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
         # Any non-timer async channel (worker / SSE / hijacked fetch / window
         # message / websocket) still in flight — the WPT runner's drain consults

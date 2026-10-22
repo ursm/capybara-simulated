@@ -616,9 +616,10 @@ module Capybara
       # in the creator's isolate, not necessarily the navigator's). Used to load a blob
       # document into a TOP-LEVEL window (window.open / a window navigation): that new
       # context is the blob's own partition, so no partition gate applies here — the
-      # cross-partition rule for windows is the noopener severing above, and for nested
-      # frames it is enforced at the frame-navigation site. Falls back to the
-      # accessor's own store for an unpartitioned URL (worker / legacy path).
+      # cross-partition rule for windows is the noopener severing above. (A nested frame
+      # resolves a blob URL in its own window's registry alone, which no other window's
+      # URL is in.) Falls back to the accessor's own store for an unpartitioned URL
+      # (worker / legacy path).
       def blob_bytes_for(url, accessor)
         entry = blob_partition(url)
         creator = entry ? entry[:browser] : accessor
@@ -878,6 +879,8 @@ module Capybara
         @blob_partitions_lock.synchronize do
           @blob_partitions.reject! {|_url, e| e[:browser].equal?(browser) }
         end
+        # (…and its blob URL registry, gone with it: blob_registry.rs)
+        Native.blob_registry_clear(browser.blob_window) if browser.respond_to?(:blob_window)
       end
       def switch_to_window(h)
         window_browser!(h)   # unknown / already-closed handle → WindowError

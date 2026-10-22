@@ -2,9 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
-# The blob URL store is the isolate's (blob_urls.rs): one entry a URL, the realm that made it beside it.
+# The blob URL store is the isolate's (blob_urls.rs): one entry a URL, the realm that made it beside it — and its
+# window's registry (blob_registry.rs), which its other contexts, a worker's isolate, resolve it in.
 RSpec.describe 'the blob URL store' do
+  include PollUntil
+
   # A revoke removes the URL whichever realm made it — a frame's, revoked by its page (same origin) — and nothing in the
   # isolate resolves it after: not a fetch, not the driver's reads of it.
   it 'forgets a URL whichever realm revokes it' do
@@ -125,5 +129,37 @@ RSpec.describe 'the blob URL store' do
     s.execute_script("location.href = '/r?to=' + encodeURIComponent(#{u.to_json})")
     expect(s).to have_no_css('p', text: 'home')
     expect(s).to have_no_css('#b')
+  end
+
+  # A URL a worker made resolves in its page as the blob it is — its type with it, which the window's registry keeps
+  # (it had resolved as `application/octet-stream`) — and one the page made is gone for the page once the worker revokes
+  # it, whichever of the window's reads asks.
+  it "resolves a worker's blob URL with its type, and a URL a worker revoked for none" do
+    worker = <<~JS
+      onmessage = (e) => {
+        if (e.data === 'make') postMessage(URL.createObjectURL(new Blob(['w'], {type: 'text/plain'})));
+        else { URL.revokeObjectURL(e.data); postMessage('revoked'); }
+      };
+    JS
+    page = "<!DOCTYPE html><script>window.w = new Worker(URL.createObjectURL(new Blob([#{worker.to_json}], {type: 'text/javascript'})));</script>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = null;
+      w.onmessage = async (e) => {
+        const r = await fetch(e.data);
+        window.got = [r.headers.get('content-type'), await r.text()];
+      };
+      w.postMessage('make');
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(['text/plain', 'w'])
+    s.execute_script(<<~JS)
+      window.mine = URL.createObjectURL(new Blob(['p']));
+      window.revoked = false;
+      w.onmessage = () => { window.revoked = true; };
+      w.postMessage(mine);
+    JS
+    expect(poll_until { s.evaluate_script('window.revoked') }).to be(true)
+    expect(s.evaluate_script('[__csimReadBlobBytes(mine), __csimReadBlobForWindow(mine)]')).to eq([nil, nil])
   end
 end
