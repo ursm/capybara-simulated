@@ -103,4 +103,21 @@ RSpec.describe 'a javascript: URL' do
     s.execute_script(%q{window.errs = []; onerror = (m, f, l, c) => { errs.push([f, l, c]); }; location.href = 'javascript:)'; setTimeout(() => { location.href = 'javascript:throw 5'; }, 10);})
     expect(poll_until { (e = s.evaluate_script('errs')).size == 2 && e }).to eq([['http://www.example.com/e.html', 1, 1]] * 2)
   end
+
+  # …and a link to a new window runs it only where it keeps its opener: a new window with none has an opaque origin
+  # (Chrome: `target=_blank`, `rel=noopener` and `rel=noreferrer` run nothing; `rel=opener` runs it).
+  it 'runs from a link in a new window only where the link keeps its opener' do
+    links = %w[plain noopener noreferrer opener].map {|rel| %(<a id=#{rel} target=_blank rel=#{rel} href="javascript:opener.ran.push('#{rel}'); void 0">#{rel}</a>) }
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><script>window.ran = [];</script>#{links.join}"]] })
+    s.visit '/'
+    %w[plain noopener noreferrer opener].each {|rel| s.find("##{rel}").click }
+    expect(poll_until { (r = s.evaluate_script('ran')).any? && r }).to eq(['opener'])
+  end
+
+  # A window's name chooses it again, one of this isolate's too (Chrome: `open('', 'br')` twice is one window, named).
+  it 'reuses the window a name names' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    expect(s.evaluate_script("(() => { const n0 = open('', 'br'); return [open('', 'br') === n0, n0.name]; })()")).to eq([true, 'br'])
+  end
 end

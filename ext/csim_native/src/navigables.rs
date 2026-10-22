@@ -91,11 +91,13 @@ impl RealmArena {
 // What a target name chooses (HTML "the rules for choosing a navigable"): no navigable; one the current navigable is not
 // allowed by sandboxing to navigate — which nothing is done for; or a navigable — the realm its active document is in
 // (none yet: an `about:blank` frame no script has looked into) and its container with the realm its node document is
-// in (none: a top-level one).
+// in (none: a top-level one); or another top-level traversable of its browsing context group, a window of this isolate's
+// that is no ancestor of it — the realm its document is in.
 pub(crate) enum Chosen {
     None,
     Blocked,
     Navigable(Option<i32>, Option<(i32, NodeId)>),
+    Window(i32),
 }
 
 impl RealmArena {
@@ -344,7 +346,9 @@ impl RealmArena {
     // document may not navigate ("allowed by sandboxing to navigate": with the sandboxed navigation browsing context flag,
     // its own navigable and its descendants alone, and its top-level traversable where its sandboxing lets it navigate
     // that — `allow-top-navigation`, or `…-by-user-activation` with its window's transient activation) — Chrome leaves
-    // it as it was.
+    // it as it was. Then the other top-level traversables of its browsing context group, each with its tree: the page's
+    // window and the windows its script opened in this isolate (Chrome: `open('', name)` twice is one window), none of
+    // which a document sandboxed against navigation may navigate.
     pub(crate) fn find_navigable(&self, current: i32, name: &[u16]) -> Chosen {
         if name.is_empty() {
             return Chosen::None;
@@ -357,15 +361,24 @@ impl RealmArena {
         while let Some(parent) = self.live_container(top).and_then(|c| self.get(c)).map(|n| n.realm) {
             top = parent;
         }
-        if top == current {
-            return Chosen::None;
+        if top != current {
+            match self.find_in(top, None, name) {
+                None => {}
+                Some(Chosen::Navigable(_, None)) if self.top_navigation_allowed(current) => return Chosen::Navigable(Some(top), None),
+                Some(found) if !self.sandboxed(current, crate::sandbox::NAVIGATION) => return found,
+                Some(_) => return Chosen::Blocked,
+            }
         }
-        match self.find_in(top, None, name) {
-            None => Chosen::None,
-            Some(Chosen::Navigable(_, None)) if self.top_navigation_allowed(current) => Chosen::Navigable(Some(top), None),
-            Some(found) if !self.sandboxed(current, crate::sandbox::NAVIGATION) => found,
-            Some(_) => Chosen::Blocked,
+        let windows = std::iter::once(0).chain(self.navigables.windows.iter().copied()).filter(|&w| w != top);
+        for window in windows.filter(|&w| !self.is_dropped(w)) {
+            match self.find_in(window, None, name) {
+                None => continue,
+                Some(_) if self.sandboxed(current, crate::sandbox::NAVIGATION) => return Chosen::Blocked,
+                Some(Chosen::Navigable(_, None)) => return Chosen::Window(window),
+                Some(found) => return found,
+            }
         }
+        Chosen::None
     }
     // Whether realm `current`'s document may navigate its top-level traversable ("allowed by sandboxing to navigate"): as
     // its window's transient activation lets it — without one, where its sandboxing has no sandboxed top-level
@@ -660,17 +673,18 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
 }
-// __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm]: the navigable the target name chooses
-// from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the realm its
-// active document is in (-1: none yet), its container (null: a top-level one) and the realm the container's node
-// document is in (-1: none).
+// __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm, window]: the navigable the target name
+// chooses from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the
+// realm its active document is in (-1: none yet), its container (null: a top-level one), the realm the container's node
+// document is in (-1: none), and whether it is another window of this isolate's than this realm's own top-level one.
 fn find_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
-    let (realm, container) = match crate::dom::realm(scope, cid).find_navigable(cid, &name) {
+    let (realm, container, window) = match crate::dom::realm(scope, cid).find_navigable(cid, &name) {
         Chosen::None => return rv.set_null(),
         Chosen::Blocked => return rv.set_bool(false),
-        Chosen::Navigable(realm, container) => (realm, container),
+        Chosen::Navigable(realm, container) => (realm, container, false),
+        Chosen::Window(realm) => (Some(realm), None, true),
     };
     let parent = v8::Integer::new(scope, container.map_or(-1, |(parent, _)| parent)).into();
     let container = crate::dom::node_value(scope, container.map(|(_, c)| c));
@@ -678,7 +692,8 @@ fn find_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         return;
     }
     let realm = v8::Integer::new(scope, realm.unwrap_or(-1)).into();
-    rv.set(v8::Array::new_with_elements(scope, &[realm, container, parent]).into());
+    let window = v8::Boolean::new(scope, window).into();
+    rv.set(v8::Array::new_with_elements(scope, &[realm, container, parent, window]).into());
 }
 
 // __dom.childNavigables(docNid, limit) -> the containers of the document's document-tree child navigables, in tree order —
