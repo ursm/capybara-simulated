@@ -368,4 +368,27 @@ RSpec.describe 'Sandboxing' do
     s.find('form').base.submit
     expect(s.current_path).to eq('/')
   end
+
+  # The window `open()` chooses is the one the page holds for that navigable — a sibling frame's its container's realm's
+  # — and a top-level navigation it makes from a frame refers as that frame, as a `target=_top` link's does (Chrome,
+  # measured).
+  it "returns the page's own window for the frame open() chooses, and refers as the frame that called it" do
+    referers = []
+    s = simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p>frame']]
+      when '/landed'
+        referers << env['HTTP_REFERER']
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p id=at>landed']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe name=sib src="/frame"></iframe><iframe id=f src="/frame"></iframe>']]
+      end
+    })
+    s.visit '/'
+    expect(s.evaluate_script(<<~JS)).to be(true)
+      document.getElementById('f').contentWindow.open('', 'sib') === document.querySelector('iframe[name=sib]').contentWindow
+    JS
+    s.execute_script("document.getElementById('f').contentWindow.open('/landed', '_top')")
+    expect(s).to have_css('#at')
+    expect(referers).to eq(['http://www.example.com/frame'])
+  end
 end

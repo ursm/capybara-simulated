@@ -10161,9 +10161,12 @@ module Capybara
       # would dispose the Context mid-call. tick_real_time drains
       # after the call returns. Same pattern as a planned submission (navigation_plan.rs).
       # (…`replace`: a `location.replace`, whose navigation replaces the current history entry rather than adding one)
-      def location_assign(url, replace: false)
-        @pending_location         = resolve_against_current(url.to_s)
-        @pending_location_replace = replace
+      # …navigated by the top-level document's own script, or (`initiator_realm`) by a frame's — `open(url, '_top')` —
+      # its Referer that frame's document (HTML: the source document the navigation's).
+      def location_assign(url, replace: false, initiator_realm: nil)
+        @pending_location           = resolve_against_current(url.to_s)
+        @pending_location_replace   = replace
+        @pending_location_initiator = initiator_realm
       end
       # …and none: a form the page submitted since planned the navigation that replaces it (HTML "plan to navigate":
       # the later of the two is the one taken).
@@ -10174,6 +10177,7 @@ module Capybara
         return unless (url = @pending_location)
         @pending_location = nil
         replace = @pending_location_replace
+        initiator = @pending_location_initiator
         # A `location.href`/`assign`/`hash` set to a same-document
         # fragment (e.g. `location.hash = ''`) is NOT a document fetch —
         # move the hash without rebuilding the VM, matching the anchor-
@@ -10185,6 +10189,9 @@ module Capybara
           # A page navigating its top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the
           # URL's document would run with no origin of its own).
           nil
+        elsif initiator
+          source, policy = realm_referrer_initiator(initiator.to_i)
+          in_top_context { navigate(url, referer: source, referrer_policy: policy, replace: replace) }
         elsif @current_realm_id
           # A JS-driven `location.*` from inside a `within_frame` block
           # navigates the FRAME, not the top page (same as a self-targeted
@@ -11672,7 +11679,7 @@ module Capybara
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` are
       # Hashes keyed by realm and the frame-submit / frame-reload slots are Arrays.
       NAV_INTENT_SLOTS = %i[
-        @pending_location @pending_location_replace @pending_reload @pending_history_traverse
+        @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit
         @pending_frame_reload @pending_frame_traverse
       ].freeze
