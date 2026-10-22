@@ -10151,7 +10151,7 @@ module Capybara
       # it (HTML "plan to navigate": the later is the one taken).
       def cancel_planned_navigation
         @pending_location = nil
-        @pending_reload   = false
+        @pending_reload   = nil
       end
       def consume_pending_location
         return unless (url = @pending_location)
@@ -10303,7 +10303,7 @@ module Capybara
       def location_reload   ; @pending_reload = true ; end
       def consume_pending_reload
         return unless @pending_reload
-        @pending_reload = false
+        @pending_reload = nil
         refresh
       end
       # `frame.contentWindow.location.reload()` from a nested browsing context.
@@ -10318,10 +10318,16 @@ module Capybara
       # A frame's navigation planned — to a URL, a reload, a form's submission — replaces the one it had planned before
       # (HTML "navigate": a later navigation of a navigable aborts its ongoing one): `href = …` and then `reload()` in one
       # task reloads the document it is at (Chrome, measured: the reload's document, not the href's).
+      # (…a form's submission its realm's plan as well, taken there and dropped: a navigation that leaves the realm in place
+      # — one that ends as a download — must not leave it to a later drain)
       private def supersede_frame_navigation(realm_id)
         @pending_frame_nav&.delete(realm_id)
         @pending_frame_reload&.delete(realm_id)
-        @pending_frame_submit&.delete(realm_id)
+        return unless @pending_frame_submit&.delete(realm_id)
+
+        @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit') if @runtime.frame_realm_alive?(realm_id)
+      rescue StandardError
+        nil
       end
       def consume_pending_frame_reload
         return if @pending_frame_reload.nil? || @pending_frame_reload.empty?
