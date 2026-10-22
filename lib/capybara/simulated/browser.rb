@@ -10251,11 +10251,9 @@ module Capybara
         @pending_frame_nav = nil
         navs.each do |realm_id, (url, referrer, sandbox, initiator)|
           invalidate_find_cache
-          # (…sandboxed as the container said when the navigation began: what its document's seed takes, a document it
-          # does not make — a download, a refused unload — leaving nothing behind; and made by the initiator's document,
-          # what a download its response is may be saved by)
+          # (…sandboxed as the container said when the navigation began: what its document's seed and a download its
+          # response is take, a document it does not make — a refused unload — leaving nothing behind)
           @navigation_sandbox = sandbox
-          @download_source    = initiator
           # If this frame is on the entered `within_frame` stack, navigate it
           # through `navigate_frame` — it does the full fetch (redirects /
           # downloads / cookies) AND updates `@frame_stack` / `@current_realm_id`
@@ -10264,25 +10262,27 @@ module Capybara
           # names it) re-navigate the owning iframe by realm id — fetched here for an
           # http(s) URL, else by the src-reassignment path in the realm whose
           # document holds the iframe.
-          entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-          if entry
-            navigate_frame(url, entry: entry, referrer: referrer)
-          elsif url.match?(%r{\Ahttps?://}i)
-            # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so
-            # it carries correct navigation request headers (Referer under policy / Sec-Fetch);
-            # non-http(s) and relative URLs stay on the JS src-reassignment path via
-            # navigate_realm_self_get. `record: false` — a location/link frame nav isn't history-
-            # recorded yet (that's a form-submission-only path), and must not push where a
-            # location.replace should overwrite.
-            navigate_realm_self_get(realm_id, url, record: false, referrer: referrer)
-          else
-            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, sandbox)
+          # (…made by the initiator's document: what a download its response is may be saved by)
+          from_document(initiator) do
+            entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
+            if entry
+              navigate_frame(url, entry: entry, referrer: referrer)
+            elsif url.match?(%r{\Ahttps?://}i)
+              # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so
+              # it carries correct navigation request headers (Referer under policy / Sec-Fetch);
+              # non-http(s) and relative URLs stay on the JS src-reassignment path via
+              # navigate_realm_self_get. `record: false` — a location/link frame nav isn't history-
+              # recorded yet (that's a form-submission-only path), and must not push where a
+              # location.replace should overwrite.
+              navigate_realm_self_get(realm_id, url, record: false, referrer: referrer)
+            else
+              frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, sandbox)
+            end
           end
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")
         ensure
           @navigation_sandbox = nil
-          @download_source    = nil
         end
       end
       # A same-origin WINDOW realm (window.open in this isolate) navigating itself
@@ -11823,7 +11823,7 @@ module Capybara
       def save_downloaded_response(url, headers, body, realm: nil)
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         source = @download_source || realm
-        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i)
+        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, @navigation_sandbox)
 
         filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?

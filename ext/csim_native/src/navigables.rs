@@ -378,12 +378,14 @@ impl RealmArena {
     // HTML "allowed to download": whether a navigation realm `source`'s document makes (none: the driver's) to a response
     // that is a download may save it — refused where its sandboxing, or the target's, has the sandboxed downloads flag:
     // the target a frame realm `target`'s navigable (none: a top-level one), whose flags are those its document would be
-    // made with (its container's `sandbox` attribute as the navigation began, with its container document's flags).
-    pub(crate) fn download_allowed(&self, source: Option<i32>, target: Option<i32>) -> bool {
+    // made with (its container's `sandbox` attribute as the navigation began — `begun`, where the navigation carries it,
+    // else as `frame_sandbox` has it — with its container document's flags).
+    pub(crate) fn download_allowed(&self, source: Option<i32>, target: Option<i32>, begun: Option<Option<&str>>) -> bool {
         let flags = |realm: i32| self.realm_state(realm).map_or(0, |s| s.location.sandbox);
         let target = target.and_then(|t| self.live_container(t)).map_or(0, |c| {
             let around = self.get(c).map_or(0, |n| flags(n.realm));
-            around | crate::sandbox::sandboxing(None, self.frame_sandbox(c).as_deref())
+            let attribute = begun.map_or_else(|| self.frame_sandbox(c), |b| b.map(str::to_owned));
+            around | crate::sandbox::sandboxing(None, attribute.as_deref())
         });
         (source.map_or(0, flags) | target) & crate::sandbox::DOWNLOADS == 0
     }
@@ -641,11 +643,15 @@ fn auxiliary_refused(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
     rv.set_bool(arena.auxiliary_refused(realm, &target));
 }
-// __dom.downloadAllowed(source, target) -> `RealmArena::download_allowed`, each realm -1 for none.
+// __dom.downloadAllowed(source, target[, begun]) -> `RealmArena::download_allowed`, each realm -1 for none, `begun` the
+// `[attribute]` the navigation carries (browser.rb `frame_sandbox_now`).
 fn download_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).int32_value(scope).filter(|r| *r >= 0);
     let (source, target) = (realm(scope, 0), realm(scope, 1));
-    rv.set_bool(crate::dom::dom(scope).arena.download_allowed(source, target));
+    let begun = v8::Local::<v8::Array>::try_from(args.get(2)).ok().map(|a| {
+        a.get_index(scope, 0).filter(|v| !v.is_null_or_undefined()).map(|v| v.to_rust_string_lossy(scope))
+    });
+    rv.set_bool(crate::dom::dom(scope).arena.download_allowed(source, target, begun.as_ref().map(Option::as_deref)));
 }
 // __dom.keywordNavigable(keyword) -> `RealmArena::keyword_navigable` of the calling realm's (`TARGET_TOP` /
 // `TARGET_PARENT`), -1 where its document may not navigate it.

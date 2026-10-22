@@ -479,10 +479,18 @@ RSpec.describe 'Sandboxing' do
       JS
       s.click_link 'r'
       s.click_link 'a'
+      # (…and a frame its parent navigates, sandboxed in the same task after: as it was when the navigation began)
+      s.execute_script(<<~JS)
+        const raced = document.querySelector('iframe[name=added]');
+        raced.removeAttribute('sandbox');
+        raced.contentWindow.location.href = '/attachment?raced';
+        raced.setAttribute('sandbox', 'allow-same-origin');
+      JS
+      s.evaluate_script('1')
       s.visit '/boxed'
       s.execute_script("location.href = '/attachment?boxed'")
       s.evaluate_script('1')
-      expect(poll_until { Dir.children(dir) if Dir.children(dir).any? }).to eq(['removed.txt'])
+      expect(poll_until { Dir.children(dir).sort if Dir.children(dir).size == 2 }).to eq(%w[raced.txt removed.txt])
     ensure
       ENV['CSIM_DOWNLOADS_DIR'] = prev
     end
