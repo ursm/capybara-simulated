@@ -12,7 +12,7 @@ module Capybara
     # fingerprinted; identical URL → identical map).
     #
     # Frames whose URL has no `.map` (snapshot stubs, eval'd app inline
-    # scripts) pass through unchanged.
+    # scripts, any URL that is no script the page loaded) pass through unchanged.
     class StackResolver
       # Matches `(URL:LINE:COL)` inside V8 stack frames. URLs can contain
       # `:` (e.g. `:port`), so the URL class includes `:` and the engine
@@ -78,10 +78,15 @@ module Capybara
       # inline `sourceMappingURL` directive at the bottom of the bundle
       # if the sibling `.map` 404s. data: URLs (inline base64 maps) are
       # also supported via `sourceMappingURL`.
+      # Only for a script the page loaded through the asset cache — a JavaScript response, its body read from there: any
+      # other frame's URL is never requested, an inline script's being its DOCUMENT's, which a request would run the
+      # app's action for again. (A script another script inserted, fetched past the asset cache, passes through as is.)
       def fetch_map_body(url)
+        meta = @browser.external_asset_meta(url)
+        return nil unless meta && Native.module_content(Array(meta.dig('headers', 'content-type')).join(', '), false)
         body = @browser.rack_fetch_body("#{url}.map")
         return body if body
-        bundle = @browser.rack_fetch_body(url)
+        bundle = @browser.external_asset_source(url)
         return nil unless bundle
         directive = bundle[/\/\/[#@]\s*sourceMappingURL=([^\s]+)\s*\z/, 1]
         return nil unless directive
