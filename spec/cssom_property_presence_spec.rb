@@ -196,14 +196,16 @@ RSpec.describe 'CSS property names on a CSSStyleDeclaration' do
 
   # A name that is no supported property has no attribute, so reading it is an ordinary [[Get]]: `undefined` (Chrome) —
   # what `style[prefixed] !== undefined` feature detection reads — a custom property too (only getPropertyValue reads
-  # it), on an inline style as on a computed one.
+  # it), on an inline style as on a computed one — which is no view of the inline style's own properties either.
   it 'answers undefined for a name that is no supported property' do
     s = style_probe
-    expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, 'v'])
+    expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, 'v', [7, nil]])
       (() => { const el = document.getElementById('a'); el.style.setProperty('--x', 'v');
                const cs = getComputedStyle(el);
+               el.style.myExpando = 7;
                return [el.style.notAProperty === undefined, el.style['--x'] === undefined,
-                       cs.notAProperty === undefined, cs['--x'] === undefined, el.style.getPropertyValue('--x')]; })()
+                       cs.notAProperty === undefined, cs['--x'] === undefined, el.style.getPropertyValue('--x'),
+                       [el.style.myExpando, cs.myExpando ?? null]]; })()
     JS
   end
 
