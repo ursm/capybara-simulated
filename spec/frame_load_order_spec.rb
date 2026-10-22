@@ -62,4 +62,38 @@ RSpec.describe 'the load of a document with frames' do
     poll_until { session.evaluate_script('log.length') >= 5 }
     expect(session.evaluate_script('log')).to eq(%w[inner1 inner0 cload fload wload])
   end
+
+  # A frame's `load` handler navigating it again owes the new navigation's `load`, which the page's waits for too —
+  # Chrome: "fload:/g,fload:/h,wload".
+  it 'waits for the load a frame navigated from its load handler owes' do
+    app = lambda {|env|
+      next html.("<body>#{env['PATH_INFO']}") unless env['PATH_INFO'] == '/'
+
+      html.(<<~HTML)
+        <body><script>var log = []; addEventListener('load', () => log.push('wload'));</script>
+        <iframe id="f" src="/g" onload="log.push('fload:' + this.src.slice(-2)); if (!window.again) { window.again = true; this.src = '/h' }"></iframe>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 3 }
+    expect(session.evaluate_script('log')).to eq(%w[fload:/g fload:/h wload])
+  end
+
+  # A navigation that supersedes a frame's initial one — `srcdoc` set as the page is parsed — owes its own `load`, which
+  # the superseded one's leaves owed. Chrome: "fload,fload,wload" — the initial about:blank document's `load` too, which
+  # this driver drops (a gap of its own).
+  it "waits for the load of a navigation that superseded the frame's initial one" do
+    app = lambda {|_env|
+      html.(<<~HTML)
+        <body><script>var log = []; addEventListener('load', () => log.push('wload'));</script>
+        <iframe id="f" onload="log.push('fload')"></iframe>
+        <script>f.srcdoc = '<p>s';</script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log').include?('wload') }
+    expect(session.evaluate_script('log')).to eq(%w[fload wload])
+  end
 end

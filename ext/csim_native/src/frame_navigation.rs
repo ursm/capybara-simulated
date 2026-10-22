@@ -435,12 +435,14 @@ fn frame_nav_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 }
 
 // __dom.supersedeFrameNav(containerNid) — another navigation of the container's is its latest: the one under way
-// superseded, by a navigation of its own or a host's that committed first.
+// superseded, by a navigation of its own or a host's that committed first — and the element `load` it owed with it, the
+// latest one owing its own as it queues it.
 fn supersede_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let nav = crate::dom::realm(scope, cid).frame_navigation(container);
     nav.generation = nav.generation.wrapping_add(1);
+    nav.flags &= !LOAD_OWED;
 }
 
 // __dom.frameNavUrl(containerNid, slot, take) -> the URL the navigation carries in the slot (0 the one it started
