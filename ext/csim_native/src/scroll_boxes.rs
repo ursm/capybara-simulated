@@ -130,9 +130,54 @@ pub(crate) fn padding_edge_box(engine: &mut StyleEngine, arena: &RealmArena, id:
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "scrollingElement", scrolling_element_op, context_id);
+    crate::dom::register(scope, ns, "scrollMove", scroll_move_op, context_id);
     crate::dom::register(scope, ns, "holdsScrollOffset", holds_scroll_offset_op, context_id);
     crate::dom::register(scope, ns, "scrollHolder", scroll_holder_op, context_id);
     crate::dom::register(scope, ns, "paddingEdgeBox", padding_edge_box_op, context_id);
+}
+
+// A box that keeps a scroll offset — the root for the viewport — moved to (x, y), an axis given as None staying, each
+// clamped to its scroll range as the scrollTop / scrollLeft setters clamp (one with no range — no box laid out — to 0):
+// `scrollTo(0, scrollHeight)` lands at `scrollHeight - clientHeight`, which puts a list's sentinel INSIDE the viewport
+// where an IntersectionObserver sees it. Where it moved, its document's pending scroll and scrollend event targets have
+// it — the DOCUMENT for its viewport, whose three names (`document`, `documentElement`, `scrollingElement`) are one
+// scrolling box — and the scroll generation moves. Whether it moved. The realm laid out first, by the caller.
+fn scroll_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, id: NodeId, doc: NodeId, to: [Option<f64>; 2]) -> bool {
+    let cid = crate::dom::realm_id(scope, args);
+    let arena = crate::dom::realm(scope, cid);
+    let range = crate::geometry::scroll_range(arena, id);
+    let Some(node) = arena.get(id) else { return false };
+    let to = [0, 1].map(|axis| to[axis].map(|v| range.map_or(0.0, |r| v.max(r[axis][0]).min(r[axis][1]))));
+    if !(0..2).any(|axis| to[axis].is_some_and(|v| v != node.scroll[axis])) {
+        return false;
+    }
+    let viewport = document_element(arena, doc) == Some(id)
+        || (arena.document_mode(Some(doc)).0
+            && with_engine(scope, args, |engine, arena, now| scrolling_element(engine, arena, doc, true, now) == Some(id)).unwrap_or(false));
+    let arena = crate::dom::realm(scope, cid);
+    arena.scrolled();
+    if let Some(node) = arena.get_mut_quietly(id) {
+        for (axis, v) in to.into_iter().enumerate() {
+            if let Some(v) = v {
+                node.scroll[axis] = v;
+            }
+        }
+        if node.scroll != [0.0; 2] && !arena.scrolled_nodes.contains(&id) {
+            arena.scrolled_nodes.push(id);
+        }
+    }
+    let target = if viewport { doc } else { id };
+    arena.queue_scroll_event(doc, target, false);
+    arena.queue_scroll_event(doc, target, true);
+    arena.generations.bump(crate::dom::GEN_SCROLL);
+    true
+}
+// __dom.scrollMove(nid, docNid, x, y) -> whether the box moved (`scroll_move`; an axis not a number stays).
+fn scroll_move_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return rv.set_bool(false) };
+    let to = [2, 3].map(|i| args.get(i).is_number().then(|| args.get(i).number_value(scope)).flatten());
+    let moved = scroll_move(scope, &args, id, doc, to);
+    rv.set_bool(moved);
 }
 
 // __dom.scrollingElement(docNid) -> [the document's scrolling element] or [] (`scrolling_element`), as
