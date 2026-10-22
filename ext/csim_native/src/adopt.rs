@@ -25,7 +25,8 @@ const CROSS: u32 = 2;
 const CROSS_REGISTRY: u32 = 3;
 
 // __dom.adoptInto(rootNid, document, kind, windowRegistry) -> the nodes of the walk with steps of the bindings' to run, as
-// `nodes_value` answers: across documents, the elements with an `id` or a `name` and the templates; of
+// `nodes_value` answers: across documents, the elements with an `id` or a `name`, the templates and the shadow roots
+// whose adopted stylesheets it emptied; of
 // template contents, the templates. `document` is the node document each node gets; `kind` what the adopt is (`CROSS`,
 // …); `windowRegistry` the document's window registry's code (0: none).
 fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -98,9 +99,18 @@ fn adopt_into(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
         (handles, registries, steps, shadow_roots)
     };
-    let sheets = &mut crate::dom::dom(scope).arena.adopted_sheets;
+    // (…a shadow root's adopted list emptied — handed back too where it had sheets, as a change to its cascade)
+    let mut steps = steps;
     for sr in shadow_roots {
-        sheets.remove(&sr);
+        let arena = &mut crate::dom::dom(scope).arena;
+        if arena.adopted_sheets.remove(&sr).is_none() {
+            continue;
+        }
+        let handle = arena.get(sr).and_then(|n| crate::node_handle::holding(&n.link));
+        if let Some(objects) = handle.as_ref().and_then(|h| h.get()).and_then(|h| crate::node_handle::adopted_sheet_objects(scope, h, false)) {
+            crate::dom::set_array_length(scope, objects, 0);
+        }
+        steps.push(sr);
     }
     // (…the references set once the arena is let go of: setting one needs the scope)
     for h in handles {

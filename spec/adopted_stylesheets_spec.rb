@@ -227,4 +227,28 @@ RSpec.describe 'adoptedStyleSheets ObservableArray + shadow encapsulation' do
     JS
     expect(out).to eq(['0,1,2,tag', 3, 3, 1, 2, 1, 2, 'rgb(3, 0, 0)', 'kept', true])
   end
+
+  # Adopted into another document of the same realm and back, a shadow root's list is emptied, and its tree restyled
+  # without the sheets it held — the engine's emptying moves the cascade as an assignment would.
+  it 'restyles a shadow tree whose list another document emptied' do
+    session = simulated_session(app)
+    session.visit '/'
+    out = session.evaluate_script(<<~JS)
+      (() => {
+        const host = document.createElement('div');
+        document.body.append(host);
+        const sr = host.attachShadow({mode: 'open'});
+        sr.innerHTML = '<b>z</b>';
+        const b = sr.querySelector('b');
+        const s = new CSSStyleSheet();
+        s.replaceSync('b { color: rgb(10, 0, 0) }');
+        sr.adoptedStyleSheets = [s];
+        const before = getComputedStyle(b).color;
+        document.implementation.createHTMLDocument('').body.append(host);
+        document.body.append(host);
+        return [before, sr.adoptedStyleSheets.length, getComputedStyle(b).color];
+      })()
+    JS
+    expect(out).to eq(['rgb(10, 0, 0)', 0, 'rgb(0, 0, 0)'])
+  end
 end

@@ -605,18 +605,41 @@ fn listened_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // undefined.
 fn rare_data(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(ptr) = handle_of(scope, args.get(0)) else { return };
-    let slot = unsafe { ptr.as_ref() }.rare.get();
-    // SAFETY: the main thread writes the reference; the handle lives while the object, an argument, does.
-    if let Some(record) = unsafe { (*slot).get(scope) } {
-        return rv.set(record.into());
-    }
-    if args.get(1).is_true() {
-        let null: v8::Local<v8::Value> = v8::null(scope).into();
-        let record = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
-        // SAFETY: as above.
-        unsafe { (*slot).reset(scope, Some(record)) };
+    // SAFETY: the handle lives while the object, an argument, does.
+    if let Some(record) = rare_record(scope, unsafe { ptr.as_ref() }, args.get(1).is_true()) {
         rv.set(record.into());
     }
+}
+fn rare_record<'s>(scope: &mut v8::PinScope<'s, '_>, handle: &NodeHandle, make: bool) -> Option<v8::Local<'s, v8::Object>> {
+    let slot = handle.rare.get();
+    // SAFETY: the main thread writes the reference, as TracedReference allows between marking steps.
+    if let Some(record) = unsafe { (*slot).get(scope) } {
+        return Some(record);
+    }
+    if !make {
+        return None;
+    }
+    let null: v8::Local<v8::Value> = v8::null(scope).into();
+    let record = v8::Object::with_prototype_and_properties(scope, null, &[], &[]);
+    // SAFETY: as above.
+    unsafe { (*slot).reset(scope, Some(record)) };
+    Some(record)
+}
+// The CSSStyleSheets of a document's or shadow root's adopted list (dom.rs `AdoptedSheets`, which keeps their ids), in
+// its order: an array its rare data record holds — traced from its handle as the record is, so the list keeps its
+// sheets while the root lives, and a sheet that refers back to the root roots neither — made first, with `make`.
+pub(crate) fn adopted_sheet_objects<'s>(scope: &mut v8::PinScope<'s, '_>, handle: &NodeHandle, make: bool) -> Option<v8::Local<'s, v8::Array>> {
+    let record = rare_record(scope, handle, make)?;
+    let key = v8::String::new(scope, "adoptedSheetObjects")?;
+    if let Some(array) = record.get(scope, key.into()).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) {
+        return Some(array);
+    }
+    if !make {
+        return None;
+    }
+    let array = v8::Array::new(scope, 0);
+    record.set(scope, key.into(), array.into())?;
+    Some(array)
 }
 
 // `__dom.nodeData(node)` -> a character data node's data (`data`): the string it holds, or one made from the arena's and

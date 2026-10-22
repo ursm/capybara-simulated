@@ -4619,14 +4619,14 @@ pub(crate) fn sheet_applies_at(engine: Option<&crate::style::StyleEngine>, arena
     media.is_empty() || crate::style::media_matches(engine, arena, screen, &media)
 }
 // A document's or shadow root's adopted sheets, in order: each one's id, of the store of `realm` — its node document's,
-// every sheet's constructor document being that one (the bindings' `checkAdoptable`) — and its CSSStyleSheet, which the
-// list keeps alive (the store lets an id go with its object: cssom.js `SHEET_DROPS`). Kept beside the nodes, not in a
-// realm's state: what the realm's cascade takes of the root after its owned sheets, and emptied as the root is adopted
-// into another document (adopt.rs), none of whose sheets it can hold.
+// every sheet's constructor document being that one (the bindings' `checkAdoptable`). Their CSSStyleSheets, which the
+// list keeps alive (the store lets an id go with its object: cssom.js `SHEET_DROPS`), are the root's handle's to hold
+// (node_handle.rs `adopted_sheet_objects`). Kept beside the nodes, not in a realm's state: what the realm's cascade takes
+// of the root after its owned sheets, and emptied as the root is adopted into another document (adopt.rs), none of
+// whose sheets it can hold.
 pub(crate) struct AdoptedSheets {
     pub(crate) realm: i32,
     ids: Vec<u32>,
-    sheets: Vec<v8::Global<v8::Object>>,
 }
 impl RealmArena {
     // The adopted sheets of `root` the realm `cid` cascades — its list, where its sheets are of that realm's store — in
@@ -4639,56 +4639,81 @@ impl RealmArena {
 pub(crate) fn adopted_applying(engine: Option<&crate::style::StyleEngine>, arena: &RealmArena, screen: crate::style::Screen, root: NodeId, cid: i32) -> Vec<u32> {
     arena.adopted_of(root, cid).iter().copied().filter(|&id| sheet_applies_at(engine, arena, screen, id)).collect()
 }
-// __dom.adoptedSheetCount(rootNid) -> the length of the document's or shadow root's `adoptedStyleSheets`…
+// __dom.adoptedSheetCount(root) -> the length of the document's or shadow root's `adoptedStyleSheets`…
 fn adopted_sheet_count(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_uint32(0) };
     rv.set_uint32(dom(scope).arena.adopted_sheets.get(&root).map_or(0, |list| list.ids.len() as u32));
 }
-// __dom.adoptedSheetAt(rootNid, index) -> …the CSSStyleSheet at `index` in it, undefined past its end…
+// __dom.adoptedSheetAt(root, index) -> …the CSSStyleSheet at `index` in it, undefined past its end…
 fn adopted_sheet_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return };
-    let index = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
-    let sheet = dom(scope).arena.adopted_sheets.get(&root).and_then(|list| list.sheets.get(index)).cloned();
-    if let Some(sheet) = sheet {
-        rv.set(v8::Local::new(scope, sheet).into());
+    let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let index = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
+    if !dom(scope).arena.adopted_sheets.get(&root).is_some_and(|list| (index as usize) < list.ids.len()) {
+        return;
+    }
+    // SAFETY: the handle lives while the object, an argument, does.
+    let Some(objects) = crate::node_handle::adopted_sheet_objects(scope, unsafe { ptr.as_ref() }, false) else { return };
+    if let Some(sheet) = objects.get_index(scope, index) {
+        rv.set(sheet);
     }
 }
-// __dom.adoptedSheetPut(rootNid, docNid, index, sheet, id) — …`sheet`, the engine's sheet `id` of the store of the realm
+// __dom.adoptedSheetPut(root, docNid, index, sheet, id) — …`sheet`, the engine's sheet `id` of the store of the realm
 // whose document `docNid` (the root's node document) is, at `index` in it — in place of the one there, or at its end
 // (`index` its length)…
 fn adopted_sheet_put(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return };
+    let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let doc = nid_arg(scope, &args, 1);
-    let index = args.get(2).uint32_value(scope).unwrap_or(u32::MAX) as usize;
-    let Ok(sheet) = v8::Local::<v8::Object>::try_from(args.get(3)) else { return };
+    let index = args.get(2).uint32_value(scope).unwrap_or(u32::MAX);
+    let sheet = args.get(3);
     let id = args.get(4).uint32_value(scope).unwrap_or(0);
-    let sheet = v8::Global::new(scope, sheet);
     let caller = realm_id(scope, &args);
     let d = dom(scope);
     let realm = doc.and_then(|doc| d.arena.get(doc)).map_or(caller, |n| n.realm);
-    let list = d.arena.adopted_sheets.entry(root).or_insert_with(|| AdoptedSheets { realm, ids: Vec::new(), sheets: Vec::new() });
+    let list = d.arena.adopted_sheets.entry(root).or_insert_with(|| AdoptedSheets { realm, ids: Vec::new() });
     // (…a list another realm's store made none of this one's: its sheets were dropped as it was adopted)
     if list.realm != realm {
-        *list = AdoptedSheets { realm, ids: Vec::new(), sheets: Vec::new() };
+        *list = AdoptedSheets { realm, ids: Vec::new() };
     }
-    if index < list.ids.len() {
-        list.ids[index] = id;
-        list.sheets[index] = sheet;
-    } else if index == list.ids.len() {
+    let i = index as usize;
+    if i < list.ids.len() {
+        list.ids[i] = id;
+    } else if i == list.ids.len() {
         list.ids.push(id);
-        list.sheets.push(sheet);
+    } else {
+        return;
     }
+    let length = list.ids.len() as u32;
+    // SAFETY: the handle lives while the object, an argument, does.
+    let Some(objects) = crate::node_handle::adopted_sheet_objects(scope, unsafe { ptr.as_ref() }, true) else { return };
+    // (…defined, not set: a setter a page put on `Array.prototype` is never handed the array)
+    let Some(key) = v8::String::new(scope, &index.to_string()) else { return };
+    objects.create_data_property(scope, key.into(), sheet);
+    set_array_length(scope, objects, length);
 }
-// __dom.adoptedSheetsTruncate(rootNid, length) — …and its sheets past `length` gone.
+// __dom.adoptedSheetsTruncate(root, length) — …and its sheets past `length` gone.
 fn adopted_sheets_truncate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return };
-    let length = args.get(1).uint32_value(scope).unwrap_or(0) as usize;
+    let Some(ptr) = crate::node_handle::handle_of(scope, args.get(0)) else { return };
+    let Some(root) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let length = args.get(1).uint32_value(scope).unwrap_or(0);
     let sheets = &mut dom(scope).arena.adopted_sheets;
     if length == 0 {
         sheets.remove(&root);
     } else if let Some(list) = sheets.get_mut(&root) {
-        list.ids.truncate(length);
-        list.sheets.truncate(length);
+        list.ids.truncate(length as usize);
+    }
+    // SAFETY: the handle lives while the object, an argument, does.
+    if let Some(objects) = crate::node_handle::adopted_sheet_objects(scope, unsafe { ptr.as_ref() }, false) {
+        set_array_length(scope, objects, length);
+    }
+}
+// …the array `objects` cut to `length` (none grown: a list's length only ever drops to its ids').
+pub(crate) fn set_array_length(scope: &mut v8::PinScope<'_, '_>, objects: v8::Local<'_, v8::Array>, length: u32) {
+    if objects.length() > length {
+        let key = v8::String::new(scope, "length").unwrap();
+        let value = v8::Integer::new_from_unsigned(scope, length);
+        objects.set(scope, key.into(), value.into());
     }
 }
 // __dom.sheetModificationDisallowed(handle[, on]) -> whether the sheet's disallow modification flag is set (a
