@@ -98,4 +98,26 @@ RSpec.describe 'a nested document navigating itself' do
     s.execute_script('c.remove()')
     expect(s.evaluate_script('top.seen')).to eq([false, 'leaf'])
   end
+
+  # A frame's `src` set records the session history entry of the URL it navigates to — parsed against its document's base
+  # URL — so a traversal back and forward returns to that document.
+  it "records a frame's navigation by its src parsed against the base URL" do
+    hits = []
+    s = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><base href="/sub/"><iframe id=f src="/a"></iframe>']] if env['PATH_INFO'] == '/'
+
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><p>#{env['PATH_INFO']}"]]
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script('f.contentDocument?.body?.textContent') == '/a' }
+    s.execute_script("f.src = 'b'")
+    poll_until { s.evaluate_script('f.contentDocument?.body?.textContent') == '/sub/b' }
+    s.execute_script('f.contentWindow.history.back()')
+    poll_until { s.evaluate_script('f.contentDocument?.body?.textContent') == '/a' }
+    hits.clear
+    s.execute_script('f.contentWindow.history.forward()')
+    poll_until { hits.any? }
+    expect(hits).to eq(['/sub/b'])
+  end
 end
