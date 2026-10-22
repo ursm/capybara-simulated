@@ -189,4 +189,20 @@ RSpec.describe 'the blob URL store' do
     popup = s.window_opened_by { s.execute_script("open(#{made.to_json})") }
     s.within_window(popup) { expect(s).to have_css('#w', text: 'made') }
   end
+
+  # The next page revokes the URLs every realm of the last one made — a frame's, a same-isolate popup's — as its own:
+  # nothing of the new page resolves them.
+  it "lets a visit revoke the URLs the last page's frames and popups made" do
+    page = '<!DOCTYPE html><iframe srcdoc="<script>parent.fu = URL.createObjectURL(new Blob([\'FRAME\']))</script>"></iframe>' \
+           "<script>window.pu = open().eval(\"URL.createObjectURL(new Blob(['POP']))\");</script>"
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/' ? page : '<p>b']] })
+    s.visit '/'
+    urls = s.evaluate_script('[fu, pu]')
+    s.visit '/b'
+    s.execute_script(<<~JS)
+      window.got = null;
+      Promise.all(#{urls.to_json}.map((u) => fetch(u).then(() => 'fetched', () => 'failed'))).then((r) => { window.got = r; });
+    JS
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(%w[failed failed])
+  end
 end

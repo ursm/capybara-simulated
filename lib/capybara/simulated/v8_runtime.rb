@@ -440,6 +440,9 @@ module Capybara
         # whose arenas, and their marks as discarded, lived on until now. Done from the main context
         # (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
         ids = ((@frame_realms&.keys || []) + discarded_realm_ids).uniq
+        # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
+        # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
+        (@frame_realms&.keys || []).each {|id| @browser.revoke_realm_blobs(id) rescue nil }
         if @ctx && !ids.empty?
           drops = ids.map {|id| "__dom.dropRealm(#{id.to_i});" }.join
           @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil
