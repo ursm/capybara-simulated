@@ -391,7 +391,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "keyEdit", edit_op, context_id);
     crate::dom::register(scope, ns, "keyMotion", motion_op, context_id);
 }
-// __dom.keyPlan(element, key, char, modifiers) -> `plan` (its bits, `modifiers` CTRL | META | ALT).
+// __dom.keyPlan(element, key, char, modifiers) -> `plan` (its bits, `modifiers` CTRL | META | ALT | SHIFT — Shift no chord).
 fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_uint32(0) };

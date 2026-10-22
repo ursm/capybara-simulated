@@ -86,4 +86,16 @@ RSpec.describe 'Key default actions' do
     expect(got[1]).not_to include('old')
     expect(got[1]).not_to include("\n")
   end
+
+  # The keys after a Tab go to the element it focused, as a keyboard's go to the focused one — a Tab in a `set`
+  # value too — and a key's keypress and keyup go where its keydown went while focus stays put: to a paragraph of an
+  # editing host, which takes no focus, not to a field that merely held it.
+  it 'sends the keys after a Tab to what it focused, and a key to one element while focus stays' do
+    s = session_of('<input id=a><input id=b><div contenteditable><p id=p>old</p></div>')
+    s.find('#a').send_keys('x', :tab, 'y')
+    expect(s.evaluate_script('[a.value, b.value, document.activeElement.id]')).to eq(%w[x y b])
+    s.execute_script("window.L = []; for (const t of ['keydown', 'keypress', 'keyup']) document.addEventListener(t, (e) => L.push(t + ':' + e.target.id), true)")
+    s.find('#p').set('z')
+    expect(s.evaluate_script('L')).to eq(%w[keydown:p keypress:p keyup:p])
+  end
 end
