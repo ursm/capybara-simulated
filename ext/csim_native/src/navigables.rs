@@ -30,8 +30,11 @@ pub(crate) struct Navigables {
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
-    // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made.
+    // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made; none closed.
     windows: Vec<i32>,
+    // …and the realm whose document made each: its "one permitted sandboxed navigator", which may navigate it though its
+    // sandboxing lets it navigate no other top-level traversable.
+    openers: HashMap<i32, i32>,
     // The realms whose contexts are disposed — or being disposed: neutered (`neuterRealm`) on the way — and not yet
     // dropped: a child navigable whose container is in the document of one, or whose active document is one's, is
     // stepped and counted no more — though it keeps its realm, so a `contentWindow` read of a frame in a discarded
@@ -258,12 +261,17 @@ impl RealmArena {
         }
         "null".to_owned()
     }
-    // A window `window.open` made in this isolate (realm `realm`) the page's event loop steps now (`on`), or no more.
-    pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool) {
+    // A window `window.open` made in this isolate (realm `realm`) the page's event loop steps now (`on`) — `opener` the
+    // realm whose document made it — or no more: closed, or its context discarded.
+    pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool, opener: Option<i32>) {
         let nav = &mut self.navigables;
         nav.windows.retain(|&w| w != realm);
+        nav.openers.remove(&realm);
         if on {
             nav.windows.push(realm);
+            if let Some(opener) = opener {
+                nav.openers.insert(realm, opener);
+            }
         }
         self.note_linked();
     }
@@ -369,11 +377,13 @@ impl RealmArena {
                 Some(_) => return Chosen::Blocked,
             }
         }
-        let windows = std::iter::once(0).chain(self.navigables.windows.iter().copied()).filter(|&w| w != top);
-        for window in windows.filter(|&w| !self.is_dropped(w)) {
+        // (…one a document sandboxed against navigation may not navigate is none it finds — a new window then, Chrome — but
+        // the window it made itself, whose permitted sandboxed navigator it is)
+        let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
+        let windows = std::iter::once(0).chain(self.navigables.windows.iter().copied()).filter(|&w| w != top && !self.is_dropped(w));
+        for window in windows.filter(|w| !sandboxed || self.navigables.openers.get(w) == Some(&current)) {
             match self.find_in(window, None, name) {
                 None => continue,
-                Some(_) if self.sandboxed(current, crate::sandbox::NAVIGATION) => return Chosen::Blocked,
                 Some(Chosen::Navigable(_, None)) => return Chosen::Window(window),
                 Some(found) => return found,
             }
@@ -721,13 +731,14 @@ fn realm_in_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_bool(crate::dom::realm(scope, cid).realm_in_tree(realm));
 }
 
-// __dom.setSteppedWindow(realm, on) — a window `window.open` made in this isolate stepped by the page's event loop
-// (`on`), or no more (`RealmArena::set_stepped_window`).
+// __dom.setSteppedWindow(realm, on, opener) — a window `window.open` made in this isolate stepped by the page's event loop
+// (`on`), the realm `opener` its maker (none where undefined), or no more (`RealmArena::set_stepped_window`).
 fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return };
     let on = args.get(1).is_true();
+    let opener = args.get(2).int32_value(scope).filter(|_| args.get(2).is_int32());
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).set_stepped_window(realm, on);
+    crate::dom::realm(scope, cid).set_stepped_window(realm, on, opener);
 }
 
 // __dom.ownContainer() -> the container whose navigable this realm's document is the active document of — its

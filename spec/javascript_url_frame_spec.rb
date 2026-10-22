@@ -105,13 +105,20 @@ RSpec.describe 'a javascript: URL' do
   end
 
   # …and a link to a new window runs it only where it keeps its opener: a new window with none has an opaque origin
-  # (Chrome: `target=_blank`, `rel=noopener` and `rel=noreferrer` run nothing; `rel=opener` runs it).
+  # (Chrome: `target=_blank`, `rel=noopener` and `rel=noreferrer` request nothing; `rel=opener` does).
   it 'runs from a link in a new window only where the link keeps its opener' do
-    links = %w[plain noopener noreferrer opener].map {|rel| %(<a id=#{rel} target=_blank rel=#{rel} href="javascript:opener.ran.push('#{rel}'); void 0">#{rel}</a>) }
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><script>window.ran = [];</script>#{links.join}"]] })
+    hits = []
+    links = %w[plain noopener noreferrer opener].map {|rel| %(<a id=#{rel} target=_blank rel=#{rel} href="javascript:fetch('/mark-#{rel}'); void 0">#{rel}</a>) }
+    app = lambda {|env|
+      hits << env['PATH_INFO'] if env['PATH_INFO'].start_with?('/mark-')
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{links.join}"]]
+    }
+    s = simulated_session(app)
     s.visit '/'
     %w[plain noopener noreferrer opener].each {|rel| s.find("##{rel}").click }
-    expect(poll_until { (r = s.evaluate_script('ran')).any? && r }).to eq(['opener'])
+    poll_until { hits.include?('/mark-opener') }
+    s.has_css?('#none', wait: 0.3)
+    expect(hits).to eq(['/mark-opener'])
   end
 
   # A window's name chooses it again, one of this isolate's too (Chrome: `open('', 'br')` twice is one window, named).
@@ -119,5 +126,26 @@ RSpec.describe 'a javascript: URL' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
     s.visit '/'
     expect(s.evaluate_script("(() => { const n0 = open('', 'br'); return [open('', 'br') === n0, n0.name]; })()")).to eq([true, 'br'])
+  end
+
+  # …and not where it is closed, nor one a document sandboxed against navigation may not navigate — but the one it opened
+  # itself (Chrome: a closed `cw` gives a new window; a sandboxed frame's `open('', 'br')` a new one, not `br`, and its
+  # own `mine` twice the same).
+  it 'finds no closed window by name, and from a sandboxed document only the one it opened' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><iframe sandbox="allow-scripts allow-popups allow-same-origin" srcdoc="<p>f"></iframe>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.has_css?('iframe')
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const p = open('', 'cw'); p.close(); const q = open('', 'cw');
+        const br = open('', 'br'), w = document.querySelector('iframe').contentWindow;
+        const r = w.open('', 'br'), a = w.open('', 'mine'), b = w.open('', 'mine');
+        return [q === p, q.closed, r === null, r === br, a === b];
+      })()
+    JS
+    expect(got).to eq([false, false, false, false, true])
   end
 end

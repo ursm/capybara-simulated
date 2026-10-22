@@ -1148,7 +1148,7 @@ module Capybara
         # Register with the page's (main) realm's stepped windows so `drainChildRealms`
         # steps THIS realm's event loop too — otherwise its queued tasks (e.g. a
         # BroadcastChannel delivery from a blob document) never fire.
-        ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true);")
+        ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true, #{opener_id.nil? ? 'undefined' : opener_id.to_i});")
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
