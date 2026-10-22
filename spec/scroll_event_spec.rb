@@ -151,4 +151,19 @@ RSpec.describe 'scroll event' do
     pump(s)
     expect(s.evaluate_script('window.__el')).to eq(0)
   end
+
+  # A box scrolled by ANOTHER realm's scrollTop setter moves its own realm's scroll generation, so that realm's
+  # IntersectionObserver sees the scroll (scroll_boxes.rs `scroll_move`, on the box's arena).
+  it "lets the scrolled box's own realm observe a scroll another realm made" do
+    frame = '<!DOCTYPE html><meta charset=utf-8><body style=margin:0><div style=height:3000px></div><div id=sent style=height:10px></div>' \
+            '<script>window.io = []; new IntersectionObserver((es) => es.forEach((e) => io.push(e.isIntersecting))).observe(sent)</script>'
+    app = ->(_env) { [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><iframe id="f" style="width:300px;height:150px" srcdoc="#{frame}"></iframe>)]] }
+    s = simulated_session(app)
+    s.visit '/'
+    pump = -> { 8.times { s.evaluate_script('__runLoopStep(50, 50, false)') } }
+    pump.call
+    s.execute_script("Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop').set.call(f.contentDocument.documentElement, 5000)")
+    pump.call
+    expect(s.evaluate_script('f.contentWindow.io')).to eq([false, true])
+  end
 end

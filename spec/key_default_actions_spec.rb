@@ -115,4 +115,13 @@ RSpec.describe 'Key default actions' do
     expect([cut, s.evaluate_script('ed.innerHTML')]).to eq([deleted, deleted])
     expect(deleted).to eq('<p>ad</p>')
   end
+
+  # `set("…\n")` types the value and then presses Enter: the line feed is no part of the value, so a number field's
+  # `change` reports what it holds.
+  it 'sets a number field to the value before its trailing line feed' do
+    s = session_of('<form><input id=n type=number></form>')
+    s.execute_script("window.L = []; n.addEventListener('change', () => L.push(n.value)); n.form.addEventListener('submit', (e) => { e.preventDefault(); L.push('submit') })")
+    s.find('#n').set("5\n")
+    expect(s.evaluate_script('L')).to eq(%w[5 submit])
+  end
 end
