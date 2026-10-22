@@ -102,4 +102,17 @@ RSpec.describe 'Key default actions' do
     s.find('#a').send_keys('c', 'd')
     expect(s.evaluate_script('[b.value.endsWith("d"), L.slice(3)]')).to eq([true, %w[keydown:b keypress:b keyup:b]])
   end
+
+  # A cut deletes an editing host's selection as Delete does — the blocks it spans merged — by the accelerator and by
+  # `execCommand('cut')` alike.
+  it "cuts a selection across blocks as Delete deletes it" do
+    s = session_of('<div id=ed contenteditable><p>ab</p><p>cd</p></div>')
+    select = 'const t = ed.querySelectorAll("p"); getSelection().setBaseAndExtent(t[0].firstChild, 1, t[1].firstChild, 1)'
+    deleted = s.evaluate_script("(() => { ed.focus(); #{select}; document.execCommand('delete'); const h = ed.innerHTML; ed.innerHTML = '<p>ab</p><p>cd</p>'; return h })()")
+    cut = s.evaluate_script("(() => { #{select}; document.execCommand('cut'); const h = ed.innerHTML; ed.innerHTML = '<p>ab</p><p>cd</p>'; return h })()")
+    s.execute_script(select)
+    s.find('#ed').send_keys([:control, 'x'])
+    expect([cut, s.evaluate_script('ed.innerHTML')]).to eq([deleted, deleted])
+    expect(deleted).to eq('<p>ad</p>')
+  end
 end
