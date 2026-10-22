@@ -10191,7 +10191,7 @@ module Capybara
           nil
         elsif initiator
           source, policy = realm_referrer_initiator(initiator.to_i)
-          in_top_context { navigate(url, referer: source, referrer_policy: policy, replace: replace) }
+          in_top_context { navigate(url, referer: source, referrer_policy: policy, initiator: source, replace: replace) }
         elsif @current_realm_id
           # A JS-driven `location.*` from inside a `within_frame` block
           # navigates the FRAME, not the top page (same as a self-targeted

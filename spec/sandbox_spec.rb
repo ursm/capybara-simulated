@@ -391,4 +391,21 @@ RSpec.describe 'Sandboxing' do
     expect(s).to have_css('#at')
     expect(referers).to eq(['http://www.example.com/frame'])
   end
+
+  # …and navigates it as its own location would be: a javascript: URL evaluated there (a same-origin one), a window
+  # realm's — a popup's — that window's navigation, never its opener's page's.
+  it 'navigates the navigable open() chooses as its own location would be' do
+    s = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/landed' ? "<!DOCTYPE html><p id=at>#{env['QUERY_STRING']}" : '<!DOCTYPE html><iframe id=f src="/plain"></iframe>'
+      [200, {'content-type' => 'text/html'}, [body]]
+    })
+    s.visit '/'
+    s.execute_script("document.getElementById('f').contentWindow.open('javascript:top.ran = 5; void 0', '_top')")
+    expect(poll_until { s.evaluate_script('window.ran') }).to eq(5)
+    # (…the popup's own navigation to an http URL is a window realm's, which the host drops: browser.rb
+    # `window_realm_navigate_self` — so what holds is that the opener's page stays)
+    s.execute_script("window.w = open(); w.name = 'p'; w.eval(\"open('/landed?p', 'p')\")")
+    s.evaluate_script('1')
+    expect(s.current_path).to eq('/')
+  end
 end
