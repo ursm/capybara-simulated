@@ -3547,6 +3547,8 @@ module Capybara
         reset_event_sources
         reset_hijacked_fetches
         reset_websockets
+        # (…and its blob URL registry, process-global as the transfers are: blob_registry.rs)
+        Native.blob_registry_clear(@blob_window)
         @window_inbox.clear
         @broadcast_inbox.clear
         @bc_queue.clear
@@ -8425,8 +8427,8 @@ module Capybara
           revoked.each {|url| @driver.unregister_blob_partition(url) }
         end
       end
-      # Keys are normalized with `.to_i` on BOTH sides (register tags
-      # "r:#{owner_realm.to_i}") so a marshalled Float/String id still matches.
+      # Keys are normalized with `.to_i` (blob.js enters a realm's URLs as "r:<id>", a worker's as "w:<handle>") so a
+      # marshalled Float/String id still matches.
       def revoke_worker_blobs(handle) = revoke_owned_blobs("w:#{handle.to_i}")
       def revoke_realm_blobs(realm_id) = revoke_owned_blobs("r:#{realm_id.to_i}")
       # The copies the last blob: document booted here held let go of — but a URL a realm of this window
@@ -9165,12 +9167,9 @@ module Capybara
           if @driver.respond_to?(:blob_bytes_for) && (data = @driver.blob_bytes_for(u, self))
             return data[:bytes]
           end
+          # (…the isolate's store, whichever of its realms made it — `new Worker(blobURL)` from a data: iframe —
+          # else the window's registry, where a worker's isolate entered its bytes: `__csimReadBlobBytes`)
           bytes = @runtime.call('__csimReadBlobBytes', u)
-          # A blob the isolate's store has none of — one a worker's isolate created — is in the
-          # window's registry where its creator entered its bytes, so fall back to it.
-          # (A frame realm's is in the isolate's store, which `__csimReadBlobBytes` reads whichever
-          # realm made it: `new Worker(blobURL)` from a data: iframe.)
-          bytes = Native.blob_registry_get(@blob_window, u) if bytes.nil? || bytes.empty?
           return nil if bytes.nil? || bytes.empty?
           return bytes
         end

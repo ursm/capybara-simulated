@@ -162,4 +162,31 @@ RSpec.describe 'the blob URL store' do
     expect(poll_until { s.evaluate_script('window.revoked') }).to be(true)
     expect(s.evaluate_script('[__csimReadBlobBytes(mine), __csimReadBlobForWindow(mine)]')).to eq([nil, nil])
   end
+
+  # A URL the page made before any worker existed — no other context to resolve it then, its entry only a marker — the
+  # worker made after resolves, its bytes carried to the window's registry as the worker is spawned; and a window opened
+  # at a URL a worker made loads that blob.
+  it 'lets a later worker resolve an earlier URL, and a window open a worker-made one' do
+    worker = <<~JS
+      onmessage = async (e) => {
+        if (e.data === 'make') return postMessage(URL.createObjectURL(new Blob(['<p id=w>made</p>'], {type: 'text/html'})));
+        postMessage(await (await fetch(e.data)).text());
+      };
+    JS
+    page = '<!DOCTYPE html><p>page'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.early = URL.createObjectURL(new Blob(['early']));
+      window.w = new Worker(URL.createObjectURL(new Blob([#{worker.to_json}], {type: 'text/javascript'})));
+      window.got = [];
+      w.onmessage = (e) => got.push(e.data);
+      w.postMessage(early);
+      w.postMessage('make');
+    JS
+    expect(poll_until { r = s.evaluate_script('got'); r if r.size == 2 }.first).to eq('early')
+    made = s.evaluate_script('got[1]')
+    popup = s.window_opened_by { s.execute_script("open(#{made.to_json})") }
+    s.within_window(popup) { expect(s).to have_css('#w', text: 'made') }
+  end
 end

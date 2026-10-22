@@ -879,8 +879,6 @@ module Capybara
         @blob_partitions_lock.synchronize do
           @blob_partitions.reject! {|_url, e| e[:browser].equal?(browser) }
         end
-        # (…and its blob URL registry, gone with it: blob_registry.rs)
-        Native.blob_registry_clear(browser.blob_window) if browser.respond_to?(:blob_window)
       end
       def switch_to_window(h)
         window_browser!(h)   # unknown / already-closed handle → WindowError
