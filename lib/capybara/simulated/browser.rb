@@ -311,6 +311,8 @@ module Capybara
         @ticking                      = false
         @history                      = []
         @history_idx                  = -1
+        # (…and the history a navigation began from, for one that downloads: `download_in_place`)
+        @history_before_navigation    = nil
         # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
         @restoring_history_state      = nil
         @cors_preflight_cache         = {}
@@ -2258,8 +2260,9 @@ module Capybara
       # per-document isolation invoke it.
       def reset_history!
         @history.clear
-        @history_idx              = -1
-        @pending_history_traverse = nil
+        @history_idx               = -1
+        @history_before_navigation = nil
+        @pending_history_traverse  = nil
       end
 
       # Move through the history stack by `delta`. Per HTML spec, a
@@ -3377,11 +3380,7 @@ module Capybara
             return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
         end
-        if download_response?(headers)
-          download_in_place(url, headers, resp_body)
-          restore_flushed_nav_intents
-          return
-        end
+        return download_in_place(url, headers, resp_body) if download_response?(headers)
         @current_url = url
         record_response(status, headers)
         html         = read_rack_body(resp_body)
@@ -3492,7 +3491,8 @@ module Capybara
         # next test back on the main document.
         reset_frame_scope
         @history.clear
-        @history_idx     = -1
+        @history_idx               = -1
+        @history_before_navigation = nil
         @cors_preflight_cache = {}   # CORS-preflight cache is per browsing context
         # A JS-driven history.back()/go() that scheduled a deferred traverse but
         # never drained (the page navigated away first) must not survive the reset
@@ -11426,9 +11426,10 @@ module Capybara
         replace ? replace_history(entry) : record_history(entry)
       end
       # A navigation's response that downloads makes no document: a window that has one stays at it — its URL and its
-      # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a).
-      # One that has none yet — an aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports
-      # the URL it was opened on, which within_window assertions read.
+      # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a),
+      # and what its flushed timers planned still stands, the page they ran in being the one that stays. One that has none
+      # yet — an aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened
+      # on, which within_window assertions read.
       private def download_in_place(url, headers, body)
         if window_has_document?
           @history, @history_idx = @history_before_navigation if @history_before_navigation
@@ -11437,6 +11438,7 @@ module Capybara
         end
         @history_before_navigation = nil
         save_downloaded_response(url, headers, body)
+        restore_flushed_nav_intents
         nil
       end
       private def window_has_document?
