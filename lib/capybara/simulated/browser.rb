@@ -10147,10 +10147,11 @@ module Capybara
         @pending_location_replace   = replace
         @pending_location_initiator = initiator_realm
       end
-      # …and none: a form the page submitted since planned the navigation that replaces it (HTML "plan to navigate":
-      # the later of the two is the one taken).
-      def cancel_pending_location
+      # …and none — nor a reload: a navigation the page planned since (a location's, a link's, a form's, a reload) replaces
+      # it (HTML "plan to navigate": the later is the one taken).
+      def cancel_planned_navigation
         @pending_location = nil
+        @pending_reload   = false
       end
       def consume_pending_location
         return unless (url = @pending_location)

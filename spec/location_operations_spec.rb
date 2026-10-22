@@ -111,4 +111,23 @@ RSpec.describe 'Location operations' do
     session.execute_script(%q(window.seen = null; location.href = 'javascript:seen = ["%C3%A9", "%FF", "%zz"]'))
     expect(session.evaluate_script('seen')).to eq(["\u00e9", "\uFFFD", '%zz'])
   end
+
+  # A reload is a navigation planned as any other: one planned after `href` reloads the document the page is at, and an
+  # `href` after it is the one taken — each document fetched once (Chrome, measured: the page it was at, then `/c`).
+  it 'lets a reload and an href set in one task replace each other, the later taken' do
+    hits = []
+    s = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><p>#{env['PATH_INFO']}"]]
+    })
+    s.visit '/a'
+    hits.clear
+    s.execute_script("location.href = '/b'; location.reload();")
+    s.evaluate_script('1')
+    expect([hits, s.current_path]).to eq([['/a'], '/a'])
+    hits.clear
+    s.execute_script("location.reload(); location.href = '/c';")
+    s.evaluate_script('1')
+    expect([hits, s.current_path]).to eq([['/c'], '/c'])
+  end
 end
