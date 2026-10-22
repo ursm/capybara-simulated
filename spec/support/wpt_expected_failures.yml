@@ -5097,9 +5097,6 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-na
   (fetch())
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/aborted-parser.window.js:
 - async document.open() after parser is aborted
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/active.window.js:
-- document.open() removes the document's children (non-active document with an associated
-  Window object; frame is removed)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/bailout-exception-vs-return-origin.sub.window.js:
 - "[harness] TIMEOUT"
 - document.open should throw a SecurityError with cross-origin document even when
