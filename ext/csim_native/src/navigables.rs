@@ -360,18 +360,35 @@ impl RealmArena {
         if top == current {
             return Chosen::None;
         }
-        use crate::sandbox::{NAVIGATION, TOP_LEVEL_NAVIGATION, TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION};
-        // (…its top-level traversable as its window's transient activation lets it: without one, where its sandboxing
-        // has no sandboxed top-level navigation without user activation flag; with one, no such flag with user activation)
-        let sandbox = self.realm_state(current).map_or(0, |s| s.location.sandbox);
-        let flag = if self.transiently_activated(current) { TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION } else { TOP_LEVEL_NAVIGATION };
-        let top_allowed = sandbox & flag == 0;
         match self.find_in(top, None, name) {
             None => Chosen::None,
-            Some(Chosen::Navigable(_, None)) if top_allowed => Chosen::Navigable(Some(top), None),
-            Some(found) if sandbox & NAVIGATION == 0 => found,
+            Some(Chosen::Navigable(_, None)) if self.top_navigation_allowed(current) => Chosen::Navigable(Some(top), None),
+            Some(found) if !self.sandboxed(current, crate::sandbox::NAVIGATION) => found,
             Some(_) => Chosen::Blocked,
         }
+    }
+    // Whether realm `current`'s document may navigate its top-level traversable ("allowed by sandboxing to navigate"): as
+    // its window's transient activation lets it — without one, where its sandboxing has no sandboxed top-level
+    // navigation without user activation flag; with one, no such flag with user activation.
+    fn top_navigation_allowed(&self, current: i32) -> bool {
+        use crate::sandbox::{TOP_LEVEL_NAVIGATION, TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION};
+        let flag = if self.transiently_activated(current) { TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION } else { TOP_LEVEL_NAVIGATION };
+        !self.sandboxed(current, flag)
+    }
+    // The realm whose navigable `_top` or `_parent` (`keyword`) chooses from realm `current`'s, where its document may
+    // navigate it ("allowed by sandboxing to navigate": its own and its descendants alone where its sandboxing has the
+    // sandboxed navigation browsing context flag, its top-level traversable as `top_navigation_allowed` lets it) — None
+    // where it may not; its own for a top-level one's, whose top and parent it is.
+    pub(crate) fn keyword_navigable(&self, current: i32, keyword: u32) -> Option<i32> {
+        let parent = self.live_container(current).and_then(|c| self.get(c)).map(|n| n.realm);
+        let chosen = match (keyword, parent) {
+            (_, None) => return Some(current),
+            (TARGET_TOP, Some(_)) => self.top_level_realm(current),
+            (_, Some(parent)) => parent,
+        };
+        let top = chosen == self.top_level_realm(current);
+        let allowed = !self.sandboxed(current, crate::sandbox::NAVIGATION) || (top && self.top_navigation_allowed(current));
+        allowed.then_some(chosen)
     }
     // Whether the navigable target name `target` chooses from realm `current`'s is a NEW one its document may not make
     // ("the rules for choosing a navigable": with the sandboxed auxiliary navigation browsing context flag — no
@@ -529,6 +546,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
+    crate::dom::register(scope, ns, "keywordNavigable", keyword_navigable, context_id);
     crate::dom::register(scope, ns, "formsSandboxed", forms_sandboxed, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
@@ -601,11 +619,22 @@ fn set_realm_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     crate::dom::realm(scope, cid).set_realm_document(cid, doc);
 }
 
-// __dom.auxiliaryRefused(target) -> `RealmArena::auxiliary_refused` of the calling realm's.
+// __dom.auxiliaryRefused(target[, nid]) -> `RealmArena::auxiliary_refused` of the realm the element `nid` — the link,
+// the form — is in, of the calling realm's for none (`open()`'s: its window's).
 fn auxiliary_refused(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let target = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).auxiliary_refused(cid, &target));
+    let id = crate::dom::nid_arg(scope, &args, 1);
+    let arena = crate::dom::realm(scope, cid);
+    let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
+    rv.set_bool(arena.auxiliary_refused(realm, &target));
+}
+// __dom.keywordNavigable(keyword) -> `RealmArena::keyword_navigable` of the calling realm's (`TARGET_TOP` /
+// `TARGET_PARENT`), -1 where its document may not navigate it.
+fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let keyword = args.get(0).uint32_value(scope).unwrap_or(TARGET_TOP);
+    let cid = realm_id(scope, &args);
+    rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
 }
 // __dom.formsSandboxed(formNid) -> whether the form's node document is sandboxed against forms (its sandboxed forms
 // browsing context flag — no `allow-forms`), which submit nothing (HTML "submit" step 4).

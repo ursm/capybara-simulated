@@ -198,8 +198,8 @@ RSpec.describe 'Sandboxing' do
   end
 
   # `allow-top-navigation-by-user-activation` lets a sandboxed document navigate its top-level traversable only with its
-  # window's transient activation (HTML "allowed by sandboxing to navigate"): a script of its at load is refused, a
-  # click is not.
+  # window's transient activation (HTML "allowed by sandboxing to navigate"): a script of its at load is refused — its
+  # `open()` of the top by name null (Chrome, measured: `_top`'s) — a click is not.
   let(:top_navigation) {
     frame = '<!DOCTYPE html><body><a id=go target=top href="/landed">go</a>' \
             '<script>window.opened = open("/refused", "top") === null;</script></body>'
@@ -219,7 +219,7 @@ RSpec.describe 'Sandboxing' do
   it 'lets a document sandboxed but for top navigation by user activation navigate its top only once activated' do
     s = simulated_session(top_navigation)
     s.visit '/'
-    s.within_frame('f') { expect(s.evaluate_script('window.opened')).to be(false) }
+    s.within_frame('f') { expect(s.evaluate_script('window.opened')).to be(true) }
     expect(s.current_path).to eq('/')
     s.within_frame('f') { s.click_link 'go' }
     expect(s).to have_css('#at', text: '/landed')
@@ -305,5 +305,67 @@ RSpec.describe 'Sandboxing' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><iframe sandbox='allow-scripts allow-same-origin' srcdoc=\"#{frame}\"></iframe>"]] })
     s.visit '/'
     expect(s.evaluate_script('frames[0].got')).to eq([nil, false, nil, nil])
+  end
+
+  # `open()` chooses an existing navigable before it would make one ("the rules for choosing a navigable"): a frame by
+  # name, `_top`, `_parent` — navigated, its window returned — and none where the document's sandbox does not let it
+  # navigate it: a sibling frame, the top without `allow-top-navigation` (Chrome's figures, measured). Whether a link or
+  # a form may open a new window is its own document's sandbox's, wherever the script that activates it runs.
+  let(:choosing) {
+    sandboxed = "<iframe name=kid src='/plain'></iframe><script>window.got = [" \
+                "open('/landed?sib', 'sib'), open('/landed?top', '_top'), open('/landed?parent', '_parent')" \
+                "].map((w) => w === null); window.kid = open('/landed?kid', 'kid') === frames[0];</script>"
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/plain' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p>plain']]
+      when '/landed' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><p id=at>#{env['QUERY_STRING']}"]]
+      else
+        [200, {'content-type' => 'text/html'}, [
+          "<!DOCTYPE html><iframe name=sib src='/plain'></iframe><iframe name=open src='/plain'></iframe>" \
+          "<iframe id=box sandbox='allow-scripts allow-same-origin' srcdoc=\"#{sandboxed}\"></iframe>"
+        ]]
+      end
+    }
+  }
+
+  it "chooses an existing navigable for open() as its sandbox lets it, and a link's popup by the link's document" do
+    s = simulated_session(choosing)
+    s.visit '/'
+    windows = s.windows.size
+    box = "document.getElementById('box').contentWindow"
+    expect(s.evaluate_script("#{box}.got")).to eq([true, true, true])
+    expect(s.evaluate_script("#{box}.kid")).to be(true)
+    s.execute_script("open('/landed?open', 'open')")
+    at = ->(doc) { s.evaluate_script("#{doc}?.querySelector('#at')?.textContent ?? null") }
+    named = ->(name, within = 'document') { "#{within}.querySelector('iframe[name=#{name}]').contentDocument" }
+    expect(poll_until { at.(named.('kid', "#{box}.document")) == 'kid' && at.(named.('open')) == 'open' }).to be(true)
+    expect([at.(named.('sib')), s.current_path, s.windows.size]).to eq([nil, '/', windows])
+    # (…a link the page makes in the sandboxed document opens nothing; one the sandboxed document made, moved into the
+    # page, opens its window)
+    s.execute_script(<<~JS)
+      const frameDoc = document.getElementById('box').contentDocument;
+      const into = document.createElement('a');
+      into.href = '/landed?into'; into.target = '_blank';
+      frameDoc.body.append(into);
+      into.click();
+      const out = frameDoc.createElement('a');
+      out.href = '/landed?out'; out.target = '_blank';
+      document.body.append(out);
+      out.click();
+    JS
+    expect(poll_until { s.windows.size if s.windows.size > windows }).to eq(windows + 1)
+    s.within_window(s.windows.last) { expect(s).to have_css('#at', text: 'out') }
+  end
+
+  # …and the driver's own submission of a form (`Node#submit`, `form.submit()`'s steps) is refused it as the page's is.
+  it "refuses the driver's submission of a form in a document sandboxed against forms" do
+    s = simulated_session(lambda {|env|
+      headers = {'content-type' => 'text/html'}
+      headers['content-security-policy'] = 'sandbox allow-scripts' if env['PATH_INFO'] == '/'
+      [200, headers, ['<!DOCTYPE html><form action="/landed"><input name=x value=1></form>']]
+    })
+    s.visit '/'
+    s.find('form').base.submit
+    expect(s.current_path).to eq('/')
   end
 end

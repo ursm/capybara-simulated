@@ -2112,6 +2112,8 @@ module Capybara
         invalidate_find_cache
         form_handle = dom_call('__csimAncestorForm', handle).to_i
         return if form_handle.zero?
+        # (…none its document's sandbox refuses: `form.submit()`'s steps, which this one's are)
+        return if dom_call('__csimFormSubmissionRefused', form_handle)
         submit_form_handle(form_handle, nil)
       end
 
