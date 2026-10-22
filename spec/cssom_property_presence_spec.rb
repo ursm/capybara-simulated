@@ -179,17 +179,31 @@ RSpec.describe 'CSS property names on a CSSStyleDeclaration' do
   # The prototype accessors put a CSS property name on the chain of every declaration TARGET, so a
   # read that misses can no longer be allowed to fall through to it — an unset property is '' , and
   # reaching the accessor would invoke it with an internal receiver that has no declaration.
-  # `-ms-scrollbar-3dlight-color` is the name that proved it: camel-casing drops the dash before the
-  # digit, so folding `MsScrollbar3dlightColor` back by hand missed the property entirely.
+  # `-ms-scrollbar-3dlight-color` was the name that proved it while it was one of ours (camel-casing
+  # drops the dash before the digit, so folding `MsScrollbar3dlightColor` back by hand missed it); no
+  # `-ms-` property is any more, as none is Chrome's, so both its spellings now read `undefined`.
   it 'answers an unset property with the empty string, whatever its spelling' do
     s = style_probe
-    expect(s.evaluate_script(<<~JS)).to eq(['', '', '', '', 'red'])
+    expect(s.evaluate_script(<<~JS)).to eq(['', '', nil, nil, 'red'])
       (() => { const st = document.getElementById('a').style;
                const read = (n) => { try { return st[n]; } catch (e) { return e.constructor.name; } };
                st.color = 'red';
                return [read('marginInlineStart'), read('margin-inline-start'),
                        read('MsScrollbar3dlightColor'), read('-ms-scrollbar-3dlight-color'),
                        read('color')]; })()
+    JS
+  end
+
+  # A name that is no supported property has no attribute, so reading it is an ordinary [[Get]]: `undefined` (Chrome) —
+  # what `style[prefixed] !== undefined` feature detection reads — a custom property too (only getPropertyValue reads
+  # it), on an inline style as on a computed one.
+  it 'answers undefined for a name that is no supported property' do
+    s = style_probe
+    expect(s.evaluate_script(<<~JS)).to eq([true, true, true, true, 'v'])
+      (() => { const el = document.getElementById('a'); el.style.setProperty('--x', 'v');
+               const cs = getComputedStyle(el);
+               return [el.style.notAProperty === undefined, el.style['--x'] === undefined,
+                       cs.notAProperty === undefined, cs['--x'] === undefined, el.style.getPropertyValue('--x')]; })()
     JS
   end
 

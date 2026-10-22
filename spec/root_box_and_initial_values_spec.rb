@@ -696,10 +696,9 @@ RSpec.describe 'root box + computed initial values' do
       })()
     JS
     # Every key of the UA value map is reachable as a property name, so the `:any-link` predicate
-    # can't live there — a caller treating the answer as a CSS string would get a function. (Chrome
-    # answers an unknown name with `undefined`; our declaration proxy answers '' for any string key,
-    # a separate bounded gap. What matters here is that it is not a function.)
-    expect(got).to eq(['string', ''])
+    # can't live there — a caller treating the answer as a CSS string would get a function. An
+    # unknown name is no attribute of the declaration's: `undefined`, as in Chrome.
+    expect(got).to eq(['undefined', ''])
   end
 
   it 'hit-tests the root across the whole canvas' do
