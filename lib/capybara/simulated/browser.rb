@@ -8346,11 +8346,11 @@ module Capybara
       attr_reader :blob_window
 
       # A blob URL a context of this window made (its entry the context entered in the registry): its STORAGE
-      # PARTITION (this window's top-level site) recorded in the Driver-level store, so another window resolves or
-      # revokes it only from the same partition (blob URL partitioning) — keyed by the creating Browser, so the bytes
-      # are read back from wherever they live (the creator's isolate).
+      # PARTITION (this window's top-level site) recorded beside it (blob_registry.rs `set_site`), so another window
+      # resolves or revokes it only from the same partition (blob URL partitioning) — the window that made it found by
+      # its registry, its bytes read back from wherever they live (its isolate).
       def blob_register(url)
-        @driver.register_blob_partition(url.to_s, self, blob_partition_site) if @driver.respond_to?(:register_blob_partition)
+        Native.blob_registry_set_site(@blob_window, url.to_s, blob_partition_site)
         nil
       end
 
@@ -8415,11 +8415,9 @@ module Capybara
       # every window stops resolving it (the blob may have been created in another
       # window). (Context-teardown revokes go through revoke_owned_blobs, not here.)
       def blob_unregister(url)
-        if @driver.respond_to?(:revoke_blob_partitioned)
-          return nil unless @driver.revoke_blob_partitioned(url.to_s, self)
-        elsif @driver.respond_to?(:unregister_blob_partition)
-          @driver.unregister_blob_partition(url.to_s)
-        end
+        maker = Native.blob_registry_revoke_partitioned(url.to_s, blob_partition_site)
+        return nil if maker.nil?
+        @driver.drop_blob_in_window(maker, url.to_s, self) if maker != @blob_window && @driver.respond_to?(:drop_blob_in_window)
         drop_local_blob(url)
         nil
       end
@@ -8443,10 +8441,8 @@ module Capybara
       # Revoke every blob URL owned by a context that's going away (its blob URL
       # store is part of the global being torn down).
       def revoke_owned_blobs(key)
-        revoked = Native.blob_registry_revoke_owner(@blob_window, key)
-        if @driver.respond_to?(:unregister_blob_partition)
-          revoked.each {|url| @driver.unregister_blob_partition(url) }
-        end
+        Native.blob_registry_revoke_owner(@blob_window, key)
+        nil
       end
       # Keys are normalized with `.to_i` (blob.js enters a realm's URLs as "r:<id>", a worker's as "w:<handle>") so a
       # marshalled Float/String id still matches.

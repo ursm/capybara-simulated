@@ -3,8 +3,9 @@
 // in any reaches them all. One registry for the process, by window (`window_new`): a URL's entry is the blob's bytes —
 // none where no other context could resolve it yet, the entry then only the marker a revoke anywhere clears, its bytes
 // filled in as one comes to (a worker made: `markers` / `fill`) — its type, and the context that made it (a worker's
-// `w:<handle>`, a realm's `r:<id>`), which revokes it as it goes; or a copy of a blob: document's, which the window's
-// next page lets go of. The isolate's own store (blob_urls.rs) holds the blob.
+// `w:<handle>`, a realm's `r:<id>`), which revokes it as it goes, and its storage partition — its maker's top-level
+// site, from which alone another window resolves or revokes it (`partition`, `revoke_partitioned`); or a copy of a blob:
+// document's, which the window's next page lets go of. The isolate's own store (blob_urls.rs) holds the blob.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -18,6 +19,8 @@ struct Entry {
     ty: String,
     // (…none for a copy: a blob: document's, booted here)
     owner: Option<String>,
+    // (…none for a copy too, which keeps the partition of the URL it copies — or until the host says it: `set_site`)
+    site: Option<String>,
 }
 
 type Windows = HashMap<u64, HashMap<String, Entry>>;
@@ -61,7 +64,7 @@ pub(crate) fn copy(window: u64, url: magnus::RString, bytes: magnus::RString, ty
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
     let bytes: Arc<[u8]> = unsafe { bytes.as_slice() }.into();
     let (url, ty) = (entry_key(&url_text(url)), url_text(ty));
-    lock().entry(window).or_default().insert(url, Entry { bytes: Some(bytes), ty, owner: None });
+    lock().entry(window).or_default().insert(url, Entry { bytes: Some(bytes), ty, owner: None, site: None });
 }
 // …the copies let go of.
 pub(crate) fn forget_copies(window: u64) {
@@ -75,6 +78,34 @@ pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, window: u64, url: magnus::RStrin
     let url = entry_key(&url_text(url));
     let found = lock().get(&window)?.get(&url).map(|e| e.bytes.clone())?;
     Some(ruby.str_from_slice(found.as_deref().unwrap_or_default()))
+}
+
+// …the storage partition of the URL `url` a context of window `window` made: `site`, its top-level site as it was made.
+pub(crate) fn set_site(window: u64, url: magnus::RString, site: magnus::RString) {
+    let (url, site) = (url_text(url), url_text(site));
+    if let Some(entry) = lock().get_mut(&window).and_then(|e| e.get_mut(&url)) {
+        entry.site = Some(site);
+    }
+}
+// …the window whose context made the URL `url` resolves to (`entry_key`: its fragment aside) and its storage partition,
+// whichever window that is — or nil for none (revoked, never made, or a copy alone).
+pub(crate) fn partition(url: magnus::RString) -> Option<(u64, String)> {
+    let url = entry_key(&url_text(url));
+    lock().iter().find_map(|(&window, entries)| entries.get(&url).and_then(|e| e.site.clone()).map(|site| (window, site)))
+}
+// …`url` (named whole, as a revoke names it) revoked from a context whose top-level site is `site`: refused where
+// another partition's context made it — nil (cross-partition.https: "shouldn't be revocable from a cross-partition
+// iframe/worker") — else its entry gone from the window whose context made it, which it answers, its own isolate's copy
+// that window's to drop; 0 where no window's context made it.
+pub(crate) fn revoke_partitioned(url: magnus::RString, site: magnus::RString) -> Option<u64> {
+    let (url, site) = (url_text(url), url_text(site));
+    let mut reg = lock();
+    let Some((&window, entries)) = reg.iter_mut().find(|(_, e)| e.get(&url).is_some_and(|e| e.site.is_some())) else { return Some(0) };
+    if entries.get(&url).and_then(|e| e.site.as_deref()) != Some(site.as_str()) {
+        return None;
+    }
+    entries.remove(&url);
+    Some(window)
 }
 
 fn url_text(s: magnus::RString) -> String {
@@ -103,7 +134,7 @@ fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let bytes = (!args.get(2).is_null_or_undefined()).then(|| crate::blob_data::bytes_arg(scope, args.get(2)).into());
     let ty = args.get(3).to_rust_string_lossy(scope);
     let owner = Some(args.get(4).to_rust_string_lossy(scope));
-    lock().entry(window).or_default().insert(url, Entry { bytes, ty, owner });
+    lock().entry(window).or_default().insert(url, Entry { bytes, ty, owner, site: None });
 }
 
 // __dom.blobRegistryHas(window, url) -> whether `url` (`entry_key`: its fragment excluded) resolves in window

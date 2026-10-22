@@ -245,6 +245,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("blob_registry_copy", magnus::function!(blob_registry::copy, 4))?;
     native.define_module_function("blob_registry_forget_copies", magnus::function!(blob_registry::forget_copies, 1))?;
     native.define_module_function("blob_registry_get", magnus::function!(blob_registry::get_for_ruby, 2))?;
+    native.define_module_function("blob_registry_set_site", magnus::function!(blob_registry::set_site, 3))?;
+    native.define_module_function("blob_registry_partition", magnus::function!(blob_registry::partition, 1))?;
+    native.define_module_function("blob_registry_revoke_partitioned", magnus::function!(blob_registry::revoke_partitioned, 2))?;
     // The display a window starts out filling (viewport.rs `SCREEN`), the page's `screen` too.
     native.define_module_function("screen_size", magnus::function!(viewport::screen_size_for_ruby, 0))?;
     // The user agent string every request sends and the page's navigator reads (navigator.rs `USER_AGENT`).

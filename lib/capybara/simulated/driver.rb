@@ -126,13 +126,6 @@ module Capybara
         @sw_parked       = []
         @active_handle   = nil
         @next_window_seq = 0
-        # Driver-level blob URL partition map: url => {browser:, site:}. A blob URL's
-        # storage partition is its creating context's top-level SITE; another window
-        # can resolve the blob only from the same partition (and same origin, which
-        # the blob: URL embeds). Bytes aren't copied here — they're read back from the
-        # creating Browser's own store, so this stays a light reference map.
-        @blob_partitions      = {}
-        @blob_partitions_lock = Mutex.new
         @owner_thread    = Thread.current
         @@live_lock.synchronize { @@live << WeakRef.new(self) }
       end
@@ -378,7 +371,6 @@ module Capybara
         @sw_parked.each {|b| b.dispose rescue nil }
         @sw_parked.clear
         @active_handle = nil
-        @blob_partitions_lock.synchronize { @blob_partitions.clear }
       end
 
       # Full teardown of the whole driver: aux windows AND the primary browser's
@@ -596,18 +588,16 @@ module Capybara
       end
 
       # The storage-partition site a blob: URL was created in (its creator's top-level
-      # site), or nil for an unknown / revoked / unpartitioned URL.
+      # site), or nil for an unknown / revoked / unpartitioned URL — the window registries'
+      # (blob_registry.rs `partition`), its fragment aside, as a fetch of it resolves.
       def blob_partition_site_of(url)
-        e = blob_partition(url)
-        e && e[:site]
+        Native.blob_registry_partition(url.to_s)&.last
       end
 
-      # The entry of the blob a URL a document loads or navigates to resolves to: its
-      # fragment aside, as a fetch of it resolves (blob_urls.rs `entry_key`) — a revoke's
-      # URL names it whole, so `revoke_blob_partitioned` reads the entry as given.
-      private def blob_partition(url)
-        key = Native.blob_url_key(url.to_s)
-        @blob_partitions_lock.synchronize { @blob_partitions[key] }
+      # The Browser whose window's registry is number `window` — the window a blob URL's
+      # maker is in — among the open, the primary and the parked ones.
+      private def browser_of_blob_window(window)
+        ([@browser] + @aux_windows.map {|w| w[:browser] } + @sw_parked).find {|b| b&.blob_window == window }
       end
 
       # Is this blob: URL in a different storage partition than `accessor`'s top-level
@@ -627,34 +617,17 @@ module Capybara
       # URL is in.) Falls back to the accessor's own store for an unpartitioned URL
       # (worker / legacy path).
       def blob_bytes_for(url, accessor)
-        entry = blob_partition(url)
-        creator = entry ? entry[:browser] : accessor
+        maker = Native.blob_registry_partition(url.to_s)&.first
+        creator = (maker && browser_of_blob_window(maker)) || accessor
         creator.respond_to?(:read_blob_for_window) ? creator.read_blob_for_window(url) : nil
       end
 
-      # Record / drop a blob URL's storage partition (called by Browser#blob_register /
-      # #blob_unregister). `site` is the creating context's top-level site.
-      def register_blob_partition(url, browser, site)
-        @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] = {browser: browser, site: site.to_s} }
-      end
-
-      def unregister_blob_partition(url)
-        @blob_partitions_lock.synchronize { @blob_partitions.delete(url.to_s) }
-      end
-
-      # A user `URL.revokeObjectURL(url)` from `source`. Storage-partitioned: a revoke
-      # from a different top-level site than the blob's is a NO-OP (cross-partition.https
-      # "shouldn't be revocable from a cross-partition iframe/worker"). A same-partition
-      # revoke drops the Driver entry AND invalidates the blob in the CREATOR's isolate
-      # (the blob may have been created in another window), so every window stops
-      # resolving it. Returns false when vetoed (caller leaves its local copy intact).
-      def revoke_blob_partitioned(url, source)
-        entry = @blob_partitions_lock.synchronize { @blob_partitions[url.to_s] }
-        return false if entry && entry[:site] != source.blob_partition_site
-        @blob_partitions_lock.synchronize { @blob_partitions.delete(url.to_s) }
-        creator = entry && entry[:browser]
-        creator.drop_local_blob(url.to_s) if creator && creator.respond_to?(:drop_local_blob) && !creator.equal?(source)
-        true
+      # A same-partition `URL.revokeObjectURL(url)` from `source` (Browser#blob_unregister, which the registry let
+      # through: blob_registry.rs `revoke_partitioned`) of a URL another window's context made: the blob dropped in
+      # THAT window's isolate too, so every window stops resolving it.
+      def drop_blob_in_window(window, url, source)
+        creator = browser_of_blob_window(window)
+        creator.drop_local_blob(url.to_s) if creator && !creator.equal?(source)
       end
 
       # Load a blob: document into top-level window `target`. The bytes live in
@@ -825,7 +798,6 @@ module Capybara
             retire_shadowed_parked(w[:browser])
             @sw_parked << w[:browser]
           else
-            drop_blob_partitions_for(w[:browser])   # don't leave entries pointing at a disposed VM
             w[:browser].dispose rescue nil
           end
           true
@@ -843,7 +815,6 @@ module Capybara
         @sw_parked.reject! {|b|
           scopes = b.sw_live_scopes
           next false if scopes.empty? || !(scopes - fresh).empty?
-          drop_blob_partitions_for(b)
           b.dispose rescue nil
           true
         }
@@ -855,7 +826,6 @@ module Capybara
       private def sweep_dead_parked
         @sw_parked.reject! {|b|
           next false if b.sw_registrations_active?
-          drop_blob_partitions_for(b)
           b.dispose rescue nil
           true
         }
@@ -881,14 +851,6 @@ module Capybara
         resp
       end
 
-      # Drop every blob-partition entry created by `browser` — its isolate is being
-      # disposed, so the bytes are gone and the reference must not linger (a stale
-      # entry would pin the dead Browser and route blob_bytes_for to a dead VM).
-      private def drop_blob_partitions_for(browser)
-        @blob_partitions_lock.synchronize do
-          @blob_partitions.reject! {|_url, e| e[:browser].equal?(browser) }
-        end
-      end
       def switch_to_window(h)
         window_browser!(h)   # unknown / already-closed handle → WindowError
         @active_handle = (h == PRIMARY_HANDLE ? nil : h)
