@@ -77,4 +77,39 @@ RSpec.describe 'script load events' do
     JS
     expect(s.evaluate_async_script('setTimeout(() => arguments[0](log), 10)')).to eq(['micro ins', 'load'])
   end
+
+  # A script from an external file — as it was prepared, its `src` removed before its task runs it or not — runs with
+  # its document's ignore-destructive-writes counter raised, its microtasks' `document.write` included, which then
+  # writes nothing; a script a `document.write` parses runs inside the one that wrote it, its microtask checkpoint
+  # left to that one. Chrome: `intact`, `w ran | w micro | load`, `B | A after | A micro`.
+  it 'ignores an external script’s destructive writes, and checkpoints only the outermost script' do
+    s = simulated_session(->(env) {
+      case env['PATH_INFO']
+      when '/d.js' then [200, {'content-type' => 'text/javascript'}, ['document.write("<p id=clobber>x</p>")']]
+      when '/w.js' then [200, {'content-type' => 'text/javascript'}, ['log.push("w ran"); Promise.resolve().then(() => { log.push("w micro"); document.write("<p id=clobber>x</p>"); })']]
+      when '/nested' then [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><script>window.log = [];</script><script>
+        Promise.resolve().then(() => log.push('A micro'));
+        document.write('<script>log.push("B")<\\/script>');
+        log.push('A after');
+        </script>
+      HTML
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p id=intact>intact</p>']]
+      end
+    })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.log = [];
+      const d = Object.assign(document.createElement('script'), { src: '/d.js' });
+      document.head.appendChild(d);
+      d.removeAttribute('src');
+      const w = Object.assign(document.createElement('script'), { src: '/w.js' });
+      w.onload = () => log.push('load');
+      document.head.appendChild(w);
+    JS
+    expect(s.evaluate_async_script('setTimeout(() => arguments[0]([!!document.getElementById("intact"), log]), 20)')).to eq([true, ['w ran', 'w micro', 'load']])
+    s.visit '/nested'
+    nested = s.evaluate_script('log')
+    expect(nested).to eq(['B', 'A after', 'A micro'])
+  end
 end
