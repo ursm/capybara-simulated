@@ -16,6 +16,27 @@ RSpec.describe 'same-isolate window realms' do
   describe 'window.open() popup' do
     let(:s) { session('<!doctype html><title>opener</title><body>') }
 
+    # A window a script opened closes when asked, its opener kept; its page disowns the opener by setting it to null, a
+    # frame's close is ignored, and the opener is the window that opened it from its first script on.
+    it 'closes when asked, keeps its opener, and disowns it on null' do
+      result = s.evaluate_script(<<~JS)
+        (function () {
+          var w = window.open();
+          var f = document.body.appendChild(document.createElement('iframe'));
+          f.contentWindow.close();
+          var before = [w.opener === window, w.closed, f.contentWindow.closed];
+          w.close();
+          var closed = [w.closed, w.opener === window];
+          var v = window.open();
+          v.opener = null;
+          var u = window.open();
+          u.opener = 42;
+          return before.concat(closed, [v.opener, u.opener]);
+        })()
+      JS
+      expect(result).to eq([true, false, false, true, true, nil, 42])
+    end
+
     it 'is a real same-isolate window whose document is reachable' do
       result = s.evaluate_script(<<~JS)
         (function () {

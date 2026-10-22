@@ -1099,26 +1099,9 @@ module Capybara
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
         # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
-        # top-page path — top === self here, so neither default branch fits. And make it
-        # a window a script may close, as a frame realm is not: `window.close()` marks it closed (window.js; the
-        # realm lingers inert until the Browser tears the isolate down — matching a real
-        # closed window whose proxy stays valid and reports closed === true).
-        realm.eval_void(<<~JS)
-          globalThis.__csimIsWindowRealm = true;
-          globalThis.__csimScriptClosable = true;
-        JS
-        # window.opener → a WindowProxy for the opener realm. opener_id is the opener's
-        # context id (0 = the main realm, a VALID opener); nil means "no opener", so the
-        # guard is on nil, not on 0 (0 is falsy but real here). It is the window's opener
-        # (window.js `__csimOpener`) until a page disowns it.
-        unless opener_id.nil?
-          realm.eval_void(<<~JS)
-            if (typeof globalThis.__csimFrameWindowProxyFor === 'function') {
-              const opener = globalThis.__csimFrameWindowProxyFor(#{opener_id.to_i});
-              if (opener) globalThis.__csimOpener = opener;
-            }
-          JS
-        end
+        # top-page path — top === self here, so neither default branch fits. That a script may close it, and the
+        # realm that opened it (its `window.opener`), are the engine's: `setSteppedWindow` below.
+        realm.eval_void('globalThis.__csimIsWindowRealm = true;')
         # `window.open()` with no URL opens about:blank — that IS the new document's URL, and a
         # realm built from the snapshot would otherwise keep reporting the OPENER's (making the
         # popup a phantom duplicate of its opener everywhere a document URL is read, the service-
