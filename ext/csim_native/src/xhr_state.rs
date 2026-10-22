@@ -364,14 +364,13 @@ fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 
 // XHR "open()"'s checks of its method and URL, in order, each before any state changes (a bad open() leaves the object
 // as it was): a method that is no token a SyntaxError, a forbidden one a SecurityError — then the method normalized
-// (uppercased only where it case-insensitively is one of the six: `patCH` keeps its case); a URL that parses neither
-// against `base` nor against any http(s) base a SyntaxError (a malformed URL never reaches the network — url/failure). The
-// request URL is resolved against the API base URL `api_base` AT OPEN TIME — a `<base>` inserted later does not apply —
-// its query in the document's encoding `encoding` (`?ß` is `%DF` under windows-1252), its fragment kept apart: never
-// sent, and no part of `responseURL`, but a document response's URL has it. Only an http(s) base resolves it: an
-// about:blank or srcdoc frame's is opaque, its path left RELATIVE for the fetch to resolve, the query alone re-encoded
-// (a `?` kept for an empty one). The method, the URL and its fragment; or the DOMException's message and name.
-fn opened(method: &str, bytes: &[u8], url: &str, base: Option<&str>, api_base: &str, encoding: Option<&str>) -> Result<(String, String, String), (String, &'static str)> {
+// (uppercased only where it case-insensitively is one of the six: `patCH` keeps its case); then the URL parsed against the
+// API base URL `api_base` AT OPEN TIME — a `<base>` inserted later does not apply — its query in the document's encoding
+// `encoding` (`?ß` is `%DF` under windows-1252), a URL that does not parse a SyntaxError (a malformed URL never reaches
+// the network — url/failure; a relative one against a blob: worker's base, Chrome alike), its fragment kept apart: never
+// sent, and no part of `responseURL`, but a document response's URL has it. The method, the URL and its fragment; or the
+// DOMException's message and name.
+fn opened(method: &str, bytes: &[u8], url: &str, api_base: &str, encoding: Option<&str>) -> Result<(String, String, String), (String, &'static str)> {
     if !crate::fetch_rules::is_token(bytes) {
         return Err((format!("'{method}' is not a valid HTTP method."), "SyntaxError"));
     }
@@ -379,29 +378,17 @@ fn opened(method: &str, bytes: &[u8], url: &str, base: Option<&str>, api_base: &
         return Err((format!("'{method}' HTTP method is unsupported."), "SecurityError"));
     }
     let method = crate::fetch_rules::normalized_method(bytes).map_or_else(|| method.to_owned(), str::to_owned);
-    let parse = |b: Option<&str>, e: Option<&str>| crate::url_ops::encoding_parse(url, b, e);
-    if parse(base, None).is_none() && parse(Some("http://csim-fallback.invalid/"), None).is_none() {
+    let Some(parsed) = crate::url_ops::encoding_parse(url, Some(api_base), encoding) else {
         return Err(("Invalid URL".into(), "SyntaxError"));
-    }
-    let special = api_base.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("http:")) || api_base.get(..6).is_some_and(|p| p.eq_ignore_ascii_case("https:"));
-    if let Some(parsed) = parse(Some(api_base), encoding).filter(|_| special) {
-        let href = parsed.href();
-        return Ok(match href.split_once('#') {
-            Some((url, fragment)) => (method, url.to_owned(), format!("#{fragment}")),
-            None => (method, href.to_owned(), String::new()),
-        });
-    }
-    let request = match (url.find('?'), parse(base, encoding)) {
-        (Some(q), Some(parsed)) => {
-            let search = parsed.search();
-            format!("{}{}", &url[..q], if search.is_empty() { "?" } else { search })
-        }
-        _ => url.to_owned(),
     };
-    Ok((method, request, String::new()))
+    let href = parsed.href();
+    Ok(match href.split_once('#') {
+        Some((url, fragment)) => (method, url.to_owned(), format!("#{fragment}")),
+        None => (method, href.to_owned(), String::new()),
+    })
 }
 
-// __dom.xhrOpen(state, method, url, async, inDocument, username, password, base, apiBase, encoding) -> -1 where a
+// __dom.xhrOpen(state, method, url, async, inDocument, username, password, apiBase, encoding) -> -1 where a
 // synchronous request from a document set a response type or a timeout (InvalidAccessError), else whether its
 // readystatechange fires — none where it was OPENED already (open-open-send / open-send-open): the open() steps
 // (`opened`'s checks a DOMException thrown). The request is the one opened, its username and password (null for none
@@ -411,10 +398,9 @@ fn open_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).to_rust_string_lossy(scope);
     let (method, url) = (text(scope, 1), text(scope, 2));
     let bytes = crate::fetch_rules::byte_string(scope, args.get(1));
-    let base = (!args.get(7).is_null_or_undefined()).then(|| text(scope, 7));
-    let api_base = text(scope, 8);
-    let encoding = (!args.get(9).is_null_or_undefined()).then(|| text(scope, 9));
-    let (method, url, fragment) = match opened(&method, &bytes, &url, base.as_deref(), &api_base, encoding.as_deref()) {
+    let api_base = text(scope, 7);
+    let encoding = (!args.get(8).is_null_or_undefined()).then(|| text(scope, 8));
+    let (method, url, fragment) = match opened(&method, &bytes, &url, &api_base, encoding.as_deref()) {
         Ok(opened) => opened,
         Err((message, name)) => {
             if let Some(message) = v8::String::new(scope, &format!("Failed to execute 'open' on 'XMLHttpRequest': {message}")) {

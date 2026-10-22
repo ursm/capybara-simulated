@@ -104,6 +104,8 @@ module Capybara
         # aux window forwards to the Driver; a same-origin window realm lives in this
         # isolate. a[2] is the opener's realm id (for wiring window.opener); a[3]/a[4] the opener
         # document's base URL and origin, which an about:blank popup inherits.
+        # An external script's `sourceMappingURL` comment, for the stack annotation (stack_resolver.rb).
+        '__csimNoteSourceMap'        => ->(b, *a) { b.note_source_map(a[0], a[1]); nil },
         '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(a[0], a[1], a[2], a[3], a[4], a[5], a[6]) },
         # A `target=_blank`/named link/area activation from a frame or window realm:
         # open a new auxiliary window (the realm's VM isn't rebuilt — a fresh window

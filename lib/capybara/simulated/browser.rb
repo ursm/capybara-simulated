@@ -2540,6 +2540,15 @@ module Capybara
         @stack_resolver ||= StackResolver.new(self)
       end
 
+      # The source map script `url` names in its `sourceMappingURL` comment, read out of its text (`text`: the whole of
+      # it, or its tail from the comment on) as it runs — a script with no such comment forgets one it had.
+      def note_source_map(url, text)
+        directive = StackResolver.mapping_url(text)
+        directive ? (@source_maps ||= {})[url.to_s] = directive : @source_maps&.delete(url.to_s)
+      end
+      # …the one it named, or nil.
+      def source_map_of(url) = @source_maps&.[](url.to_s)
+
       def log_network(method, url, status, **extra) = @trace&.log_network(method, url, status, **extra)
 
       # `tag#id.class` short description of the handle, for trace

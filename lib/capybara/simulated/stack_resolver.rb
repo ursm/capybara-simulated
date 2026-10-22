@@ -7,12 +7,12 @@ require_relative 'sourcemap'
 module Capybara
   module Simulated
     # Annotates a V8 stack-trace string with original-source positions
-    # from each frame's `.map` companion file. Resolves once per frame,
+    # from the source map each frame's script names. Resolves once per frame,
     # caches loaded Sourcemap objects process-wide (built bundles are
     # fingerprinted; identical URL → identical map).
     #
-    # Frames whose URL has no `.map` (snapshot stubs, eval'd app inline
-    # scripts, any URL that is no script the page loaded) pass through unchanged.
+    # Frames of a script that named no map (snapshot stubs, eval'd app inline
+    # scripts, any URL that is no script the page ran) pass through unchanged.
     class StackResolver
       # Matches `(URL:LINE:COL)` inside V8 stack frames. URLs can contain
       # `:` (e.g. `:port`), so the URL class includes `:` and the engine
@@ -23,6 +23,14 @@ module Capybara
 
       @@maps = {}
       @@lock = Mutex.new
+
+      # The URL a script's text names in its last `sourceMappingURL` comment (`//# …` or the older `//@ …`), with only
+      # white space after it; nil for none.
+      def self.mapping_url(text)
+        text = text.to_s
+        at = text.rindex('sourceMappingURL=')
+        at && text[[at - 8, 0].max..][/\/\/[#@]\s*sourceMappingURL=(\S+)\s*\z/, 1]
+      end
 
       # Drop the fetched source maps (part of `Browser.clear_http_cache`).
       def self.clear
@@ -58,43 +66,28 @@ module Capybara
         "#{pos.source}:#{pos.line}:#{pos.column}"
       end
 
+      # The map a frame's script named in its `sourceMappingURL` comment as it ran (`Browser#note_source_map`) — kept by
+      # that map's URL, resolved against the script's — or nil for a script that named none. Nothing else is ever
+      # requested, as a browser guesses no `<url>.map`: a frame's URL may be its DOCUMENT's (an inline script's), which a
+      # request would run the app's action for again.
       def load_map(url)
-        return @@maps[url] if @@maps.key?(url)
+        directive = @browser.source_map_of(url)
+        return nil unless directive
+        map_url = directive.start_with?('data:') ? directive : @browser.resolve_against(directive, url)
+        return @@maps[map_url] if @@maps.key?(map_url)
         @@lock.synchronize {
-          return @@maps[url] if @@maps.key?(url)
-          @@maps[url] = build_map(url)
+          return @@maps[map_url] if @@maps.key?(map_url)
+          @@maps[map_url] = build_map(map_url)
         }
       end
 
-      def build_map(url)
-        body = fetch_map_body(url)
+      # …a data: one decoded, any other fetched.
+      def build_map(map_url)
+        body = map_url.start_with?('data:') ? decode_data_url(map_url) : @browser.rack_fetch_body(map_url)
         return nil unless body
         Sourcemap.new(JSON.parse(body))
       rescue JSON::ParserError, ArgumentError
         nil
-      end
-
-      # Tries the conventional `<url>.map` location; falls back to the
-      # inline `sourceMappingURL` directive at the bottom of the bundle
-      # if the sibling `.map` 404s. data: URLs (inline base64 maps) are
-      # also supported via `sourceMappingURL`.
-      # Only for a script the page loaded through the asset cache — a JavaScript response, its body read from there: any
-      # other frame's URL is never requested, an inline script's being its DOCUMENT's, which a request would run the
-      # app's action for again. (A script another script inserted, fetched past the asset cache, passes through as is.)
-      def fetch_map_body(url)
-        meta = @browser.external_asset_meta(url)
-        return nil unless meta && Native.module_content(Array(meta.dig('headers', 'content-type')).join(', '), false)
-        body = @browser.rack_fetch_body("#{url}.map")
-        return body if body
-        bundle = @browser.external_asset_source(url)
-        return nil unless bundle
-        directive = bundle[/\/\/[#@]\s*sourceMappingURL=([^\s]+)\s*\z/, 1]
-        return nil unless directive
-        if directive.start_with?('data:')
-          decode_data_url(directive)
-        else
-          @browser.rack_fetch_body(@browser.resolve_against(directive, url))
-        end
       end
 
       # A source map given inline, by Fetch's data: URL processor (the engine's): its body, or nil.
