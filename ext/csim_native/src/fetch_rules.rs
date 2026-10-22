@@ -107,14 +107,37 @@ pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type
     }
 }
 
-// Fetch "main fetch" (§4.1) step 12's `same-origin` branch: whether a request in mode `same-origin` for `url` (absolute,
-// the Request's) from a client of origin `here` — its document's origin, serialized: an opaque one's "null" — is a
-// network error: an http(s) URL of another origin. (A `data:` / `blob:` URL is its own scheme fetch's to answer.)
-pub(crate) fn same_origin_mode_refused(url: &str, here: &str) -> bool {
-    ada_url::Url::parse(url, None)
-        .ok()
-        .filter(|u| matches!(u.protocol(), "http:" | "https:"))
-        .is_some_and(|u| u.origin() != here)
+// What answers a request of the bindings' fetch() / XHR — Fetch "main fetch" (§4.1) and "HTTP fetch" (§4.3) as they take
+// them, for `url` (absolute, the request's) made by a client of document origin `here` (serialized: an opaque one's
+// "null"), `flags` its `FETCH_*` facts: a `data:` URL's processor; a `blob:` URL's entry; for an http(s) URL a
+// navigation's chain (outside a worker: a service worker's re-fetch of one is a plain fetch), else a network error where
+// its mode is `same-origin` and the URL of another origin (step 12, before any service worker), else the controlling
+// service worker (Handle Fetch, which a synchronous request cannot await), else a keepalive request's own thread, else
+// the network; for any other URL the network, which refuses it — Handle Fetch sees an HTTP(S) request alone.
+pub(crate) const ROUTE_NETWORK: u32 = 0;
+pub(crate) const ROUTE_DATA: u32 = 1;
+pub(crate) const ROUTE_BLOB: u32 = 2;
+pub(crate) const ROUTE_NAVIGATION: u32 = 3;
+pub(crate) const ROUTE_REFUSED: u32 = 4;
+pub(crate) const ROUTE_SERVICE_WORKER: u32 = 5;
+pub(crate) const ROUTE_KEEPALIVE: u32 = 6;
+pub(crate) const FETCH_CONTROLLED: u32 = 1;
+pub(crate) const FETCH_SYNC: u32 = 2;
+pub(crate) const FETCH_KEEPALIVE: u32 = 4;
+pub(crate) const FETCH_NAVIGATE: u32 = 8;
+pub(crate) const FETCH_IN_WORKER: u32 = 16;
+pub(crate) const FETCH_SAME_ORIGIN: u32 = 32;
+pub(crate) fn fetch_route(url: &str, flags: u32, here: &str) -> u32 {
+    let Ok(u) = ada_url::Url::parse(url, None) else { return ROUTE_NETWORK };
+    match u.protocol() {
+        "data:" => ROUTE_DATA,
+        "blob:" => ROUTE_BLOB,
+        "http:" | "https:" if flags & (FETCH_NAVIGATE | FETCH_IN_WORKER) == FETCH_NAVIGATE => ROUTE_NAVIGATION,
+        "http:" | "https:" if flags & FETCH_SAME_ORIGIN != 0 && u.origin() != here => ROUTE_REFUSED,
+        "http:" | "https:" if flags & (FETCH_CONTROLLED | FETCH_SYNC) == FETCH_CONTROLLED => ROUTE_SERVICE_WORKER,
+        "http:" | "https:" if flags & FETCH_KEEPALIVE != 0 => ROUTE_KEEPALIVE,
+        _ => ROUTE_NETWORK,
+    }
 }
 
 // Fetch "HTTP-redirect fetch" (§4.4) step 12: whether a redirect of `status` makes a request of `method` a bodyless GET —
@@ -405,9 +428,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
-    crate::dom::register(scope, ns, "sameOriginModeRefused", same_origin_mode_refused_op, context_id);
     crate::dom::register(scope, ns, "swSubresourceUsable", sw_subresource_usable_op, context_id);
     crate::dom::register(scope, ns, "nosniffBlocked", nosniff_blocked_op, context_id);
+    crate::dom::register(scope, ns, "fetchRoute", fetch_route_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
     crate::dom::register(scope, ns, "httpToken", http_token_op, context_id);
@@ -468,10 +491,11 @@ fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let name = byte_string(scope, args.get(0));
     rv.set_bool(request_body_header(&name));
 }
-// __dom.sameOriginModeRefused(url, here) -> `same_origin_mode_refused`.
-fn same_origin_mode_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
-    rv.set_bool(same_origin_mode_refused(&url, &here));
+// __dom.fetchRoute(url, flags, here) -> `fetch_route`.
+fn fetch_route_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
+    let flags = args.get(1).uint32_value(scope).unwrap_or(0);
+    rv.set_uint32(fetch_route(&url, flags, &here));
 }
 // __dom.swSubresourceUsable(destination, mode, type, redirected, status) -> `sw_subresource_usable`.
 fn sw_subresource_usable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -637,16 +661,33 @@ mod tests {
     }
 
     #[test]
-    fn a_same_origin_request_refuses_an_http_url_of_another_origin() {
+    fn a_request_goes_to_its_schemes_processor_else_an_http_one_to_the_worker_or_the_network() {
         let here = "http://a.test";
-        assert!(!same_origin_mode_refused("http://a.test/x", here));
-        assert!(!same_origin_mode_refused("http://A.TEST:80/x", here));
-        assert!(same_origin_mode_refused("http://b.test/x", here));
-        assert!(same_origin_mode_refused("https://a.test/x", here));
-        assert!(same_origin_mode_refused("http://a.test/x", "null"));
-        assert!(!same_origin_mode_refused("data:,x", here));
-        assert!(!same_origin_mode_refused("blob:http://b.test/u", here));
-        assert!(!same_origin_mode_refused("about:blank", here));
+        assert_eq!(fetch_route("data:,x", FETCH_CONTROLLED | FETCH_SAME_ORIGIN, here), ROUTE_DATA);
+        assert_eq!(fetch_route("blob:http://b.test/u", FETCH_CONTROLLED | FETCH_SAME_ORIGIN, here), ROUTE_BLOB);
+        assert_eq!(fetch_route("http://a.test/x", 0, here), ROUTE_NETWORK);
+        assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED, here), ROUTE_SERVICE_WORKER);
+        assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED | FETCH_SYNC, here), ROUTE_NETWORK);
+        assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED | FETCH_KEEPALIVE, here), ROUTE_SERVICE_WORKER);
+        assert_eq!(fetch_route("http://a.test/x", FETCH_KEEPALIVE, here), ROUTE_KEEPALIVE);
+        assert_eq!(fetch_route("http://a.test/x", FETCH_NAVIGATE | FETCH_CONTROLLED, here), ROUTE_NAVIGATION);
+        assert_eq!(fetch_route("http://a.test/x", FETCH_NAVIGATE | FETCH_IN_WORKER | FETCH_CONTROLLED, here), ROUTE_SERVICE_WORKER);
+        // (…a scheme Handle Fetch never sees, even controlled: the network's to refuse)
+        assert_eq!(fetch_route("about:blank", FETCH_CONTROLLED, here), ROUTE_NETWORK);
+        assert_eq!(fetch_route("x-custom:y", FETCH_CONTROLLED | FETCH_KEEPALIVE, here), ROUTE_NETWORK);
+    }
+
+    // Main fetch's `same-origin` branch refuses an http(s) URL of another origin than the client's document — an opaque
+    // one's every URL — before any service worker; a scheme of its own processor is not judged.
+    #[test]
+    fn a_same_origin_request_refuses_an_http_url_of_another_origin() {
+        let (here, flags) = ("http://a.test", FETCH_SAME_ORIGIN | FETCH_CONTROLLED);
+        assert_eq!(fetch_route("http://a.test/x", flags, here), ROUTE_SERVICE_WORKER);
+        assert_eq!(fetch_route("http://A.TEST:80/x", flags, here), ROUTE_SERVICE_WORKER);
+        assert_eq!(fetch_route("http://b.test/x", flags, here), ROUTE_REFUSED);
+        assert_eq!(fetch_route("https://a.test/x", FETCH_SAME_ORIGIN, here), ROUTE_REFUSED);
+        assert_eq!(fetch_route("http://a.test/x", flags, "null"), ROUTE_REFUSED);
+        assert_eq!(fetch_route("about:blank", flags, here), ROUTE_NETWORK);
     }
 
     #[test]
