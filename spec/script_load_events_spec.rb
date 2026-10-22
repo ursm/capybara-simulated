@@ -60,4 +60,21 @@ RSpec.describe 'script load events' do
     s.visit '/'
     expect(s.evaluate_async_script('setTimeout(() => arguments[0]([runs, loads]), 10)')).to eq([2, 2])
   end
+
+  # A script another script inserted runs from a task of its own, its JS stack empty: "clean up after running script"
+  # runs the microtasks it queued before its `load` — `document.currentScript` still it — as a parser-run one's.
+  it 'runs an inserted external script’s microtasks before its load' do
+    s = simulated_session(->(env) {
+      next [200, {'content-type' => 'text/javascript'}, ['Promise.resolve().then(() => log.push("micro " + (document.currentScript && document.currentScript.id)))']] if env['PATH_INFO'] == '/m.js'
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']]
+    })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.log = [];
+      const el = Object.assign(document.createElement('script'), { id: 'ins', src: '/m.js' });
+      el.onload = () => log.push('load');
+      document.head.appendChild(el);
+    JS
+    expect(s.evaluate_async_script('setTimeout(() => arguments[0](log), 10)')).to eq(['micro ins', 'load'])
+  end
 end
