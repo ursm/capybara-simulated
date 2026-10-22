@@ -122,6 +122,10 @@ impl RealmLocation {
 }
 
 impl RealmArena {
+    // Whether realm `realm`'s document's sandboxing has `flag` (sandbox.rs).
+    pub(crate) fn sandboxed(&self, realm: i32, flag: u32) -> bool {
+        self.realm_state(realm).is_some_and(|s| s.location.sandbox & flag != 0)
+    }
     // The realm's target fragment is `hash` (none: the one it has) — and its document `doc`'s target, given one in the
     // arena, the element it indicates.
     fn retarget(&mut self, doc: Option<NodeId>, hash: Option<String>) {
@@ -147,7 +151,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "popupOrigins", popup_origins_op, context_id);
     register(scope, ns, "setSandbox", set_sandbox, context_id);
     register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
-    register(scope, ns, "sandbox", sandbox, context_id);
+    register(scope, ns, "modalsSandboxed", modals_sandboxed, context_id);
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
     register(scope, ns, "originStorageKey", origin_storage_key, context_id);
@@ -282,10 +286,11 @@ fn take_opener_origins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     location.set_document_origin(created.document);
     location.origin_override = created.location.map(str::to_owned);
 }
-// __dom.sandbox() -> the calling realm's document's active sandboxing flag set.
-fn sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.modalsSandboxed() -> whether the calling realm's document is sandboxed against modals (its sandboxed modals flag
+// — no `allow-modals`), which shows no simple dialog and prints nothing.
+fn modals_sandboxed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    rv.set_uint32(realm(scope, cid).location.sandbox);
+    rv.set_bool(realm(scope, cid).sandboxed(cid, crate::sandbox::MODALS));
 }
 
 // __dom.setDocumentOrigin(text) — the calling realm's document's origin (`set_document_origin`; null: its location's).

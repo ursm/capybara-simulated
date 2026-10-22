@@ -90,7 +90,7 @@ impl RealmArena {
     // §7.6.5), which disables scripting in it: no script of its runs, no event handler content attribute of its
     // compiles, no `javascript:` URL of its is evaluated.
     pub(crate) fn scripts_sandboxed(&self, realm: i32) -> bool {
-        self.realm_state(realm).is_some_and(|s| s.location.sandbox & crate::sandbox::SCRIPTS != 0)
+        self.sandboxed(realm, crate::sandbox::SCRIPTS)
     }
     // HTML "prepare the script element" — for one no parser is preparing (its children changed, it was connected, its
     // `src` set), and for the parser's import maps — as far as the element decides it: an "already started" one, one with

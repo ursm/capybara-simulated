@@ -260,4 +260,50 @@ RSpec.describe 'Sandboxing' do
     expect(poll_until { %w[s t u].map(&at) if %w[s t u].all? {|id| at.(id) == '/b' } }).to eq(%w[/b /b /b])
     expect(%w[s t u].map {|id| s.evaluate_script("document.getElementById('#{id}').contentDocument.body.dataset.ran ?? 'no'") }).to eq(%w[no no no])
   end
+
+  # Without `allow-popups` a sandboxed document opens no new window — `open()` returns null, a `_blank` link or form
+  # navigates nothing ("the rules for choosing a navigable": none chosen) — and without `allow-forms` it submits no form
+  # (HTML "submit" step 4). Chrome's figures, measured.
+  let(:popups_and_forms) {
+    blocked = '<form id=f action="/landed"><input name=x value=1></form><a id=l target=_blank href="/landed">l</a>' \
+              '<script>window.opened = [open("/landed") === null, open("/landed", "other") === null];</script>'
+    forms = '<form id=f action="/landed" target=_blank><input name=x value=1></form>' \
+            '<form id=g action="/landed"><input name=y value=1></form>'
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/landed' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><p>landed']]
+      else
+        [200, {'content-type' => 'text/html'}, [
+          "<!DOCTYPE html><iframe id=a sandbox='allow-scripts allow-same-origin' srcdoc='#{blocked}'></iframe>" \
+          "<iframe id=b sandbox='allow-scripts allow-same-origin allow-forms' srcdoc='#{forms}'></iframe>"
+        ]]
+      end
+    }
+  }
+
+  it 'opens no window without allow-popups and submits no form without allow-forms' do
+    s = simulated_session(popups_and_forms)
+    s.visit '/'
+    windows = s.windows.size
+    s.execute_script(<<~JS)
+      const a = document.getElementById('a').contentDocument, b = document.getElementById('b').contentDocument;
+      a.getElementById('l').click();
+      a.getElementById('f').submit();
+      b.getElementById('f').submit();
+    JS
+    expect(s.evaluate_script("document.getElementById('a').contentWindow.opened")).to eq([true, true])
+    s.execute_script("document.getElementById('b').contentDocument.getElementById('g').submit()")
+    path = ->(id) { s.evaluate_script("document.getElementById('#{id}').contentWindow.location.pathname") }
+    expect(poll_until { path.('b') == '/landed' }).to be(true)
+    expect([path.('a'), s.windows.size]).to eq(['srcdoc', windows])
+  end
+
+  # …and without `allow-modals` it shows no simple dialog (HTML "cannot show simple dialogs"): `alert` returns at once,
+  # `confirm` false, `prompt` null — no modal handler asked (Chrome's figures, measured).
+  it 'shows no dialog without allow-modals' do
+    frame = "<script>window.got = [alert('a'), confirm('c'), prompt('p', 'd'), print()];</script>"
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><iframe sandbox='allow-scripts allow-same-origin' srcdoc=\"#{frame}\"></iframe>"]] })
+    s.visit '/'
+    expect(s.evaluate_script('frames[0].got')).to eq([nil, false, nil, nil])
+  end
 end

@@ -373,6 +373,19 @@ impl RealmArena {
             Some(_) => Chosen::Blocked,
         }
     }
+    // Whether the navigable target name `target` chooses from realm `current`'s is a NEW one its document may not make
+    // ("the rules for choosing a navigable": with the sandboxed auxiliary navigation browsing context flag — no
+    // `allow-popups` — none is chosen): `_blank`, or a name no navigable it may find has.
+    pub(crate) fn auxiliary_refused(&self, current: i32, target: &[u16]) -> bool {
+        if !self.sandboxed(current, crate::sandbox::AUXILIARY_NAVIGATION) {
+            return false;
+        }
+        match target_keyword(&String::from_utf16_lossy(target)) {
+            TARGET_BLANK => true,
+            TARGET_NAME => matches!(self.find_navigable(current, target), Chosen::None),
+            _ => false,
+        }
+    }
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
     fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
         if self.window_name(realm) == name {
@@ -515,6 +528,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
+    crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
+    crate::dom::register(scope, ns, "formsSandboxed", forms_sandboxed, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
     crate::dom::register(scope, ns, "childRealms", child_realms, context_id);
@@ -586,6 +601,21 @@ fn set_realm_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     crate::dom::realm(scope, cid).set_realm_document(cid, doc);
 }
 
+// __dom.auxiliaryRefused(target) -> `RealmArena::auxiliary_refused` of the calling realm's.
+fn auxiliary_refused(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = utf16_arg(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).auxiliary_refused(cid, &target));
+}
+// __dom.formsSandboxed(formNid) -> whether the form's node document is sandboxed against forms (its sandboxed forms
+// browsing context flag — no `allow-forms`), which submit nothing (HTML "submit" step 4).
+fn forms_sandboxed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let id = crate::dom::nid_arg(scope, &args, 0);
+    let arena = crate::dom::realm(scope, cid);
+    let realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
+    rv.set_bool(arena.sandboxed(realm, crate::sandbox::FORMS));
+}
 // __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm]: the navigable the target name chooses
 // from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the realm its
 // active document is in (-1: none yet), its container (null: a top-level one) and the realm the container's node
