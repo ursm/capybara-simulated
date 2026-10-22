@@ -45,6 +45,19 @@ RSpec.describe 'a subresource request route' do
     JS
     poll_until { s.evaluate_script('done') }
     expect(s.evaluate_script("[getComputedStyle(document.getElementById('a')).color, document.querySelector('link').sheet.cssRules.length]")).to eq(['rgb(9, 9, 9)', 1])
+    # (…while a link added after the revoke, the first gone, finds nothing: Chrome `error`, its color none)
+    s.execute_script(<<~JS)
+      window.late = null;
+      const first = document.querySelector('link'), l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = first.href;
+      l.onload = () => { late = 'load'; };
+      l.onerror = () => { late = 'error'; };
+      first.remove();
+      document.head.appendChild(l);
+    JS
+    expect(poll_until { s.evaluate_script('late') }).to eq('error')
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).color")).to eq('rgb(0, 0, 0)')
   end
 
   # …and a worker's `importScripts` of a blob: URL runs its blob (Chrome: `b`).
