@@ -8702,9 +8702,8 @@ module Capybara
         # A SERVICE worker is not a client.
         rt.eval_void("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
-        # (importScripts throws a TypeError). A SERVICE worker's module script evaluates
-        # as a real module graph below (eval_module_graph); a dedicated/shared
-        # module worker still evaluates on the classic path (that ESM follow-up remains).
+        # (importScripts throws a TypeError); its script evaluates as a real module graph
+        # below (eval_module_graph).
         rt.eval_void('globalThis.__csimWorkerModule = true;') if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
@@ -8835,7 +8834,13 @@ module Capybara
           end
           outbox << {handle: handle, kind: 'sw_eval', ok: true}
         else
-          run_worker_script(rt, body, url.to_s)
+          module_fetch = worker_module_fetch(handle, controller.to_i)
+          rt.accept_dynamic_imports(url.to_s, module_fetch)
+          if module_worker
+            run_worker_module(rt, body, url.to_s, handle, outbox, module_fetch)
+          else
+            run_worker_script(rt, body, url.to_s)
+          end
         end
         rt.drain_microtasks
         # Drive the service worker's lifecycle: fire `install`, then `activate`, each phase
@@ -9170,6 +9175,42 @@ module Capybara
         file, line, col = e.backtrace.to_a.first.to_s.match(/\(?([^\s()]+):(\d+):(\d+)\)?\z/)&.captures
         rt.call('__csimReportWorkerScriptError', e.message, file || url, line.to_i, col.to_i)
       end
+
+      # …and a module worker's (`{type: 'module'}`) as a module graph, its static imports fetched on the worker's thread as
+      # a module script's are — a 2xx response of a JavaScript MIME type (Chrome enforces it for module scripts whatever
+      # the server) — one that cannot be fetched, parsed or linked failing the graph: a plain `error` at the Worker, no
+      # exception to report (HTML "run a worker": its script null, or its error to rethrow set). An exception its
+      # evaluation throws is reported as a classic script's is (`eval_module_graph`).
+      private def run_worker_module(rt, body, url, handle, outbox, module_fetch)
+        rt.eval_module_graph(body, url, module_fetch, service: false)
+      rescue ModuleScriptUnavailable, RustyRacer::ParseError, RustyRacer::RuntimeError => e
+        outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
+      end
+      # …the fetch of a module worker `handle` imports, statically or by `import()`: its source — through the service
+      # worker that controls it (`controller`), a module script request of the worker's (destination 'script', mode
+      # 'cors', its client the worker), the network where that answers nothing.
+      private def worker_module_fetch(handle, controller)
+        lambda do |abs|
+          r = controller.positive? && abs.match?(%r{\Ahttps?://}i) ? sw_direct_fetch(controller, JSON.generate(
+            method: 'GET', url: abs, headers: {}, body_b64: '', mode: 'cors', destination: 'script',
+            credentials: 'same-origin', clientId: sw_worker_client_id(handle)
+          ), handle) : nil
+          if r && !r['fallthrough']
+            raise ModuleScriptUnavailable, abs if r['networkError'] || !sw_response_allowed?(r, 'cors')
+
+            r = {'status' => r['status'], 'headers' => r['headers'] || {}, 'body' => Base64.decode64(r['body_b64'].to_s)}
+          else
+            r = rack_fetch('GET', abs, '', {}, 'follow')
+            raise ModuleScriptUnavailable, abs unless resource_loaded?(r)
+          end
+          ct = r['headers'].find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
+          raise ModuleScriptUnavailable, abs unless (200..299).cover?(r['status'].to_i) && js_mime_type?(ct)
+
+          r['body'].to_s
+        end
+      end
+      # (…a module script the graph cannot have: unfetched, failed, or of no JavaScript MIME type)
+      class ModuleScriptUnavailable < StandardError; end
 
       # A worker's script, of `url`: an http(s) one fetched in mode 'same-origin' against its creator's URL `client_url` —
       # a cross-origin URL or redirect a network error, as for a classic and a module worker alike (HTML "fetch a classic

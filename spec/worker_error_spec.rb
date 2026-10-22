@@ -59,4 +59,35 @@ RSpec.describe 'Worker errors' do
     JS
     expect(got.sort).to eq(['canceled Error: boom', 'page | Error: boom | /boom.js | 2 | ', 'worker Error: boom'])
   end
+
+  # A module worker (`{type: 'module'}`) runs its script as a module graph: a static import fetched and linked before it
+  # runs, an `import()` fetched when called — in a classic worker too — and a graph that cannot be fetched or parsed a
+  # plain `error` at its Worker, no exception reported up.
+  it 'runs a module worker as a module graph, its imports and import() fetched' do
+    app = lambda do |env|
+      body = {
+        '/'          => '<!doctype html><meta charset=utf-8>',
+        '/net.js'    => "postMessage('net');",
+        '/static.js' => "import './net.js';",
+        '/dyn.js'    => "import('./net.js');",
+        '/bad.js'    => "import './missing.js';"
+      }[env['PATH_INFO']]
+      next [404, {'content-type' => 'text/plain'}, ['nope']] unless body
+
+      [200, {'content-type' => env['PATH_INFO'] == '/' ? 'text/html' : 'text/javascript'}, [body]]
+    end
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], log = [];
+      window.onerror = (m) => { log.push('page ' + m); return true; };
+      for (const [u, type] of [['/static.js', 'module'], ['/dyn.js', 'module'], ['/dyn.js', 'classic'], ['/bad.js', 'module']]) {
+        const w = new Worker(u, {type});
+        w.onmessage = (e) => log.push(`${u} ${type} ${e.data}`);
+        w.onerror = (e) => log.push(`${u} ${type} ${e.constructor.name}`);
+      }
+      setTimeout(() => done(log), 500);
+    JS
+    expect(got.sort).to eq(['/bad.js module Event', '/dyn.js classic net', '/dyn.js module net', '/static.js module net'])
+  end
 end

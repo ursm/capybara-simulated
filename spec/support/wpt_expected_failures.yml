@@ -5576,10 +5576,6 @@ service-workers/service-worker/credentials.https.html:
 - Script with service worker served as modules should not have credentials
 service-workers/service-worker/data-iframe.html:
 - 'navigator.serviceWorker is not available in a data: iframe'
-service-workers/service-worker/dedicated-worker-service-worker-interception.https.html:
-- Dynamic import should be intercepted by a service worker.
-- Static import should be intercepted by a service worker.
-- "[harness] TIMEOUT"
 service-workers/service-worker/detached-context.https.html:
 - accessing a ServiceWorker object from a removed iframe
 - accessing navigator.serviceWorker on a detached iframe

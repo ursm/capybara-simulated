@@ -30,45 +30,69 @@ module Capybara
       def terminate = (@ctx.terminate rescue nil)
 
       # Native ES-module evaluation of a worker MAIN script + its static import
-      # graph (a `{type: 'module'}` service worker), via V8's native module API
+      # graph (a `{type: 'module'}` worker), via V8's native module API
       # (the same surface the main realm's eval_esm_module uses). The whole graph
       # resolves through the root's instantiate callback (V8 calls it per
       # unresolved edge, transitively). `fetch_import` is called on the worker's
       # own thread for each resolved static import URL and returns the script
       # source (raising fails the evaluation — an import that 404s or has a
-      # non-JS MIME type fails the module script, and with it the Run Service
-      # Worker job). Specifier resolution is PLAIN URL resolution — a worker has
-      # no document, so the page's importmap does not apply, and a bare
-      # specifier is a resolution failure per the spec.
-      def eval_module_graph(src, url, fetch_import)
-        handles = {}
-        root    = @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: url.to_s)
-        handles[url.to_s] = root
-        root.instantiate do |spec, ref|
-          s = spec.to_s
-          resolved =
-            if s.match?(%r{\A[a-z]+://}i)
-              s
-            elsif s.start_with?('/', './', '../')
-              # (…parsed as the page parses a URL, url_ops.rs)
-              Native.url_parts(s, (ref || url).to_s)&.first || s
-            else
-              raise "Failed to resolve module specifier '#{s}'"
-            end
-          handles[resolved] ||= @ctx.compile_module(RuntimeShared.utf8_text(fetch_import.call(resolved).to_s.dup), filename: resolved)
-        end
-        # Top-level await is disallowed in a service worker module ("Run Service
-        # Worker" fails the script; Chrome rejects the registration). V8's
-        # IsGraphAsync (Module#graph_async?) answers it for the WHOLE
-        # instantiated graph, which is what the spec asks: TLA hiding in an
-        # imported module fails too. Per-module `[[HasTLA]]` would name the
-        # offender but not this question — it can't see an imported module's
-        # await. This serves service workers only; a dedicated module worker,
-        # where TLA is legal, would need the check parameterized.
-        raise 'Top-level await is disallowed in a service worker' if root.graph_async?
+      # non-JS MIME type fails the module script). Specifier resolution is PLAIN
+      # URL resolution — a worker has no document, so the page's importmap does
+      # not apply, and a bare specifier is a resolution failure per the spec.
+      #
+      # A SERVICE worker's graph may not await at its top level ("Run Service
+      # Worker" fails the script; Chrome rejects the registration) — V8's
+      # IsGraphAsync (Module#graph_async?) answers it for the WHOLE instantiated
+      # graph, TLA hiding in an imported module included — and what its
+      # evaluation throws fails the job its caller runs. Any other worker's may,
+      # and what its evaluation throws — now, or as an awaited module settles — is
+      # reported in the worker's global as a classic script's exception is (HTML
+      # "run a module script").
+      def eval_module_graph(src, url, fetch_import, service: true)
+        @fetch_import = fetch_import
+        root = @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: url.to_s)
+        (@modules ||= {})[url.to_s] = root
+        link(root, url.to_s)
+        if service
+          raise 'Top-level await is disallowed in a service worker' if root.graph_async?
 
-        root.evaluate
+          root.evaluate
+        else
+          root.evaluate(report: '__csimReportError')
+        end
         nil
+      end
+
+      # A dedicated or shared worker's `import()`, from a classic script (of `url`) or a module: the module its specifier
+      # names, fetched by `fetch_import` and linked as a static import's is — each one module however often it is
+      # imported — whose evaluation the engine finishes before it settles the import's promise.
+      def accept_dynamic_imports(url, fetch_import)
+        @fetch_import = fetch_import
+        @ctx.dynamic_import_resolver = lambda do |specifier, referrer, _initiating|
+          resolved = resolve_specifier(specifier.to_s, (referrer || url).to_s)
+          module_for(resolved).tap {|m| link(m, resolved) if m.status == :uninstantiated }
+        end
+      end
+
+      private
+
+      def link(root, url)
+        root.instantiate do |spec, ref|
+          module_for(resolve_specifier(spec.to_s, (ref || url).to_s))
+        end
+      end
+      def module_for(resolved)
+        (@modules ||= {})[resolved] ||= @ctx.compile_module(RuntimeShared.utf8_text(@fetch_import.call(resolved).to_s.dup), filename: resolved)
+      end
+      def resolve_specifier(spec, base)
+        if spec.match?(%r{\A[a-z]+://}i)
+          spec
+        elsif spec.start_with?('/', './', '../')
+          # (…parsed as the page parses a URL, url_ops.rs)
+          Native.url_parts(spec, base)&.first || spec
+        else
+          raise "Failed to resolve module specifier '#{spec}'"
+        end
       end
     end
   end
