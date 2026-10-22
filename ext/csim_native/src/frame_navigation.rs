@@ -67,6 +67,8 @@ const RELOAD_NAV: u32 = 1 << 5;
 const CONTEXT_READY: u32 = 1 << 6;
 // Its `src` refused as its attributes were last processed (frame-nav.js `FN_SRC_REFUSED`, `process_src`).
 const SRC_REFUSED: u32 = 1 << 7;
+// Its element's `load` for the navigation under way still to fire (frame-nav.js `FN_LOAD_OWED`).
+const LOAD_OWED: u32 = 1 << 8;
 
 #[derive(Default)]
 pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>, Plans);
@@ -135,6 +137,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameBuildsEagerly", frame_builds_eagerly, context_id);
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
+    crate::dom::register(scope, ns, "frameLoadsOwed", frame_loads_owed, context_id);
     crate::dom::register(scope, ns, "frameNavGeneration", frame_nav_generation, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
@@ -392,6 +395,17 @@ fn frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.flags));
+}
+
+// __dom.frameLoadsOwed() -> whether a connected container of the calling realm's documents owes its element's `load`:
+// HTML's iframe, which delays its document's load event until its load event steps ran.
+fn frame_loads_owed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = &crate::dom::dom(scope).arena;
+    let owed = arena.frame_navigations.0.iter().any(|(&container, nav)| {
+        nav.flags & LOAD_OWED != 0 && arena.get(container).is_some_and(|n| n.realm == cid) && arena.is_connected(container)
+    });
+    rv.set_bool(owed);
 }
 
 // __dom.setFrameNav(containerNid, flags, on) — sets (`on`) or clears the flags.
