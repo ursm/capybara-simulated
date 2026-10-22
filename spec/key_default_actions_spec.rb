@@ -97,5 +97,9 @@ RSpec.describe 'Key default actions' do
     s.execute_script("window.L = []; for (const t of ['keydown', 'keypress', 'keyup']) document.addEventListener(t, (e) => L.push(t + ':' + e.target.id), true)")
     s.find('#p').set('z')
     expect(s.evaluate_script('L')).to eq(%w[keydown:p keypress:p keyup:p])
+    # (…and once a listener moves focus, the next key goes to the element it focused — all of its events)
+    s.execute_script("L.length = 0; a.value = b.value = ''; a.addEventListener('keydown', () => b.focus(), {once: true})")
+    s.find('#a').send_keys('c', 'd')
+    expect(s.evaluate_script('[b.value.endsWith("d"), L.slice(3)]')).to eq([true, %w[keydown:b keypress:b keyup:b]])
   end
 end
