@@ -455,9 +455,6 @@ fn supersede_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let nav = crate::dom::realm(scope, cid).frame_navigation(container);
     nav.generation = nav.generation.wrapping_add(1);
     nav.flags &= !LOAD_OWED;
-    // (…and a form's planned navigation of it with the rest: its request, not yet sent, never is — Chrome and Firefox
-    // send none for `submit()` and then `src` set)
-    nav.planned = 0;
 }
 
 // __dom.frameNavUrl(containerNid, slot, take) -> the URL the navigation carries in the slot (0 the one it started

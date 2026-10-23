@@ -5,7 +5,8 @@ require_relative 'support/session_teardown'
 
 # A page form's navigation of a frame its `target` names is PLANNED (HTML "plan to navigate"): its request sent as the
 # planned navigation runs, and none where another navigation of the frame comes before it — the frame's `src` or
-# `srcdoc` set, a link's targeting it (Chrome and Firefox, measured 2026-10-24: no POST, the frame at the later one's).
+# `srcdoc` set, a link's targeting it, a reload (Chrome and Firefox, measured 2026-10-24: no POST, the frame at the later
+# one's; Firefox sends a reload's POST).
 RSpec.describe "a page form's planned navigation of a named frame" do
   def session_with(hits)
     simulated_session(lambda {|env|
@@ -30,6 +31,34 @@ RSpec.describe "a page form's planned navigation of a named frame" do
       expect(session.evaluate_script('frames[0].location.pathname')).to eq(lands)
       expect(hits).not_to include('POST /x')
     end
+  end
+
+  # …nor by one that starts no navigation: a javascript: URL's result, a fragment of the frame's document (HTML
+  # "navigate" sets no ongoing navigation for either; Chrome and Firefox: the frame at /x, the POST sent).
+  {
+    "a javascript: URL's src" => 'fr.src = "javascript:\'<p>js\'"',
+    "a link to the frame's own fragment" => 'l.href = "/blank#b"; l.click()'
+  }.each do |name, js|
+    it "goes on where #{name} comes after it" do
+      hits = []
+      session = session_with(hits)
+      session.visit '/top'
+      session.execute_script("f.submit(); #{js}")
+      session.evaluate_script('1')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/x')
+      expect(hits).to include('POST /x')
+    end
+  end
+
+  # A link to a fragment of the frame's document moves it within it, fetching nothing (HTML "navigate to a fragment").
+  it "fetches nothing for a link to the frame's own fragment" do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    hits.clear
+    session.execute_script('l.href = "/blank#b"; l.click()')
+    expect(session.evaluate_script('frames[0].location.hash')).to eq('#b')
+    expect(hits).to be_empty
   end
 
   it "sends nothing where the frame's srcdoc is set after it" do
