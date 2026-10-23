@@ -6,6 +6,7 @@ require 'yaml'
 require 'set'
 require 'json'
 require 'open3'
+require 'tmpdir'
 require 'digest'
 # The reftest raster diff reads both renderings' PNGs with the driver's own decoder.
 require_relative 'raster'
@@ -32,6 +33,7 @@ module WptRunner
   PY_HANDLER        = File.expand_path('../../script/wpt_py_handler.py', __dir__)
   # One .py handler subprocess at a time — see the capture2 call site.
   PY_EXEC_LOCK      = Mutex.new
+  PY_CACHE_PREFIX   = File.join(Dir.tmpdir, 'csim-wpt-pycache')
   EXPECTED_PATH     = File.expand_path('wpt_expected_failures.yml', __dir__)
   OUT_OF_SCOPE_PATH = File.expand_path('wpt_out_of_scope.yml', __dir__)
   SKIP_PATH         = File.expand_path('wpt_skip.yml', __dir__)
@@ -276,7 +278,10 @@ module WptRunner
       # (the CORS preflight-denied flow stashes state across reset/preflight/complete);
       # cleared per file in run_one.
       'WPT_STASH_DIR' => stash_dir,
-      'PYTHONDONTWRITEBYTECODE' => '1'   # no __pycache__ in the vendored WPT tree
+      # (…its bytecode cached outside the vendored WPT tree, which keeps no __pycache__ — the standard library's too: a
+      # Python installed fresh has none of it compiled, and each handler compiling `re` and `json` anew (0.07 s a call,
+      # against 0.02) ran a service worker's twenty redirects past its time budget)
+      'PYTHONPYCACHEPREFIX' => PY_CACHE_PREFIX
     }
     # Serialized: concurrent capture2 from multiple driver threads (a race-network
     # leg's rack_fetch racing the page's own .py fetches) hits an MRI pipe-fd race

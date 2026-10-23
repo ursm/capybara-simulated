@@ -17,7 +17,9 @@ Out of scope (best-effort stubs, won't pass but won't crash): request.server.sta
 (cross-request state — each call is a fresh subprocess) and deep server config.
 """
 import sys
-sys.dont_write_bytecode = True   # never litter __pycache__ into the vendored WPT tree
+# Never litter __pycache__ into the vendored WPT tree: bytecode is written only under a cache prefix outside it (the
+# runner's PYTHONPYCACHEPREFIX), which caches the standard library's too.
+sys.dont_write_bytecode = sys.pycache_prefix is None
 import os, json, io, re, base64, hashlib, importlib.util, pickle, posixpath
 import time as _time_mod
 from email.utils import formatdate
