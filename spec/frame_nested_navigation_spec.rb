@@ -121,4 +121,17 @@ RSpec.describe 'a nested document navigating itself' do
     poll_until { hits.any? }
     expect(hits).to eq(['/sub/b'])
   end
+
+  # A frame a handler of a document above it removes as that one unloads — a navigation away — is one of its descendants,
+  # unloaded with it ("unload a document and its descendants"), not destroyed: its pagehide and unload fire.
+  it "unloads a descendant an ancestor's unload handler removes" do
+    g = '<!DOCTYPE html><meta charset=utf-8><script>for (const t of ["pagehide", "unload"]) addEventListener(t, () => top.L.push("g2:" + t))</script>'
+    a = %(<!DOCTYPE html><meta charset=utf-8><iframe id=g1 srcdoc="x"></iframe><iframe id=g2 srcdoc="#{g.gsub('"', '&quot;')}"></iframe>) +
+        '<script>addEventListener("unload", () => document.getElementById("g2").remove())</script>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><script>var L = []</script><iframe id=a srcdoc="#{a.gsub('&', '&amp;').gsub('"', '&quot;')}"></iframe>)]] })
+    s.visit '/'
+    poll_until { s.evaluate_script('a.contentWindow?.frames?.[1]?.document?.readyState') == 'complete' }
+    s.execute_script("a.srcdoc = '<p>gone'")
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 2 } }).to eq(%w[g2:pagehide g2:unload])
+  end
 end

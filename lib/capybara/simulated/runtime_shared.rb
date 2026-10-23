@@ -66,7 +66,7 @@ module Capybara
         # A <form> submitted from inside a nested browsing context (a[0] = the
         # initiating frame's realm id). Deferred + applied against that realm,
         # like __csimFrameNavigate — see Browser#frame_submit_self.
-        '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i); nil },
+        '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i, a[1].to_s); nil },
         '__csimFrameHistoryGo'       => ->(b, *a) { b.frame_history_go(a[0].to_i, a[1].to_i); nil },
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees

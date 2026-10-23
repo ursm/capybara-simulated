@@ -115,4 +115,43 @@ RSpec.describe "a form submission's request" do
       expect(session).to have_current_path(path)
     end
   end
+
+  # A frame's own navigation replaces a submission of it that navigates the frame, not one that navigates the page
+  # (Chrome: "/t?q=1"); a frame's submission to the page replaces the page's navigation planned before it (Chrome too).
+  {
+    "f.submit(); location.href = '/x'"     => '/t?q=1',
+    "top.location.href = '/y'; f.submit()" => '/t?q=1'
+  }.each do |js, path|
+    it "navigates the page a frame's form targets after `#{js}`" do
+      app = lambda {|env|
+        next html.("<body>#{env['PATH_INFO']}") unless env['PATH_INFO'] == '/'
+
+        html.('<body><iframe srcdoc="<form id=f action=/t target=_top><input name=q value=1></form>"></iframe>')
+      }
+      session = simulated_session(app)
+      session.visit '/'
+      session.within_frame(0) { session.execute_script(js) }
+      expect(session).to have_current_path(path)
+    end
+  end
+
+  # …and a frame entered with `within_frame` submits by a click as by its script: its sandbox keeps it from the page, and
+  # its Referer is the frame's document.
+  it "submits an entered frame's form to the page under the frame's sandbox and Referer" do
+    referers = []
+    app = lambda {|env|
+      referers << [env['PATH_INFO'], env['HTTP_REFERER']] if env['PATH_INFO'] == '/t'
+      next html.('<body><form action="/t" target="_top"><button>go</button></form>') if env['PATH_INFO'] == '/a'
+      next html.('<body>t') if env['PATH_INFO'] == '/t'
+
+      html.('<body><iframe src="/a"></iframe><iframe sandbox="allow-forms allow-scripts allow-same-origin" src="/a"></iframe>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.within_frame(1) { session.click_button('go') }
+    expect(session).to have_current_path('/')
+    session.within_frame(0) { session.click_button('go') }
+    expect(session).to have_current_path('/t?')
+    expect(referers).to eq([['/t', 'http://www.example.com/a']])
+  end
 end
