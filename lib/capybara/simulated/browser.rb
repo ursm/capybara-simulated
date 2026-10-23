@@ -10657,6 +10657,9 @@ module Capybara
       # `perform_frame_traverse`)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
+        # (…none of a javascript: URL's, which runs in the document it is at — HTML "navigate", its result at most
+        # replacing it)
+        return if new_url.to_s.match?(/\Ajavascript:/i)
 
         return unless (h = frame_history_of(realm_id, create: true))
 
@@ -11529,7 +11532,8 @@ module Capybara
 
         # (…an entry of the frame's session history, as a frame its realm navigates records one: `record_frame_nav` — or,
         # a location's, in place of the current one: `replace_frame_entry`)
-        if depth.zero? && !reload
+        # (…none of a data: URL's, which this frame's fetch makes no document of)
+        if depth.zero? && !reload && !url.to_s.match?(/\Adata:/i)
           record ? record_frame_nav(entry[:realm_id], url) : replace_frame_entry(entry[:realm_id], url)
         end
         invalidate_find_cache
