@@ -160,4 +160,32 @@ RSpec.describe 'a nested document navigating itself' do
     expect(s).to have_current_path('/t')
     expect(log.last).to eq(['/t', 'http://www.example.com/a'])
   end
+
+  # …under the policy the link's `rel` sets (Chrome: no Referer for `noreferrer`); a fragment of the frame's own URL a
+  # new document of the page — judged against the page's URL, not the frame's (Chrome loads "/f#zz"); and none to a
+  # `data:` URL, which a top-level navigation refuses (Chrome).
+  it "follows a frame's _top link under its rel, against the page's URL, and to no data: URL" do
+    log = []
+    page = ->(body) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8>#{body}"]] }
+    s = simulated_session(lambda {|env|
+      log << [env['PATH_INFO'], env['HTTP_REFERER']]
+      case env['PATH_INFO']
+      when '/' then page.('TOP<iframe src="/f"></iframe>')
+      when '/f' then page.('F<a id="n" href="/t" rel="noreferrer" target="_top">n</a><a id="z" href="#zz" target="_top">z</a><a id="d" href="data:text/html,x" target="_top">d</a>')
+      else page.(env['PATH_INFO'])
+      end
+    })
+    s.visit '/'
+    s.within_frame(0) { s.execute_script("document.getElementById('d').click()") }
+    s.evaluate_script('1')
+    expect(s).to have_current_path('/')
+    s.within_frame(0) { s.execute_script("document.getElementById('z').click()") }
+    expect(s).to have_current_path('/f')
+    expect(s.evaluate_script('location.hash')).to eq('#zz')
+    expect(log.last).to eq(['/f', 'http://www.example.com/f'])
+    s.visit '/'
+    s.within_frame(0) { s.execute_script("document.getElementById('n').click()") }
+    expect(s).to have_current_path('/t')
+    expect(log.last).to eq(['/t', nil])
+  end
 end

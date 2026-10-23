@@ -10194,12 +10194,21 @@ module Capybara
       # would dispose the Context mid-call. tick_real_time drains
       # after the call returns. Same pattern as a planned submission (navigation_plan.rs).
       # (…`replace`: a `location.replace`, whose navigation replaces the current history entry rather than adding one)
-      # …navigated by the top-level document's own script, or (`initiator_realm`) by a frame's — `open(url, '_top')` —
-      # its Referer that frame's document (HTML: the source document the navigation's).
-      def location_assign(url, replace: false, initiator_realm: nil)
+      # …navigated by the top-level document's own script, or (`initiator_realm`) by a frame's — `open(url, '_top')`, a
+      # `_top` link — its Referer that frame's document under the policy a link sets (`policy`), taken now: the frame may
+      # be gone by the time the navigation runs (HTML: the source document the navigation's, snapshotted as it begins).
+      def location_assign(url, replace: false, initiator_realm: nil, policy: '')
         @pending_location           = resolve_against_current(url.to_s)
         @pending_location_replace   = replace
-        @pending_location_initiator = initiator_realm
+        @pending_location_initiator = initiator_realm && [initiator_realm.to_i, navigation_referrer(initiator_realm.to_i, policy)]
+      end
+      # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
+      # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
+      # any policy.
+      def navigation_referrer(realm, policy = '')
+        source, document_policy = realm_referrer_initiator(realm)
+        policy = '' if frame_document_origin_opaque?(realm)
+        [source, policy.to_s.empty? ? document_policy : policy.to_s]
       end
       # …and none — nor a reload: a navigation the page planned since (a location's, a link's, a form's, a reload) replaces
       # it (HTML "plan to navigate": the later is the one taken).
@@ -10214,28 +10223,29 @@ module Capybara
         @pending_location = nil
         replace = @pending_location_replace
         initiator = @pending_location_initiator
-        # A `location.href`/`assign`/`hash` set to a same-document
-        # fragment (e.g. `location.hash = ''`) is NOT a document fetch —
-        # move the hash without rebuilding the VM, matching the anchor-
-        # click navigate branch. Without this a hash assignment reloaded
-        # the page, discarding all JS state.
-        if pure_fragment_navigation?(url)
-          update_current_hash(url)
-        elsif !@current_realm_id && url.match?(/\Adata:/i)
-          # A page navigating its top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the
-          # URL's document would run with no origin of its own).
-          nil
-        elsif initiator
-          source, policy = realm_referrer_initiator(initiator.to_i)
-          in_top_context { from_document(initiator.to_i) { navigate(url, referer: source, referrer_policy: policy, initiator: source, replace: replace) } }
-        elsif @current_realm_id
-          # A JS-driven `location.*` from inside a `within_frame` block
-          # navigates the FRAME, not the top page (same as a self-targeted
-          # link/form there). Gated on the realm, so the main-page path is
-          # untouched.
-          navigate_frame(url)
-        else
-          from_document(0) { navigate(url, replace: replace) }
+        # A JS-driven `location.*` from inside a `within_frame` block navigates the FRAME, not the top page (same as a
+        # self-targeted link/form there); a frame's navigation of the page (`initiator`) and the page's own, the page —
+        # each judged against the document it navigates.
+        if !initiator && @current_realm_id
+          return pure_fragment_navigation?(url) ? update_current_hash(url) : navigate_frame(url)
+        end
+
+        in_top_context do
+          # A `location.href`/`assign`/`hash` set to a same-document fragment (e.g. `location.hash = ''`) is NOT a
+          # document fetch — move the hash without rebuilding the VM, matching the anchor-click navigate branch. Without
+          # this a hash assignment reloaded the page, discarding all JS state.
+          if pure_fragment_navigation?(url)
+            update_current_hash(url)
+          elsif url.match?(/\Adata:/i)
+            # A navigation of the top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the URL's
+            # document would run with no origin of its own).
+            nil
+          elsif initiator
+            realm, referrer = initiator
+            navigate_top_from(realm, referrer, url, replace: replace)
+          else
+            from_document(0) { navigate(url, replace: replace) }
+          end
         end
       end
       # A nested browsing context navigating its OWN `location` (the frame's
@@ -10249,13 +10259,10 @@ module Capybara
       # before the drain: by then the initiator may have navigated itself.
       def frame_navigate_self(url, realm_id, initiator_realm = realm_id, policy = '')
         return if realm_id.nil? || realm_id.zero?
-        source, document_policy = realm_referrer_initiator(initiator_realm)
-        # (…which no link's policy lifts for a document of an opaque origin: it refers as none, a step before any policy)
-        policy = '' if frame_document_origin_opaque?(initiator_realm)
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
         supersede_frame_navigation(realm_id)
-        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, [source, policy.to_s.empty? ? document_policy : policy.to_s], frame_sandbox_now(realm_id), initiator_realm]
+        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, navigation_referrer(initiator_realm, policy), frame_sandbox_now(realm_id), initiator_realm]
       end
       # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
       # another realm's — one the navigation's own made, nested in it.
@@ -11299,14 +11306,14 @@ module Capybara
       # content type]).
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares, that document's URL — the page's where it is a
       # local one, about:blank's or srcdoc's, whose origin is the one that made it)
-      def navigate_top_from(realm, initiator, url, post: nil)
+      def navigate_top_from(realm, initiator, url, post: nil, replace: false)
         source, policy = initiator
         site = source.to_s.match?(%r{\Ahttps?://}i) ? source : @current_url
         from_document(realm) do
           if post
             navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: site)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace)
           end
         end
       end
