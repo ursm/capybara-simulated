@@ -183,4 +183,23 @@ RSpec.describe 'the meta referrer policy' do
       ['/n/changed', nil]
     ])
   end
+
+  # …a written one too, before the `write` returns: what a script the parser runs writes is connected as it is inserted
+  # (Chrome: no Referer, and the written select's first option selected).
+  it 'is what a meta a parser-run script wrote set, before the write returns' do
+    seen = []
+    s = simulated_session(->(env) {
+      seen << [env['PATH_INFO'], env['QUERY_STRING'], env['HTTP_REFERER']] if env['PATH_INFO'].start_with?('/n/')
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><body><script>
+          document.write('<meta name="referrer" content="no-referrer"><select id="s"><option>a<option>b</select>');
+          const x = new XMLHttpRequest();
+          x.open('GET', '/n/w?' + document.getElementById('s').selectedIndex, false);
+          x.send();
+        </script>
+      HTML
+    })
+    s.visit '/p'
+    expect(seen).to eq([['/n/w', '0', nil]])
+  end
 end
