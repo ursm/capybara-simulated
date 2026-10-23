@@ -195,6 +195,51 @@ RSpec.describe 'the joint session history' do
     expect(session.evaluate_script('o')).to eq(%w[after micro pop t0])
   end
 
+  # …which the driver applies as it takes what the page planned: a visit after the script is a navigation from the
+  # entry the traversal went to (Chrome runs the task as the script ends).
+  it 'applies a traversal the script asked for before the next visit' do
+    session.visit '/top'
+    session.execute_script("history.pushState(null, '', '/top2'); history.back()")
+    session.visit '/b'
+    expect(length).to eq(2)
+    session.go_back
+    expect(session.current_path).to eq('/top')
+  end
+
+  # A traversal making a navigable's document again cancels the navigation planned for it, whichever came first (HTML
+  # "apply the history step"; Chrome and Firefox, measured 2026-10-24: /x never requested).
+  {'after' => 'history.back(); location.href = "/x"', 'before' => 'location.href = "/x"; history.back()'}.each do |order, js|
+    it "goes back rather than to a location set #{order} it" do
+      hits = []
+      session = simulated_session(lambda {|env|
+        hits << env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{env['PATH_INFO']}"]]
+      })
+      session.visit '/a'
+      session.visit '/b'
+      session.execute_script(js)
+      expect(session).to have_current_path('/a')
+      expect(hits).not_to include('/x')
+      expect(session.evaluate_script('history.length')).to eq(2)
+    end
+  end
+
+  it "goes back rather than to a frame's src set after it" do
+    hits = []
+    session = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      body = env['PATH_INFO'] == '/top' ? '<iframe src="/f1"></iframe>' : env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+    session.execute_script('const f = document.querySelector("iframe"); f.contentWindow.history.back(); f.src = "/x"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f1')
+    expect(hits).not_to include('/x')
+    expect(session.evaluate_script('history.length')).to eq(2)
+  end
+
   # The page navigated on: its frames' steps stay steps of the document it left (Chrome: 3 after /b), and a traversal
   # back to it makes it again, its frames with it.
   it "keeps a frame's steps once the page has navigated on" do

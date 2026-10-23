@@ -2290,6 +2290,7 @@ module Capybara
         @frame_history_saved_for = nil
         @frame_leaving_entries   = nil
         @pending_history_traverse = nil
+        @planned_traversals       = nil
       end
 
       # Traverse the page's session history by `delta` steps — the joint history of the page and its frames
@@ -2309,6 +2310,10 @@ module Capybara
         return unless (plan = history_plan(delta))
 
         step, changes = plan
+        # (…a navigable whose document it makes again its navigation planned before it no more: HTML "apply the history
+        # step" sets its ongoing navigation to "traversal" — Chrome and Firefox: `history.back(); location.href = '/x'`
+        # never requests /x, in either order — one moved within its document keeping its own)
+        changes.each {|nav, _, same_document| cancel_navigations_for(nav) unless same_document }
         if changes.all? {|(_, _, same_document)| same_document }
           # …unless this is the page being navigated away from, running its last
           # due-now step: the navigation already under way wins, and moving the
@@ -2346,6 +2351,29 @@ module Capybara
           @pending_history_traverse = delta
           :cross_document
         end
+      end
+
+      # A traversal a page's `history` asked for (history.js `traverse`): appended to the traversable's session history
+      # traversal queue now, applied as the task it is runs (`apply_planned_traversal`) — or, before that, as the driver
+      # takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation planned with it, which a
+      # traversal making a document again cancels (`cancel_navigations_for`). Its token, which the task applies it by.
+      def plan_history_traverse(delta, realm)
+        return 0 if delta.to_i.zero?
+
+        token = (@traversal_tokens = @traversal_tokens.to_i + 1)
+        (@planned_traversals ||= []) << [token, delta.to_i, realm.to_i]
+        token
+      end
+      # …the traversal of `token` applied, and those planned before it: none where the driver took them already.
+      def apply_planned_traversal(token)
+        return unless (at = @planned_traversals&.index {|t, _, _| t == token })
+
+        @planned_traversals.shift(at + 1).each {|_, delta, realm| history_go(delta, realm: realm) }
+      end
+      def apply_planned_traversals
+        return if @planned_traversals.nil? || @planned_traversals.empty?
+
+        apply_planned_traversal(@planned_traversals.last[0])
       end
 
       def consume_pending_history_traverse
@@ -2400,6 +2428,16 @@ module Capybara
         # (…none of the page's documents made again, after all: the page stays, and what its flushed timers planned
         # still stands — taken once the traversal is in)
         restore_flushed_nav_intents if flushed
+      end
+
+      # The navigations planned for navigable `nav` (0 the page) let go of: a traversal making its document again.
+      private def cancel_navigations_for(nav)
+        if nav.zero?
+          cancel_planned_navigation
+          @runtime.call('__csimSupersedePlanned')
+        elsif (realm = navigable_realm(nav))
+          supersede_frame_navigation(realm)
+        end
       end
 
       # Navigable `nav` (0 the page) traversed to its entry `id` of the document it is at: its location the entry's URL, a
@@ -3211,6 +3249,7 @@ module Capybara
         !@pending_location.nil? ||
           @pending_reload ||
           !@pending_history_traverse.nil? ||
+          !(@planned_traversals || []).empty? ||
           !(@pending_frame_nav || {}).empty? ||
           !(@pending_frame_submit || []).empty? ||
           !@pending_page_submission.nil? ||
@@ -3635,6 +3674,7 @@ module Capybara
         # never drained (the page navigated away first) must not survive the reset
         # — otherwise the stale target replays against the NEXT page's fresh history.
         @pending_history_traverse = nil
+        @planned_traversals       = nil
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
         # running after `reset_session!` (Capybara's per-test teardown
@@ -11287,6 +11327,7 @@ module Capybara
 
       # One pass of the intent drain, without the window-load chaining above.
       def drain_pending_navigation_once
+        apply_planned_traversals
         consume_pending_sw_client_nav
         consume_pending_location
         consume_pending_frame_nav
@@ -12155,7 +12196,7 @@ module Capybara
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
         @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
-        @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
+        @planned_traversals @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS
