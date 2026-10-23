@@ -548,9 +548,14 @@ fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let started = nav.src.clone();
     let refused = nav.flags & SRC_REFUSED != 0;
     let Some(node) = arena.get(container) else { return none(scope, rv, reload) };
-    // (…its `srcdoc`, but for a reload of the document it went on to since — a reload of an about:srcdoc one keeps none:
-    // bridge.entry.js `__csimReloadFrameByRealm`)
-    if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| reload_url.is_none()).map(str::to_owned) {
+    // (…its `srcdoc`, but for a reload of the document it went on to since: one of another URL than about:srcdoc, its
+    // fragment aside)
+    let went_on = reload_url.as_ref().is_some_and(|url| {
+        let url = String::from_utf16_lossy(url);
+        let url = url.split('#').next().unwrap_or_default();
+        !url.eq_ignore_ascii_case("about:srcdoc")
+    });
+    if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on).map(str::to_owned) {
         let (kind, reload) = (v8::Integer::new(scope, SOURCE_SRCDOC).into(), v8::Boolean::new(scope, reload).into());
         let srcdoc = v8::String::new(scope, &srcdoc).map_or_else(|| v8::undefined(scope).into(), Into::into);
         return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, srcdoc]).into());

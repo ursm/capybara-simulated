@@ -281,4 +281,20 @@ RSpec.describe 'the blob URL store' do
     expect(poll_until { s.evaluate_script('frames[0].location.href').then {|h| h if h.end_with?('/other') } }).to end_with('/other')
     expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('OTHER')
   end
+
+  # …its fragment aside: a srcdoc frame at `#z` reloads its srcdoc, and a frame at a revoked blob URL's `#y` the blob it
+  # loaded — entered or not.
+  it 'reloads the document a frame is at, its fragment aside' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>TOP<iframe srcdoc="<p>SD"></iframe>']] })
+    s.visit '/'
+    s.execute_script('frames[0].location.hash = "z"; frames[0].location.reload()')
+    expect(poll_until { s.evaluate_script('frames[0].document.body && frames[0].document.body.textContent').then {|t| t if t == 'SD' } }).to eq('SD')
+    s.execute_script("const w = frames[0], u = w.URL.createObjectURL(new w.Blob(['<p>BL'], {type: 'text/html'})); w.location.href = u; w.URL.revokeObjectURL(u);")
+    poll_until { s.evaluate_script('frames[0].document.body.textContent') == 'BL' }
+    s.execute_script('frames[0].location.hash = "y"; frames[0].location.reload()')
+    s.evaluate_script('1')
+    expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('BL')
+    s.within_frame(0) { s.execute_script('location.reload()') }
+    expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('BL')
+  end
 end

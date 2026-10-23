@@ -10429,7 +10429,7 @@ module Capybara
           url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
           cur   = current_frame_history_entry(realm_id)
           if entry && !url.empty?
-            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id))
+            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true)
           elsif cur && cur[:method] == 'POST'
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
@@ -11333,7 +11333,8 @@ module Capybara
 
       # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
       # shape) under that document's policy, determined anew at each redirect hop.
-      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
+      # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
+      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false)
         raise 'too many redirects' if depth > 10
         return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
 
@@ -11342,12 +11343,13 @@ module Capybara
           reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
           return
         end
-        # A `blob:` URL, which no server answers: the blob its navigation began with, which the container holds
-        # (`__csimTakeFrameNavBlob`), else the one it names now in this window's registry — as the container's own path
-        # resolves it, no other window's partition — none a failed load at the URL. A redirect to one is a network error
-        # (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
+        # A `blob:` URL, which no server answers: the blob its navigation began with, which the container holds — or, a
+        # reload's, the one the document was loaded of (`__csimTakeFrameNavBlob`) — else the one it names now in this
+        # window's registry — as the container's own path resolves it, no other window's partition — none a failed load
+        # at the URL. A redirect to one is a network error (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S)
+        # scheme), its failed load committed at the URL.
         if url.to_s.match?(/\Ablob:/i)
-          blob = depth.zero? ? host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s)) || read_blob_for_window(url) : nil
+          blob = depth.zero? ? host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, reload)) || read_blob_for_window(url) : nil
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
         env = rack_env_for(url, method: 'GET')
