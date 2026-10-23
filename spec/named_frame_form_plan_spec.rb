@@ -242,6 +242,35 @@ RSpec.describe "a page form's planned navigation of a named frame" do
       expect(session.evaluate_script('frames[0].location.pathname')).to eq('/fa')
     end
 
+    # …and moved by a later step whose document is made: at that document from then on, its reload that one's.
+    it 'lets a held frame go where a later step moves it' do
+      no_content = false
+      hits = []
+      session = simulated_session(lambda {|env|
+        hits << env['PATH_INFO']
+        next [204, {}, []] if no_content && env['PATH_INFO'] == '/blank'
+
+        body = env['PATH_INFO'] == '/top' ? '<iframe src="/blank"></iframe><iframe src="/blank2"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      %w[/fa /fc].each do |path|
+        session.execute_script("frames[0].location = '#{path}'")
+        expect(session.evaluate_script('frames[0].location.pathname')).to eq(path)
+      end
+      session.execute_script('frames[1].location = "/fb"')
+      expect(session.evaluate_script('frames[1].location.pathname')).to eq('/fb')
+      no_content = true
+      session.execute_script('history.go(-3)')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/fc')
+      session.execute_script('history.go(1)')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/fa')
+      hits.clear
+      session.execute_script('frames[0].location.reload()')
+      session.evaluate_script('1')
+      expect(hits).to eq(['/fa'])
+    end
+
     # …a window `window.open` made on one at its initial about:blank, whichever side asks (Chrome).
     it 'leaves a new window on one at about:blank' do
       session = simulated_session(app)

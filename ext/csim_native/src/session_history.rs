@@ -40,7 +40,8 @@ struct State {
     // The navigables a traversal left at an entry other than the one the current step gives them — one whose target
     // entry's document was not made (a 204, a download): HTML "apply the history step" updates no such navigable, its
     // current entry the one it was at — by navigable, until a step gives it that entry again or it is navigated.
-    held: HashMap<u32, u64>,
+    // …each with the step it was at as it was held, which the navigables of its document are at with it.
+    held: HashMap<u32, (u64, i64)>,
 }
 
 #[derive(Default)]
@@ -69,27 +70,45 @@ impl State {
         State { current: -1, ..Default::default() }
     }
 
-    // Navigable `nav`'s current entry of its list: the one a traversal held it at, else the current step's.
-    fn current_of<'a>(&self, nav: u32, list: &'a [Entry]) -> Option<&'a Entry> {
-        self.held.get(&nav).and_then(|id| list.iter().find(|e| e.id == *id)).or_else(|| active(list, self.current))
+    // Navigable `nav`'s current entry of its list read at `step`: the one a traversal held it at, else that step's.
+    fn current_of<'a>(&self, nav: u32, list: &'a [Entry], step: i64) -> Option<&'a Entry> {
+        self.held.get(&nav).and_then(|&(id, _)| list.iter().find(|e| e.id == id)).or_else(|| active(list, step))
     }
 
-    // The entry list of navigable `nav` in the tree of current entries, or None where it has none there.
-    fn list(&self, nav: u32, build: u32) -> Option<&Vec<Entry>> {
-        if nav == TOP {
-            return Some(&self.entries);
-        }
-        let mut lists = vec![(TOP, &self.entries)];
-        while let Some((owner, list)) = lists.pop() {
-            let Some(entry) = self.current_of(owner, list) else { continue };
+    // The tree of current entries: each navigable in it — of page document build `build` — its entry list, the step
+    // that list is read at (the current one, but under a navigable a traversal held, the step it was at as it was held)
+    // and the document state whose nested histories hold it (none for the page's).
+    fn tree(&self, build: u32) -> Vec<(u32, &Vec<Entry>, i64, Option<u64>)> {
+        let mut out = Vec::new();
+        let mut stack = vec![(TOP, &self.entries, self.current, None)];
+        while let Some((nav, list, step, parent)) = stack.pop() {
+            out.push((nav, list, step, parent));
+            let Some(entry) = self.current_of(nav, list, step) else { continue };
+            let below = self.held.get(&nav).map_or(step, |&(_, at)| at);
             for nested in self.docs.get(&entry.doc).into_iter().flatten().filter(|n| n.build == build) {
-                if nested.navigable == nav {
-                    return Some(&nested.entries);
-                }
-                lists.push((nested.navigable, &nested.entries));
+                stack.push((nested.navigable, &nested.entries, below, Some(entry.doc)));
             }
         }
-        None
+        out
+    }
+
+    // Navigable `nav`'s entry list in the tree of current entries and the step it is read at, or None where it has
+    // none there.
+    fn find(&self, nav: u32, build: u32) -> Option<(&Vec<Entry>, i64)> {
+        if nav == TOP {
+            return Some((&self.entries, self.current));
+        }
+        self.tree(build).into_iter().find(|&(n, ..)| n == nav).map(|(_, list, step, _)| (list, step))
+    }
+
+    fn list(&self, nav: u32, build: u32) -> Option<&Vec<Entry>> {
+        self.find(nav, build).map(|(list, _)| list)
+    }
+
+    // …and its current entry.
+    fn current_entry(&self, nav: u32, build: u32) -> Option<&Entry> {
+        let (list, step) = self.find(nav, build)?;
+        self.current_of(nav, list, step)
     }
 
     fn list_mut(&mut self, nav: u32, build: u32) -> Option<&mut Vec<Entry>> {
@@ -102,17 +121,7 @@ impl State {
 
     // The document state whose nested histories hold navigable `nav`'s, in the tree of current entries.
     fn parent_doc_of(&self, nav: u32, build: u32) -> Option<u64> {
-        let mut lists = vec![(TOP, &self.entries)];
-        while let Some((owner, list)) = lists.pop() {
-            let Some(entry) = self.current_of(owner, list) else { continue };
-            for nested in self.docs.get(&entry.doc).into_iter().flatten().filter(|n| n.build == build) {
-                if nested.navigable == nav {
-                    return Some(entry.doc);
-                }
-                lists.push((nested.navigable, &nested.entries));
-            }
-        }
-        None
+        self.tree(build).into_iter().find(|&(n, ..)| n == nav).and_then(|(.., parent)| parent)
     }
 
     fn entry(&self, id: u64) -> Option<&Entry> {
@@ -131,17 +140,17 @@ impl State {
     }
 
     // HTML "clear the forward session history": every navigable's entries past the current step dropped — and the
-    // document states only they had, with the nested histories in them.
-    // A navigable held at an entry past the current step keeps it, its entry now the current step's — the one it is at,
-    // whose document it shows: in place of that step's own entry, which it never went to.
-    fn clear_forward(&mut self) {
+    // document states only they had, with the nested histories in them. A navigable whose current entry is past it —
+    // one a traversal held there, a navigable of that one's document — keeps that entry, now the current step's: the one
+    // it is at, whose document it shows, in place of that step's own, which it never went to.
+    fn clear_forward(&mut self, build: u32) {
         let current = self.current;
-        let held: HashSet<u64> = self.held.values().copied().collect();
+        let at: HashSet<u64> = self.tree(build).into_iter().filter_map(|(nav, list, step, _)| self.current_of(nav, list, step)).map(|e| e.id).collect();
         let keep = |list: &mut Vec<Entry>| {
-            if let Some(at) = list.iter().position(|e| e.step > current && held.contains(&e.id)) {
-                list[at].step = current;
-                let id = list[at].id;
-                list.retain(|e| e.id == id || e.step < current);
+            if let Some(i) = list.iter().position(|e| e.step > current && at.contains(&e.id)) {
+                list[i].step = current;
+                let id = list[i].id;
+                list.retain(|e| e.id == id || e.step != current);
             }
             list.retain(|e| e.step <= current);
         };
@@ -150,19 +159,38 @@ impl State {
             keep(&mut nested.entries);
         }
         self.collect_docs();
-        self.drop_stale_holds();
+        self.drop_stale_holds(build);
     }
 
-    // …a hold of an entry gone, or of the one the current step gives its navigable anyway, let go of.
-    fn drop_stale_holds(&mut self) {
-        let current = self.current;
-        let lists: Vec<(u32, &Vec<Entry>)> =
-            std::iter::once((TOP, &self.entries)).chain(self.docs.values().flatten().map(|n| (n.navigable, &n.entries))).collect();
-        let stands = |nav: u32, id: u64| {
-            lists.iter().any(|&(owner, list)| owner == nav && list.iter().any(|e| e.id == id) && active(list, current).is_some_and(|e| e.id != id))
-        };
-        let held: HashMap<u32, u64> = self.held.iter().filter(|&(&nav, &id)| stands(nav, id)).map(|(&n, &i)| (n, i)).collect();
-        self.held = held;
+    // …a hold of an entry gone, of a navigable out of the tree, or of the entry the step gives its navigable anyway, let
+    // go of.
+    fn drop_stale_holds(&mut self, build: u32) {
+        if self.held.is_empty() {
+            return;
+        }
+        let stands: HashSet<u32> = self
+            .tree(build)
+            .into_iter()
+            .filter(|&(nav, list, step, _)| {
+                self.held.get(&nav).is_some_and(|&(id, _)| list.iter().any(|e| e.id == id) && active(list, step).is_some_and(|e| e.id != id))
+            })
+            .map(|(nav, ..)| nav)
+            .collect();
+        self.held.retain(|nav, _| stands.contains(nav));
+    }
+
+    // …and one of a navigable the step `to` moves to another entry than the current one's: it is navigated by the
+    // traversal, held at none (the host holding it again where that one's document is not made: `hold`).
+    fn release_moved(&mut self, to: i64, build: u32) {
+        let moved: HashSet<u32> = self
+            .tree(build)
+            .into_iter()
+            .filter(|&(nav, list, step, _)| {
+                self.held.contains_key(&nav) && active(list, step).map(|e| e.id) != active(list, to).map(|e| e.id)
+            })
+            .map(|(nav, ..)| nav)
+            .collect();
+        self.held.retain(|nav, _| !moved.contains(nav));
     }
 
     fn collect_docs(&mut self) {
@@ -189,11 +217,11 @@ impl Traversable {
     // document state, its one entry `url`'s of the step of that document state's first entry — where it has none.
     fn ensure(&mut self, nav: u32, parent: u32, url: &str) -> Option<u64> {
         let build = self.build;
-        if let Some(list) = self.state.list(nav, build) {
-            return active(list, self.state.current).map(|e| e.id);
+        if self.state.list(nav, build).is_some() {
+            return self.state.current_entry(nav, build).map(|e| e.id);
         }
+        let doc = self.state.current_entry(parent, build)?.doc;
         let parent_list = self.state.list(parent, build)?;
-        let doc = active(parent_list, self.state.current)?.doc;
         let step = parent_list.iter().filter(|e| e.doc == doc).map(|e| e.step).min()?;
         let (id, entry_doc) = (self.mint(), self.mint());
         let entry = Entry { id, step, url: url.to_owned(), doc: entry_doc };
@@ -212,11 +240,11 @@ impl Traversable {
         let (id, fresh_doc) = (self.mint(), self.mint());
         let build = self.build;
         let current = self.state.current;
-        let leaving = self.state.list(nav, build).and_then(|list| self.state.current_of(nav, list)).cloned();
+        let leaving = self.state.current_entry(nav, build).cloned();
         // (…navigated now: its entry the one it is given, held at none)
         self.state.held.remove(&nav);
         if !replace {
-            self.state.clear_forward();
+            self.state.clear_forward(build);
         }
         let list = self.state.list_mut(nav, build)?;
         let doc = match (&leaving, same_document) {
@@ -234,7 +262,7 @@ impl Traversable {
         let step = current + 1;
         list.push(Entry { id, step, url: url.to_owned(), doc });
         self.state.current = step;
-        self.state.drop_stale_holds();
+        self.state.drop_stale_holds(build);
         Some(id)
     }
 
@@ -246,16 +274,17 @@ impl Traversable {
         let here = steps.iter().rposition(|&s| s <= self.state.current)? as i64;
         let target = *steps.get(usize::try_from(here + delta).ok()?)?;
         let mut changes = Vec::new();
-        let mut lists = vec![(TOP, &self.state.entries)];
-        while let Some((nav, list)) = lists.pop() {
-            let (Some(from), Some(to)) = (self.state.current_of(nav, list), active(list, target)) else { continue };
+        let mut lists = vec![(TOP, &self.state.entries, self.state.current)];
+        while let Some((nav, list, step)) = lists.pop() {
+            let (Some(from), Some(to)) = (self.state.current_of(nav, list, step), active(list, target)) else { continue };
             let same_document = from.doc == to.doc;
             if from.id != to.id {
                 changes.push((nav, to.id, same_document));
             }
             if same_document {
+                let below = self.state.held.get(&nav).map_or(step, |&(_, at)| at);
                 for nested in self.state.docs.get(&to.doc).into_iter().flatten().filter(|n| n.build == self.build).rev() {
-                    lists.push((nested.navigable, &nested.entries));
+                    lists.push((nested.navigable, &nested.entries, below));
                 }
             }
         }
@@ -272,6 +301,7 @@ impl Traversable {
         }
         self.state.held.remove(&nav);
         self.state.collect_docs();
+        self.state.drop_stale_holds(build);
     }
 
     fn ids(&self) -> Vec<u64> {
@@ -308,7 +338,7 @@ impl SessionHistory {
     // #active(navigable) -> the id of its active entry, or nil.
     fn active(&self, nav: u32) -> Option<u64> {
         let t = self.0.borrow();
-        t.state.current_of(nav, t.state.list(nav, t.build)?).map(|e| e.id)
+        t.state.current_entry(nav, t.build).map(|e| e.id)
     }
     // #url(entry) -> its URL, or nil for no such entry.
     fn url(&self, id: u64) -> Option<String> {
@@ -334,15 +364,22 @@ impl SessionHistory {
     // #go_to(step): the traversal to `step` applied — the step a plan gave.
     fn go_to(&self, step: i64) {
         let mut t = self.0.borrow_mut();
+        let build = t.build;
+        t.state.release_moved(step, build);
         t.state.current = step;
-        t.state.drop_stale_holds();
+        t.state.drop_stale_holds(build);
     }
-    // #hold(navigable, entry): the navigable left at `entry` by the traversal just applied — its target entry's
-    // document not made (HTML "apply the history step").
-    fn hold(&self, nav: u32, id: u64) {
+    // #step -> the current step.
+    fn step(&self) -> i64 {
+        self.0.borrow().state.current
+    }
+    // #hold(navigable, entry, step): the navigable left at `entry` — the one it was at at `step` — by the traversal just
+    // applied, its target entry's document not made (HTML "apply the history step").
+    fn hold(&self, nav: u32, id: u64, step: i64) {
         let mut t = self.0.borrow_mut();
-        t.state.held.insert(nav, id);
-        t.state.drop_stale_holds();
+        let build = t.build;
+        t.state.held.insert(nav, (id, step));
+        t.state.drop_stale_holds(build);
     }
     // #destroyed(navigable): a frame's container removed from its document — its navigable gone, its session history
     // with it.
@@ -400,7 +437,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("plan", method!(SessionHistory::plan, 1))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
-    class.define_method("hold", method!(SessionHistory::hold, 2))?;
+    class.define_method("hold", method!(SessionHistory::hold, 3))?;
+    class.define_method("step", method!(SessionHistory::step, 0))?;
     class.define_method("destroyed", method!(SessionHistory::destroyed, 1))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
     class.define_method("save", method!(SessionHistory::save, 1))?;
@@ -530,7 +568,7 @@ mod tests {
         h.push(2, TOP, "/fb".into(), false);
         let (step, _) = h.plan(-2).unwrap();
         h.go_to(step);
-        h.hold(1, fa);
+        h.hold(1, fa, 2);
         assert_eq!(h.active(1), Some(fa));
         let changes = h.plan(1).unwrap().1;
         assert!(changes.iter().all(|c| c.0 != 1));
@@ -551,11 +589,36 @@ mod tests {
         h.push(2, TOP, "/fb".into(), false);
         let (step, _) = h.plan(-2).unwrap();
         h.go_to(step);
-        h.hold(1, fa);
+        h.hold(1, fa, 2);
         h.push(2, TOP, "/mz".into(), false);
         assert_eq!(h.active(1), Some(fa));
         assert_eq!(h.length(), 2);
         assert!(h.0.borrow().state.held.is_empty());
+    }
+
+    // …released where a later step moves it to another entry (its document made), and the frames of its document read
+    // at the step it was held at.
+    #[test]
+    fn a_hold_goes_where_a_step_moves_the_navigable() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false);
+        h.seed(1, TOP, "/blank".into());
+        let fa = h.push(1, TOP, "/fa".into(), false).unwrap();
+        h.seed(3, 1, "/c0".into());
+        let cz = h.push(3, 1, "/cz".into(), false).unwrap();
+        let fc = h.push(1, TOP, "/fc".into(), false).unwrap();
+        h.seed(2, TOP, "/blank2".into());
+        h.push(2, TOP, "/fb".into(), false);
+        let before = h.step();
+        let (step, _) = h.plan(-4).unwrap();
+        h.go_to(step);
+        h.hold(1, fc, before);
+        assert_eq!(h.active(1), Some(fc));
+        let (step, changes) = h.plan(2).unwrap();
+        assert!(changes.contains(&(1, fa, false)));
+        h.go_to(step);
+        assert_eq!(h.active(1), Some(fa));
+        assert_eq!(h.active(3), Some(cz));
     }
 
     #[test]
