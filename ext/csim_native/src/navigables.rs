@@ -711,7 +711,6 @@ fn frame_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(crate::dom::node_value(scope, container));
 }
 
-// __dom.discardNavigable(containerNid) — the container's navigable destroyed: it left its document.
 // __dom.realmNavigable(realm) -> which navigable the realm's document is the active document of (`realm_navigable`).
 fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
@@ -719,6 +718,7 @@ fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_uint32(crate::dom::realm(scope, cid).realm_navigable(realm));
 }
 
+// __dom.discardNavigable(containerNid) — the container's navigable destroyed: it left its document.
 fn discard_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);

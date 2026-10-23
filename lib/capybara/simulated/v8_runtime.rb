@@ -886,7 +886,7 @@ module Capybara
       MAX_FRAME_DEPTH = 16
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
-      # Whether frame realm `realm_id` is the first its container made (`create_frame_realm`).
+      # Whether frame realm `realm_id`'s document is the first its navigable had (`create_frame_realm`).
       def first_frame_realm?(realm_id) = @first_frame_realms&.include?(realm_id.to_i) || false
       # …and the navigable its document is the active document of, 0 for none (`create_frame_realm`).
       def frame_realm_navigable(realm_id) = frame_realm_navigables[realm_id.to_i] || 0
