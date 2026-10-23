@@ -11343,13 +11343,12 @@ module Capybara
           reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
           return
         end
-        # A `blob:` URL, which no server answers: the blob its navigation began with, which the container holds — or, a
-        # reload's, the one the document was loaded of (`__csimTakeFrameNavBlob`) — else the one it names now in this
-        # window's registry — as the container's own path resolves it, no other window's partition — none a failed load
-        # at the URL. A redirect to one is a network error (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S)
-        # scheme), its failed load committed at the URL.
+        # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
+        # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
+        # registry — no other window's partition) — none a failed load at the URL. A redirect to one is a network error
+        # (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
         if url.to_s.match?(/\Ablob:/i)
-          blob = depth.zero? ? host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, reload)) || read_blob_for_window(url) : nil
+          blob = depth.zero? ? host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, reload)) : nil
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
         env = rack_env_for(url, method: 'GET')
@@ -11423,6 +11422,10 @@ module Capybara
         parent = entry[:parent_realm_id]
         seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp, navigation_sandbox(old_id)) or return
         return unless unload_frame_document(parent, old_id)
+
+        # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
+        # `__csimTakeFrameNavBlob`)
+        frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
         return if new_id.zero?
