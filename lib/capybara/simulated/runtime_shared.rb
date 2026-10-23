@@ -54,7 +54,7 @@ module Capybara
         # under the policy (a[4]) its `rel` / `referrerpolicy` sets.
         # Deferred + applied by re-navigating the owning iframe, so a frame's
         # `location.href = …` navigates the frame, not the top page.
-        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i, a[3].nil? ? a[1].to_i : a[3].to_i, a[4].to_s); nil },
+        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i, a[3].nil? ? a[1].to_i : a[3].to_i, a[4].to_s, replace: a[2] == true); nil },
         # A same-origin window realm (window.open in this isolate) navigating itself
         # (a[0] = url, a[1] = the window's realm id). Deferred + applied by reloading
         # that realm's document in place — see Browser#window_realm_navigate_self.

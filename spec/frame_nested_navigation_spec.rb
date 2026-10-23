@@ -276,4 +276,34 @@ RSpec.describe 'a nested document navigating itself' do
     s.evaluate_script('1')
     expect(seen).to eq([])
   end
+
+  # An entered frame's navigations are entries of its session history, as its own are: `history.back()` returns to the
+  # document it left, a reload of a POST's document re-posts it, and a redirect's entry is the page it was sent to.
+  it "keeps an entered frame's navigations in its session history" do
+    seen = []
+    s = simulated_session(lambda {|env|
+      seen << [env['REQUEST_METHOD'], env['PATH_INFO']] unless env['PATH_INFO'] == '/'
+      case env['PATH_INFO']
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/f"></iframe>']]
+      when '/x' then [303, {'location' => '/r'}, []]
+      when '/f' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><a href="/g">g</a><form action="/p" method="post"><button>p</button></form><form action="/x" method="post"><button>x</button></form>']]
+      else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><p>#{env['PATH_INFO']}"]]
+      end
+    })
+    s.visit '/'
+    s.within_frame(0) do
+      s.click_link 'g'
+      s.execute_script('history.back()')
+      expect(s).to have_link('g')
+      s.click_button 'p'
+      s.execute_script('location.reload()')
+      expect(s).to have_text('/p')
+      s.execute_script('history.back()')
+      expect(s).to have_button('x')
+      s.click_button 'x'
+      s.execute_script('location.reload()')
+      expect(s).to have_text('/r')
+    end
+    expect(seen).to eq([%w[GET /f], %w[GET /g], %w[GET /f], %w[POST /p], %w[POST /p], %w[GET /f], %w[POST /x], %w[GET /r], %w[GET /r]])
+  end
 end
