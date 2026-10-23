@@ -2584,12 +2584,15 @@ module Capybara
 
         entry = history_entry(id)
         @restoring_history_state = entry[:state]
+        # (…a traversal referred as the entry's document's request was, HTML's document state, and a POST's re-post too,
+        # under the policy it was first sent under; a GET's reload by the document reloading, under its policy — Chrome,
+        # measured: `location.reload()` sends the page's own URL, a re-posted `no-referrer` form none)
+        referred = is_reload && entry[:method] != :post ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
         if entry[:method] == :post
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin],
-                        referer: entry[:referer], referrer_policy: entry[:referrer_policy])
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin], **referred)
         else
-          # (…a user traversal: site 'none' — referred as the entry's document's request was)
-          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil, referer: entry[:referer], referrer_policy: entry[:referrer_policy])
+          # (…a user traversal: site 'none')
+          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil, **referred)
         end
       ensure
         @restoring_history_state = nil
@@ -6892,7 +6895,7 @@ module Capybara
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil)
+                                 referrer_policy: nil, reloading_realm: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6911,6 +6914,10 @@ module Capybara
         if container_realm
           initiator, document_policy = realm_referrer_initiator(container_realm.to_i)
           referrer_policy = document_policy if referrer_policy.to_s.empty?
+        end
+        # (…a reload by the document reloading, under its own policy: Chrome — the container's attribute none of its)
+        if reloading_realm && @runtime.frame_realm_alive?(reloading_realm.to_i)
+          initiator, referrer_policy = realm_referrer_initiator(reloading_realm.to_i)
         end
         meth        = method.to_s.empty? ? 'GET' : method.to_s.upcase
         req_body    = body.to_s.b
@@ -10204,7 +10211,7 @@ module Capybara
           # keeps: a POST's through a 307 / 308 still one, a 303's a GET)
           out['method'] = method.to_s if navigation && out
           # (…and the Referer it sent, the referrer of the document it makes)
-          out['referrer'] = env['HTTP_REFERER'] if navigation && out && env['HTTP_REFERER']
+          out['referrer'] = referrer_header(hop_referer) if navigation && out && hop_referer
           return out
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
@@ -11067,7 +11074,7 @@ module Capybara
           # does the single utf8_text re-tag, matching the network path below.
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
                                    response_content_type(sw['headers'] || {}), restore_state: restore, history_state: history_state, client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                   referrer: entry.fetch(:referrer) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) })
+                                   referrer: frame_entry_referrer(entry, is_reload) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) })
           return
         end
         env = rack_env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
@@ -11084,7 +11091,14 @@ module Capybara
         return save_downloaded_response(url, headers, resp_body, realm: is_reload ? nil : realm_id) if download_response?(headers)
         return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(status)
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers),
-                                 restore_state: restore, history_state: history_state, csp: response_csp(headers), referrer: entry.fetch(:referrer) { env['HTTP_REFERER'] })
+                                 restore_state: restore, history_state: history_state, csp: response_csp(headers),
+                                 referrer: frame_entry_referrer(entry, is_reload) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) })
+      end
+      # The referrer of the document a traversal (or, `is_reload`, a reload) to frame session history entry `entry` makes:
+      # the one the entry's document was made with (HTML's document state) for a traversal, the request's — the block's —
+      # for a reload, which refers by the document reloading (Chrome).
+      private def frame_entry_referrer(entry, is_reload)
+        is_reload ? yield : entry.fetch(:referrer) { yield }
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
       # its shadow trees' controls left out, its action resolved against its document): routed, then navigated.
@@ -12725,7 +12739,7 @@ module Capybara
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
         # (…and the Referer the request sent: the referrer of the document its response makes)
-        [status, headers, resp_body, env['HTTP_REFERER']]
+        [status, headers, resp_body, referrer_header(compute_referrer(referrer_policy, initiator, url))]
       end
 
       # The Navigation Preload request: a parallel GET the browser issues for a navigation whose

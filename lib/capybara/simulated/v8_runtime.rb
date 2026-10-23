@@ -1097,7 +1097,11 @@ module Capybara
         frame_realms[realm.id] = realm
         loading_frame_realms.delete(realm.id)
         # (…its referrer kept with its session history entry: Browser#frame_document_made)
-        @browser.frame_document_made(realm.id, referrer) rescue nil
+        begin
+          @browser.frame_document_made(realm.id, referrer)
+        rescue StandardError => e
+          @browser.log_console('warn', "frame history entry referrer: #{e.message}")
+        end
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual
         # `window.onload = () => parent.postMessage(...)` a frame reports back
