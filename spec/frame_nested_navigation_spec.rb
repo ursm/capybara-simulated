@@ -235,4 +235,23 @@ RSpec.describe 'a nested document navigating itself' do
       expect(s.evaluate_script('[frames[0].location.pathname, frames[0].document.body?.textContent || ""]')).to eq([landed, landed == '/o' ? 'o' : ''])
     end
   end
+
+  # A frame entered with `within_frame` and navigated there loads its new document's subresources — its scripts, its
+  # style sheets — as any document does: they ask as it is built, before the frame is pointed at it.
+  it "loads the subresources of an entered frame's new document" do
+    s = simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when '/s.js' then [200, {'content-type' => 'text/javascript'}, ['window.ran = 1']]
+      when '/c.css' then [200, {'content-type' => 'text/css'}, ['p { color: rgb(255, 0, 0) }']]
+      when '/g' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><link rel="stylesheet" href="c.css"><script src="s.js"></script><p id="p">x</p>']]
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/f"></iframe>']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><a href="/g">g</a>']]
+      end
+    })
+    s.visit '/'
+    s.within_frame(0) do
+      s.click_link 'g'
+      expect(s.evaluate_script('[window.ran, getComputedStyle(document.getElementById("p")).color]')).to eq([1, 'rgb(255, 0, 0)'])
+    end
+  end
 end

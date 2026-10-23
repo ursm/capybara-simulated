@@ -930,8 +930,11 @@ module Capybara
       # frame-relative navigation and to set its request referrer, so
       # `resolve_against_current` / `pure_fragment_navigation?` work the same
       # whether the navigation originates in the main page or a frame.
+      # (…the page's while the entered frame's realm is gone: its rebuild, `reload_current_frame_realm`, whose new document's
+      # loads — its scripts, sheets and images, each URL resolved already — ask as it is built, before the frame is
+      # pointed at it)
       def current_browsing_context_url
-        return @current_url unless @current_realm_id
+        return @current_url unless @current_realm_id && @runtime.frame_realm_alive?(@current_realm_id)
         href = dom_call('__csimLocationHref').to_s
         href.empty? ? @current_url : href
       end
