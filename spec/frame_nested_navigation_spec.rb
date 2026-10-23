@@ -306,4 +306,23 @@ RSpec.describe 'a nested document navigating itself' do
     end
     expect(seen).to eq([%w[GET /f], %w[GET /g], %w[GET /f], %w[POST /p], %w[POST /p], %w[GET /f], %w[POST /x], %w[GET /r], %w[GET /r]])
   end
+
+  # …and a frame removed and inserted again is a new navigable, with a session history of its own: its first navigation
+  # replaces its new initial about:blank, none of the old navigable's entries to go back to (HTML "destroy a child
+  # navigable").
+  it 'forgets a removed frame\'s session history' do
+    s = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/' ? '<iframe></iframe>' : "<p>#{env['PATH_INFO']}"
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    })
+    s.visit '/'
+    s.execute_script("frames[0].location = '/g'")
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/g' }
+    s.execute_script("const f = document.querySelector('iframe'); f.remove(); document.body.append(f)")
+    s.execute_script("frames[0].location = '/h'")
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/h' }
+    s.execute_script('frames[0].history.back()')
+    s.evaluate_script('1')
+    expect(s.evaluate_script('frames[0].location.pathname')).to eq('/h')
+  end
 end

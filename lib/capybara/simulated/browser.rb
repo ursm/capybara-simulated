@@ -10629,11 +10629,7 @@ module Capybara
         # The traversal was deferred; the frame may have been disposed (a competing
         # nav) between flag and drain — drop it gracefully.
         return unless @runtime.frame_realm_alive?(realm_id)
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        return if handle.zero?
-        h = (@frame_histories ||= {})[[parent, handle]]
-        return if h.nil?
+        return unless (h = frame_history_of(realm_id))
         target = h[:idx] + delta
         return if target.negative? || target >= h[:entries].size
         # (…to an entry a traversal can make again alone: an HTTP(S) document refetched, about:blank — a srcdoc or a blob
@@ -10657,10 +10653,8 @@ module Capybara
         return if realm_id.nil? || realm_id.zero?
         return unless recordable_frame_url?(new_url)
 
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        return if handle.zero?
-        h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
+        return unless (h = frame_history_of(realm_id, create: true))
+
         snapshot_frame_history(realm_id, h)
         # (…the first in place of the frame's initial about:blank, which no traversal goes back to: HTML "navigate" — a
         # navigable whose active document is its initial about:blank replaces it)
@@ -10692,10 +10686,19 @@ module Capybara
         cur.replace(url: url.to_s, form_state: nil)
       end
       # The session history of frame realm `realm_id`'s container, nil for none.
-      def frame_history_of(realm_id)
+      # (…its navigable's, which its container keeps while it is in its document — one inserted again a new navigable's,
+      # with none: `frame_realm_navigable` — made where `create` and it has none; nil for none)
+      def frame_history_of(realm_id, create: false)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
-        handle.zero? ? nil : @frame_histories&.[]([parent, handle])
+        return nil if handle.zero?
+
+        key       = [parent, handle]
+        navigable = @runtime.frame_realm_navigable(realm_id)
+        h = @frame_histories&.[](key)
+        return h if h && h[:navigable] == navigable
+
+        (@frame_histories ||= {})[key] = {entries: [], idx: -1, navigable: navigable} if create
       end
       # …kept as it stood before a navigation recorded or replaced an entry of it, which one that ends in no document —
       # a download, a navigation handed off — restores (`frame_navigation_made_no_document`): neither is a navigation of
@@ -10714,10 +10717,7 @@ module Capybara
       # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
       # whether to re-POST.
       def current_frame_history_entry(realm_id)
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        return nil if handle.zero?
-        h = (@frame_histories || {})[[parent, handle]]
+        h = frame_history_of(realm_id)
         h && h[:idx] >= 0 ? h[:entries][h[:idx]] : nil
       end
       # The history entry for the document currently loaded in `realm_id`: its URL
@@ -11314,11 +11314,8 @@ module Capybara
       private def note_frame_same_document_url(realm_id, url)
         return nil if url.nil? || realm_id.zero?
 
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        return nil if handle.zero?
+        return nil unless (h = frame_history_of(realm_id, create: true))
 
-        h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
         if h[:idx].negative?
           # Seed entry 0 from the document as it is NOW — this runs before the location update,
           # so it still reads the URL the frame was loaded at.

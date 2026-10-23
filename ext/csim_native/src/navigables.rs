@@ -16,11 +16,16 @@ struct Child {
     // has looked into) or is between two of them.
     realm: Option<i32>,
     name: Vec<u16>,
+    // Which navigable it is, of those the isolate made: a container removed and inserted again has a new one (HTML
+    // "destroy a child navigable", then its insertion steps' "create a new child navigable"), whose session history and
+    // initial about:blank are its own.
+    id: u32,
 }
 
 #[derive(Default)]
 pub(crate) struct Navigables {
     children: HashMap<NodeId, Child>,
+    made: u32,
     // Each nested realm's container — kept once the container's navigable is gone (its container left its document): a
     // window whose browsing context is discarded is no top-level one, its name '' and not to be set.
     containers: HashMap<i32, NodeId>,
@@ -151,7 +156,9 @@ impl RealmArena {
                 return;
             }
             let name = self.get(container).and_then(|n| n.plain_attr_units("name")).unwrap_or_default();
-            self.navigables.children.insert(container, Child { realm: None, name });
+            self.navigables.made += 1;
+            let id = self.navigables.made;
+            self.navigables.children.insert(container, Child { realm: None, name, id });
         }
         let nav = &mut self.navigables;
         let Some(child) = nav.children.get_mut(&container) else { return };
@@ -177,6 +184,10 @@ impl RealmArena {
             Some(child) => child.name == name,
             None => node.plain_attr_is("name", name),
         }
+    }
+    // …and which navigable realm `realm`'s document is the active document of (`Child::id`), 0 for none.
+    pub(crate) fn realm_navigable(&self, realm: i32) -> u32 {
+        self.navigables.containers.get(&realm).and_then(|c| self.navigables.children.get(c)).filter(|c| c.realm == Some(realm)).map_or(0, |c| c.id)
     }
     pub(crate) fn frame_realm(&self, container: NodeId) -> Option<i32> {
         self.navigables.children.get(&container).and_then(|c| c.realm)
@@ -631,6 +642,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setWindowName", set_window_name, context_id);
     crate::dom::register(scope, ns, "setFrameRealm", set_frame_realm, context_id);
     crate::dom::register(scope, ns, "frameRealm", frame_realm, context_id);
+    crate::dom::register(scope, ns, "realmNavigable", realm_navigable, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
@@ -700,6 +712,13 @@ fn frame_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 // __dom.discardNavigable(containerNid) — the container's navigable destroyed: it left its document.
+// __dom.realmNavigable(realm) -> which navigable the realm's document is the active document of (`realm_navigable`).
+fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(crate::dom::realm(scope, cid).realm_navigable(realm));
+}
+
 fn discard_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);

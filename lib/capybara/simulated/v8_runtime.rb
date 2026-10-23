@@ -433,8 +433,9 @@ module Capybara
         @module_sw_ctxs&.clear
         @frame_realm_depths&.clear
         @frame_realm_parents&.clear
-        @frame_container_builds&.clear
+        @navigable_builds&.clear
         @first_frame_realms&.clear
+        @frame_realm_navigables&.clear
         @window_realm_meta&.clear
         @loading_frame_realms&.clear
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
@@ -525,6 +526,7 @@ module Capybara
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
         @first_frame_realms&.delete(id)
+        @frame_realm_navigables&.delete(id)
         @window_realm_meta&.delete(id)
         # Evict from the main realm's stepped windows so `drainChildRealms` stops
         # stepping a disposed context. A FRAME realm is also evicted via the DOM
@@ -886,6 +888,9 @@ module Capybara
       def frame_realm_depths = (@frame_realm_depths ||= {})
       # Whether frame realm `realm_id` is the first its container made (`create_frame_realm`).
       def first_frame_realm?(realm_id) = @first_frame_realms&.include?(realm_id.to_i) || false
+      # …and the navigable its document is the active document of, 0 for none (`create_frame_realm`).
+      def frame_realm_navigable(realm_id) = frame_realm_navigables[realm_id.to_i] || 0
+      def frame_realm_navigables = (@frame_realm_navigables ||= {})
       # The frame realms being made, until they are registered as alive: a frame's document still parsing, whose own
       # inline scripts run first — and the URL one has (its location's), which a descendant's cookies ask after (nil
       # for no such realm).
@@ -946,10 +951,6 @@ module Capybara
         # never trips.
         frame_realm_depths[realm.id]  = depth
         frame_realm_parents[realm.id] = parent_id.to_i   # owning realm, for contentWindow-reached rebuilds
-        # (…and whether it is the first its container made, whose document — where it is about:blank — is the
-        # navigable's initial about:blank: `first_frame_realm?`)
-        builds = (@frame_container_builds ||= Hash.new(0))[[parent_id.to_i, container]] += 1
-        (@first_frame_realms ||= Set.new) << realm.id if builds == 1
         loading_frame_realms[realm.id] = realm           # (…its URL asked for while it loads: loading_frame_realm_url)
         seed_realm_bridge(realm)
         # Wire `parent` / `top` to the realm that owns this iframe (its context
@@ -1004,6 +1005,11 @@ module Capybara
         # from the container's `name` and kept across its navigations) to identify itself sees it
         # (declarative-shadow declarative-child-frame).
         realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, realm.id) if container
+        # (…and which navigable that is, and whether its document is the first that navigable has — its initial
+        # about:blank where it is about:blank: `first_frame_realm?`; a container inserted again a new navigable's)
+        navigable = realm.call('__csimRealmNavigable', realm.id).to_i
+        frame_realm_navigables[realm.id] = navigable
+        (@first_frame_realms ||= Set.new) << realm.id if ((@navigable_builds ||= Hash.new(0))[navigable] += 1) == 1
         # The frame's viewport is its container's content box, measured by the parent realm. Seed it
         # BEFORE the document loads so load-time `innerWidth` reads and `@media` evaluation see the
         # frame's own size rather than the top window's. `nil` = an unrendered container, which is a
