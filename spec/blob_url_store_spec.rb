@@ -254,4 +254,31 @@ RSpec.describe 'the blob URL store' do
       expect(poll_until { s.evaluate_script('frames[0].document.body && frames[0].document.body.textContent').then {|t| t if t == 'BLOB' } }).to eq('BLOB')
     end
   end
+
+  # A redirect to a blob URL is a network error (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme), an
+  # entered frame's or another's; and a frame that went on from a blob document to another reloads that one, not the
+  # blob it loaded before.
+  it "loads no blob a frame's redirect names, and reloads the document a frame went on to" do
+    url = nil
+    s = simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when '/redir' then [302, {'location' => url}, []]
+      when '/other' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8>OTHER']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>TOP<iframe srcdoc="x"></iframe>']]
+      end
+    })
+    s.visit '/'
+    url = s.evaluate_script("URL.createObjectURL(new Blob(['<p>B'], {type: 'text/html'}))")
+    s.within_frame(0) { s.execute_script("location.href = '/redir'") }
+    s.evaluate_script('1')
+    expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('')
+    s.execute_script("frames[0].location.href = #{url.to_json}")
+    poll_until { s.evaluate_script('frames[0].document.body.textContent') == 'B' }
+    s.execute_script("frames[0].location.href = 'http://www.example.com/other'")
+    poll_until { s.evaluate_script('frames[0].document.body.textContent') == 'OTHER' }
+    s.execute_script('frames[0].location.reload()')
+    s.evaluate_script('1')
+    expect(poll_until { s.evaluate_script('frames[0].location.href').then {|h| h if h.end_with?('/other') } }).to end_with('/other')
+    expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('OTHER')
+  end
 end

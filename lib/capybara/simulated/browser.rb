@@ -10786,6 +10786,10 @@ module Capybara
         # (where the owning iframe lives), not unconditionally to main.
         parent = @runtime.frame_realm_parent(realm_id)
         unless get_url.is_a?(String) && get_url.match?(%r{\Ahttps?://}i)
+          # (…one a redirect reached a network error — Fetch's HTTP-redirect fetch takes no location URL of another
+          # scheme — its failed load committed at the URL)
+          return reload_frame_realm_by_id(realm_id, get_url.to_s, '', 'text/html') if depth.positive?
+
           return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
         end
         # The realm may have been disposed earlier in THIS drain batch — an ancestor frame that also
@@ -11339,9 +11343,11 @@ module Capybara
           return
         end
         # A `blob:` URL, which no server answers: the blob its navigation began with, which the container holds
-        # (`__csimTakeFrameNavBlob`), else the one it names now — none a failed load at the URL.
+        # (`__csimTakeFrameNavBlob`), else the one it names now in this window's registry — as the container's own path
+        # resolves it, no other window's partition — none a failed load at the URL. A redirect to one is a network error
+        # (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
         if url.to_s.match?(/\Ablob:/i)
-          blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s)) || blob_snapshot(url)
+          blob = depth.zero? ? host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s)) || read_blob_for_window(url) : nil
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
         env = rack_env_for(url, method: 'GET')
