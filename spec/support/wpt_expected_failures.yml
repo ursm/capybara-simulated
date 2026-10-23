@@ -5632,9 +5632,6 @@ service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
 service-workers/service-worker/import-scripts-updated-flag.https.html:
 - import script not previously imported
-service-workers/service-worker/intercepted-referrer.https.html:
-- document.referrer for a navigation intercepted by a Service Worker is unchanged
-  and matches the parent URL
 service-workers/service-worker/local-url-inherit-controller.https.html:
 - Data URL worker should not inherit service worker controller.
 - Data URL worker should not intercept fetch().

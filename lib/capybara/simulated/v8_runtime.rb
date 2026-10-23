@@ -1096,6 +1096,8 @@ module Capybara
         end
         frame_realms[realm.id] = realm
         loading_frame_realms.delete(realm.id)
+        # (…its referrer kept with its session history entry: Browser#frame_document_made)
+        @browser.frame_document_made(realm.id, referrer) rescue nil
         # Fire the nested document's window `load`. The frame's inline scripts ran
         # during __csimLoadDocument and registered their `window.onload` (the usual
         # `window.onload = () => parent.postMessage(...)` a frame reports back
@@ -1131,7 +1133,7 @@ module Capybara
       # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
       # same-isolate Document (cross-window adoptNode works). The single isolate also
       # makes a same-origin window far cheaper than today's isolate-per-window.
-      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil, window_key: nil)
+      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil, window_key: nil, referrer: nil)
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
         # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
@@ -1151,6 +1153,8 @@ module Capybara
         if url.to_s.empty?
           realm.call('__csimUpdateLocation', 'about:blank')
           realm.call('__csimSetAboutBaseURL', about_base.to_s)   unless about_base.to_s.empty?
+          # (…and its referrer its creator's URL: HTML "create a new browsing context and document")
+          realm.call('__csimSetPendingReferrer', referrer.to_s) unless referrer.to_s.empty?
           realm.eval_void("__dom.takeOpenerOrigins(#{opener_id.to_i});") unless opener_id.nil?
         else
           realm.call('__csimUpdateLocation', url.to_s)

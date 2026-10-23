@@ -221,7 +221,9 @@ fn set_doc_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let texts = crate::dom::dom(scope).arena.document_states.1.entry(doc).or_default();
     texts.texts[field] = text;
     // (…its URL, encoding or inherited base each one the base URL is computed from)
-    texts.base_url = None;
+    if matches!(field, TEXT_URL | TEXT_ENCODING | TEXT_ABOUT_BASE) {
+        texts.base_url = None;
+    }
 }
 
 // __dom.docLastModified(docNid[, time]) -> when the document was last modified (ms since the epoch), or null for none
