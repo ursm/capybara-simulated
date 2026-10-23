@@ -354,4 +354,24 @@ RSpec.describe 'a nested document navigating itself' do
     step.('frames[0].location.reload()')
     expect(seen).to eq([%w[GET /f], %w[POST /p], %w[POST /p], %w[GET /f], %w[POST /x], %w[GET /r], %w[GET /r]])
   end
+
+  # A nested frame's `location.reload()` reloads its document, its container the one its parent frame's document holds.
+  it "reloads a nested frame's document" do
+    hits = []
+    s = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      body = case env['PATH_INFO']
+             when '/' then '<iframe src="/fa"></iframe>'
+             when '/fa' then 'FA<iframe src="/c0"></iframe>'
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{body}"]]
+    })
+    s.visit '/'
+    expect(s.evaluate_script('frames[0].frames[0].location.pathname')).to eq('/c0')
+    hits.clear
+    s.execute_script('frames[0].frames[0].location.reload()')
+    s.evaluate_script('1')
+    expect(hits).to eq(['/c0'])
+  end
 end

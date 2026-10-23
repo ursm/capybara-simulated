@@ -10740,7 +10740,8 @@ module Capybara
             # bytes a URL refetch can't reproduce.)
             reload_frame_to_entry(realm_id, cur, is_reload: true, is_history: false)
           else
-            @runtime.call('__csimReloadFrameByRealm', realm_id)
+            # (…by the realm whose document holds its container: a nested frame's, its parent frame's)
+            frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimReloadFrameByRealm', realm_id)
           end
         rescue StandardError => e
           log_console('warn', "frame self-reload failed: #{e.message}")
