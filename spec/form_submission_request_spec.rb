@@ -141,6 +141,32 @@ RSpec.describe "a form submission's request" do
     end
   end
 
+  # A POST navigation carries its initiating document's origin (Fetch "append a request Origin header"; Chrome and
+  # Firefox send it): the page's, and 'null' for an opaque-origin frame's submission to the page.
+  {
+    'the page'                 => ['<form action="/r" method="post"><button>go</button></form>', 'http://www.example.com'],
+    'an opaque frame, to _top' => ['<iframe sandbox="allow-forms allow-top-navigation" srcdoc="<form action=/r method=post target=_top><button>go</button></form>"></iframe>', 'null']
+  }.each do |name, (body, origin)|
+    it "sends the Origin of #{name} on a POST navigation" do
+      origins = []
+      app = lambda {|env|
+        origins << env['HTTP_ORIGIN'] if env['PATH_INFO'] == '/r'
+        next html.('<body>r') if env['PATH_INFO'] == '/r'
+
+        html.("<body>#{body}")
+      }
+      session = simulated_session(app)
+      session.visit '/'
+      if body.include?('iframe')
+        session.within_frame(0) { session.click_button('go') }
+      else
+        session.click_button('go')
+      end
+      expect(session).to have_current_path('/r')
+      expect(origins).to eq([origin])
+    end
+  end
+
   # A form whose link types include `noreferrer` sends no Referer, whatever it navigates (HTML "plan to navigate": the
   # referrer policy "no-referrer"); Chrome sends one from the page's own form, a departure from the spec it states.
   {

@@ -3341,7 +3341,7 @@ module Capybara
         picks && picks[entry['index'].to_i]
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false, origin_null: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
@@ -3376,7 +3376,8 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
-              return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
+              return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
+                                   origin_null: redirect_taints_origin?(origin_null, initiator, url, next_url))
             end
 
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -3397,6 +3398,9 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: hop_referer)
+        # (…and its initiating document's origin, as every POST navigation carries it — 'null' where that is opaque or a
+        # redirect has tainted it, none where the initiator is unknown: `navigation_request_headers`)
+        env['HTTP_ORIGIN'] = (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
         response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return commit_error_document(url)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -3408,7 +3412,8 @@ module Capybara
           if Native.redirect_to_get(status.to_i, 'POST')
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           else
-            return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
+            return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
+                                 origin_null: redirect_taints_origin?(origin_null, initiator, url, next_url))
           end
         end
         return download_in_place(url, headers, resp_body) if download_response?(headers)
@@ -11361,7 +11366,7 @@ module Capybara
         site = source.to_s.match?(%r{\Ahttps?://}i) ? source : @current_url
         from_document(realm) do
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace)
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, origin_null: frame_document_origin_opaque?(realm))
           else
             navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob)
           end
