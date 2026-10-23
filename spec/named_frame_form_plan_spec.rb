@@ -235,6 +235,11 @@ RSpec.describe "a page form's planned navigation of a named frame" do
       # (…the frame whose was not made left at its own entry, which the next step gives it anyway: no change of it)
       session.execute_script('window.loads = 0; document.querySelector("iframe").onload = () => loads++; history.go(1)')
       expect(session.evaluate_script('[frames[0].location.pathname, frames[1].location.pathname, loads]')).to eq(['/fa', '/blank2', 0])
+      # (…and kept there by a navigation clearing the forward steps: its reload the document it is at)
+      session.execute_script('history.pushState(null, "", "/p")')
+      session.execute_script('frames[0].location.reload()')
+      session.evaluate_script('1')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/fa')
     end
 
     # …a window `window.open` made on one at its initial about:blank, whichever side asks (Chrome).

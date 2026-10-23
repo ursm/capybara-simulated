@@ -132,11 +132,22 @@ impl State {
 
     // HTML "clear the forward session history": every navigable's entries past the current step dropped — and the
     // document states only they had, with the nested histories in them.
+    // A navigable held at an entry past the current step keeps it, its entry now the current step's — the one it is at,
+    // whose document it shows: in place of that step's own entry, which it never went to.
     fn clear_forward(&mut self) {
         let current = self.current;
-        self.entries.retain(|e| e.step <= current);
+        let held: HashSet<u64> = self.held.values().copied().collect();
+        let keep = |list: &mut Vec<Entry>| {
+            if let Some(at) = list.iter().position(|e| e.step > current && held.contains(&e.id)) {
+                list[at].step = current;
+                let id = list[at].id;
+                list.retain(|e| e.id == id || e.step < current);
+            }
+            list.retain(|e| e.step <= current);
+        };
+        keep(&mut self.entries);
         for nested in self.docs.values_mut().flatten() {
-            nested.entries.retain(|e| e.step <= current);
+            keep(&mut nested.entries);
         }
         self.collect_docs();
         self.drop_stale_holds();
@@ -526,6 +537,24 @@ mod tests {
         let (step, _) = h.plan(2).unwrap();
         h.go_to(step);
         assert_eq!(h.active(1), Some(fa));
+        assert!(h.0.borrow().state.held.is_empty());
+    }
+
+    // …and a navigation clearing the forward steps keeps it at that entry, now the current step's.
+    #[test]
+    fn a_held_navigable_keeps_its_entry_past_a_navigation() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false);
+        h.seed(1, TOP, "/blank".into());
+        let fa = h.push(1, TOP, "/fa".into(), false).unwrap();
+        h.seed(2, TOP, "/blank2".into());
+        h.push(2, TOP, "/fb".into(), false);
+        let (step, _) = h.plan(-2).unwrap();
+        h.go_to(step);
+        h.hold(1, fa);
+        h.push(2, TOP, "/mz".into(), false);
+        assert_eq!(h.active(1), Some(fa));
+        assert_eq!(h.length(), 2);
         assert!(h.0.borrow().state.held.is_empty());
     }
 
