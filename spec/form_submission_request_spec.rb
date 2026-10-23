@@ -199,6 +199,42 @@ RSpec.describe "a form submission's request" do
     expect(origins).to eq(['http://www.example.com'] * 3)
   end
 
+  # …under the referrer policy it was first sent under, not the page it reached's: a `no-referrer` form page's POST is
+  # re-posted with `Origin: null` and no Referer (Chrome).
+  it 're-posts under the referrer policy it was first sent under' do
+    seen = []
+    app = lambda {|env|
+      seen << [env['HTTP_ORIGIN'], env['HTTP_REFERER']] if env['PATH_INFO'] == '/r'
+      next html.('<body>r') if env['PATH_INFO'] == '/r'
+
+      html.('<meta name="referrer" content="no-referrer"><body><form action="/r" method="post"><button>go</button></form>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.click_button('go')
+    session.refresh
+    expect(seen).to eq([['null', nil]] * 2)
+  end
+
+  # A POST redirected to a GET leaves its session history entry the GET's: a reload of a Post/Redirect/Get page gets
+  # the page it was sent to, and submits nothing again (Chrome: `GET /r`).
+  it 'reloads the page a POST was redirected to, not the POST' do
+    seen = []
+    app = lambda {|env|
+      seen << [env['REQUEST_METHOD'], env['PATH_INFO']] unless env['PATH_INFO'] == '/'
+      next [303, {'location' => '/r'}, []] if env['PATH_INFO'] == '/x'
+      next html.('<body>r') if env['PATH_INFO'] == '/r'
+
+      html.('<body><form action="/x" method="post"><button>go</button></form>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.click_button('go')
+    session.refresh
+    expect(session).to have_current_path('/r')
+    expect(seen).to eq([%w[POST /x], %w[GET /r], %w[GET /r]])
+  end
+
   # …and a submission to a named frame is that frame's navigation request: Sec-Fetch-Dest 'iframe', and a POST its
   # Origin (Fetch "create a navigation request"; Fetch Metadata).
   it 'sends the Fetch metadata and Origin of a navigation for a form submitted to a named frame' do

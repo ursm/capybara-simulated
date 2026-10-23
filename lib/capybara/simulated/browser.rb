@@ -2417,7 +2417,8 @@ module Capybara
         return unless entry
         @restoring_history_state = entry[:state]
         if entry[:method] == :post
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin])
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin],
+                        referer: entry[:referer], referrer_policy: entry[:referrer_policy])
         else
           navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil)   # user traversal: site 'none'
         end
@@ -3362,7 +3363,9 @@ module Capybara
         @history_before_navigation = nil if depth.zero?
         unless from_history || depth > 0
           capture_outgoing_form_state
-          record_navigation_history({method: :post, url: url, body: body, content_type: content_type, origin: origin}, replace: replace)
+          # (…the request as it was sent — its origin, its referrer and referrer policy — what a reload or a traversal
+          # re-posts: HTML's document state)
+          record_navigation_history({method: :post, url: url, body: body, content_type: content_type, origin: origin, referer: referer, referrer_policy: referrer_policy}, replace: replace)
         end
         # A controlled top-level POST navigation (form submission) goes to the SW's fetch
         # event first — same model as `navigate` (the SW reads the body via
@@ -3382,10 +3385,12 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
+              redirect_history_entry(next_url, get: false)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
                                    origin: redirected_origin(origin, url, next_url))
             end
 
+            redirect_history_entry(next_url, get: true)
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
           return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
@@ -3414,7 +3419,9 @@ module Capybara
           resp_body.close if resp_body.respond_to?(:close)
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
-          if Native.redirect_to_get(status.to_i, 'POST')
+          to_get = Native.redirect_to_get(status.to_i, 'POST')
+          redirect_history_entry(next_url, get: to_get)
+          if to_get
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           else
             return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
@@ -11680,6 +11687,14 @@ module Capybara
       end
       # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
       # kept, for a response that turns out to make no document (`download_in_place`).
+      # …and the current entry made a redirect's from it (Fetch "HTTP-redirect fetch"): its URL the redirect's, a POST
+      # become a GET where the redirect makes one — so a reload of a Post/Redirect/Get page gets the page it was sent to,
+      # not the form submitted again (Chrome).
+      private def redirect_history_entry(url, get:)
+        return unless (entry = @history_idx >= 0 && @history[@history_idx])
+
+        @history[@history_idx] = get ? entry.except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get, url: url) : entry.merge(url: url)
+      end
       private def record_navigation_history(entry, replace: false)
         @history_before_navigation = [@history.dup, @history_idx] if window_has_document?
         replace ? replace_history(entry) : record_history(entry)
@@ -12400,13 +12415,13 @@ module Capybara
       # on the initiator's origin) keeps the real Origin; a later hop that redirects same-origin-to-
       # current keeps it too. Monotonic: once opaque, an opaque origin is same-origin with nothing, so
       # it stays null.
-      # …a request's origin `origin` (serialized, nil for none) after a redirect from `current_url` to `location_url`.
-      def redirected_origin(origin, current_url, location_url)
-        origin && (redirect_taints_origin?(origin == 'null', origin, current_url, location_url) ? 'null' : origin)
-      end
       def redirect_taints_origin?(already_null, initiator_url, current_url, location_url)
         already_null ||
           (url_origin(current_url) != url_origin(location_url) && url_origin(initiator_url) != url_origin(current_url))
+      end
+      # …a request's origin `origin` (serialized, nil for none) after a redirect from `current_url` to `location_url`.
+      def redirected_origin(origin, current_url, location_url)
+        origin && (redirect_taints_origin?(origin == 'null', origin, current_url, location_url) ? 'null' : origin)
       end
 
       # The site of a URL — scheme and registrable domain — that a Sec-Fetch-Site / same-site comparison and a blob
