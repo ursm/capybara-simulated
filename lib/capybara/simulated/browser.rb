@@ -3277,15 +3277,20 @@ module Capybara
         no_referrer = Native.link_noreferrer(spec['rel'].to_s)
         keep_opener = !Native.link_noopener(spec['rel'].to_s, target)
         referrer    = no_referrer ? '' : (@current_url || '')
-        # (…replacing the session history entry of the form's document where that is not completely loaded yet and the
-        # navigable it navigates is its own — the page's, not an entered frame's: `request.replace`)
-        replace = spec['replace'] == true && @current_realm_id.nil?
+        # (…replacing the session history entry of the form's document where that is not completely loaded yet: the
+        # page's, whose own navigable it navigates — `request.replace`)
+        replace = spec['replace'] == true
         # (…and whatever it navigates is told its initiator under the policy `noreferrer` sets — HTML "plan to navigate"
         # sets the referrer policy "no-referrer" where the form's link types include it)
         initiator = realm_referrer_initiator(@current_realm_id.to_i)
         initiator = [initiator[0], 'no-referrer'] if no_referrer
         policy    = no_referrer ? 'no-referrer' : nil
-        if method == 'GET'
+        if @current_realm_id && !new_window && !named_frame && !frame_entry
+          # (…an entered frame's form whose target names the page navigates it as the frame's `_top` does: its Referer and
+          # site the frame document's)
+          post = method == 'GET' ? nil : [body, content_type]
+          in_top_context { navigate_top_from(@current_realm_id.to_i, initiator, url, post: post) }
+        elsif method == 'GET'
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: referrer)
