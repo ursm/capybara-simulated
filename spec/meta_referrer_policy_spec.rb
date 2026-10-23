@@ -1,11 +1,11 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# A document's `<meta name="referrer">` (url_ops.rs `meta_referrer_policy`): its content ASCII-lowercased, a legacy
-# keyword mapped (`never` → no-referrer), the last valid one in tree order — what a frame's navigation of itself (a link
-# followed in it) sends its Referer by.
+# A document's `<meta name="referrer">` (url_ops.rs `meta_referrer_steps`): its content ASCII-lowercased, a legacy
+# keyword mapped (`never` → no-referrer), the last valid one to be connected — what a frame's navigation of itself (a
+# link followed in it) sends its Referer by.
 RSpec.describe 'the meta referrer policy' do
-  it "sets a frame's navigation Referer by its last valid meta" do
+  it "sets a frame's navigation Referer by the last valid meta connected" do
     referers = {}
     s = simulated_session(->(env) {
       referers[env['PATH_INFO']] = env['HTTP_REFERER']

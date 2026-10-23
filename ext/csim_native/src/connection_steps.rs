@@ -52,8 +52,10 @@ pub(crate) fn connection_steps(n: &NodeData) -> u32 {
         "link" => CONNECT_LINK,
         "source" => CONNECT_SOURCE,
         "iframe" | "frame" => CONNECT_FRAME,
-        "meta" if n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")) => CONNECT_DEFAULT_STYLE,
-        "meta" if crate::url_ops::names_referrer(n) => CONNECT_META_REFERRER,
+        "meta" => {
+            flag(n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")), CONNECT_DEFAULT_STYLE)
+                | flag(crate::url_ops::names_referrer(n), CONNECT_META_REFERRER)
+        }
         _ => 0,
     };
     // (…a valid custom element name has a hyphen; a customized built-in an `is` value)

@@ -10691,9 +10691,9 @@ module Capybara
       rescue StandardError
         nil
       end
-      # A frame document's referrer policy (its last valid `<meta name="referrer">`), read from
-      # the live realm to compute a self-navigation's Referer under the initiating document's
-      # policy. '' when the realm is gone / has no meta → the platform default applies.
+      # A document's referrer policy (what its `<meta name="referrer">` elements have set: `__csimDocumentReferrerPolicy`),
+      # read from the live realm to compute a navigation's Referer under the initiating document's policy. '' when the
+      # realm is gone / no meta has set one → the platform default applies.
       def main_document_referrer_policy
         @runtime.call('__csimDocumentReferrerPolicy').to_s
       rescue StandardError

@@ -289,6 +289,9 @@ const SUPPORT_TREES = [
 // the vendored common/dispatcher framework; neither tree is in TREES.
 const SUPPORT_FILES = [
   'html/resources/common.js',
+  // dom/nodes/insertion-removing-steps' meta-referrer test reads the Referer its fetches carried through this echo
+  // handler, from a tree we don't vendor (its other tests are of base URLs).
+  'html/infrastructure/urls/terminology-0/resources/echo-referrer-text.py',
   // html/semantics/interactive-elements' dialog and details tests drive light dismiss, close requests and toggle
   // sources through these helpers (clickOn / sendEscKey / sendCloseRequest / the toggle-source harness, the focus
   // utilities) by path into trees we don't vendor; each is plain testdriver code.

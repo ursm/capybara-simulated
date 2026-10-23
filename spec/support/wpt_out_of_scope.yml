@@ -32620,10 +32620,6 @@ dom/nodes/Document-createEvent.https.html:
     APIs is the UA''s choice, which a desktop with no touch screen — headless Chrome
     and Firefox, measured — makes as this driver does (no ontouch* anywhere, createEvent(''touchevent'')
     NotSupportedError).'
-dom/nodes/insertion-removing-steps/Node-append-meta-referrer-and-script-from-fragment.html:
-- name: "<meta name=referrer> gets processed and applied in the post-insertion steps"
-  reason: Asserts referrer-policy effect observed via real async fetch() to an echo-referrer
-    .py resource; needs true network async runtime not modeled.
 dom/nodes/moveBefore/fullscreen-preserve.html:
 - name: Document#fullscreenElement
   reason: Needs requestFullscreen()/fullscreenElement fullscreen subsystem + trusted_click
