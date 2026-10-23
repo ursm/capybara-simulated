@@ -3345,7 +3345,7 @@ module Capybara
       end
 
       def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false, origin_null: false, origin: nil)
-        raise 'too many redirects' if depth > 10
+        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
@@ -3387,12 +3387,12 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
-              redirect_history_entry(next_url, get: false)
+              redirect_history_entry(next_url, get: false, depth: depth)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
                                    origin: redirected_origin(origin, url, next_url))
             end
 
-            redirect_history_entry(next_url, get: true)
+            redirect_history_entry(next_url, get: true, depth: depth)
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
           return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
@@ -3422,7 +3422,7 @@ module Capybara
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
           to_get = Native.redirect_to_get(status.to_i, 'POST')
-          redirect_history_entry(next_url, get: to_get)
+          redirect_history_entry(next_url, get: to_get, depth: depth)
           if to_get
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           else
@@ -9417,6 +9417,8 @@ module Capybara
       # throwaway arrays per hop (perf).
       CACHE_MODES_SKIP_READ  = %w[no-store reload].freeze
       CACHE_MODES_SERVE_STALE = %w[force-cache only-if-cached].freeze
+      # The redirects a top-level navigation follows before it fails.
+      NAVIGATION_REDIRECT_LIMIT = 10
       REFERRER_POLICIES = %w[
         no-referrer no-referrer-when-downgrade origin origin-when-cross-origin
         same-origin strict-origin strict-origin-when-cross-origin unsafe-url
@@ -11562,7 +11564,7 @@ module Capybara
       # (…`blob`: a `blob:` URL's blob as the navigation began — `{bytes:, type:}`, `blob_snapshot` — which a revoke after
       # it began does not take back: HTML resolves the URL's blob URL entry as it parses it)
       def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false, blob: nil)
-        raise 'too many redirects' if depth > 10
+        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
@@ -11636,7 +11638,7 @@ module Capybara
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
               next_url = carry_fragment(url, resolve_location(loc, url))
-              redirect_history_entry(next_url, get: true)
+              redirect_history_entry(next_url, get: true, depth: depth)
               return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
             return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
@@ -11665,7 +11667,7 @@ module Capybara
             # the original fragment in the final URL.
             next_url = carry_fragment(url, next_url)
             body.close if body.respond_to?(:close)
-            redirect_history_entry(next_url, get: true)
+            redirect_history_entry(next_url, get: true, depth: depth)
             # Thread the initiator + widened site so the chain's SameSite verdict
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -11696,7 +11698,10 @@ module Capybara
       # …and the current entry made a redirect's from it (Fetch "HTTP-redirect fetch"): its URL the redirect's, a POST
       # become a GET where the redirect makes one — so a reload gets the page it was redirected to, not the chain run
       # again: a Post/Redirect/Get page's not the form submitted again (Chrome).
-      private def redirect_history_entry(url, get:)
+      # …where the redirect is followed: a fetchable URL, and the redirect limit not reached by it (the entry the last URL
+      # requested where it is: Chrome).
+      private def redirect_history_entry(url, get:, depth:)
+        return if depth + 1 > NAVIGATION_REDIRECT_LIMIT || !url.to_s.match?(%r{\Ahttps?://}i)
         return unless (entry = @history_idx >= 0 && @history[@history_idx])
 
         @history[@history_idx] = get ? entry.except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get, url: url) : entry.merge(url: url)
