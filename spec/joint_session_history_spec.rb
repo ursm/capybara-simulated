@@ -84,6 +84,78 @@ RSpec.describe 'the joint session history' do
     expect(session.evaluate_script('document.title')).to eq('PF')
   end
 
+  # A frame's fragment navigation is an entry of its own, the one it left the URL it was at (a back gives it, a popstate
+  # — /f1's listener writes the F — and a hashchange).
+  it "goes back over a frame's fragment navigation" do
+    session.visit '/top'
+    session.execute_script('frames[0].addEventListener("hashchange", () => document.title += "H"); frames[0].location.hash = "x"')
+    expect(session.evaluate_script('frames[0].location.hash')).to eq('#x')
+    expect(length).to eq(2)
+    session.execute_script('history.back()')
+    expect(session.evaluate_script('frames[0].location.href')).to end_with('/f1')
+    expect(session.evaluate_script('document.title')).to eq('HFH')
+  end
+
+  # A frame's document made again by a traversal starts with its entry's classic history API state (HTML "update
+  # document for history step application"), as the page's does.
+  it "restores a frame entry's history state" do
+    session.visit '/top'
+    session.execute_script('frames[0].history.pushState({a: 1}, "", "/f1x")')
+    session.execute_script('frames[0].location = "/f2"')
+    expect(frame_path).to eq('/f2')
+    session.go_back
+    expect(frame_path).to eq('/f1x')
+    expect(session.evaluate_script('frames[0].history.state')).to eq({'a' => 1})
+  end
+
+  # A frame's container removed: its navigable destroyed, its steps none of the page's (HTML "destroy a child
+  # navigable"; Chrome keeps them, the spec says otherwise).
+  it "drops a removed frame's steps" do
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(frame_path).to eq('/f2')
+    expect(length).to eq(2)
+    session.execute_script('const f = document.querySelector("iframe"); f.remove(); document.body.append(f)')
+    expect(length).to eq(1)
+  end
+
+  # A timer of the page due as the session goes forward runs first — its pushState dropping the forward step the
+  # traversal was to go to, which then goes to the pushed entry.
+  it 'plans a traversal after the outgoing page has run what was due' do
+    session.visit '/top'
+    session.visit '/b'
+    session.go_back
+    session.execute_script('setTimeout(() => history.pushState(null, "", "/top2"), 0)')
+    session.go_forward
+    expect(session.current_path).to eq('/top2')
+    expect(length).to eq(2)
+  end
+
+  # The application's error in a traversal's request is the test's, as a visit's is.
+  it "raises the application's error of a traversal" do
+    gets = 0
+    session = simulated_session(lambda {|env|
+      gets += 1 if env['PATH_INFO'] == '/b'
+      raise 'boom' if gets == 2
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>x']]
+    })
+    session.visit '/a'
+    session.visit '/b'
+    session.go_back
+    expect { session.go_forward }.to raise_error(RuntimeError, 'boom')
+  end
+
+  # A window `window.open` made is a traversable of its own: its `history` is its initial about:blank's, not the
+  # opener's.
+  it "keeps a new window's history its own" do
+    session.visit '/top'
+    session.visit '/b'
+    session.execute_script('window.w = window.open(); w.history.back()')
+    expect(session.evaluate_script('w.history.length')).to eq(1)
+    expect(session.current_path).to eq('/b')
+  end
+
   # The page navigated on: its frames' steps stay steps of the document it left (Chrome: 3 after /b), and a traversal
   # back to it makes it again, its frames with it.
   it "keeps a frame's steps once the page has navigated on" do

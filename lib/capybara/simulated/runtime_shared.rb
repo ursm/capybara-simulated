@@ -79,8 +79,8 @@ module Capybara
         # history, so a frame's pushState must not be mirrored onto the top document's.
         '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1], a[2]); nil },
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1], a[2]); nil },
-        '__historyGo'                => ->(b, *a) { b.history_go(a[0]); nil },
-        '__historyLength'            => ->(b, *_) { b.history_length },
+        '__historyGo'                => ->(b, *a) { b.history_go(a[0], realm: a[1].to_i); nil },
+        '__historyLength'            => ->(b, *a) { b.history_length(a[0].to_i) },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1]) },
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s, a[1], a[2]); nil },

@@ -871,6 +871,11 @@ module Capybara
           dispose_frame_realm(id)   # also revokes the realm's blob URLs
           nil
         })
+        # …and a frame's container removed: its navigable destroyed, its session history with it (session_history.rs).
+        c.attach('__csim_navigableDestroyed', ->(id) {
+          @browser.frame_navigable_destroyed(id.to_i)
+          nil
+        })
       end
 
       # Build the iframe's realm: a snapshot-built isolate replays the whole
@@ -991,6 +996,10 @@ module Capybara
         # HTML / control bytes survive (Ruby's String#inspect is NOT a faithful
         # JS string escaper — it mangles \a, \e, and binary bytes).
         realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
+        # (…and its classic history API state, a traversal's to its entry: `reload_frame_to_entry`)
+        if (state = @browser.take_restoring_frame_history_state)
+          realm.call('__csimSetHistoryState', state[0])
+        end
         # The navigation's reserved client id — this document's realm ADOPTS it as its
         # service-worker Client identity (`event.resultingClientId` resolves to THIS
         # client after commit). Seeded BEFORE the document loads so the realm's own

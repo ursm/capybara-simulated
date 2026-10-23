@@ -2286,6 +2286,9 @@ module Capybara
       def reset_history!
         @session_history.clear
         @history_entries.clear
+        @saved_history_entries   = nil
+        @frame_history_saved_for = nil
+        @frame_leaving_entries   = nil
         @pending_history_traverse = nil
       end
 
@@ -2299,9 +2302,10 @@ module Capybara
       # deferred `load`: `:same_document` (pushState traversal — popstate
       # already fired, no load), `:cross_document` (full document replay —
       # load follows), or `nil` (no-op: zero delta / out of range).
-      def history_go(delta, force: false)
+      def history_go(delta, force: false, realm: 0)
         delta = delta.to_i
         return if delta == 0
+        return unless history_of_page?(realm)
         return unless (plan = history_plan(delta))
 
         step, changes = plan
@@ -2349,6 +2353,8 @@ module Capybara
         @pending_history_traverse = nil
         invalidate_find_cache
         perform_history_traverse(delta)
+      rescue StandardError => e
+        log_console('warn', "history traversal failed: #{e.message}")
       end
 
       # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `plan`) — past
@@ -2367,10 +2373,14 @@ module Capybara
       private def perform_history_traverse(delta)
         return unless (plan = history_plan(delta))
 
+        if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document }
+          # Before the step below moves (see `flush_outgoing_page_init`) — and the step planned after it, as the history
+          # stands once what the page's timers did to it (a pushState dropping the forward steps) is in.
+          flush_outgoing_page_init if @timers_active
+          return restore_flushed_nav_intents unless (plan = history_plan(delta))
+        end
         step, changes = plan
         if (page = changes.find {|nav, _, same_document| nav.zero? && !same_document })
-          # Before the step below moves (see `flush_outgoing_page_init`).
-          flush_outgoing_page_init if @timers_active
           capture_outgoing_form_state
           @session_history.go_to(step)
           replay_history_entry(page[1])
@@ -2385,8 +2395,6 @@ module Capybara
         @session_history.go_to(step)
         changes.each {|nav, id, same_document| traverse_same_document(nav, id) if same_document }
         frames.each {|_, id, realm| reload_frame_to_entry(realm, history_entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
-      rescue StandardError => e
-        log_console('warn', "history traversal failed: #{e.message}")
       end
 
       # Navigable `nav` (0 the page) traversed to its entry `id` of the document it is at: its location the entry's URL, a
@@ -2454,6 +2462,8 @@ module Capybara
         @history_entries[id] = (@history_entries[id] || {}).merge(fields)
       end
       private def set_history_entry(id, data)
+        return unless id
+
         @history_entries[id] = data
         return if @history_entries.size < (@history_entries_pruned_at ||= 64)
 
@@ -10691,6 +10701,12 @@ module Capybara
 
         [nav, parent_nav, parent]
       end
+      # Frame realm `realm_id`'s container removed from its document: its navigable destroyed, its session history with
+      # it (HTML "destroy a child navigable").
+      def frame_navigable_destroyed(realm_id)
+        nav = @runtime.frame_realm_navigable(realm_id)
+        @session_history.destroyed(nav) unless nav.zero?
+      end
       # …the live frame realm of navigable `nav`, or nil.
       def navigable_realm(nav)
         @runtime.frame_realm_navigables.select {|realm, n| n == nav && @runtime.frame_realm_alive?(realm) }.keys.max
@@ -10860,6 +10876,8 @@ module Capybara
         # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a
         # fresh document, so it must NOT restore the (possibly stale) snapshot the entry was left with.
         restore = is_reload ? nil : entry[:form_state]
+        # …and its classic history API state, which the document made starts with (as the page's: `replay_history_entry`).
+        @restoring_frame_history_state = [entry[:state]] unless is_reload
         # A traversal / reload is a navigation: route it through the controlling SW's fetch event
         # first — the refetch happens here, Ruby-side, bypassing the __csimFrameWindow interception
         # the initial load uses. A respondWith serves the document; a network error fails the
@@ -10897,6 +10915,14 @@ module Capybara
         merge_set_cookie(headers, url, env)
         return if download_response?(headers)
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, csp: response_csp(headers))
+      ensure
+        @restoring_frame_history_state = nil
+      end
+      # The classic history API state the frame document a traversal makes starts with, as `[state]` — taken by the
+      # first frame realm made after it is set (`create_frame_realm`), none of those its document goes on to make.
+      def take_restoring_frame_history_state
+        state, @restoring_frame_history_state = @restoring_frame_history_state, nil
+        state
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
       # its shadow trees' controls left out, its action resolved against its document): routed, then navigated.
@@ -11359,8 +11385,12 @@ module Capybara
         nil
       end
 
-      # `history.length`: the number of steps of the page's session history — its frames' navigations' too.
-      def history_length = @session_history.length
+      # `history.length`: the number of steps of the page's session history — its frames' navigations' too — or, asked
+      # by a realm of another traversable (a same-isolate window `window.open` made), 1: the one entry of its initial
+      # about:blank.
+      def history_length(realm = 0) = history_of_page?(realm) ? @session_history.length : 1
+      # …whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it.
+      private def history_of_page?(realm) = realm.to_i.zero? || !frame_navigable(realm.to_i).nil?
       # The host a URL names, or nil for one with none (about:blank / data: / a relative current_url before the first
       # navigate).
       def cookie_host(url)
@@ -11833,7 +11863,7 @@ module Capybara
         return unless (id = @session_history.active(0))
 
         @session_history.set_url(id, url)
-        @history_entries[id] = (@history_entries[id] || {}).except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get) if get
+        set_history_entry(id, (@history_entries[id] || {}).except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get)) if get
       end
       # …the history kept as it stood before, for a window that has a document to stay at.
       private def save_navigation_history

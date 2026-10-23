@@ -228,6 +228,17 @@ impl Traversable {
         Some((target, changes))
     }
 
+    // HTML "destroy a child navigable": navigable `nav`'s nested history removed from its parent's document state — its
+    // steps, and its own frames' with it, counted no more.
+    fn destroy(&mut self, nav: u32) {
+        let build = self.build;
+        let Some(doc) = self.state.parent_doc_of(nav, build) else { return };
+        if let Some(nested) = self.state.docs.get_mut(&doc) {
+            nested.retain(|n| !(n.navigable == nav && n.build == build));
+        }
+        self.state.collect_docs();
+    }
+
     fn ids(&self) -> Vec<u64> {
         let states = std::iter::once(&self.state).chain(self.saved.iter().flatten());
         states.flat_map(|s| s.all_lists().into_iter().flatten().map(|e| e.id).collect::<Vec<_>>()).collect()
@@ -289,6 +300,11 @@ impl SessionHistory {
     fn go_to(&self, step: i64) {
         self.0.borrow_mut().state.current = step;
     }
+    // #destroyed(navigable): a frame's container removed from its document — its navigable gone, its session history
+    // with it.
+    fn destroyed(&self, nav: u32) {
+        self.0.borrow_mut().destroy(nav);
+    }
     // #rebuilt: the page's document made anew — its frames' navigables new ones.
     fn rebuilt(&self) {
         self.0.borrow_mut().build += 1;
@@ -338,6 +354,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("plan", method!(SessionHistory::plan, 1))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
+    class.define_method("destroyed", method!(SessionHistory::destroyed, 1))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
     class.define_method("save", method!(SessionHistory::save, 1))?;
     class.define_method("restore", method!(SessionHistory::restore, 1))?;
@@ -437,6 +454,21 @@ mod tests {
         assert_eq!(changes.iter().map(|c| c.0).collect::<Vec<_>>(), vec![1]);
         h.go_to(step);
         assert_eq!(h.url(h.active(2).unwrap()).as_deref(), Some("/in2"));
+    }
+
+    // A frame's container removed: its steps are none of the page's (HTML "destroy a child navigable"; Chrome keeps them).
+    #[test]
+    fn a_destroyed_navigable_takes_its_steps() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false);
+        h.seed(1, TOP, "/f1".into());
+        h.push(1, TOP, "/f2".into(), false);
+        h.seed(2, 1, "/in".into());
+        assert_eq!(h.length(), 2);
+        h.destroyed(1);
+        assert_eq!(h.length(), 1);
+        assert_eq!(h.active(1), None);
+        assert_eq!(h.plan(-1).map(|p| p.1), None);
     }
 
     #[test]
