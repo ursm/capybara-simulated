@@ -134,4 +134,30 @@ RSpec.describe 'a nested document navigating itself' do
     s.execute_script("a.srcdoc = '<p>gone'")
     expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 2 } }).to eq(%w[g2:pagehide g2:unload])
   end
+
+  # A frame's `<a target=_top>` / `target=_parent` a script clicks navigates the navigable it chooses, the frame's
+  # document its initiator — the page, a parent frame — and none its sandbox keeps it from (Chrome).
+  it "follows a frame's _top and _parent links its script clicks" do
+    log = []
+    page = ->(body) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8>#{body}"]] }
+    s = simulated_session(lambda {|env|
+      log << [env['PATH_INFO'], env['HTTP_REFERER']]
+      case env['PATH_INFO']
+      when '/' then page.('<iframe src="/n"></iframe><iframe sandbox="allow-scripts allow-same-origin" src="/a"></iframe><iframe src="/a"></iframe>')
+      when '/a' then page.('<a id="tl" href="/t" target="_top">tl</a>')
+      when '/n' then page.('N<iframe src="/b"></iframe>')
+      when '/b' then page.('<a id="pl" href="/p" target="_parent">pl</a>')
+      else page.(env['PATH_INFO'])
+      end
+    })
+    s.visit '/'
+    s.within_frame(0) { s.within_frame(0) { s.execute_script("document.getElementById('pl').click()") } }
+    poll_until { s.evaluate_script('frames[0].document.body.textContent') == '/p' }
+    s.within_frame(1) { s.execute_script("document.getElementById('tl').click()") }
+    s.evaluate_script('1')
+    expect(s).to have_current_path('/')
+    s.within_frame(2) { s.execute_script("document.getElementById('tl').click()") }
+    expect(s).to have_current_path('/t')
+    expect(log.last).to eq(['/t', 'http://www.example.com/a'])
+  end
 end
