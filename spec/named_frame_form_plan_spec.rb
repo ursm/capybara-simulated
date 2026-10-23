@@ -121,6 +121,18 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(session.evaluate_script('loads')).to eq(1)
   end
 
+  # …the frame's own name as its target alike (Chrome; `_parent` sends both).
+  it "gives way to a form of the frame's own targeting it by name" do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    session.execute_script('frames[0].document.body.innerHTML = "<form id=g method=post action=/g target=n></form>"')
+    session.execute_script('f.submit(); frames[0].g.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/g')
+    expect(hits).not_to include('POST /x')
+  end
+
   # A 204 / 205 makes no document (HTML "navigate"): every navigation of it leaves its navigable at the document it is
   # at, with no `load` and no session history entry (Chrome, measured 2026-10-24).
   describe 'a 204 response' do
@@ -135,6 +147,64 @@ RSpec.describe "a page form's planned navigation of a named frame" do
                end
         [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
       }
+    end
+
+    # …a traversal to an entry whose response now is one too: the page, and its step, where they are (Chrome: forward
+    # again does nothing).
+    it 'keeps the page and its step where a traversal gets one' do
+      no_content = false
+      session = simulated_session(lambda {|env|
+        next [204, {}, []] if no_content && env['PATH_INFO'] == '/top'
+
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{env['PATH_INFO']}"]]
+      })
+      session.visit '/top'
+      session.visit '/b'
+      session.execute_script('window.marker = 1')
+      no_content = true
+      session.go_back
+      expect(session.current_path).to eq('/b')
+      session.go_forward
+      expect(session.evaluate_script('window.marker')).to eq(1)
+    end
+
+    it "keeps a frame and its step where a traversal gets one" do
+      no_content = false
+      session = simulated_session(lambda {|env|
+        next [204, {}, []] if no_content && env['PATH_INFO'] == '/blank'
+
+        body = env['PATH_INFO'] == '/top' ? '<iframe src="/blank"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.execute_script('frames[0].location = "/a"')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/a')
+      session.execute_script('window.loads = 0; document.querySelector("iframe").onload = () => loads++')
+      no_content = true
+      session.go_back
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/a')
+      session.go_forward
+      expect(session.evaluate_script('loads')).to eq(0)
+    end
+
+    # …a window `window.open` made on one at its initial about:blank, whichever side asks (Chrome).
+    it 'leaves a new window on one at about:blank' do
+      session = simulated_session(app)
+      session.visit '/top'
+      session.execute_script('window.w = open("/204")')
+      session.within_window(session.windows.last) do
+        expect(session.evaluate_script('location.href')).to eq('about:blank')
+      end
+      expect(session.evaluate_script('w.location.href')).to eq('about:blank')
+    end
+
+    # …a frame's first navigation to one at its initial about:blank, no `load` (Chrome).
+    it "leaves a frame whose src gets one at its initial about:blank" do
+      session = simulated_session(app)
+      session.visit '/top'
+      session.execute_script('window.loads = 0; const f = document.createElement("iframe"); f.onload = () => loads++; f.src = "/204"; document.body.append(f)')
+      session.evaluate_script('1')
+      expect(session.evaluate_script('[frames[1].location.href, loads]')).to eq(['about:blank', 0])
     end
 
     {'a link' => 'a.click()', 'a form' => 'g.submit()', 'its location set' => 'location.href = "/204"'}.each do |name, js|
