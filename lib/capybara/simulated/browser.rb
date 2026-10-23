@@ -10638,8 +10638,7 @@ module Capybara
         return if target.negative? || target >= h[:entries].size
         # (…to an entry a traversal can make again alone: an HTTP(S) document refetched, about:blank — a srcdoc or a blob
         # document it left has no bytes to come back to)
-        to = h[:entries][target][:url].to_s
-        return unless http_url?(to) || to.match?(ABOUT_BLANK)
+        return unless recordable_frame_url?(h[:entries][target][:url])
         # Snapshot the entry we're leaving so a later forward traversal restores it (keeping how it
         # was reached, so a POST entry re-POSTs when traversed back to).
         leave_frame_entry(realm_id, h) if h[:idx] >= 0
@@ -10656,20 +10655,32 @@ module Capybara
       # one's bytes are its document's, which a traversal back to it no longer has)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
-        return unless http_url?(new_url) || new_url.to_s.match?(ABOUT_BLANK)
+        return unless recordable_frame_url?(new_url)
 
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
         snapshot_frame_history(realm_id, h)
+        # (…the first in place of the frame's initial about:blank, which no traversal goes back to: HTML "navigate" — a
+        # navigable whose active document is its initial about:blank replaces it)
+        if h[:idx].negative? && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
+          h[:entries] = [entry_for_frame_nav(new_url, post)]
+          h[:idx]     = 0
+          return
+        end
         h[:idx] = 0 if h[:idx].negative?
         leave_frame_entry(realm_id, h)
         h[:entries] = h[:entries][0..h[:idx]]
-        entry = {url: new_url.to_s, form_state: nil}
-        entry.merge!(method: 'POST', body: post[:body], content_type: post[:content_type]) if post
-        h[:entries] << entry
+        h[:entries] << entry_for_frame_nav(new_url, post)
         h[:idx] = h[:entries].size - 1
+      end
+      # …whether a frame's session history entry for `url` can be made again by a traversal alone (`record_frame_nav`).
+      def recordable_frame_url?(url) = http_url?(url) || url.to_s.match?(ABOUT_BLANK)
+      def entry_for_frame_nav(url, post)
+        entry = {url: url.to_s, form_state: nil}
+        entry.merge!(method: 'POST', body: post[:body], content_type: post[:content_type]) if post
+        entry
       end
       # …and a navigation of it its session history records no entry for — a location's: the current entry made its, where
       # the frame has a history (one an earlier navigation recorded) for a reload or a traversal to read, so neither goes
@@ -10725,6 +10736,9 @@ module Capybara
       # state again as the document is unloaded (`frame_document_unloaded`) — what its pagehide / unload handlers left
       # is what a traversal back restores (Chrome). The snapshot taken now stands when the navigation never commits.
       def leave_frame_entry(realm_id, h)
+        # (…a document no entry was recorded for — a blob's, a data: one's — leaving the entry before it as it is)
+        return unless recordable_frame_url?(frame_realm_url(realm_id))
+
         entry = h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]])
         (@frame_leaving_entries ||= {})[realm_id] = entry
       end
