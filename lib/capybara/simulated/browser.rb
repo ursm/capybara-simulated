@@ -285,6 +285,8 @@ module Capybara
         # in the new context. Node captures this on construction;
         # `check_stale` rejects on mismatch.
         @context_gen                  = 0
+        # A document booted whose load-time navigations no driver action's end has taken yet (`take_load_navigations`).
+        @load_navigations_due         = false
         @find_cache_dirty             = true
         @find_cache_kind              = nil
         @find_cache_arg               = nil
@@ -651,7 +653,6 @@ module Capybara
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
         navigate(resolve_visit_url(url), referer: referer, referrer_policy: referrer_policy, initiator: initiator)
-        take_load_navigations
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
         # browser runs them as tasks — and they may change the page.
@@ -660,18 +661,21 @@ module Capybara
       end
 
       # The navigation of the page a document planned as it loaded — its location set, a form submitted, a link followed,
-      # by its parse, its `load` handlers or the tasks its load ran — taken as the visit that loaded it ends, as a browser
-      # starts it then: a matcher that reads only the URL or the text (`have_current_path`, `has_text?`) takes none, and
-      # an auto-submitting page (an OAuth `form_post`) stayed put. Bounded as a load handler's chain is; the windows a page
-      # asked to open left pending, as the load's own drain leaves them (`flush_pending_window_load`).
+      # by its parse, its `load` handlers or the tasks its load ran — taken as the driver's action that loaded it ends (a
+      # visit, a click, a submit, a refresh, a traversal: `RecordedActions`), as a browser starts it then: a matcher that
+      # reads only the URL or the text (`have_current_path`, `has_text?`) takes none, and an auto-submitting page (an
+      # OAuth `form_post`) stayed put. Due where a document booted since (`@load_navigations_due`), the one it navigates
+      # to booting the next; bounded as a load handler's chain is. (A `window.open` of the load opened its window as the
+      # load ran; a link's or a form's to a new window is opened here as any of its plans is.)
       def take_load_navigations
         WINDOW_LOAD_CHAIN_MAX.times do
-          generation = @context_gen
+          break unless @load_navigations_due
+
+          @load_navigations_due = false
           consume_pending_location
           consume_pending_page_submission
           consume_pending_navigation
           consume_pending_form_submit
-          break if @context_gen == generation
         end
       end
 
@@ -10471,25 +10475,25 @@ module Capybara
       # `frame_navigate_self`). Keyed by realm id; deferred + drained from
       # `drain_pending_navigation` so we never serialize/navigate while the
       # form's `submit()` is still on the V8 stack.
-      # (…`target` the one its request names: one that navigates the page is the page's navigation planned last, in a slot
-      # of the page's (`@pending_page_submission`), not the frame's — the one planned before it superseded, a location's, a
-      # reload, a link's or a form's of the page, Chrome's `location.href = …; frames[0].f.submit()` — and superseded in
-      # turn by one the page plans after it (`cancel_planned_navigation`), whatever the frame plans: its request and route
-      # taken now, whatever becomes of the frame by the time the page navigates)
-      def frame_submit_self(realm_id, target = '')
-        return if realm_id.nil? || realm_id.zero?
+      # (…`target` the one its request names, `request` that request: one that navigates the page is the page's navigation
+      # planned last, in a slot of the page's (`@pending_page_submission`), not the frame's — the one planned before it
+      # superseded, a location's, a reload, a link's or a form's of the page, Chrome's `location.href = …;
+      # frames[0].f.submit()` — and superseded in turn by one the page plans after it (`cancel_planned_navigation`),
+      # whatever the frame plans: its request and route taken now, whatever becomes of the frame by the time the page
+      # navigates; true where it is, the frame's plan of it the frame's to drop — handed over, not asked of the frame,
+      # whose realm a frame still being built does not answer)
+      def frame_submit_self(realm_id, target = '', request = nil)
+        return false if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
         (@pending_frame_submit ||= {})[realm_id] = {}
-        return unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
-        return unless choose_named_navigable(realm_id, target) == :top
+        return false unless request.is_a?(Hash) && [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
+        return false unless choose_named_navigable(realm_id, target) == :top
 
-        spec = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
         @pending_frame_submit.delete(realm_id)
-        return unless spec.is_a?(Hash)
-
         cancel_planned_navigation
         @runtime.call('__csimSupersedePlanned')
-        @pending_page_submission = {realm_id: realm_id, spec: spec, route: frame_submission_route(realm_id, spec)}
+        @pending_page_submission = {realm_id: realm_id, spec: request, route: frame_submission_route(realm_id, request)}
+        true
       end
       def consume_pending_page_submission
         return unless (pending = @pending_page_submission)
@@ -11793,6 +11797,7 @@ module Capybara
         end
         flush_pending_window_load unless @defer_window_load
         flush_page_init
+        @load_navigations_due = true
       end
 
       # Run the page's own DUE-NOW init as the load ends — the `setTimeout(0)` a
@@ -12833,34 +12838,42 @@ module Capybara
       # step bookkeeping + on-failure DOM snapshot.
       module RecordedActions
         def visit(url, referer: nil, referrer_policy: nil, initiator: nil)
-          record_action(:visit, "visit #{url}") { super }
+          driver_action(:visit, "visit #{url}") { super }
         end
         def refresh
-          record_action(:refresh, 'refresh') { super }
+          driver_action(:refresh, 'refresh') { super }
         end
         def go_back
-          record_action(:go_back, 'go_back') { super }
+          driver_action(:go_back, 'go_back') { super }
         end
         def go_forward
-          record_action(:go_forward, 'go_forward') { super }
+          driver_action(:go_forward, 'go_forward') { super }
         end
         def click(handle, keys = [], **opts)
-          record_action(:click, -> { "click #{describe_node_handle(handle)}" }) { super }
+          driver_action(:click, -> { "click #{describe_node_handle(handle)}" }) { super }
         end
         def set_value_with_events(handle, value)
-          record_action(:set, -> { "set #{describe_node_handle(handle)} = #{value.inspect[0, 80]}" }) { super }
+          driver_action(:set, -> { "set #{describe_node_handle(handle)} = #{value.inspect[0, 80]}" }) { super }
         end
         def send_keys(handle, keys)
-          record_action(:send_keys, -> { "send_keys #{describe_node_handle(handle)} #{keys.inspect[0, 80]}" }) { super }
+          driver_action(:send_keys, -> { "send_keys #{describe_node_handle(handle)} #{keys.inspect[0, 80]}" }) { super }
         end
         def select_option(handle)
-          record_action(:select, -> { "select #{describe_node_handle(handle)}" }) { super }
+          driver_action(:select, -> { "select #{describe_node_handle(handle)}" }) { super }
         end
         def unselect_option(handle)
-          record_action(:unselect, -> { "unselect #{describe_node_handle(handle)}" }) { super }
+          driver_action(:unselect, -> { "unselect #{describe_node_handle(handle)}" }) { super }
         end
         def submit_form(handle)
-          record_action(:submit, -> { "submit #{describe_node_handle(handle)}" }) { super }
+          driver_action(:submit, -> { "submit #{describe_node_handle(handle)}" }) { super }
+        end
+
+        # A driver's action recorded, and the navigations the documents it loaded planned as they loaded taken as it
+        # ends (`take_load_navigations`).
+        private def driver_action(kind, description)
+          result = record_action(kind, description) { yield }
+          take_load_navigations
+          result
         end
       end
       prepend RecordedActions

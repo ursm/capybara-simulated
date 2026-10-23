@@ -8,11 +8,12 @@ require_relative 'support/session_teardown'
 # auto-submitting page (an OAuth `form_post`) has navigated by the time `current_path` is read.
 RSpec.describe 'a navigation a page plans as it loads' do
   {
-    'its location set as it parses' => '<script>location.href = "/b"</script>',
-    'a form submitted as it parses' => '<form id=f action="/b"><input name=q value=1></form><script>f.submit()</script>',
-    'a form submitted on its load'  => '<form id=f action="/b"><input name=q value=1></form><script>addEventListener("load", () => f.submit())</script>',
-    'a link clicked as it parses'   => '<a id=a href="/b">x</a><script>a.click()</script>',
-    'a form submitted on a task'    => '<form id=f action="/b"><input name=q value=1></form><script>setTimeout(() => f.submit(), 0)</script>'
+    'its location set as it parses'    => '<script>location.href = "/b"</script>',
+    'a form submitted as it parses'    => '<form id=f action="/b"><input name=q value=1></form><script>f.submit()</script>',
+    'a form submitted on its load'     => '<form id=f action="/b"><input name=q value=1></form><script>addEventListener("load", () => f.submit())</script>',
+    'a link clicked as it parses'      => '<a id=a href="/b">x</a><script>a.click()</script>',
+    'a form submitted on a task'       => '<form id=f action="/b"><input name=q value=1></form><script>setTimeout(() => f.submit(), 0)</script>',
+    "a frame's _top form as it parses" => '<iframe srcdoc="<form id=f action=/b target=_top></form><script>f.submit()</script>"></iframe>'
   }.each do |name, body|
     it "has navigated by the end of the visit: #{name}" do
       session = simulated_session(lambda {|env|
@@ -24,5 +25,21 @@ RSpec.describe 'a navigation a page plans as it loads' do
       expect(session.current_path).to eq('/b')
       expect(session.evaluate_script('document.body.textContent')).to eq('B')
     end
+  end
+
+  # …and by the end of whatever action reached the page: a button's submission to an auto-submitting page (an OAuth
+  # provider's `form_post`) lands where that page submits to.
+  it 'has navigated by the end of a click that reached the page' do
+    session = simulated_session(lambda {|env|
+      body = case env['PATH_INFO']
+             when '/authorize' then '<form id=f method=post action="/callback"><input name=code value=x></form><script>f.submit()</script>'
+             when '/callback' then 'Welcome'
+             else '<form method=post action="/authorize"><button>Sign in</button></form>'
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/'
+    session.click_button 'Sign in'
+    expect(session.current_path).to eq('/callback')
   end
 end
