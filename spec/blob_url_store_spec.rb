@@ -218,4 +218,19 @@ RSpec.describe 'the blob URL store' do
     one.execute_script("window.got = null; fetch(#{url.to_json}).then((r) => r.text()).then((t) => { window.got = t; }, () => { window.got = 'failed'; });")
     expect(poll_until { one.evaluate_script('window.got') }).to eq('ONE')
   end
+
+  # A navigation to a blob URL takes its blob as it begins (HTML resolves the URL's blob URL entry as it parses it): one
+  # the page revokes straight after — its location set, a link of it clicked, a frame's `_top` link — still loads it.
+  {
+    'its location set'     => "location.href = u; URL.revokeObjectURL(u);",
+    'a link of it clicked' => "const a = document.createElement('a'); a.href = u; document.body.append(a); a.click(); URL.revokeObjectURL(u);",
+    "a frame's _top link"  => "const d = frames[0].document, a = d.createElement('a'); a.href = u; a.target = '_top'; d.body.append(a); a.click(); URL.revokeObjectURL(u);"
+  }.each do |name, js|
+    it "loads a blob a navigation began with however soon it is revoked: #{name}" do
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>TOP<iframe srcdoc="x"></iframe>']] })
+      s.visit '/'
+      s.execute_script("const u = URL.createObjectURL(new Blob(['<p>BLOB'], {type: 'text/html'})); #{js}")
+      expect(poll_until { s.evaluate_script('document.body && document.body.textContent').then {|t| t if t == 'BLOB' } }).to eq('BLOB')
+    end
+  end
 end

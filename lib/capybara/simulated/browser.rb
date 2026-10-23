@@ -2069,7 +2069,8 @@ module Capybara
           update_current_hash(resolve_against_current(url, use_base: true))
         else
           tick_real_time
-          navigate_top_from_page(resolve_against_current(url, use_base: true))
+          blob = pending['blob']
+          navigate_top_from_page(resolve_against_current(url, use_base: true), blob: blob && {bytes: blob['bytes'], type: blob['type'].to_s})
         end
       end
 
@@ -8365,6 +8366,11 @@ module Capybara
       # Read a blob URL's bytes + content type from THIS window's VM (its local
       # blob store) — the Driver uses it to load a blob: document into a fresh aux
       # window opened by this window. Returns {bytes:, type:} or nil.
+      # The blob a `blob:` URL names now — wherever the window that made it is (its partition's) — as `{bytes:, type:}`, or
+      # nil for none: what a navigation to it takes as it begins.
+      def blob_snapshot(url)
+        @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
+      end
       def read_blob_for_window(url)
         r = @runtime.call('__csimReadBlobForWindow', url.to_s)
         return nil unless r.is_a?(Hash) && r['bytes']
@@ -10201,6 +10207,7 @@ module Capybara
         @pending_location           = resolve_against_current(url.to_s)
         @pending_location_replace   = replace
         @pending_location_initiator = initiator_realm && [initiator_realm.to_i, navigation_referrer(initiator_realm.to_i, policy)]
+        @pending_location_blob      = @pending_location.match?(/\Ablob:/i) ? blob_snapshot(@pending_location) : nil
       end
       # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
@@ -10221,8 +10228,8 @@ module Capybara
       def consume_pending_location
         return unless (url = @pending_location)
         # (…its replace flag and initiator taken with it: a location the page plans after it is its own)
-        replace, initiator = @pending_location_replace, @pending_location_initiator
-        @pending_location = @pending_location_replace = @pending_location_initiator = nil
+        replace, initiator, blob = @pending_location_replace, @pending_location_initiator, @pending_location_blob
+        @pending_location = @pending_location_replace = @pending_location_initiator = @pending_location_blob = nil
         # A JS-driven `location.*` from inside a `within_frame` block navigates the FRAME, not the top page (same as a
         # self-targeted link/form there); a frame's navigation of the page (`initiator`) and the page's own, the page —
         # each judged against the document it navigates.
@@ -10242,9 +10249,9 @@ module Capybara
             nil
           elsif initiator
             realm, referrer = initiator
-            navigate_top_from(realm, referrer, url, replace: replace)
+            navigate_top_from(realm, referrer, url, replace: replace, blob: blob)
           else
-            from_document(0) { navigate(url, replace: replace) }
+            from_document(0) { navigate(url, replace: replace, blob: blob) }
           end
         end
       end
@@ -11299,21 +11306,21 @@ module Capybara
       end
       # The top-level browsing context navigated by the page — a link followed in it or `target=_top` from a frame
       # within it — its Referer the browsing context it was followed in.
-      def navigate_top_from_page(url)
-        navigate_top_from(@current_realm_id.to_i, current_referrer_initiator, url)
+      def navigate_top_from_page(url, blob: nil)
+        navigate_top_from(@current_realm_id.to_i, current_referrer_initiator, url, blob: blob)
       end
       # …by the document of realm `realm`, its Referer `initiator` ([url, policy]): a GET, or a POST of `post` ([body,
       # content type]).
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares, that document's URL — the page's where it is a
       # local one, about:blank's or srcdoc's, whose origin is the one that made it)
-      def navigate_top_from(realm, initiator, url, post: nil, replace: false)
+      def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil)
         source, policy = initiator
         site = source.to_s.match?(%r{\Ahttps?://}i) ? source : @current_url
         from_document(realm) do
           if post
             navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob)
           end
         end
       end
@@ -11434,7 +11441,9 @@ module Capybara
         ct.empty? ? 'text/html' : ct
       end
 
-      def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false)
+      # (…`blob`: a `blob:` URL's blob as the navigation began — `{bytes:, type:}`, `blob_snapshot` — which a revoke after
+      # it began does not take back: HTML resolves the URL's blob URL entry as it parses it)
+      def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false, blob: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
@@ -11489,7 +11498,7 @@ module Capybara
           # HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
           if url.to_s.match?(/\Ablob:/i)
             return commit_error_document(url.to_s) unless depth.zero?
-            blob = @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
+            blob ||= blob_snapshot(url)
             return blob ? boot_blob_document(url, blob[:bytes], blob[:type], flushed: true) : fail_blob_document(url)
           end
           # A controlled top-level navigation goes to the controlling SW's fetch event
@@ -11848,12 +11857,13 @@ module Capybara
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
-        @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
+        @pending_location @pending_location_replace @pending_location_initiator @pending_location_blob @pending_reload
+        @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload @pending_frame_traverse
       ].freeze
       private_constant :NAV_INTENT_SLOTS
-      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator].freeze
+      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator @pending_location_blob].freeze
       private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init
