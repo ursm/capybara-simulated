@@ -254,7 +254,7 @@ RSpec.describe "a form submission's request" do
   # A redirect to a URL of a fetch scheme that is no HTTP(S) one is a network error, committed at the URL that
   # redirected — which a reload requests again (HTML "create navigation params by fetching"; Chrome:
   # ERR_UNSAFE_REDIRECT)…
-  ['about:blank', 'data:text/html,x', 'blob:http://www.example.com/x', 'http://[bad'].each do |target|
+  ['about:blank', 'data:text/html,x', 'blob:http://www.example.com/x', 'http://[bad', '//[bad'].each do |target|
     it "fails a navigation redirected to #{target}" do
       seen = []
       app = lambda {|env|

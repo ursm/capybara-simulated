@@ -216,6 +216,7 @@ RSpec.describe 'a nested document navigating itself' do
     'about:blank'      => ['/r?to=about:blank', '/r'],
     'data:'            => ['/r?to=data:text/html,x', '/r'],
     'twenty redirects' => ['/loop0', '/loop20'],
+    '//[bad'           => ['/r?to=//[bad', '/r'],
     'mailto:'          => ['/r?to=mailto:a@b.c', '/o']
   }.each do |name, (start, landed)|
     it "ends a frame's navigation redirected to #{name}" do

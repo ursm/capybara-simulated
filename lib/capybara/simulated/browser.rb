@@ -12485,7 +12485,8 @@ module Capybara
       end
       # …the end itself: `:follow`, `:fail` (a network error) or `:hand_off`.
       private def redirect_outcome(next_url, depth)
-        return :follow if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT && parse_url(next_url)
+        return :fail unless parse_url(next_url)
+        return :follow if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
 
         fetch_scheme_url?(next_url) || http_url?(next_url) ? :fail : :hand_off
       end
