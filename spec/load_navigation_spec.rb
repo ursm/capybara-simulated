@@ -65,6 +65,23 @@ RSpec.describe 'a navigation a page plans as it loads' do
     expect(posts).to eq(1)
   end
 
+  # …its own entry, not the page's: a frame's `_top` form submitted as the frame parses adds the page an entry (Chrome:
+  # `history.length` one more).
+  it "adds the page an entry for a frame's parse-time `_top` form" do
+    session = simulated_session(lambda {|env|
+      body = case env['PATH_INFO']
+             when '/fsub' then '<iframe srcdoc="<form id=f action=/b target=_top></form><script>f.submit()</script>"></iframe>'
+             when '/b' then 'B'
+             else 'START'
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/start'
+    session.visit '/fsub'
+    expect(session.current_path).to eq('/b')
+    expect(session.evaluate_script('history.length')).to eq(3)
+  end
+
   # A frame's `_parent` form submitted as a nested frame parses navigates its parent frame, not the page (Chrome).
   it "navigates the parent a nested frame's parse-time `_parent` form chooses" do
     session = simulated_session(lambda {|env|

@@ -3277,6 +3277,9 @@ module Capybara
         no_referrer = Native.link_noreferrer(spec['rel'].to_s)
         keep_opener = !Native.link_noopener(spec['rel'].to_s, target)
         referrer    = no_referrer ? '' : (@current_url || '')
+        # (…replacing the session history entry of the form's document where that is not completely loaded yet and the
+        # navigable it navigates is its own — the page's, not an entered frame's: `request.replace`)
+        replace = spec['replace'] == true && @current_realm_id.nil?
         # (…and a frame it navigates is told its initiator under the policy `noreferrer` sets)
         if named_frame
           initiator = realm_referrer_initiator(@current_realm_id.to_i)
@@ -3291,8 +3294,7 @@ module Capybara
           elsif frame_entry
             navigate_frame(url, entry: frame_entry)
           else
-            # (…replacing the session history entry of a document not completely loaded yet: `request.replace`)
-            navigate(url, replace: spec['replace'] == true)
+            navigate(url, replace: replace)
           end
         else
           if new_window
@@ -3304,7 +3306,7 @@ module Capybara
           elsif frame_entry
             navigate_frame_post(url, body, content_type, entry: frame_entry)
           else
-            navigate_post(url, body, content_type, replace: spec['replace'] == true)
+            navigate_post(url, body, content_type, replace: replace)
           end
         end
       end
@@ -10749,7 +10751,9 @@ module Capybara
             navigate_realm_self_post(realm_id, url, body, content_type)
           end
         when :top
-          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type], replace: spec['replace'] == true) }
+          # (…adding the page's entry, whether the frame's document is completely loaded or not: a form's replaces only its
+          # own navigable's — HTML "plan to navigate", the form document the target's active document)
+          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type]) }
         when Integer
           if method == 'GET'
             navigate_realm_self_get(chosen, url, referrer: initiator)
