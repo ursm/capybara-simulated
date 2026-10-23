@@ -12463,10 +12463,11 @@ module Capybara
       # Whether a top-level navigation's redirect from `url` to `next_url`, its `depth`th, is followed (HTML "create
       # navigation params by fetching", Fetch "HTTP-redirect fetch"): an HTTP(S) URL within the redirect limit is. Any
       # other ends it — one of no fetch scheme (`mailto:`, an app's own) handed off, the window keeping its document and its
-      # history as a download does (Chrome: ERR_ABORTED); any other a network error, its error document committed at
-      # `url`, the last URL requested (Chrome: ERR_UNSAFE_REDIRECT, ERR_TOO_MANY_REDIRECTS).
+      # history as a download does (Chrome: ERR_ABORTED); any other, and a `Location` that parses to no URL, a network
+      # error, its error document committed at `url`, the last URL requested (Chrome: ERR_UNSAFE_REDIRECT,
+      # ERR_TOO_MANY_REDIRECTS).
       private def redirect_followed?(url, next_url, depth)
-        return true if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+        return true if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT && parse_url(next_url)
 
         if fetch_scheme_url?(next_url) || http_url?(next_url)
           commit_error_document(url)
