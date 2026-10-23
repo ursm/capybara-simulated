@@ -21,6 +21,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "urlencodedParse", urlencoded_parse, context_id);
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
+    register(scope, ns, "metaReferrerSteps", meta_referrer_steps_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
     register(scope, ns, "referrerPolicyAttribute", referrer_policy_attribute_op, context_id);
     register(scope, ns, "elementTarget", element_target_op, context_id);
@@ -208,35 +209,49 @@ fn hyperlink_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Func
     rv.set(v8::String::new(scope, policy).unwrap().into());
 }
 
-// The referrer policy a document's `<meta name="referrer">` elements set (HTML §4.2.5.3, the referrer metadata name):
-// each one's `content` ASCII-lowercased — a legacy keyword mapped to its policy (`never`, `default`, `always`,
-// `origin-when-crossorigin`) — the last that is a referrer policy token in tree order winning; '' for none.
-pub(crate) fn meta_referrer_policy(arena: &crate::dom::RealmArena, doc: crate::dom::NodeId) -> &'static str {
-    let mut policy = "";
-    arena.find_in_tree(doc, |_, n| {
-        if n.is_html_named("meta") && n.plain_attr("name").is_some_and(|v| v.eq_ignore_ascii_case("referrer")) {
-            let content = n.plain_attr("content").unwrap_or("").to_ascii_lowercase();
-            let content = match content.as_str() {
-                "never" => "no-referrer",
-                "default" => "no-referrer-when-downgrade",
-                "always" => "unsafe-url",
-                "origin-when-crossorigin" => "origin-when-cross-origin",
-                other => other,
-            };
-            if let Some(&p) = POLICIES.iter().find(|&&p| p == content) {
-                policy = p;
-            }
-        }
-        false
-    });
-    policy
+// HTML §4.2.5.3, the referrer metadata name: a `<meta name="referrer">` in a document tree, as it is connected (its
+// post-connection steps, in tree order with the scripts beside it) or its `name` or `content` changes, sets its
+// document's policy container's referrer policy — its `content` ASCII-lowercased, a legacy keyword mapped (`never`,
+// `default`, `always`, `origin-when-crossorigin`), where that is a referrer policy token. The last to run wins, and no
+// removal undoes it ("not responsive to element removals, and does not use tree order").
+pub(crate) fn names_referrer(n: &crate::dom::NodeData) -> bool {
+    n.plain_attr("name").is_some_and(|v| v.eq_ignore_ascii_case("referrer"))
 }
-// __dom.metaReferrerPolicy(docNid) -> the policy its `<meta name="referrer">` sets (`meta_referrer_policy`), '' for none.
+impl crate::dom::RealmArena {
+    pub(crate) fn meta_referrer_steps(&mut self, id: crate::dom::NodeId) {
+        let Some(n) = self.get(id).filter(|n| n.is_html_named("meta") && names_referrer(n)) else { return };
+        let content = n.plain_attr("content").unwrap_or("").to_ascii_lowercase();
+        let content = match content.as_str() {
+            "never" => "no-referrer",
+            "default" => "no-referrer-when-downgrade",
+            "always" => "unsafe-url",
+            "origin-when-crossorigin" => "origin-when-cross-origin",
+            other => other,
+        };
+        let Some(&policy) = POLICIES.iter().find(|&&p| p == content) else { return };
+        let root = self.root_of(id);
+        if self.get(root).is_some_and(|r| r.kind == crate::dom::NodeKind::Document) {
+            self.referrer_policies.insert(root, policy);
+        }
+    }
+    // …the policy it has set for document `doc`, '' for none.
+    pub(crate) fn document_referrer_policy(&self, doc: crate::dom::NodeId) -> &'static str {
+        self.referrer_policies.get(&doc).copied().unwrap_or("")
+    }
+}
+// __dom.metaReferrerPolicy(docNid) -> the policy its `<meta name="referrer">` elements have set
+// (`document_referrer_policy`), '' for none.
 fn meta_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
-    let policy = meta_referrer_policy(crate::dom::realm(scope, cid), doc);
+    let policy = crate::dom::realm(scope, cid).document_referrer_policy(doc);
     rv.set(v8::String::new(scope, policy).unwrap().into());
+}
+// __dom.metaReferrerSteps(nid): a connected `<meta name="referrer">`'s post-connection steps (`meta_referrer_steps`).
+fn meta_referrer_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    crate::dom::realm(scope, cid).meta_referrer_steps(id);
 }
 
 // HTML "document base URL": the frozen base URL of the document's first `<base>` with an `href` (element_state.rs

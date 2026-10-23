@@ -970,6 +970,9 @@ pub(crate) struct RealmArena {
     pub(crate) close_watcher_count: u64,
     // …and its popover and dialog pointerdown targets (popovers.rs `lightDismissPress`).
     pub(crate) pointerdown_targets: std::collections::HashMap<NodeId, [Option<NodeId>; 2]>,
+    // …and its policy container's referrer policy, as its `<meta name="referrer">` elements set it (url_ops.rs
+    // `meta_referrer_steps`), by the document's slot; none for one no meta has set.
+    pub(crate) referrer_policies: std::collections::HashMap<NodeId, &'static str>,
     // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
     pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
     // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
@@ -1364,6 +1367,7 @@ impl RealmArena {
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.pointerdown_targets.retain(|doc, _| live(slots, doc));
+        self.referrer_policies.retain(|doc, _| live(slots, doc));
         self.popovers_changing.retain(|id| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
             list.retain(|(p, _)| live(slots, p));
@@ -3900,6 +3904,9 @@ fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names
     if (regrouped || checked) && arena.radio_steps(id) {
         arena.observers.note_state_changed();
     }
+    if names.iter().any(|n| matches!(*n, "name" | "content")) {
+        arena.meta_referrer_steps(id);
+    }
 }
 // …and the attribute change steps': a slottable's `slot` changed, so the slot it was assigned is assigned anew and then
 // the one that takes it now (DOM "slottable" attribute change steps: its old slot's `slotchange` first) — the rest of
@@ -4258,6 +4265,9 @@ pub(crate) fn rename_attribute(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: N
             *k = new.to_owned();
         }
         node.attr_changed(None);
+    }
+    if [old, new].iter().any(|n| matches!(*n, "name" | "content")) {
+        arena.meta_referrer_steps(id);
     }
 }
 // The attribute stored under `key` of `id` written — `value` set, or (None) removed — and, for one new in a namespace, its

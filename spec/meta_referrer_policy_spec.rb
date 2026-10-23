@@ -139,4 +139,48 @@ RSpec.describe 'the meta referrer policy' do
       ['/r4', 'http://www.example.com/p', nil]
     ])
   end
+
+  # …which a meta sets as it is connected — after a script connected before it in the same batch — or as its `content`
+  # changes, a removal undoing none of it, a prepended one winning as the last to run (HTML §4.2.5.3; Chrome, each).
+  it 'is what the meta last connected or changed set, whatever the tree order' do
+    referers = []
+    s = simulated_session(->(env) {
+      referers << [env['PATH_INFO'], env['HTTP_REFERER']] if env['PATH_INFO'].start_with?('/n/')
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p>x']]
+    })
+    s.visit '/p'
+    s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const get = (path) => { const x = new XMLHttpRequest(); x.open('GET', path, false); x.send(); };
+      const meta = (content) => Object.assign(document.createElement('meta'), {name: 'referrer', content});
+      window.get = get;
+      const box = document.createElement('div');
+      const s1 = document.createElement('script');
+      s1.textContent = "get('/n/pre')";
+      const s2 = document.createElement('script');
+      s2.textContent = "get('/n/post')";
+      const m = meta('no-referrer');
+      box.append(s1, m, s2);
+      document.body.append(box);
+      m.remove();
+      get('/n/removed');
+      document.head.append(meta('origin'));
+      const u = meta('unsafe-url');
+      document.head.prepend(u);
+      get('/n/prepended');
+      u.content = 'bogus';
+      get('/n/bogus');
+      u.content = 'no-referrer';
+      get('/n/changed');
+      done(1);
+    JS
+    expect(referers).to eq([
+      ['/n/pre', 'http://www.example.com/p'],
+      ['/n/post', nil],
+      ['/n/removed', nil],
+      ['/n/prepended', 'http://www.example.com/p'],
+      ['/n/bogus', 'http://www.example.com/p'],
+      ['/n/changed', nil]
+    ])
+  end
 end

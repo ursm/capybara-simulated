@@ -11,7 +11,8 @@ use crate::dom::{nid_arg, realm_id, NodeData, NodeId, NodeKind, RealmArena, STAT
 // `<selectedcontent>` filled from its select, a media or plugin element's resource and an SVG `<use>`'s external
 // document fetched, a script prepared, a `<link>`'s resource obtained and a `<style>`'s sheet loaded, a `<source>`'s
 // media element told of it, a frame's browsing context made, a `<meta http-equiv=default-style>`'s stylesheet set
-// chosen, a `nonce` hidden (nonce.rs), a custom element upgraded or called back. Each is an element of its exact local
+// chosen, a `<meta name="referrer">`'s policy set (url_ops.rs `meta_referrer_steps`), a `nonce` hidden (nonce.rs), a
+// custom element upgraded or called back. Each is an element of its exact local
 // name in its own namespace — HTML's, a `<use>` SVG's, a `<script>` or `<style>` either — as Chrome fires no `load` for
 // a MathML `<style>` or an HTML `STYLE`.
 pub(crate) const CONNECT_OPTION: u32 = 1;
@@ -28,6 +29,7 @@ pub(crate) const CONNECT_FRAME: u32 = 1 << 11;
 pub(crate) const CONNECT_DEFAULT_STYLE: u32 = 1 << 12;
 pub(crate) const CONNECT_NONCE: u32 = 1 << 13;
 pub(crate) const CONNECT_CUSTOM: u32 = 1 << 14;
+pub(crate) const CONNECT_META_REFERRER: u32 = 1 << 15;
 
 // What connecting `n` runs (`CONNECT_*`); none for a node that is no element.
 pub(crate) fn connection_steps(n: &NodeData) -> u32 {
@@ -51,6 +53,7 @@ pub(crate) fn connection_steps(n: &NodeData) -> u32 {
         "source" => CONNECT_SOURCE,
         "iframe" | "frame" => CONNECT_FRAME,
         "meta" if n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")) => CONNECT_DEFAULT_STYLE,
+        "meta" if crate::url_ops::names_referrer(n) => CONNECT_META_REFERRER,
         _ => 0,
     };
     // (…a valid custom element name has a hyphen; a customized built-in an `is` value)
