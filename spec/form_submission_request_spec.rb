@@ -117,16 +117,21 @@ RSpec.describe "a form submission's request" do
   end
 
   # A frame's own navigation replaces a submission of it that navigates the frame, not one that navigates the page
-  # (Chrome: "/t?q=1"); a frame's submission to the page replaces the page's navigation planned before it (Chrome too).
+  # (Chrome: "/t?q=1"); a frame's submission to the page is the page's navigation planned last, replacing the location,
+  # reload or form submission the page planned before it — the frame gone or not by then — and replaced by the one the
+  # page plans after it (Chrome, each).
   {
-    "f.submit(); location.href = '/x'"     => '/t?q=1',
-    "top.location.href = '/y'; f.submit()" => '/t?q=1'
+    "f.submit(); location.href = '/x'"                            => '/t?q=1',
+    "top.location.href = '/y'; f.submit()"                        => '/t?q=1',
+    "top.location.href = '/y'; f.submit(); frameElement.remove()" => '/t?q=1',
+    'top.location.reload(); f.submit()'                           => '/t?q=1',
+    "f.submit(); top.document.getElementById('g').submit()"       => '/m?q=m'
   }.each do |js, path|
     it "navigates the page a frame's form targets after `#{js}`" do
       app = lambda {|env|
         next html.("<body>#{env['PATH_INFO']}") unless env['PATH_INFO'] == '/'
 
-        html.('<body><iframe srcdoc="<form id=f action=/t target=_top><input name=q value=1></form>"></iframe>')
+        html.('<body><form id="g" action="/m"><input name="q" value="m"></form><iframe srcdoc="<form id=f action=/t target=_top><input name=q value=1></form>"></iframe>')
       }
       session = simulated_session(app)
       session.visit '/'

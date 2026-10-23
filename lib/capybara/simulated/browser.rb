@@ -10204,6 +10204,8 @@ module Capybara
       def cancel_planned_navigation
         @pending_location = nil
         @pending_reload   = nil
+        # (…a frame's submission to the page as well, which was the page's navigation planned last: `frame_submit_self`)
+        @pending_frame_submit&.delete_if {|_, entry| entry[:page] }
       end
       def consume_pending_location
         return unless (url = @pending_location)
@@ -10352,7 +10354,10 @@ module Capybara
       # Context) while we're still inside the V8 call, which V8
       # terminates with a `ScriptTerminatedError`. Stash the intent
       # and drain it from `tick_real_time` after the call returns.
-      def location_reload   ; @pending_reload = true ; end
+      def location_reload
+        cancel_planned_navigation
+        @pending_reload = true
+      end
       def consume_pending_reload
         return unless @pending_reload
         @pending_reload = nil
@@ -10434,16 +10439,23 @@ module Capybara
       # `frame_navigate_self`). Keyed by realm id; deferred + drained from
       # `drain_pending_navigation` so we never serialize/navigate while the
       # form's `submit()` is still on the V8 stack.
-      # (…`target` the one its request names: one that navigates the page replaces the page's own navigation planned
-      # before it — the later one wins, Chrome's `location.href = …; frames[0].f.submit()`)
+      # (…`target` the one its request names: one that navigates the page is the page's navigation planned last — the one
+      # planned before it superseded, a location's, a reload, a link's or a form's of the page, Chrome's `location.href =
+      # …; frames[0].f.submit()` — and is superseded in turn by one the page plans after it (`cancel_planned_navigation`):
+      # its request and route taken now, whatever becomes of the frame by the time the page navigates)
       def frame_submit_self(realm_id, target = '')
         return if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
-        (@pending_frame_submit ||= {})[realm_id] = {}
-        keyword = target_keyword(target)
-        return unless [TARGET_TOP, TARGET_PARENT].include?(keyword) && top_level_realm_of(realm_id).zero?
+        pending = ((@pending_frame_submit ||= {})[realm_id] = {})
+        return unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
+        return unless choose_named_navigable(realm_id, target) == :top
 
-        @pending_location = nil if choose_named_navigable(realm_id, target) == :top
+        spec = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
+        return unless spec.is_a?(Hash)
+
+        cancel_planned_navigation
+        @runtime.call('__csimSupersedePlanned')
+        pending.merge!(spec: spec, route: frame_submission_route(realm_id, spec), page: true)
       end
       def consume_pending_frame_submit
         return if @pending_frame_submit.nil? || @pending_frame_submit.empty?
@@ -11274,13 +11286,16 @@ module Capybara
       end
       # …by the document of realm `realm`, its Referer `initiator` ([url, policy]): a GET, or a POST of `post` ([body,
       # content type]).
+      # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares, that document's URL — the page's where it is a
+      # local one, about:blank's or srcdoc's, whose origin is the one that made it)
       def navigate_top_from(realm, initiator, url, post: nil)
         source, policy = initiator
+        site = source.to_s.match?(%r{\Ahttps?://}i) ? source : @current_url
         from_document(realm) do
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: source)
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: source)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site)
           end
         end
       end
@@ -11812,8 +11827,8 @@ module Capybara
       # duration of the flush and restored after, so the outgoing page's intents
       # neither leak into the incoming page nor clobber the live one. Listed here
       # (rather than saved individually) because a re-assignment does NOT restore a
-      # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` are
-      # Hashes keyed by realm and the frame-submit / frame-reload slots are Arrays.
+      # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
+      # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
         @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit
