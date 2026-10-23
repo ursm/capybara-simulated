@@ -10636,6 +10636,10 @@ module Capybara
         return if h.nil?
         target = h[:idx] + delta
         return if target.negative? || target >= h[:entries].size
+        # (…to an entry a traversal can make again alone: an HTTP(S) document refetched, about:blank — a srcdoc or a blob
+        # document it left has no bytes to come back to)
+        to = h[:entries][target][:url].to_s
+        return unless http_url?(to) || to.match?(ABOUT_BLANK)
         # Snapshot the entry we're leaving so a later forward traversal restores it (keeping how it
         # was reached, so a POST entry re-POSTs when traversed back to).
         leave_frame_entry(realm_id, h) if h[:idx] >= 0
@@ -10644,18 +10648,21 @@ module Capybara
       end
       # Record a frame navigation away from `realm_id` to `new_url`: snapshot the
       # OUTGOING document (URL + form state) into the current entry — seeding entry
-      # 0 the first time — then drop any forward tail and push the new entry. Hooked
-      # into the frame form-submission paths; frame navigations driven by
-      # `location.href` / link clicks aren't recorded yet (history.back there falls
-      # through to the top document, as before).
+      # 0 the first time — then drop any forward tail and push the new entry: every frame navigation's, a form's, a
+      # link's, a location's (`location.replace`'s replacing the current one instead: `replace_frame_entry`).
       # `post` (a {body, content_type}) records that this entry was reached by a POST submission,
       # so a later reload / history traversal re-POSTs it (with the body) rather than GET-ing the URL.
+      # (…one a traversal can make again alone: an HTTP(S) URL's — refetched — or about:blank's; a blob's or a data:
+      # one's bytes are its document's, which a traversal back to it no longer has)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
+        return unless http_url?(new_url) || new_url.to_s.match?(ABOUT_BLANK)
+
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         h = (@frame_histories ||= {})[[parent, handle]] ||= {entries: [], idx: -1}
+        snapshot_frame_history(realm_id, h)
         h[:idx] = 0 if h[:idx].negative?
         leave_frame_entry(realm_id, h)
         h[:entries] = h[:entries][0..h[:idx]]
@@ -10668,7 +10675,30 @@ module Capybara
       # the frame has a history (one an earlier navigation recorded) for a reload or a traversal to read, so neither goes
       # back to the document it left.
       def replace_frame_entry(realm_id, url)
-        current_frame_history_entry(realm_id)&.replace(url: url.to_s, form_state: nil)
+        return unless (cur = current_frame_history_entry(realm_id))
+
+        snapshot_frame_history(realm_id, frame_history_of(realm_id))
+        cur.replace(url: url.to_s, form_state: nil)
+      end
+      # The session history of frame realm `realm_id`'s container, nil for none.
+      def frame_history_of(realm_id)
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        handle.zero? ? nil : @frame_histories&.[]([parent, handle])
+      end
+      # …kept as it stood before a navigation recorded or replaced an entry of it, which one that ends in no document —
+      # a download, a navigation handed off — restores (`frame_navigation_made_no_document`): neither is a navigation of
+      # the frame (HTML, Chrome).
+      def snapshot_frame_history(realm_id, h)
+        @frame_history_before = h && [realm_id, h, h[:entries].map(&:dup), h[:idx]]
+      end
+      def frame_navigation_made_no_document(realm_id)
+        before, @frame_history_before = @frame_history_before, nil
+        return unless before && before[0] == realm_id
+
+        _, h, entries, idx = before
+        h[:entries] = entries
+        h[:idx]     = idx
       end
       # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
       # whether to re-POST.
@@ -10762,6 +10792,14 @@ module Capybara
       def reload_frame_to_entry(realm_id, entry, is_reload: false, is_history: true)
         url = entry[:url].to_s
         return if url.empty?
+        # (…about:blank's made as a navigation to it is: an entered frame's in its scope, another's where its realm's
+        # document holds the frame)
+        if url.match?(ABOUT_BLANK)
+          entered = @frame_stack.find {|e| e[:realm_id] == realm_id }
+          return reload_current_frame_realm('about:blank', '', 'text/html', entry: entered) if entered
+
+          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url)
+        end
         # An entry reached by a POST submission re-POSTS (with the recorded body); a normal entry
         # re-GETs. The method drives both the SW fetch event and the network fallback.
         is_post   = entry[:method] == 'POST'
@@ -10893,21 +10931,19 @@ module Capybara
 
       # A self-targeted GET form submit in the initiating frame realm: navigate
       # that frame to the action URL (query already mutated in).
-      # `record: false` for a `location.href=` / link-click self-nav — those frame navigations are
-      # deliberately NOT recorded in frame history yet (see record_frame_nav; history.back there falls
-      # through to the top document), and recording them here would push an entry where a
-      # `location.replace` must overwrite. A form GET submission (the default) IS a history push.
+      # `record: false` where it replaces the frame's current session history entry rather than adds one (a
+      # `location.replace`, a navigation of a document not completely loaded yet: `replace_frame_entry`).
       def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, resulting_client_id: nil, referrer: nil)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
-        if depth.zero? && !is_reload && !is_history
-          record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
-        end
         # The navigation's reserved client id — threaded through the redirect re-entries
         # (re-minted on a cross-origin hop) and adopted by the rebuilt realm on commit.
         rid = resulting_client_id || mint_resulting_client_id
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer) if entry
+        return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, reload: is_reload || is_history, record: record) if entry
+        if depth.zero? && !is_reload && !is_history
+          record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
+        end
         # A frame reached via contentWindow (not on the entered stack). An ABSOLUTE http(s) target is
         # fetched Ruby-side (like navigate_realm_self_post) so the navigation carries correct request
         # headers — a Referer under the initiating document's Referrer-Policy, no Origin (GET), the
@@ -10997,9 +11033,9 @@ module Capybara
         # DIRECT (non-redirect) response (tag_frame_entry_post below): a POST that redirects (the
         # Post/Redirect/Get pattern) resolves to a GET document, so its entry must NOT re-POST on a
         # later reload / back — only a directly-served POST does.
-        record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer) if entry
+        return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, reload: is_reload || is_history) if entry
+        record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
         return if depth.zero? && !prompt_to_unload_frame(realm_id)
 
         invalidate_find_cache
@@ -11100,6 +11136,7 @@ module Capybara
 
         new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
         return if new_id.zero?
+        @frame_history_before = nil   # (…its navigation made a document: `snapshot_frame_history`)
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
           # (…an entered frame's scope following it to its new document, as `reload_current_frame_realm` keeps it)
@@ -11578,6 +11615,7 @@ module Capybara
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
         return if new_id.zero?
+        @frame_history_before = nil   # (…its navigation made a document: `snapshot_frame_history`)
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
         if entry.equal?(@frame_stack.last)
           entry[:realm_id]  = new_id
@@ -12179,6 +12217,8 @@ module Capybara
       # driver's own) — or its target — a frame's (`realm`, the frame realm), none for the top-level one — is sandboxed
       # against downloads: no `allow-downloads` (HTML "allowed to download", navigables.rs `download_allowed`).
       def save_downloaded_response(url, headers, body, realm: nil)
+        # (…a frame's session history as it stood before: a download is no navigation of it)
+        frame_navigation_made_no_document(realm) if realm
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         source = @download_source || realm
         return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, navigation_sandbox(realm))
@@ -12528,6 +12568,7 @@ module Capybara
       private def frame_redirect_followed?(next_url, depth, realm_id)
         outcome = redirect_outcome(next_url, depth)
         yield if outcome == :fail
+        frame_navigation_made_no_document(realm_id) if outcome == :hand_off
         return false unless outcome == :follow
 
         # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
