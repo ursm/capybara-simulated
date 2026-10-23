@@ -3276,7 +3276,6 @@ module Capybara
         # keeps it. `noreferrer` also empties the referrer.
         no_referrer = Native.link_noreferrer(spec['rel'].to_s)
         keep_opener = !Native.link_noopener(spec['rel'].to_s, target)
-        referrer    = no_referrer ? '' : (@current_url || '')
         # (…replacing the session history entry of the form's document where that is not completely loaded yet: the
         # page's, whose own navigable it navigates — `request.replace`)
         replace = spec['replace'] == true
@@ -3285,6 +3284,8 @@ module Capybara
         initiator = realm_referrer_initiator(@current_realm_id.to_i)
         initiator = [initiator[0], 'no-referrer'] if no_referrer
         policy    = no_referrer ? 'no-referrer' : nil
+        # (…a new window's referrer its document — an entered frame's, not the page's — none where that refers as none)
+        referrer  = initiator[1] == 'no-referrer' ? '' : initiator[0].to_s
         if @current_realm_id && !new_window && !named_frame && !frame_entry
           # (…an entered frame's form whose target names the page navigates it as the frame's `_top` does: its Referer and
           # site the frame document's)

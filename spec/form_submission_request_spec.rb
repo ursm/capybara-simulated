@@ -202,6 +202,23 @@ RSpec.describe "a form submission's request" do
     expect(referers).to eq([['/t', 'http://www.example.com/a']])
   end
 
+  # …and a new window it opens refers to the frame's document too.
+  it "opens a new window for an entered frame's `_blank` form under the frame's Referer" do
+    referers = []
+    app = lambda {|env|
+      referers << env['HTTP_REFERER'] if env['PATH_INFO'] == '/t'
+      next html.('<body><form action="/t" target="_blank"><button>go</button></form>') if env['PATH_INFO'] == '/a'
+      next html.('<body>t') if env['PATH_INFO'] == '/t'
+
+      html.('<body><iframe src="/a"></iframe>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.within_frame(0) { session.click_button('go') }
+    poll_until { referers.any? }
+    expect(referers).to eq(['http://www.example.com/a'])
+  end
+
   # …as by a target naming the page: the page navigated, its Referer the frame's document.
   it "submits an entered frame's form to the page its target names under the frame's Referer" do
     referers = []
