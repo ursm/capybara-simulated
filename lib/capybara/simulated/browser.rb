@@ -11605,7 +11605,8 @@ module Capybara
             boot_response_into_ctx('')
             return
           end
-          @history_before_navigation = nil if depth.zero?
+          # (…the session history as it stands, which a download it ends in restores: `navigate_post`'s)
+          @history_before_navigation = window_has_document? ? [@history.dup, @history_idx] : nil if depth.zero?
           unless from_history || depth > 0
             capture_outgoing_form_state
             record_navigation_history({method: :get, url: url}, replace: replace)
@@ -11634,7 +11635,9 @@ module Capybara
             # an attachment downloads — never booted as the document.
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
-              return navigate(carry_fragment(url, resolve_location(loc, url)), depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
+              next_url = carry_fragment(url, resolve_location(loc, url))
+              redirect_history_entry(next_url, get: true)
+              return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
             return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
             @current_url = url
@@ -11662,6 +11665,7 @@ module Capybara
             # the original fragment in the final URL.
             next_url = carry_fragment(url, next_url)
             body.close if body.respond_to?(:close)
+            redirect_history_entry(next_url, get: true)
             # Thread the initiator + widened site so the chain's SameSite verdict
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -11690,8 +11694,8 @@ module Capybara
       # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
       # kept, for a response that turns out to make no document (`download_in_place`).
       # …and the current entry made a redirect's from it (Fetch "HTTP-redirect fetch"): its URL the redirect's, a POST
-      # become a GET where the redirect makes one — so a reload of a Post/Redirect/Get page gets the page it was sent to,
-      # not the form submitted again (Chrome).
+      # become a GET where the redirect makes one — so a reload gets the page it was redirected to, not the chain run
+      # again: a Post/Redirect/Get page's not the form submitted again (Chrome).
       private def redirect_history_entry(url, get:)
         return unless (entry = @history_idx >= 0 && @history[@history_idx])
 

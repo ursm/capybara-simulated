@@ -235,6 +235,22 @@ RSpec.describe "a form submission's request" do
     expect(seen).to eq([%w[POST /x], %w[GET /r], %w[GET /r]])
   end
 
+  # …as a GET's redirect does: a reload of a redirected page gets it, not the redirect (Chrome).
+  it 'reloads the page a GET was redirected to' do
+    seen = []
+    app = lambda {|env|
+      seen << env['PATH_INFO']
+      next [302, {'location' => '/b'}, []] if env['PATH_INFO'] == '/a'
+
+      html.('<body>b')
+    }
+    session = simulated_session(app)
+    session.visit '/a'
+    session.refresh
+    expect(session).to have_current_path('/b')
+    expect(seen).to eq(%w[/a /b /b])
+  end
+
   # …and a re-post that ends in a download leaves the entry the POST's: the next reload re-posts it (Chrome).
   it 'keeps the entry of a re-post that ends in a download' do
     seen = []
