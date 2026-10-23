@@ -141,6 +141,30 @@ RSpec.describe "a form submission's request" do
     end
   end
 
+  # A form whose link types include `noreferrer` sends no Referer, whatever it navigates (HTML "plan to navigate": the
+  # referrer policy "no-referrer"); Chrome sends one from the page's own form, a departure from the spec it states.
+  {
+    'the page'          => ['', ''],
+    'the page by POST'  => ['', ' method=post'],
+    'its frame'         => [' target=fr', ''],
+    'its frame by POST' => [' target=fr', ' method=post']
+  }.each do |name, (target, method)|
+    it "sends no Referer from a `noreferrer` form submitted to #{name}" do
+      referers = []
+      app = lambda {|env|
+        referers << env['HTTP_REFERER'] if env['PATH_INFO'] == '/r'
+        next html.('<body>r') if env['PATH_INFO'] == '/r'
+
+        html.(%(<body><iframe name="fr"></iframe><form action="/r" rel="noreferrer"#{target}#{method}><button>go</button></form>))
+      }
+      session = simulated_session(app)
+      session.visit '/'
+      session.click_button 'go'
+      poll_until { referers.any? }
+      expect(referers).to eq([nil])
+    end
+  end
+
   # …and a frame entered with `within_frame` submits by a click as by its script: its sandbox keeps it from the page, and
   # its Referer is the frame's document.
   it "submits an entered frame's form to the page under the frame's sandbox and Referer" do

@@ -3280,11 +3280,11 @@ module Capybara
         # (…replacing the session history entry of the form's document where that is not completely loaded yet and the
         # navigable it navigates is its own — the page's, not an entered frame's: `request.replace`)
         replace = spec['replace'] == true && @current_realm_id.nil?
-        # (…and a frame it navigates is told its initiator under the policy `noreferrer` sets)
-        if named_frame
-          initiator = realm_referrer_initiator(@current_realm_id.to_i)
-          initiator = [initiator[0], 'no-referrer'] if no_referrer
-        end
+        # (…and whatever it navigates is told its initiator under the policy `noreferrer` sets — HTML "plan to navigate"
+        # sets the referrer policy "no-referrer" where the form's link types include it)
+        initiator = realm_referrer_initiator(@current_realm_id.to_i)
+        initiator = [initiator[0], 'no-referrer'] if no_referrer
+        policy    = no_referrer ? 'no-referrer' : nil
         if method == 'GET'
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
@@ -3292,9 +3292,9 @@ module Capybara
           elsif named_frame
             navigate_realm_self_get(named_frame, url, referrer: initiator)
           elsif frame_entry
-            navigate_frame(url, entry: frame_entry)
+            navigate_frame(url, entry: frame_entry, referrer: initiator)
           else
-            navigate(url, replace: replace)
+            navigate(url, referrer_policy: policy, replace: replace)
           end
         else
           if new_window
@@ -3304,9 +3304,9 @@ module Capybara
           elsif named_frame
             navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator)
           elsif frame_entry
-            navigate_frame_post(url, body, content_type, entry: frame_entry)
+            navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator)
           else
-            navigate_post(url, body, content_type, replace: replace)
+            navigate_post(url, body, content_type, referrer_policy: policy, replace: replace)
           end
         end
       end
