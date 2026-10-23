@@ -148,12 +148,13 @@ RSpec.describe "a form submission's request" do
   # it, where Chrome and Firefox send the origin), and a document of an opaque origin sends 'null' — a sandboxed frame's
   # to the page or a new window, a `Content-Security-Policy: sandbox` page's.
   {
-    'the page'                   => ['<form action="/r" method="post"><button>go</button></form>', false, 'http://www.example.com'],
-    'a no-referrer page'         => ['<meta name="referrer" content="no-referrer"><form action="/r" method="post"><button>go</button></form>', false, 'null'],
-    'a noreferrer form'          => ['<form action="/r" method="post" rel="noreferrer"><button>go</button></form>', false, 'null'],
-    'a sandboxed page'           => ['<form action="/r" method="post"><button>go</button></form>', true, 'null'],
-    'an opaque frame, to _top'   => ['<iframe sandbox="allow-forms allow-top-navigation" srcdoc="<form action=/r method=post target=_top><button>go</button></form>"></iframe>', false, 'null'],
-    'an opaque frame, to _blank' => ['<iframe sandbox="allow-forms allow-popups" srcdoc="<form action=/r method=post target=_blank><button>go</button></form>"></iframe>', false, 'null']
+    'the page'                         => ['<form action="/r" method="post"><button>go</button></form>', false, 'http://www.example.com'],
+    'a no-referrer page'               => ['<meta name="referrer" content="no-referrer"><form action="/r" method="post"><button>go</button></form>', false, 'null'],
+    'an origin-when-cross-origin page' => ['<meta name="referrer" content="origin-when-cross-origin"><form action="http://other.example.com/r" method="post"><button>go</button></form>', false, 'http://www.example.com'],
+    'a noreferrer form'                => ['<form action="/r" method="post" rel="noreferrer"><button>go</button></form>', false, 'null'],
+    'a sandboxed page'                 => ['<form action="/r" method="post"><button>go</button></form>', true, 'null'],
+    'an opaque frame, to _top'         => ['<iframe sandbox="allow-forms allow-top-navigation" srcdoc="<form action=/r method=post target=_top><button>go</button></form>"></iframe>', false, 'null'],
+    'an opaque frame, to _blank'       => ['<iframe sandbox="allow-forms allow-popups" srcdoc="<form action=/r method=post target=_blank><button>go</button></form>"></iframe>', false, 'null']
   }.each do |name, (body, sandboxed, origin)|
     it "sends the Origin of #{name} on a POST navigation" do
       origins = []

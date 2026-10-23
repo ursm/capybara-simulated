@@ -3369,7 +3369,7 @@ module Capybara
         if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body,
                                                      content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
                                                      is_reload: is_reload, is_history: from_history && !is_reload,
-                                                     dest: 'document', referrer_source: initiator, site_seed: site_seed, origin_null: origin_null))
+                                                     dest: 'document', referrer_source: initiator, referrer_policy: referrer_policy, site_seed: site_seed, origin_null: origin_null))
           # Same post-response pipeline as the network POST below: a network error commits
           # an error document at the target URL; 307/308 re-POST, other redirects GET;
           # an attachment downloads.
@@ -9425,7 +9425,7 @@ module Capybara
           'null'
         when 'no-referrer-when-downgrade', 'strict-origin', 'strict-origin-when-cross-origin'
           origin.start_with?('https:') && !target.to_s.start_with?('https:') ? 'null' : origin
-        when 'same-origin', 'origin-when-cross-origin'
+        when 'same-origin'
           url_origin(target) == origin ? origin : 'null'
         else
           origin
