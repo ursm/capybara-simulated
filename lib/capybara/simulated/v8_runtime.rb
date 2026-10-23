@@ -433,6 +433,8 @@ module Capybara
         @module_sw_ctxs&.clear
         @frame_realm_depths&.clear
         @frame_realm_parents&.clear
+        @frame_container_builds&.clear
+        @first_frame_realms&.clear
         @window_realm_meta&.clear
         @loading_frame_realms&.clear
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
@@ -522,6 +524,7 @@ module Capybara
         @browser.forget_importmap(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
+        @first_frame_realms&.delete(id)
         @window_realm_meta&.delete(id)
         # Evict from the main realm's stepped windows so `drainChildRealms` stops
         # stepping a disposed context. A FRAME realm is also evicted via the DOM
@@ -881,6 +884,8 @@ module Capybara
       MAX_FRAME_DEPTH = 16
 
       def frame_realm_depths = (@frame_realm_depths ||= {})
+      # Whether frame realm `realm_id` is the first its container made (`create_frame_realm`).
+      def first_frame_realm?(realm_id) = @first_frame_realms&.include?(realm_id.to_i) || false
       # The frame realms being made, until they are registered as alive: a frame's document still parsing, whose own
       # inline scripts run first — and the URL one has (its location's), which a descendant's cookies ask after (nil
       # for no such realm).
@@ -941,6 +946,10 @@ module Capybara
         # never trips.
         frame_realm_depths[realm.id]  = depth
         frame_realm_parents[realm.id] = parent_id.to_i   # owning realm, for contentWindow-reached rebuilds
+        # (…and whether it is the first its container made, whose document — where it is about:blank — is the
+        # navigable's initial about:blank: `first_frame_realm?`)
+        builds = (@frame_container_builds ||= Hash.new(0))[[parent_id.to_i, container]] += 1
+        (@first_frame_realms ||= Set.new) << realm.id if builds == 1
         loading_frame_realms[realm.id] = realm           # (…its URL asked for while it loads: loading_frame_realm_url)
         seed_realm_bridge(realm)
         # Wire `parent` / `top` to the realm that owns this iframe (its context

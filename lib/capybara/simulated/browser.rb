@@ -10664,7 +10664,7 @@ module Capybara
         snapshot_frame_history(realm_id, h)
         # (…the first in place of the frame's initial about:blank, which no traversal goes back to: HTML "navigate" — a
         # navigable whose active document is its initial about:blank replaces it)
-        if h[:idx].negative? && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
+        if h[:idx].negative? && @runtime.first_frame_realm?(realm_id) && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
           h[:entries] = [entry_for_frame_nav(new_url, post)]
           h[:idx]     = 0
           return
