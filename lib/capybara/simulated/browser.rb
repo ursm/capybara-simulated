@@ -2445,11 +2445,22 @@ module Capybara
         # forward again restores it, keeping how it was reached: a POST entry re-POSTs)
         frames = changes.filter_map {|nav, id, same_document| [nav, id, navigable_realm(nav)] unless same_document }
         frames.each {|_, _, realm| leave_frame_entry(realm) if realm }
-        # (…as a frame's own does, for its entry's response making no document: `frame_navigation_made_no_document`)
-        save_frame_history(*frames.filter_map(&:last))
+        # (…the history as it stood kept, for a step none of whose documents is made after all — every frame's entry's
+        # response making none, a 204's, a download's: `frame_navigation_made_no_document` — which then leaves the frames
+        # and the step where they were; one whose others' are made applies, the frame whose is not staying at its own
+        # document, as HTML "apply the history step" has it)
+        save_history(1)
+        @traversing_frames = {none: []}
         @session_history.go_to(step)
         changes.each {|nav, id, same_document| traverse_same_document(nav, id) if same_document }
         frames.each {|_, id, realm| reload_frame_to_entry(realm, history_entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
+        if changes.all? {|_, _, same_document| !same_document } && @traversing_frames[:none].size == frames.size
+          restore_history(1)
+        else
+          forget_history(1)
+        end
+      ensure
+        @traversing_frames = nil
         # (…none of the page's documents made again, after all: the page stays, and what its flushed timers planned
         # still stands — taken once the traversal is in)
         restore_flushed_nav_intents if flushed
@@ -10872,12 +10883,13 @@ module Capybara
       # …kept as it stood before a navigation recorded or replaced an entry of it, which one that ends in no document —
       # a download, a navigation handed off — restores (`frame_navigation_made_no_document`): neither is a navigation of
       # the frame (HTML, Chrome).
-      def save_frame_history(*realm_ids)
+      def save_frame_history(realm_id)
         save_history(1)
-        @frame_history_saved_for = realm_ids
+        @frame_history_saved_for = realm_id
       end
       def frame_navigation_made_no_document(realm_id)
-        return unless @frame_history_saved_for&.include?(realm_id)
+        return @traversing_frames[:none] << realm_id if @traversing_frames
+        return unless @frame_history_saved_for == realm_id
 
         @frame_history_saved_for = nil
         restore_history(1)
@@ -11009,7 +11021,7 @@ module Capybara
                                                       referrer_source: referrer_source, referrer_policy: referrer_policy,
                                                       resulting_client_id: rid, **post_args))
           return commit_frame_error_document(realm_id, url, rid) if sw['networkError']
-          return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
+          return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(sw['status'])
 
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
           # does the single utf8_text re-tag, matching the network path below.
@@ -11026,8 +11038,10 @@ module Capybara
         response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url, rid)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
-        return if download_response?(headers)
-        return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
+        # (…none made of a download, nor of a 204 / 205 — a reload's changing no history, a traversal's its own to settle:
+        # `perform_history_traverse`)
+        return save_downloaded_response(url, headers, resp_body, realm: is_reload ? nil : realm_id) if download_response?(headers)
+        return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(status)
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, history_state: history_state, csp: response_csp(headers))
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:

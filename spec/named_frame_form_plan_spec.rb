@@ -187,6 +187,55 @@ RSpec.describe "a page form's planned navigation of a named frame" do
       expect(session.evaluate_script('loads')).to eq(0)
     end
 
+    # …a frame's traversal to an entry that now downloads too (forward again does nothing); a reload's of it after
+    # changing no history (its pushState entries kept).
+    it "keeps a frame and its step where a traversal downloads, and a later reload's 204 its history" do
+      answer = :page
+      session = simulated_session(lambda {|env|
+        if env['PATH_INFO'] == '/blank' && answer != :page
+          next answer == :download ? [200, {'content-disposition' => 'attachment; filename=x.txt'}, ['x']] : [204, {}, []]
+        end
+        body = env['PATH_INFO'] == '/top' ? '<iframe src="/blank"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.execute_script('frames[0].location = "/a"')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/a')
+      session.execute_script('window.loads = 0; document.querySelector("iframe").onload = () => loads++')
+      answer = :download
+      session.go_back
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/a')
+      session.go_forward
+      expect(session.evaluate_script('loads')).to eq(0)
+      session.execute_script('history.pushState(null, "", "/p1"); history.pushState(null, "", "/p2")')
+      expect(session.evaluate_script('history.length')).to eq(4)
+      answer = :no_content
+      session.execute_script('frames[0].location.reload()')
+      session.evaluate_script('1')
+      expect(session.evaluate_script('history.length')).to eq(4)
+    end
+
+    # …one of two frames a step moves: the other moves, the step with it (HTML "apply the history step"; Chrome).
+    it 'moves the step where one frame of it gets one' do
+      no_content = false
+      session = simulated_session(lambda {|env|
+        next [204, {}, []] if no_content && env['PATH_INFO'] == '/blank'
+
+        body = env['PATH_INFO'] == '/top' ? '<iframe src="/blank"></iframe><iframe src="/blank2"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      session.visit '/top'
+      session.execute_script('frames[0].location = "/fa"')
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/fa')
+      session.execute_script('frames[1].location = "/fb"')
+      expect(session.evaluate_script('frames[1].location.pathname')).to eq('/fb')
+      no_content = true
+      session.execute_script('history.go(-2)')
+      expect(session.evaluate_script('[frames[0].location.pathname, frames[1].location.pathname]')).to eq(['/fa', '/blank2'])
+      session.execute_script('history.go(-1)')
+      expect(session.evaluate_script('frames[1].location.pathname')).to eq('/blank2')
+    end
+
     # …a window `window.open` made on one at its initial about:blank, whichever side asks (Chrome).
     it 'leaves a new window on one at about:blank' do
       session = simulated_session(app)
