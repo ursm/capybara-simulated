@@ -10005,7 +10005,11 @@ module Capybara
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
           return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size) if no_cors_mode && crossed
-          return response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
+          out = response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
+          # (…a document's navigation request's the method its last hop went with, which its session history entry
+          # keeps: a POST's through a 307 / 308 still one, a 303's a GET)
+          out['method'] = method.to_s if navigation && out
+          return out
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
@@ -10631,10 +10635,11 @@ module Capybara
         return unless @runtime.frame_realm_alive?(realm_id)
         return unless (h = frame_history_of(realm_id))
         target = h[:idx] + delta
+        # (…to an entry a traversal can make again alone: an HTTP(S) document refetched, about:blank — one past a srcdoc or
+        # a blob document it left, which has no bytes to come back to)
+        step = delta.positive? ? 1 : -1
+        target += step while target.between?(0, h[:entries].size - 1) && !recordable_frame_url?(h[:entries][target][:url])
         return if target.negative? || target >= h[:entries].size
-        # (…to an entry a traversal can make again alone: an HTTP(S) document refetched, about:blank — a srcdoc or a blob
-        # document it left has no bytes to come back to)
-        return unless recordable_frame_url?(h[:entries][target][:url])
         # Snapshot the entry we're leaving so a later forward traversal restores it (keeping how it
         # was reached, so a POST entry re-POSTs when traversed back to).
         leave_frame_entry(realm_id, h) if h[:idx] >= 0
@@ -10647,11 +10652,11 @@ module Capybara
       # link's, a location's (`location.replace`'s replacing the current one instead: `replace_frame_entry`).
       # `post` (a {body, content_type}) records that this entry was reached by a POST submission,
       # so a later reload / history traversal re-POSTs it (with the body) rather than GET-ing the URL.
-      # (…one a traversal can make again alone: an HTTP(S) URL's — refetched — or about:blank's; a blob's or a data:
-      # one's bytes are its document's, which a traversal back to it no longer has)
+      # (…whatever its URL, so the entry a reload reads is the document's the frame is at: one a traversal cannot make
+      # again alone — a blob's, a data: one's, whose bytes are its document's — passed over by a traversal,
+      # `perform_frame_traverse`)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
-        return unless recordable_frame_url?(new_url)
 
         return unless (h = frame_history_of(realm_id, create: true))
 
@@ -10669,7 +10674,7 @@ module Capybara
         h[:entries] << entry_for_frame_nav(new_url, post)
         h[:idx] = h[:entries].size - 1
       end
-      # …whether a frame's session history entry for `url` can be made again by a traversal alone (`record_frame_nav`).
+      # …whether a frame's session history entry for `url` can be made again by a traversal alone (`perform_frame_traverse`).
       def recordable_frame_url?(url) = http_url?(url) || url.to_s.match?(ABOUT_BLANK)
       def entry_for_frame_nav(url, post)
         entry = {url: url.to_s, form_state: nil}
@@ -11085,7 +11090,7 @@ module Capybara
             return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, referrer: referrer, is_reload: is_reload, is_history: is_history, record: false,
                                                      site_seed: site, origin_null: taint, resulting_client_id: next_rid)
           end
-          tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
+          tag_frame_entry_post(realm_id, body, content_type)
           reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}))
           return
         end
@@ -11127,7 +11132,7 @@ module Capybara
           save_downloaded_response(url, headers, resp_body, realm: realm_id)
           return
         end
-        tag_frame_entry_post(realm_id, body, content_type) if depth.zero?
+        tag_frame_entry_post(realm_id, body, content_type)
         reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers))
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
