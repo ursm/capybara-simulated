@@ -10256,13 +10256,8 @@ module Capybara
         @pending_location = @pending_location_replace = @pending_location_initiator = nil
         # (…a `blob:` URL's blob the one the navigation began with, which the page's plan holds: location.js `dispatchNav`)
         blob = host_blob(@runtime.call('__csimTakeLocationBlob', url)) if url.match?(/\Ablob:/i)
-        # A JS-driven `location.*` from inside a `within_frame` block navigates the FRAME, not the top page (same as a
-        # self-targeted link/form there); a frame's navigation of the page (`initiator`) and the page's own, the page —
-        # each judged against the document it navigates.
-        if !initiator && @current_realm_id
-          return pure_fragment_navigation?(url) ? update_current_hash(url) : navigate_frame(url)
-        end
-
+        # The page's `location` navigates the page, whichever realm's script set it — a frame's own is its container's to
+        # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates.
         in_top_context do
           # A `location.href`/`assign`/`hash` set to a same-document fragment (e.g. `location.hash = ''`) is NOT a
           # document fetch — move the hash without rebuilding the VM, matching the anchor-click navigate branch. Without

@@ -188,4 +188,24 @@ RSpec.describe 'a nested document navigating itself' do
     expect(s).to have_current_path('/t')
     expect(log.last).to eq(['/t', nil])
   end
+
+  # A script of an entered frame setting the page's location navigates the page, as the frame's own script does (HTML:
+  # a Location navigates its own window's navigable, whichever realm's script calls it).
+  {
+    "top.location.href = '/x'"   => '/x',
+    "top.location.assign('/x')"  => '/x',
+    "top.location.replace('/x')" => '/x',
+    "parent.location = '/x#h'"   => '/x'
+  }.each do |js, path|
+    it "navigates the page for `#{js}` run in an entered frame" do
+      s = simulated_session(lambda {|env|
+        body = env['PATH_INFO'] == '/' ? 'TOP<iframe src="/f"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      s.visit '/'
+      s.within_frame(0) { s.execute_script(js) }
+      expect(s).to have_current_path(path)
+      expect(s.evaluate_script('document.body.textContent')).to eq(path)
+    end
+  end
 end
