@@ -81,6 +81,7 @@ module Capybara
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1], a[2]); nil },
         '__historyGo'                => ->(b, *a) { b.plan_history_traverse(a[0], a[1]) },
         '__csimApplyTraversal'       => ->(b, *a) { b.apply_planned_traversal(a[0].to_i); nil },
+        '__csimSupersedeFrameNavigation' => ->(b, *a) { b.frame_navigation_superseded(a[0].to_i); nil },
         '__historyLength'            => ->(b, *a) { b.history_length(a[0].to_i) },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1]) },

@@ -10648,6 +10648,11 @@ module Capybara
         supersede_frame_navigation(realm_id)
         (@pending_frame_reload ||= []) << realm_id
       end
+      # …the host's navigation of frame realm `realm_id` planned, replaced by one its parent's document plans (a form's
+      # whose target names it: dom-nodes.js `__csimSubmitFormToNamedFrame`).
+      def frame_navigation_superseded(realm_id)
+        supersede_frame_navigation(realm_id) unless realm_id.zero?
+      end
       # A frame's navigation planned — to a URL, a reload, a form's submission — replaces the one it had planned before
       # (HTML "navigate": a later navigation of a navigable aborts its ongoing one): `href = …` and then `reload()` in one
       # task reloads the document it is at (Chrome, measured: the reload's document, not the href's).

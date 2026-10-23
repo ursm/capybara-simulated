@@ -96,6 +96,18 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(session.evaluate_script('history.length')).to eq(3)
   end
 
+  # A navigation of the frame the page began before it gives way to it (Chrome: the frame at /x, one load).
+  {'its location set' => 'frames[0].location = "/a"', 'a link targeting it' => 'l.click()'}.each do |name, js|
+    it "takes over from #{name} before it" do
+      hits = []
+      session = session_with(hits)
+      session.visit '/top'
+      session.execute_script("window.loads = 0; fr.onload = () => loads++; #{js}; f.submit()")
+      expect(session.evaluate_script('frames[0].location.pathname')).to eq('/x')
+      expect(session.evaluate_script('loads')).to eq(1)
+    end
+  end
+
   it "sends nothing where the frame's srcdoc is set after it" do
     hits = []
     session = session_with(hits)
