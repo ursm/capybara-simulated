@@ -233,4 +233,13 @@ RSpec.describe 'the blob URL store' do
       expect(poll_until { s.evaluate_script('document.body && document.body.textContent').then {|t| t if t == 'BLOB' } }).to eq('BLOB')
     end
   end
+
+  # …and a user's click of a blob link, whose handler revokes it on a task of its own (Chrome: the blob's document).
+  it 'loads the blob a clicked link began with, revoked by a task its click handler queued' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>TOP<a id=l>go</a>']] })
+    s.visit '/'
+    s.execute_script("const u = URL.createObjectURL(new Blob(['<p>BLOB'], {type: 'text/html'})); l.href = u; l.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(u), 0));")
+    s.click_link 'go'
+    expect(s.evaluate_script('document.body.textContent')).to eq('BLOB')
+  end
 end

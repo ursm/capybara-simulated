@@ -1379,8 +1379,9 @@ module Capybara
             # every internal link click.
             tick_real_time
             # Link clicks honour `<base href>` (HTML spec); `visit`
-            # does not — that's address-bar navigation.
-            navigate_top_from_page(resolve_against_current(url, use_base: true))
+            # does not — that's address-bar navigation. (…a `blob:` one's blob the one it was clicked with, a revoke by
+            # a handler of the click no matter)
+            navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(action['blob']))
           end
         when 'submit'
           # Drain any work the click handler queued before the form
@@ -2069,8 +2070,7 @@ module Capybara
           update_current_hash(resolve_against_current(url, use_base: true))
         else
           tick_real_time
-          blob = pending['blob']
-          navigate_top_from_page(resolve_against_current(url, use_base: true), blob: blob && {bytes: blob['bytes'], type: blob['type'].to_s})
+          navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(pending['blob']))
         end
       end
 
@@ -8363,21 +8363,22 @@ module Capybara
         registrable_site(@current_url) || ''
       end
 
-      # Read a blob URL's bytes + content type from THIS window's VM (its local
-      # blob store) — the Driver uses it to load a blob: document into a fresh aux
-      # window opened by this window. Returns {bytes:, type:} or nil.
       # The blob a `blob:` URL names now — wherever the window that made it is (its partition's) — as `{bytes:, type:}`, or
-      # nil for none: what a navigation to it takes as it begins.
+      # nil for none: what a navigation to it that began with none loads.
       def blob_snapshot(url)
         @driver.respond_to?(:blob_bytes_for) ? @driver.blob_bytes_for(url, self) : read_blob_for_window(url)
       end
+
+      # Read a blob URL's bytes + content type from THIS window's VM (its local
+      # blob store) — the Driver uses it to load a blob: document into a fresh aux
+      # window opened by this window. Returns {bytes:, type:} or nil.
       def read_blob_for_window(url)
-        r = @runtime.call('__csimReadBlobForWindow', url.to_s)
-        return nil unless r.is_a?(Hash) && r['bytes']
-        {bytes: r['bytes'], type: r['type'].to_s}
+        host_blob(@runtime.call('__csimReadBlobForWindow', url.to_s))
       rescue StandardError
         nil
       end
+      # A blob the page hands the host, `{'bytes' => …, 'type' => …}`, as `{bytes:, type:}` — nil for none.
+      def host_blob(blob) = blob.is_a?(Hash) && blob['bytes'] ? {bytes: blob['bytes'], type: blob['type'].to_s} : nil
 
       # Load a blob: document (bytes from the opener) as THIS window's top-level
       # document — for `window.open(blobURL)` / a blob: aux-window navigation,
@@ -10207,7 +10208,6 @@ module Capybara
         @pending_location           = resolve_against_current(url.to_s)
         @pending_location_replace   = replace
         @pending_location_initiator = initiator_realm && [initiator_realm.to_i, navigation_referrer(initiator_realm.to_i, policy)]
-        @pending_location_blob      = @pending_location.match?(/\Ablob:/i) ? blob_snapshot(@pending_location) : nil
       end
       # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
@@ -10228,8 +10228,10 @@ module Capybara
       def consume_pending_location
         return unless (url = @pending_location)
         # (…its replace flag and initiator taken with it: a location the page plans after it is its own)
-        replace, initiator, blob = @pending_location_replace, @pending_location_initiator, @pending_location_blob
-        @pending_location = @pending_location_replace = @pending_location_initiator = @pending_location_blob = nil
+        replace, initiator = @pending_location_replace, @pending_location_initiator
+        @pending_location = @pending_location_replace = @pending_location_initiator = nil
+        # (…a `blob:` URL's blob the one the navigation began with, which the page's plan holds: location.js `dispatchNav`)
+        blob = host_blob(@runtime.call('__csimTakeLocationBlob', url)) if url.match?(/\Ablob:/i)
         # A JS-driven `location.*` from inside a `within_frame` block navigates the FRAME, not the top page (same as a
         # self-targeted link/form there); a frame's navigation of the page (`initiator`) and the page's own, the page —
         # each judged against the document it navigates.
@@ -11857,13 +11859,12 @@ module Capybara
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
-        @pending_location @pending_location_replace @pending_location_initiator @pending_location_blob @pending_reload
-        @pending_history_traverse
+        @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload @pending_frame_traverse
       ].freeze
       private_constant :NAV_INTENT_SLOTS
-      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator @pending_location_blob].freeze
+      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator].freeze
       private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init

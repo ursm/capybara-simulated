@@ -25,12 +25,16 @@ pub(crate) struct NavigationPlan {
     navigation: Option<Navigation>,
     submission: Option<Submission>,
     download: Option<(String, String)>,
+    // The blob a location's navigation to a `blob:` URL began with, by that URL — the host's to take as it navigates
+    // (HTML resolves the URL's blob URL entry as it parses it: a revoke after the navigation began does not take it back).
+    location_blob: Option<(String, v8::Global<v8::Value>)>,
 }
 
 impl NavigationPlan {
     fn supersede(&mut self) {
         self.navigation = None;
         self.submission = None;
+        self.location_blob = None;
     }
 }
 
@@ -43,6 +47,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeNavigation", take_navigation, context_id);
     register(scope, ns, "takeSubmission", take_submission, context_id);
     register(scope, ns, "takeDownload", take_download, context_id);
+    register(scope, ns, "holdLocationBlob", hold_location_blob, context_id);
+    register(scope, ns, "takeLocationBlob", take_location_blob, context_id);
 }
 
 fn plan<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'a mut NavigationPlan {
@@ -51,7 +57,7 @@ fn plan<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
 }
 
 // __dom.planNavigation(url, target, opener, referrerPolicy, blob): a hyperlink's navigation planned — `blob` a `blob:`
-// URL's bytes and type taken for a new window, or undefined — after `supersedePlanned` where it navigates the top-level
+// URL's bytes and type taken as it was followed, or undefined — after `supersedePlanned` where it navigates the top-level
 // document.
 fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).to_rust_string_lossy(scope);
@@ -128,4 +134,21 @@ fn take_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let Some((url, filename)) = plan(scope, &args).download.take() else { return };
     let (Some(url), Some(filename)) = (v8::String::new(scope, &url), v8::String::new(scope, &filename)) else { return };
     rv.set(v8::Array::new_with_elements(scope, &[url.into(), filename.into()]).into());
+}
+
+// __dom.holdLocationBlob(url, blob): the location's navigation to the `blob:` URL `url` began with `blob` (its bytes and
+// type)…
+fn hold_location_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let blob = v8::Global::new(scope, args.get(1));
+    plan(scope, &args).location_blob = Some((url, blob));
+}
+// __dom.takeLocationBlob(url) -> …and that blob, as the navigation to `url` runs, which the realm holds no more —
+// undefined where it holds none for that URL.
+fn take_location_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let Some((held, blob)) = plan(scope, &args).location_blob.take() else { return };
+    if held == url {
+        rv.set(v8::Local::new(scope, blob));
+    }
 }
