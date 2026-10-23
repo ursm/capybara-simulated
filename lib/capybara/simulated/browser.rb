@@ -3360,7 +3360,9 @@ module Capybara
         # initiator is unknown — or, re-posted from its session history entry, the one it was first sent with: the
         # document state's initiator origin)
         origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
-        @history_before_navigation = nil if depth.zero?
+        # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
+        # redirect rewrites: `redirect_history_entry`)
+        @history_before_navigation = window_has_document? ? [@history.dup, @history_idx] : nil if depth.zero?
         unless from_history || depth > 0
           capture_outgoing_form_state
           # (…the request as it was sent — its origin, its referrer and referrer policy — what a reload or a traversal

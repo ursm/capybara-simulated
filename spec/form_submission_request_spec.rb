@@ -235,6 +235,26 @@ RSpec.describe "a form submission's request" do
     expect(seen).to eq([%w[POST /x], %w[GET /r], %w[GET /r]])
   end
 
+  # …and a re-post that ends in a download leaves the entry the POST's: the next reload re-posts it (Chrome).
+  it 'keeps the entry of a re-post that ends in a download' do
+    seen = []
+    app = lambda {|env|
+      seen << [env['REQUEST_METHOD'], env['PATH_INFO']] unless env['PATH_INFO'] == '/'
+      next [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename=f.txt'}, ['f']] if env['PATH_INFO'] == '/dl'
+      next [302, {'location' => '/dl'}, []] if env['PATH_INFO'] == '/r' && seen.count(%w[POST /r]) > 1
+      next html.('<body>r') if env['PATH_INFO'] == '/r'
+
+      html.('<body><form action="/r" method="post"><button>go</button></form>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.click_button('go')
+    session.refresh
+    session.refresh
+    expect(session).to have_current_path('/r')
+    expect(seen).to eq([%w[POST /r], %w[POST /r], %w[GET /dl], %w[POST /r], %w[GET /dl]])
+  end
+
   # …and a submission to a named frame is that frame's navigation request: Sec-Fetch-Dest 'iframe', and a POST its
   # Origin (Fetch "create a navigation request"; Fetch Metadata).
   it 'sends the Fetch metadata and Origin of a navigation for a form submitted to a named frame' do
