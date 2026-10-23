@@ -43,7 +43,9 @@ const NO_BROWSING_CONTEXT: u32 = 1;
 const READY_COMPLETE: u32 = 2;
 
 // …its texts, as the bindings number them (`DOC_TEXT_*`): none until set — a document's URL then its realm's, its
-// encoding UTF-8, its content type text/html — and its last modification time (ms since the epoch: none, now).
+// encoding UTF-8, its content type text/html, its referrer (HTML §3.1.2: the URL of the document that navigated to it,
+// as its navigation's request sent it) the empty string — and its last modification time (ms since the epoch: none,
+// now).
 #[derive(Default)]
 struct DocumentTexts {
     texts: [Option<String>; TEXTS],
@@ -55,7 +57,7 @@ struct DocumentTexts {
     // computed against — none once a text is set.
     base_url: Option<(u64, String, String)>,
 }
-const TEXTS: usize = 5;
+const TEXTS: usize = 6;
 const TEXT_URL: usize = 0;
 const TEXT_ENCODING: usize = 1;
 const TEXT_DOMAIN: usize = 3;

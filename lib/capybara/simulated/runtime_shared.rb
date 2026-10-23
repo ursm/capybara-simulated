@@ -87,7 +87,6 @@ module Capybara
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1]) },
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s, a[1], a[2]); nil },
         '__csimDeleteAllCookies'     => ->(b, *_) { b.delete_all_cookies; nil },
-        '__getDocumentReferrer'      => ->(b, *_) { b.current_referer },
         '__csimStoragePartitions'    => ->(b, *_a) { b.storage_partitions },
         '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
         '__csimGeolocationState'     => ->(b, *_) { b.geolocation_state_json },

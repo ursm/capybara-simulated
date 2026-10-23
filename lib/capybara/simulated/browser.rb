@@ -3524,6 +3524,8 @@ module Capybara
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
         referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
         hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
+        # The document's referrer is the request's, the last hop's, as a GET navigation's is (`navigate`).
+        @current_referer = hop_referer.to_s
         # (…its origin the initiating document's — 'null' where that is opaque or a redirect has tainted it, none where the
         # initiator is unknown — or, re-posted from its session history entry, the one it was first sent with: the
         # document state's initiator origin)
@@ -6911,7 +6913,8 @@ module Capybara
         # is origin-bound) — and the committed document's realm adopts the final one.
         rid         = mint_resulting_client_id
         (MAX_FETCH_REDIRECTS + 1).times do
-          resp_body = nil
+          resp_body     = nil
+          sent_referrer = nil
           # (…cross-site for cookies where the document the frame is in, or one of ITS ancestors, is: RFC 6265bis "site
           # for cookies" — the realm building it, when it says which)
           cookie_cross = !container_realm.nil? && container_cross_site?(container_realm, target)
@@ -6945,7 +6948,7 @@ module Capybara
               dest:              dest,
               cookie_cross_site: cookie_cross
             ) or return nil
-            status, headers, resp_body = response
+            status, headers, resp_body, sent_referrer = response
             body = nil   # read only for the terminal hop, below
           end
           if (loc = redirect_location(status, headers))
@@ -6973,6 +6976,7 @@ module Capybara
           # The final reserved client id — the JS frame builder hands it to the new realm
           # (create_frame_realm injects `__csimClientId` + records the adoption).
           out['resulting_client_id'] = rid if out
+          out['referrer'] = sent_referrer if out && sent_referrer
           return out
         end
         nil   # redirect loop → failed navigation
@@ -11046,7 +11050,8 @@ module Capybara
         # `perform_history_traverse`)
         return save_downloaded_response(url, headers, resp_body, realm: is_reload ? nil : realm_id) if download_response?(headers)
         return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(status)
-        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, history_state: history_state, csp: response_csp(headers))
+        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers),
+                                 restore_state: restore, history_state: history_state, csp: response_csp(headers), referrer: env['HTTP_REFERER'])
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
       # its shadow trees' controls left out, its action resolved against its document): routed, then navigated.
@@ -11206,7 +11211,7 @@ module Capybara
           origin_null:       origin_null,
           cookie_cross_site: cookie_cross
         ) or return commit_frame_error_document(realm_id, get_url, rid)
-        status, headers, resp_body = response
+        status, headers, resp_body, sent_referrer = response
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(get_url, resolve_against(loc, get_url))
           resp_body.close if resp_body.respond_to?(:close)
@@ -11221,7 +11226,7 @@ module Capybara
         if download_response?(headers)
           return save_downloaded_response(get_url, headers, resp_body, realm: realm_id)
         end
-        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers))
+        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: sent_referrer)
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
@@ -11296,7 +11301,7 @@ module Capybara
           content_type:      content_type,
           cookie_cross_site: cookie_cross
         ) or return commit_frame_error_document(realm_id, url, rid)
-        status, headers, resp_body = response
+        status, headers, resp_body, sent_referrer = response
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
           resp_body.close if resp_body.respond_to?(:close)
@@ -11320,7 +11325,7 @@ module Capybara
           return
         end
         tag_frame_entry_post(realm_id, body, content_type)
-        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers))
+        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: sent_referrer)
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
       # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
@@ -11332,7 +11337,7 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, history_state: nil, client_id: nil, csp: nil)
+      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, history_state: nil, client_id: nil, csp: nil, referrer: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
@@ -11340,7 +11345,7 @@ module Capybara
         seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, navigation_sandbox(realm_id)) or return
         return unless unload_frame_document(parent, realm_id)
 
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, history_state: history_state).to_i
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, history_state: history_state, referrer: referrer).to_i
         return if new_id.zero?
         frame_navigation_made_document
         begin
@@ -11606,7 +11611,6 @@ module Capybara
         )
         RuntimeShared.utf8_text(cookies)
       end
-      def current_referer      ; @current_referer.to_s ; end
       def write_document_cookie(s, url = nil, realm = nil)
         return if s.nil? || s.empty?
 
@@ -11748,7 +11752,7 @@ module Capybara
           save_downloaded_response(url, headers, body, realm: entry[:realm_id])
           return
         end
-        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry, csp: response_csp(headers))
+        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry, csp: response_csp(headers), referrer: env['HTTP_REFERER'])
       end
 
       def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false)
@@ -11785,7 +11789,7 @@ module Capybara
         # (…its entry a POST's where the POST answered directly, which a reload or a traversal re-posts:
         # `tag_frame_entry_post`)
         tag_frame_entry_post(entry[:realm_id], body, content_type)
-        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry, csp: response_csp(headers))
+        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry, csp: response_csp(headers), referrer: env['HTTP_REFERER'])
       end
 
       # Tear down a frame's realm and rebuild it from `html`, then re-point the
@@ -11806,7 +11810,7 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, csp: nil)
+      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, csp: nil, referrer: nil)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
@@ -11817,7 +11821,7 @@ module Capybara
         # `__csimTakeFrameNavBlob`)
         frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
-        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
+        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed, referrer: referrer).to_i
         return if new_id.zero?
         frame_navigation_made_document
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
@@ -12126,6 +12130,8 @@ module Capybara
         end
         opts['touch'] = true if @touch_input
         opts['historyState'] = @restoring_history_state unless @restoring_history_state.nil?
+        # (…and its referrer, its navigation's request's: `@current_referer`)
+        opts['referrer'] = @current_referer unless @current_referer.to_s.empty?
         csp = response_csp(@last_response_headers || {})
         opts['csp'] = csp if csp
         # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
@@ -12673,7 +12679,8 @@ module Capybara
         response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
-        [status, headers, resp_body]
+        # (…and the Referer the request sent: the referrer of the document its response makes)
+        [status, headers, resp_body, env['HTTP_REFERER']]
       end
 
       # The Navigation Preload request: a parallel GET the browser issues for a navigation whose
