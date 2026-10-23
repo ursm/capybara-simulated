@@ -325,4 +325,33 @@ RSpec.describe 'a nested document navigating itself' do
     s.evaluate_script('1')
     expect(s.evaluate_script('frames[0].location.pathname')).to eq('/h')
   end
+
+  # A page's form submitted to a named frame is an entry of the frame's session history too: a POST's re-posted by a
+  # reload or a traversal to it, a Post/Redirect/Get's the page it was sent to.
+  it "keeps a page form's navigation of a named frame in the frame's session history" do
+    seen = []
+    s = simulated_session(lambda {|env|
+      seen << [env['REQUEST_METHOD'], env['PATH_INFO']] unless env['PATH_INFO'] == '/'
+      case env['PATH_INFO']
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe name="fr" src="/f"></iframe><form id="p" action="/p" method="post" target="fr"></form><form id="x" action="/x" method="post" target="fr"></form>']]
+      when '/x' then [303, {'location' => '/r'}, []]
+      else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><p>#{env['PATH_INFO']}"]]
+      end
+    })
+    step = lambda {|js|
+      s.execute_script(js)
+      s.evaluate_script('1')
+    }
+    s.visit '/'
+    poll_until { s.evaluate_script('frames[0].document.body?.textContent') == '/f' }
+    step.('p.submit()')
+    poll_until { s.evaluate_script('frames[0].document.body?.textContent') == '/p' }
+    step.('frames[0].location.reload()')
+    step.('frames[0].history.back()')
+    poll_until { s.evaluate_script('frames[0].document.body?.textContent') == '/f' }
+    step.('x.submit()')
+    poll_until { s.evaluate_script('frames[0].document.body?.textContent') == '/r' }
+    step.('frames[0].location.reload()')
+    expect(seen).to eq([%w[GET /f], %w[POST /p], %w[POST /p], %w[GET /f], %w[POST /x], %w[GET /r], %w[GET /r]])
+  end
 end

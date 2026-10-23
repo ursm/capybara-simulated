@@ -71,7 +71,7 @@ module Capybara
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
-        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1]); nil },
+        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1], post: a[2] && {body: RuntimeShared.latin1_bytes(a[2]), content_type: a[3].to_s}); nil },
         # …and the outgoing document unloaded (a[0] its realm, alive still): the entry takes its form state as its
         # pagehide / unload handlers left it.
         '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },
@@ -277,6 +277,9 @@ module Capybara
         s = s.dup.force_encoding(Encoding::UTF_8) unless s.encoding == Encoding::UTF_8
         s.valid_encoding? ? s : s.scrub
       end
+      # …and a JS string that carries bytes, one per code unit (a form's encoded body: `latin1ToBytes`'s input), as the
+      # bytes it carries.
+      def self.latin1_bytes(s) = s.to_s.encode(Encoding::ISO_8859_1).b
     end
   end
 end
