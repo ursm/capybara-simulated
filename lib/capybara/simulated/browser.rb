@@ -2451,6 +2451,7 @@ module Capybara
         # document, as HTML "apply the history step" has it)
         save_history(1)
         @traversing_frames = {none: []}
+        at = frames.to_h {|nav, _, _| [nav, @session_history.active(nav)] }
         @session_history.go_to(step)
         changes.each {|nav, id, same_document| traverse_same_document(nav, id) if same_document }
         frames.each {|_, id, realm| reload_frame_to_entry(realm, history_entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
@@ -2458,6 +2459,7 @@ module Capybara
           restore_history(1)
         else
           forget_history(1)
+          frames.each {|nav, _, realm| @session_history.hold(nav, at[nav]) if at[nav] && @traversing_frames[:none].include?(realm) }
         end
       ensure
         @traversing_frames = nil

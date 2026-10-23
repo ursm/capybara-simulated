@@ -232,8 +232,9 @@ RSpec.describe "a page form's planned navigation of a named frame" do
       no_content = true
       session.execute_script('history.go(-2)')
       expect(session.evaluate_script('[frames[0].location.pathname, frames[1].location.pathname]')).to eq(['/fa', '/blank2'])
-      session.execute_script('history.go(-1)')
-      expect(session.evaluate_script('frames[1].location.pathname')).to eq('/blank2')
+      # (…the frame whose was not made left at its own entry, which the next step gives it anyway: no change of it)
+      session.execute_script('window.loads = 0; document.querySelector("iframe").onload = () => loads++; history.go(1)')
+      expect(session.evaluate_script('[frames[0].location.pathname, frames[1].location.pathname, loads]')).to eq(['/fa', '/blank2', 0])
     end
 
     # …a window `window.open` made on one at its initial about:blank, whichever side asks (Chrome).
