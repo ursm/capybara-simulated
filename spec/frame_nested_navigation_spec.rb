@@ -118,7 +118,8 @@ RSpec.describe 'a nested document navigating itself' do
     poll_until { s.evaluate_script('f.contentDocument?.body?.textContent') == '/a' }
     hits.clear
     s.execute_script('f.contentWindow.history.forward()')
-    poll_until { hits.any? }
+    # (…the traversal a task of its own, which the page's event loop runs: each read steps it)
+    poll_until { s.evaluate_script('1') && hits.any? }
     expect(hits).to eq(['/sub/b'])
   end
 

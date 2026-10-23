@@ -178,6 +178,23 @@ RSpec.describe 'the joint session history' do
     expect(session.current_path).to eq('/b')
   end
 
+  # A traversal is a task of its own (the session history traversal queue): a same-document one's popstate after the
+  # script that asked and its microtasks, before a timer that script set after (Chrome, measured 2026-10-24).
+  it "fires a traversal's popstate in a task of its own" do
+    session.visit '/top'
+    session.execute_script(<<~JS)
+      window.o = [];
+      addEventListener('popstate', () => o.push('pop'));
+      history.pushState(null, '', '/top2');
+      history.back();
+      setTimeout(() => o.push('t0'), 0);
+      Promise.resolve().then(() => o.push('micro'));
+      o.push('after');
+    JS
+    expect(session).to have_current_path('/top')
+    expect(session.evaluate_script('o')).to eq(%w[after micro pop t0])
+  end
+
   # The page navigated on: its frames' steps stay steps of the document it left (Chrome: 3 after /b), and a traversal
   # back to it makes it again, its frames with it.
   it "keeps a frame's steps once the page has navigated on" do
