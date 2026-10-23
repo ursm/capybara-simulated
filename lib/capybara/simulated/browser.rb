@@ -10220,9 +10220,9 @@ module Capybara
       end
       def consume_pending_location
         return unless (url = @pending_location)
-        @pending_location = nil
-        replace = @pending_location_replace
-        initiator = @pending_location_initiator
+        # (…its replace flag and initiator taken with it: a location the page plans after it is its own)
+        replace, initiator = @pending_location_replace, @pending_location_initiator
+        @pending_location = @pending_location_replace = @pending_location_initiator = nil
         # A JS-driven `location.*` from inside a `within_frame` block navigates the FRAME, not the top page (same as a
         # self-targeted link/form there); a frame's navigation of the page (`initiator`) and the page's own, the page —
         # each judged against the document it navigates.
@@ -11853,6 +11853,8 @@ module Capybara
         @pending_frame_reload @pending_frame_traverse
       ].freeze
       private_constant :NAV_INTENT_SLOTS
+      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator].freeze
+      private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init
         saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
@@ -11894,7 +11896,11 @@ module Capybara
         @flushed_nav_intents = nil
         return if intents.nil? || intents.empty? || @restoring_flushed_nav_intents
 
+        # (…a location's replace flag and initiator restored with the location they were planned with, whichever is taken)
+        flushed_location = @pending_location.nil? && intents.key?(:@pending_location)
         intents.each do |slot, flushed|
+          next if LOCATION_PLAN_SLOTS.include?(slot)
+
           current = instance_variable_get(slot)
           merged =
             case current
@@ -11905,6 +11911,7 @@ module Capybara
             end
           instance_variable_set(slot, merged)
         end
+        LOCATION_PLAN_SLOTS.each {|slot| instance_variable_set(slot, intents[slot]) } if flushed_location
         # And run them. The flush consumed the task that stashed them, so the
         # settle that follows a user action sees nothing left to do and would
         # leave the page sitting on a redirect it has already asked for.
