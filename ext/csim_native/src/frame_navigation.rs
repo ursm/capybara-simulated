@@ -147,6 +147,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setFrameLoadedAt", set_frame_loaded_at, context_id);
     crate::dom::register(scope, ns, "planFrameNavigation", plan_frame_navigation, context_id);
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameContent", frame_content, context_id);
     crate::dom::register(scope, ns, "setFrameContent", set_frame_content, context_id);
@@ -363,6 +364,16 @@ fn land_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         navs.1.last.remove(&form);
     }
     rv.set_bool(true);
+}
+
+// __dom.frameNavigationPlanned(containerNid, token) -> whether the planned navigation is the container's navigable's
+// still — its request then the one to send.
+fn frame_navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let token = args.get(1).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let navs = &crate::dom::realm(scope, cid).frame_navigations;
+    rv.set_bool(token != 0 && navs.0.get(&container).is_some_and(|n| n.planned == token));
 }
 
 // __dom.cancelFrameNavigation(containerNid) — another navigation of the container's navigable replaces the one a form

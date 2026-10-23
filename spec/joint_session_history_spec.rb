@@ -251,7 +251,8 @@ RSpec.describe 'the joint session history' do
   end
 
   # A form of the page's planning a navigation of a frame a traversal makes the document of again plans none (HTML
-  # "apply the history step"; Chrome and Firefox: the frame at /f1, /x never requested).
+  # "apply the history step"; Chrome and Firefox: the frame at /f1, /x never requested — its request sent as the
+  # planned navigation runs, after the traversal cancelled it).
   it "cancels a form's navigation of a frame the traversal takes back" do
     hits = []
     session = simulated_session(lambda {|env|
@@ -267,6 +268,7 @@ RSpec.describe 'the joint session history' do
     session.evaluate_script('1')
     expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f1')
     expect(session.evaluate_script('history.length')).to eq(2)
+    expect(hits).not_to include('/x')
   end
 
   it "goes back rather than to a frame's src set after it" do
