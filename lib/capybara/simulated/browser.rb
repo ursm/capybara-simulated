@@ -10889,10 +10889,6 @@ module Capybara
         # (where the owning iframe lives), not unconditionally to main.
         parent = @runtime.frame_realm_parent(realm_id)
         unless get_url.is_a?(String) && http_url?(get_url)
-          # (…one a redirect reached a network error — Fetch's HTTP-redirect fetch takes no location URL of another
-          # scheme — its failed load committed at the URL)
-          return reload_frame_realm_by_id(realm_id, get_url.to_s, '', 'text/html') if depth.positive?
-
           return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
         end
         # The realm may have been disposed earlier in THIS drain batch — an ancestor frame that also
@@ -10925,6 +10921,7 @@ module Capybara
           # redirect branch below.
           if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
             next_url = carry_fragment(get_url, resolve_against(loc, get_url))
+            return unless frame_redirect_followed?(next_url, depth) { commit_frame_error_document(realm_id, get_url, rid) }
             return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
                                                      site_seed: widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, get_url)),
                                                      origin_null: redirect_taints_origin?(origin_null, initiator, get_url, next_url),
@@ -10946,6 +10943,7 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(get_url, resolve_against(loc, get_url))
           resp_body.close if resp_body.respond_to?(:close)
+          return unless frame_redirect_followed?(next_url, depth) { commit_frame_error_document(realm_id, get_url, rid) }
           # Latch the redirect chain's Fetch-Metadata: Sec-Fetch-Site widens to include this hop, and
           # a form POST's Origin taints to 'null' per redirect_taints_origin? (moot for GET — no Origin).
           return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
@@ -10997,6 +10995,7 @@ module Capybara
           # as the network branch below, re-entering interception at the new URL.
           if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
             next_url = carry_fragment(url, resolve_location(loc, url))
+            return unless frame_redirect_followed?(next_url, depth) { commit_frame_error_document(realm_id, url, rid) }
             site     = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url.to_s))
             taint    = redirect_taints_origin?(origin_null, initiator, url.to_s, next_url)
             next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
@@ -11032,6 +11031,7 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
           resp_body.close if resp_body.respond_to?(:close)
+          return unless frame_redirect_followed?(next_url, depth) { commit_frame_error_document(realm_id, url, rid) }
           # 307/308 preserve method + body; 301/302/303 → GET the frame — the same split as the SW branch above, the
           # navigation going on (its document prompted to unload once, at its start). Latch the redirect chain's
           # Sec-Fetch-Site (widened) + Origin taint (redirect_taints_origin?).
@@ -11448,10 +11448,10 @@ module Capybara
         end
         # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
         # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
-        # registry — no other window's partition) — none a failed load at the URL. A redirect to one is a network error
-        # (Fetch's HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
+        # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
+        # `frame_redirect_followed?`.)
         if url.to_s.match?(/\Ablob:/i)
-          blob = depth.zero? ? host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, reload)) : nil
+          blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, reload))
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
         env = rack_env_for(url, method: 'GET')
@@ -11463,6 +11463,7 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
           body.close if body.respond_to?(:close)
+          return unless frame_redirect_followed?(next_url, depth) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
           return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
         end
         if download_response?(headers)
@@ -11487,6 +11488,7 @@ module Capybara
         if (loc = redirect_location(status, headers))
           next_url = carry_fragment(url, resolve_location(loc, url))
           resp_body.close if resp_body.respond_to?(:close)
+          return unless frame_redirect_followed?(next_url, depth) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
           if Native.redirect_to_get(status.to_i, 'POST')
             return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
@@ -12467,14 +12469,25 @@ module Capybara
       # error, its error document committed at `url`, the last URL requested (Chrome: ERR_UNSAFE_REDIRECT,
       # ERR_TOO_MANY_REDIRECTS).
       private def redirect_followed?(url, next_url, depth)
-        return true if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT && parse_url(next_url)
-
-        if fetch_scheme_url?(next_url) || http_url?(next_url)
-          commit_error_document(url)
-        else
-          navigation_made_no_document(url)
+        case redirect_outcome(next_url, depth)
+        when :follow then return true
+        when :fail then commit_error_document(url)
+        else navigation_made_no_document(url)
         end
         false
+      end
+      # …and a frame's, its error document committed (the block) where it fails, its document left as it is where it is
+      # handed off.
+      private def frame_redirect_followed?(next_url, depth)
+        outcome = redirect_outcome(next_url, depth)
+        yield if outcome == :fail
+        outcome == :follow
+      end
+      # …the end itself: `:follow`, `:fail` (a network error) or `:hand_off`.
+      private def redirect_outcome(next_url, depth)
+        return :follow if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT && parse_url(next_url)
+
+        fetch_scheme_url?(next_url) || http_url?(next_url) ? :fail : :hand_off
       end
 
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow

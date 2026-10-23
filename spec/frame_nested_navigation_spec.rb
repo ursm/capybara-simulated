@@ -208,4 +208,30 @@ RSpec.describe 'a nested document navigating itself' do
       expect(s.evaluate_script('document.body.textContent')).to eq(path)
     end
   end
+
+  # A frame's navigation redirected as no fetch follows ends as a top-level one does: a fetch scheme's that is no HTTP(S)
+  # one, or one past the redirect limit, a network error committed at the URL that redirected (Chrome: an error page
+  # there); one of no fetch scheme handed off, the frame's document left as it is.
+  {
+    'about:blank'      => ['/r?to=about:blank', '/r'],
+    'data:'            => ['/r?to=data:text/html,x', '/r'],
+    'twenty redirects' => ['/loop0', '/loop20'],
+    'mailto:'          => ['/r?to=mailto:a@b.c', '/o']
+  }.each do |name, (start, landed)|
+    it "ends a frame's navigation redirected to #{name}" do
+      s = simulated_session(lambda {|env|
+        case env['PATH_INFO']
+        when '/r' then [302, {'location' => env['QUERY_STRING'].delete_prefix('to=')}, []]
+        when %r{\A/loop(\d+)} then [302, {'location' => "/loop#{::Regexp.last_match(1).to_i + 1}"}, []]
+        when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/o"></iframe>']]
+        else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p>o']]
+        end
+      })
+      s.visit '/'
+      poll_until { s.evaluate_script('frames[0].document.body?.textContent') == 'o' }
+      s.execute_script("frames[0].location.href = '#{start}'")
+      poll_until { s.evaluate_script('frames[0].location.pathname') == landed }
+      expect(s.evaluate_script('[frames[0].location.pathname, frames[0].document.body?.textContent || ""]')).to eq([landed, landed == '/o' ? 'o' : ''])
+    end
+  end
 end
