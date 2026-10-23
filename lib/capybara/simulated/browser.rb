@@ -10516,6 +10516,11 @@ module Capybara
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
         supersede_frame_navigation(realm_id)
+        # (…and a navigation a form of its parent's document planned for it, its request not yet sent: a link's targeting
+        # it, Chrome and Firefox sending none — the frame's own `location` cancels it from its realm, location.js)
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle, true) unless handle.zero?
         (@pending_frame_nav ||= {})[realm_id] = [url.to_s, navigation_referrer(initiator_realm, policy), frame_sandbox_now(realm_id), initiator_realm, replace]
       end
       # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
