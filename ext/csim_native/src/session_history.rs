@@ -182,6 +182,9 @@ impl State {
     // …and one of a navigable the step `to` moves to another entry than the current one's: it is navigated by the
     // traversal, held at none (the host holding it again where that one's document is not made: `hold`).
     fn release_moved(&mut self, to: i64, build: u32) {
+        if self.held.is_empty() {
+            return;
+        }
         let moved: HashSet<u32> = self
             .tree(build)
             .into_iter()
