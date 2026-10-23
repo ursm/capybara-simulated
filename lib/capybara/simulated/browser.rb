@@ -10718,8 +10718,10 @@ module Capybara
       # `:window` a same-isolate window's (its navigation not modeled), nil a new window (not modeled), `:blocked` none
       # its sandbox lets it navigate — and its Referer: the frame's document's, under its policy or `noreferrer`'s.
       def frame_submission_route(realm_id, spec)
+        initiator = realm_referrer_initiator(realm_id)
+        initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
         target = spec['target'].to_s
-        return [:self, nil] if frame_self_target?(target)
+        return [:self, initiator] if frame_self_target?(target)
 
         chosen = target_keyword(target) == TARGET_BLANK ? nil : choose_named_navigable(realm_id, target)
         # (…the top-level one of a frame of a same-isolate window is that window, not the page)
@@ -10728,8 +10730,6 @@ module Capybara
         elsif chosen.is_a?(Integer) && @runtime.top_level_realm?(chosen)
           chosen = :window
         end
-        initiator = realm_referrer_initiator(realm_id)
-        initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
         [chosen, initiator]
       end
       def submit_frame_route(realm_id, spec, route)
@@ -10741,9 +10741,9 @@ module Capybara
         case chosen
         when :self
           if method == 'GET'
-            navigate_realm_self_get(realm_id, url)
+            navigate_realm_self_get(realm_id, url, referrer: initiator)
           else
-            navigate_realm_self_post(realm_id, url, body, content_type)
+            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator)
           end
         when :top
           # (…adding the page's entry, whether the frame's document is completely loaded or not: a form's replaces only its

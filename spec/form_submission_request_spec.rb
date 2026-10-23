@@ -165,6 +165,23 @@ RSpec.describe "a form submission's request" do
     end
   end
 
+  # …and a frame's own `noreferrer` form submitted to the frame by its script sends none either (Firefox: none).
+  it "sends no Referer from a frame's own `noreferrer` form its script submits" do
+    referers = []
+    app = lambda {|env|
+      referers << env['HTTP_REFERER'] if env['PATH_INFO'] == '/r'
+      next html.('<body>r') if env['PATH_INFO'] == '/r'
+      next html.('<body><form id="ff" action="/r" rel="noreferrer"></form>') if env['PATH_INFO'] == '/f'
+
+      html.('<body><iframe src="/f"></iframe>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script('frames[0].ff.submit()')
+    poll_until { referers.any? }
+    expect(referers).to eq([nil])
+  end
+
   # …and a frame entered with `within_frame` submits by a click as by its script: its sandbox keeps it from the page, and
   # its Referer is the frame's document.
   it "submits an entered frame's form to the page under the frame's sandbox and Referer" do
