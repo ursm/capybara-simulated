@@ -167,6 +167,23 @@ RSpec.describe "a form submission's request" do
     end
   end
 
+  # …and a submission to a named frame is that frame's navigation request: Sec-Fetch-Dest 'iframe', and a POST its
+  # Origin (Fetch "create a navigation request"; Fetch Metadata).
+  it 'sends the Fetch metadata and Origin of a navigation for a form submitted to a named frame' do
+    seen = []
+    app = lambda {|env|
+      seen << [env['REQUEST_METHOD'], env['HTTP_SEC_FETCH_DEST'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_ORIGIN']] if env['PATH_INFO'] == '/r'
+      next html.('<body>r') if env['PATH_INFO'] == '/r'
+
+      html.('<body><iframe name="f1"></iframe><iframe name="f2"></iframe><form id="g" action="/r" target="f1"></form><form id="p" action="/r" method="post" target="f2"></form>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script('g.submit(); p.submit()')
+    poll_until { session.evaluate_script('1') && seen.size == 2 }
+    expect(seen.sort).to eq([%w[GET iframe navigate] + [nil], %w[POST iframe navigate http://www.example.com]])
+  end
+
   # A form whose link types include `noreferrer` sends no Referer, whatever it navigates (HTML "plan to navigate": the
   # referrer policy "no-referrer"); Chrome sends one from the page's own form, a departure from the spec it states.
   {

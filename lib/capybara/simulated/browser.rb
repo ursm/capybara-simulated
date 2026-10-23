@@ -9477,7 +9477,7 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9523,8 +9523,9 @@ module Capybara
         # enforcement itself stays gated on `cors` below; a nil-mode internal caller
         # (navigation / asset GET) has no origin semantics. An explicit `initiator` (a SW
         # re-issuing a navigation via `fetch(event.request)`) is the request's origin for
-        # ALL modes — so a passthrough 'navigate'-mode POST still carries its Origin.
-        req_origin  = initiator || (%w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil)
+        # ALL modes — so a passthrough 'navigate'-mode POST still carries its Origin — and a document's own navigation
+        # request (`navigation`: a form submission's of a frame) is of its document's origin.
+        req_origin  = initiator || (navigation || %w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil)
         # Fetch request "mode" (fetch threads it; XHR is always 'cors'; a non-fetch/xhr
         # caller passes nil → no mode semantics, a plain 'basic' response). `no-cors`
         # filters a cross-origin response to opaque; `same-origin` makes a cross-origin
@@ -9739,7 +9740,8 @@ module Capybara
             sec_site = widen_sec_fetch_site(sec_site, client_origin == 'null' ? 'cross-site' : sec_fetch_site(sec_initiator, target))
             env['HTTP_SEC_FETCH_SITE'] = sec_site
             env['HTTP_SEC_FETCH_MODE'] = cors_mode
-            env['HTTP_SEC_FETCH_DEST'] = 'empty'
+            # (…a document's own navigation request its destination: a SW's passthrough re-fetch alone reports 'empty')
+            env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : 'empty'
             # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
             # merge_set_cookie)
             env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
