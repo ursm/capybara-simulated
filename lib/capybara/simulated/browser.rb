@@ -10515,15 +10515,19 @@ module Capybara
         return if realm_id.nil? || realm_id.zero?
         # Keyed by realm id (last URL wins per frame) so two different frames each
         # navigating in one turn both apply — a single slot would drop one.
+        # A fragment of the document the frame is at, which HTML "navigate to a fragment" moves to within it at once, no
+        # navigation ongoing: the one already under way — a cross-document one stashed — going on (Chrome: `location =
+        # '/other'` and then a link to its document's `#b` pushes the fragment's entry and lands at /other).
+        if @runtime.frame_realm_alive?(realm_id) && frame_fragment_navigation?(realm_id, url)
+          return @runtime.realm_call(realm_id, '__csimFragmentNavigate', url.to_s, replace == true)
+        end
+
         supersede_frame_navigation(realm_id)
         # (…and a navigation a form of its parent's document planned for it, its request not yet sent: a link's targeting
         # it, Chrome and Firefox sending none — the frame's own `location` cancels it from its realm, location.js)
-        # (…none a fragment's, which HTML "navigate to a fragment" makes within the document, no navigation ongoing)
-        unless frame_fragment_navigation?(realm_id, url)
-          parent = @runtime.frame_realm_parent(realm_id)
-          handle = frame_container_handle(realm_id, parent)
-          frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle, true) unless handle.zero?
-        end
+        parent = @runtime.frame_realm_parent(realm_id)
+        handle = frame_container_handle(realm_id, parent)
+        frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle, true) unless handle.zero?
         (@pending_frame_nav ||= {})[realm_id] = [url.to_s, navigation_referrer(initiator_realm, policy), frame_sandbox_now(realm_id), initiator_realm, replace]
       end
       # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
@@ -10569,11 +10573,7 @@ module Capybara
           # (…made by the initiator's document: what a download its response is may be saved by)
           from_document(initiator) do
             entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-            # (…a fragment of the document the frame is at moved to within it — its fragment and session history entry,
-            # a `hashchange` — and nothing fetched: HTML "navigate to a fragment", Chrome and Firefox requesting nothing)
-            if @runtime.frame_realm_alive?(realm_id) && frame_fragment_navigation?(realm_id, url)
-              @runtime.realm_call(realm_id, '__csimFragmentNavigate', url, replace == true)
-            elsif entry
+            if entry
               navigate_frame(url, entry: entry, referrer: referrer, record: !replace)
             elsif http_url?(url)
               # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so

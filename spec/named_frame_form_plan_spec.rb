@@ -61,6 +61,17 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(hits).to be_empty
   end
 
+  # …and goes on with a cross-document navigation already under way (Chrome: the fragment's entry pushed, the frame at
+  # /other).
+  it 'keeps a navigation under way when a link moves the frame to a fragment' do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/other"; l.href = "/blank#b"; l.click()')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/other')
+    expect(session.evaluate_script('history.length')).to eq(3)
+  end
+
   it "sends nothing where the frame's srcdoc is set after it" do
     hits = []
     session = session_with(hits)
