@@ -651,11 +651,28 @@ module Capybara
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
         navigate(resolve_visit_url(url), referer: referer, referrer_policy: referrer_policy, initiator: initiator)
+        take_load_navigations
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
         # browser runs them as tasks — and they may change the page.
         @runtime.pump_message_loop
         @find_cache_dirty = true
+      end
+
+      # The navigation of the page a document planned as it loaded — its location set, a form submitted, a link followed,
+      # by its parse, its `load` handlers or the tasks its load ran — taken as the visit that loaded it ends, as a browser
+      # starts it then: a matcher that reads only the URL or the text (`have_current_path`, `has_text?`) takes none, and
+      # an auto-submitting page (an OAuth `form_post`) stayed put. Bounded as a load handler's chain is; the windows a page
+      # asked to open left pending, as the load's own drain leaves them (`flush_pending_window_load`).
+      def take_load_navigations
+        WINDOW_LOAD_CHAIN_MAX.times do
+          generation = @context_gen
+          consume_pending_location
+          consume_pending_page_submission
+          consume_pending_navigation
+          consume_pending_form_submit
+          break if @context_gen == generation
+        end
       end
 
       def resolve_visit_url(url)
