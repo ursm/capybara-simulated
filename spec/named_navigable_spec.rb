@@ -231,14 +231,15 @@ RSpec.describe 'choosing a navigable by name' do
     JS
   end
 
-  # …and the old document's teardown handlers — a frame navigated away from, or removed — still have it: the navigable
-  # outlives its document's beforeunload / pagehide / unload (Chrome; Firefox too for a navigation).
+  # …and the old document's teardown handlers — a frame navigated away from — still have it: the navigable outlives its
+  # document's beforeunload / pagehide / unload (Chrome; Firefox too). A frame removed fires none of them: HTML "destroy
+  # a child navigable" unloads no document (Chrome does, the spec over it).
   it "keeps a frame's frameElement through its document's teardown" do
     child = '<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => parent.L.push(t + ":" + (frameElement && frameElement.id)));</script>'
     s, = session_for('/p' => '<script>window.L = []</script><iframe id="a" src="/c"></iframe><iframe id="b" src="/c"></iframe>', '/c' => child)
     s.evaluate_script('frames[1].length')
     s.execute_script('document.getElementById("a").remove(); document.getElementById("b").src = "/d"')
-    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 5 } }).to eq(%w[pagehide:a unload:a beforeunload:b pagehide:b unload:b])
+    expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 3 } }).to eq(%w[beforeunload:b pagehide:b unload:b])
   end
 
   # …and a teardown handler re-navigating its own frame is ignored — HTML "navigate" with the document's unload counter

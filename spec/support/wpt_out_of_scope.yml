@@ -37757,6 +37757,323 @@ fetch/api/abort/general.any.js:
     response - no-cors"
   reason: Server-side connection-close detection on abort; no persistent connection
     in the in-process Rack model (rule 1).
+fetch/api/basic/keepalive.any.js:
+- name: '[keepalive] simple GET request on ''pagehide'' [no payload]'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] simple GET request on ''unload'' [no payload]'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] simple POST request on ''pagehide'' [no payload]'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] simple POST request on ''unload'' [no payload]'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+fetch/api/cors/cors-keepalive.any.js:
+- name: '[harness] TIMEOUT'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage GET request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage GET request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage GET request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage POST request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage POST request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage POST request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain basic usage POST request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port GET request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port GET request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port GET request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port GET request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port POST request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port POST request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port POST request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different port POST request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol GET request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol GET request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol GET request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol GET request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol POST request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol POST request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol POST request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Cross domain different protocol POST request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port GET request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port GET request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port GET request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port GET request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port POST request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port POST request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port POST request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different port POST request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port GET request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port GET request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port GET request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port GET request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port POST request in unload [cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port POST request in unload [cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port POST request in unload [no-cors mode, server forbid CORS]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
+- name: '[keepalive] Same domain different protocol different port POST request in unload [no-cors mode]; setting up'
+  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
+    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
+    navigable" runs "destroy a document and its descendants", which destroys each
+    document (its unloading cleanup steps) and never runs "unload a document" - no
+    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
+    insertion-removing-steps-iframe pins it.'
 fetch/api/cors/cors-preflight-redirect.any.js:
 - name: Redirection 301 after preflight failed
   reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"

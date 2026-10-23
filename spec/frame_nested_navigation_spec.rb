@@ -85,9 +85,10 @@ RSpec.describe 'a nested document navigating itself' do
     expect(hits).to eq(['/fs?q=2'])
   end
 
-  # A removed frame's whole tree is unloaded before any of it is destroyed: an unload handler of one frame still reaches
-  # its sibling's document, unloaded but not gone (Chrome, measured: the sibling `closed` false, its body readable).
-  it "unloads a removed frame's whole tree before destroying any of it" do
+  # A frame navigated away from has its whole tree unloaded before any of it is destroyed: an unload handler of one frame
+  # still reaches its sibling's document, unloaded but not gone (Chrome, measured: the sibling `closed` false, its body
+  # readable). (A removed frame's tree fires no unload at all: HTML "destroy a child navigable".)
+  it "unloads a navigated frame's whole tree before destroying any of it" do
     leaf = '<!DOCTYPE html><meta charset=utf-8><body>leaf'
     g2 = '<!DOCTYPE html><meta charset=utf-8><script>onunload = () => { const s = parent.frames[0]; ' \
          'top.seen = [s.closed, s.document.body.textContent]; }</script>'
@@ -95,8 +96,8 @@ RSpec.describe 'a nested document navigating itself' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [%(<!DOCTYPE html><meta charset="utf-8"><iframe id=c srcdoc="#{c.gsub('&', '&amp;').gsub('"', '&quot;')}"></iframe>)]] })
     s.visit '/'
     poll_until { s.evaluate_script('c.contentWindow?.frames?.[1]?.document?.readyState') == 'complete' }
-    s.execute_script('c.remove()')
-    expect(s.evaluate_script('top.seen')).to eq([false, 'leaf'])
+    s.execute_script("c.srcdoc = '<p>gone'")
+    expect(poll_until { s.evaluate_script('top.seen') }).to eq([false, 'leaf'])
   end
 
   # A frame's `src` set records the session history entry of the URL it navigates to — parsed against its document's base

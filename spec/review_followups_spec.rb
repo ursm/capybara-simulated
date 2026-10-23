@@ -75,10 +75,10 @@ RSpec.describe 'review follow-ups' do
     expect(session.evaluate_script('__w.closed')).to be(false)
   end
 
-  # A replacement goes in before what followed the node it replaces, whatever the removal's steps (a frame's unload) did
-  # to the children meanwhile; a document with no browsing context — a removed frame's, a clone — has no location and no
-  # focus, and is hidden, its domain its origin's (Chrome: a clone's, `new Document()`'s and a DOMParser's are the page's
-  # host).
+  # A replacement goes in before what followed the node it replaces — a removed frame's document destroyed with no
+  # unload of it (HTML "destroy a child navigable"), so no handler of its changes the children meanwhile; a document with
+  # no browsing context — a removed frame's, a clone — has no location and no focus, and is hidden, its domain its
+  # origin's (Chrome: a clone's, `new Document()`'s and a DOMParser's are the page's host).
   it 'replaces before what followed, and keeps a document with no browsing context out of the page' do
     session.execute_script(<<~JS)
       const q = document.body.appendChild(document.createElement('div'));
@@ -95,6 +95,6 @@ RSpec.describe 'review follow-ups' do
         return [[...q.children].map((c) => c.localName).join(), fd.location, fd.hasFocus(), clone.domain === document.domain, clone.visibilityState, clone.hidden];
       })()
     JS
-    expect(got).to eq(['s,s,b', nil, false, true, 'hidden', true])
+    expect(got).to eq(['i,s,s,b', nil, false, true, 'hidden', true])
   end
 end
