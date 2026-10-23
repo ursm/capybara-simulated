@@ -11442,6 +11442,8 @@ module Capybara
       # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
       def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
+        # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
+        return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
         return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
 
         invalidate_find_cache
@@ -11478,6 +11480,8 @@ module Capybara
 
       def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
+        # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
+        return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
         return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
 
         invalidate_find_cache

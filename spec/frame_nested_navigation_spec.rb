@@ -254,4 +254,26 @@ RSpec.describe 'a nested document navigating itself' do
       expect(s.evaluate_script('[window.ran, getComputedStyle(document.getElementById("p")).color]')).to eq([1, 'rgb(255, 0, 0)'])
     end
   end
+
+  # …and one whose document a handler removed, before what it began navigates, navigates nothing: a form submitted or a
+  # link followed (HTML "cannot navigate"; Chrome: no request).
+  it 'navigates nothing for an entered frame removed before its navigation' do
+    seen = []
+    s = simulated_session(lambda {|env|
+      seen << env['PATH_INFO'] unless %w[/ /f].include?(env['PATH_INFO'])
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/f"></iframe>']] if env['PATH_INFO'] == '/'
+
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8">
+        <form action="/act" method="post"><button onclick="var f = frameElement; setTimeout(() => f.remove())">p</button></form>
+        <a href="/lnk" onclick="frameElement.remove()">l</a>
+      HTML
+    })
+    s.visit '/'
+    s.within_frame(0) { s.click_button 'p' } rescue Capybara::Simulated::StaleElement
+    s.visit '/'
+    s.within_frame(0) { s.click_link 'l' } rescue Capybara::Simulated::StaleElement
+    s.evaluate_script('1')
+    expect(seen).to eq([])
+  end
 end
