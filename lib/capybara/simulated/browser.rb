@@ -3279,13 +3279,14 @@ module Capybara
         # (…replacing the session history entry of the form's document where that is not completely loaded yet: the
         # page's, whose own navigable it navigates — `request.replace`)
         replace = spec['replace'] == true
-        # (…and whatever it navigates is told its initiator under the policy `noreferrer` sets — HTML "plan to navigate"
-        # sets the referrer policy "no-referrer" where the form's link types include it)
+        # (…and whatever it navigates — a new window too — is told its initiator, the form's document under its policy or
+        # the one `noreferrer` sets: HTML "plan to navigate" sets the referrer policy "no-referrer" where the form's link
+        # types include it)
         initiator = realm_referrer_initiator(@current_realm_id.to_i)
         initiator = [initiator[0], 'no-referrer'] if no_referrer
         policy    = no_referrer ? 'no-referrer' : nil
-        # (…a new window's referrer its document — an entered frame's, not the page's — none where that refers as none)
-        referrer  = initiator[1] == 'no-referrer' ? '' : initiator[0].to_s
+        # (…a new window's under that document's policy, the default where it sets none: not the page's)
+        window_policy = initiator[1].to_s.empty? ? DEFAULT_REFERRER_POLICY : initiator[1]
         if @current_realm_id && !new_window && !named_frame && !frame_entry
           # (…an entered frame's form whose target names the page navigates it as the frame's `_top` does: its Referer and
           # site the frame document's)
@@ -3294,7 +3295,7 @@ module Capybara
         elsif method == 'GET'
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
-                                    opener: keep_opener, referrer: referrer)
+                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy)
           elsif named_frame
             navigate_realm_self_get(named_frame, url, referrer: initiator)
           elsif frame_entry
@@ -3305,7 +3306,7 @@ module Capybara
         else
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
-                                    opener: keep_opener, referrer: referrer,
+                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
                                     post: {body: body, content_type: content_type})
           elsif named_frame
             navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator)
@@ -6881,7 +6882,7 @@ module Capybara
           # `event.request.referrerPolicy` reflects the RESOLVED policy: a navigation with no explicit
           # meta/header policy uses the document default (strict-origin-when-cross-origin), never the
           # empty string a bare Request would carry (fetch-event-referrer-policy "default referrer policy").
-          referrerPolicy:      referrer_policy.to_s.empty? ? 'strict-origin-when-cross-origin' : referrer_policy.to_s,
+          referrerPolicy:      referrer_policy.to_s.empty? ? DEFAULT_REFERRER_POLICY : referrer_policy.to_s,
           # A passthrough `fetch(event.request)` re-fetch reports the navigation's OWN request
           # metadata to the server, independent of the referrer (which Referrer-Policy may reduce):
           # the initiator origin (the navigating frame's — the request's origin for the Origin
@@ -9401,6 +9402,8 @@ module Capybara
         no-referrer no-referrer-when-downgrade origin origin-when-cross-origin
         same-origin strict-origin strict-origin-when-cross-origin unsafe-url
       ].freeze
+      # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
+      DEFAULT_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
       # The `Referer` value a request carries under a Referrer-Policy — nil = send none
       # (https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer).
@@ -9410,7 +9413,7 @@ module Capybara
       # (strict-origin-when-cross-origin).
       def compute_referrer(policy, referrer_url, target_url)
         return nil if referrer_url.nil? || referrer_url.to_s.empty?
-        policy = 'strict-origin-when-cross-origin' unless REFERRER_POLICIES.include?(policy)
+        policy = DEFAULT_REFERRER_POLICY unless REFERRER_POLICIES.include?(policy)
         return nil if policy == 'no-referrer'
         # The referrer is almost always the (constant) document URL — memoise its parse
         # so the rack_fetch hot path doesn't re-parse it per request (rule 3).
