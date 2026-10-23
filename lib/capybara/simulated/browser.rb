@@ -2303,7 +2303,7 @@ module Capybara
       # deferred `load`: `:same_document` (pushState traversal — popstate
       # already fired, no load), `:cross_document` (full document replay —
       # load follows), or `nil` (no-op: zero delta / out of range).
-      def history_go(delta, force: false, realm: 0)
+      def history_go(delta, force: false, realm: 0, token: nil)
         delta = delta.to_i
         return if delta == 0
         return unless history_of_page?(realm)
@@ -2327,7 +2327,10 @@ module Capybara
           # — a timer that came due while the test was busy in Ruby — and the cost
           # of being wrong there is a history step that doesn't describe the
           # document.
-          return :same_document if @flushing_outgoing_page
+          # (A traversal the page asked for before the navigation began is its own and goes ahead: its task, which a
+          # browser would have run as the script that asked ended, comes due in the flush only because the driver
+          # takes the navigation first.)
+          return :same_document if @flushing_outgoing_page && !(token && token <= @flush_traversal_mark.to_i)
           # Pure pushState traversal — no VM rebuild, safe to run
           # inline; the popstate dispatch happens within the current
           # call's JS context.
@@ -2356,24 +2359,39 @@ module Capybara
       # A traversal a page's `history` asked for (history.js `traverse`): appended to the traversable's session history
       # traversal queue now, applied as the task it is runs (`apply_planned_traversal`) — or, before that, as the driver
       # takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation planned with it, which a
-      # traversal making a document again cancels (`cancel_navigations_for`). Its token, which the task applies it by.
+      # traversal making a document again cancels (`cancel_navigations_for`). `[token, delay]`: the token its task applies
+      # it by, and the delay of that task — none for one making a document again, whose task goes ahead of a navigation
+      # the script plans after it (a frame's `src` set, Chrome and Firefox: never requested), a turn for one within the
+      # documents, whose `popstate` comes after what is due as the script ends (history.js `traverse`).
       def plan_history_traverse(delta, realm)
-        return 0 if delta.to_i.zero?
+        return [0, 0] if delta.to_i.zero? || !history_of_page?(realm)
 
         token = (@traversal_tokens = @traversal_tokens.to_i + 1)
-        (@planned_traversals ||= []) << [token, delta.to_i, realm.to_i]
-        token
+        documents = history_plan(delta.to_i)&.last&.any? {|_, _, same_document| !same_document }
+        (@planned_traversals ||= []) << [token, delta.to_i, realm.to_i, documents]
+        [token, documents ? 0 : 1]
       end
       # …the traversal of `token` applied, and those planned before it: none where the driver took them already.
       def apply_planned_traversal(token)
-        return unless (at = @planned_traversals&.index {|t, _, _| t == token })
+        return unless (at = @planned_traversals&.index {|t, *| t == token })
 
-        @planned_traversals.shift(at + 1).each {|_, delta, realm| history_go(delta, realm: realm) }
+        @planned_traversals.shift(at + 1).each {|t, delta, realm, _| history_go(delta, realm: realm, token: t) }
       end
       def apply_planned_traversals
         return if @planned_traversals.nil? || @planned_traversals.empty?
 
         apply_planned_traversal(@planned_traversals.last[0])
+      end
+      # …those, as the driver takes the navigations the page planned with them — the traversal they make first, its
+      # cancelling of the ones it cancels in (HTML "apply the history step") — where one makes a document again (whose
+      # task would have gone ahead of the page's own navigations) or the host has a navigation of the page's to take; else
+      # they wait for their task, which runs after what is due now.
+      private def apply_planned_traversals_before_navigations
+        return if @planned_traversals.nil? || @planned_traversals.empty?
+        return unless @planned_traversals.any? {|*, documents| documents } || pending_navigation_besides_traversals?
+
+        apply_planned_traversals
+        consume_pending_history_traverse
       end
 
       def consume_pending_history_traverse
@@ -2437,6 +2455,10 @@ module Capybara
           @runtime.call('__csimSupersedePlanned')
         elsif (realm = navigable_realm(nav))
           supersede_frame_navigation(realm)
+          # (…a form's of its parent's document too, planned in that realm: frame_navigation.rs `planned`)
+          parent = @runtime.frame_realm_parent(realm)
+          handle = frame_container_handle(realm, parent)
+          frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle) unless handle.zero?
         end
       end
 
@@ -3246,10 +3268,11 @@ module Capybara
       # fired-timer signals can't see. Aux-window opens are intentionally excluded:
       # they build a separate Browser, not a hop in a same-page chain.
       private def pending_nav_intent?
+        !@pending_history_traverse.nil? || !(@planned_traversals || []).empty? || pending_navigation_besides_traversals?
+      end
+      private def pending_navigation_besides_traversals?
         !@pending_location.nil? ||
           @pending_reload ||
-          !@pending_history_traverse.nil? ||
-          !(@planned_traversals || []).empty? ||
           !(@pending_frame_nav || {}).empty? ||
           !(@pending_frame_submit || []).empty? ||
           !@pending_page_submission.nil? ||
@@ -7652,6 +7675,8 @@ module Capybara
       # (history.back/forward/go — restores the previous entry + fires load), and
       # child-frame navigation. Each consume is a no-op when nothing is pending.
       def drain_pending_after_remote_ref
+        # (…a traversal it asked for too: a window not the active one runs no task of its own to apply it)
+        apply_planned_traversals
         consume_pending_form_submit
         consume_pending_navigation
         consume_pending_history_traverse
@@ -11327,7 +11352,7 @@ module Capybara
 
       # One pass of the intent drain, without the window-load chaining above.
       def drain_pending_navigation_once
-        apply_planned_traversals
+        apply_planned_traversals_before_navigations
         consume_pending_sw_client_nav
         consume_pending_location
         consume_pending_frame_nav
@@ -11960,6 +11985,8 @@ module Capybara
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
         @flushed_nav_intents = nil
+        # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
+        @planned_traversals = nil
         # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
@@ -12196,7 +12223,7 @@ module Capybara
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
         @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
-        @planned_traversals @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
+        @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS
@@ -12204,6 +12231,7 @@ module Capybara
       private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init
+        @flush_traversal_mark = @traversal_tokens.to_i
         saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
         NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
         # A same-document `history.back()` from the flushed page takes effect INLINE
@@ -12218,6 +12246,9 @@ module Capybara
         @flushing_outgoing_page = true
         begin
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+          # (…and the traversals the page asked for before the navigation began, whose tasks a browser would have run by
+          # now: the driver took the navigation first)
+          apply_planned_traversals
         rescue StandardError
           # Outgoing page is discarded by this navigation; its flush error is moot.
         ensure

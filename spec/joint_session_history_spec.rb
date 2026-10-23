@@ -178,21 +178,29 @@ RSpec.describe 'the joint session history' do
     expect(session.current_path).to eq('/b')
   end
 
-  # A traversal is a task of its own (the session history traversal queue): a same-document one's popstate after the
-  # script that asked and its microtasks, before a timer that script set after (Chrome, measured 2026-10-24).
-  it "fires a traversal's popstate in a task of its own" do
-    session.visit '/top'
-    session.execute_script(<<~JS)
-      window.o = [];
-      addEventListener('popstate', () => o.push('pop'));
-      history.pushState(null, '', '/top2');
-      history.back();
-      setTimeout(() => o.push('t0'), 0);
-      Promise.resolve().then(() => o.push('micro'));
-      o.push('after');
-    JS
-    expect(session).to have_current_path('/top')
-    expect(session.evaluate_script('o')).to eq(%w[after micro pop t0])
+  # A traversal is a task of its own (the session history traversal queue, which answers in parallel): a same-document
+  # one's popstate after the script that asked, its microtasks and the tasks due as it ends — timers set before it and
+  # after (Chrome and Firefox, measured 2026-10-24 in real time).
+  %w[execute_script click].each do |how|
+    it "fires a traversal's popstate after what is due (#{how})" do
+      session.visit '/top'
+      session.execute_script(<<~JS)
+        window.o = [];
+        addEventListener('popstate', () => o.push('pop'));
+        window.go = () => {
+          setTimeout(() => o.push('t0'), 0);
+          history.pushState(null, '', '/top2');
+          history.back();
+          setTimeout(() => o.push('t1'), 0);
+          Promise.resolve().then(() => o.push('micro'));
+          o.push('after');
+        };
+        const b = document.createElement('button'); b.textContent = 'Go'; b.onclick = go; document.body.append(b);
+      JS
+      how == 'click' ? session.click_button('Go') : session.execute_script('go()')
+      expect(session).to have_current_path('/top')
+      expect(session.evaluate_script('o')).to eq(%w[after micro t0 t1 pop])
+    end
   end
 
   # …which the driver applies as it takes what the page planned: a visit after the script is a navigation from the
@@ -222,6 +230,43 @@ RSpec.describe 'the joint session history' do
       expect(hits).not_to include('/x')
       expect(session.evaluate_script('history.length')).to eq(2)
     end
+  end
+
+  # …and a navigation of the page planned with a traversal that moves it within its document and its frame across
+  # them goes on after it (Chrome and Firefox: at /x, length 2).
+  it 'navigates after a traversal that keeps the page in its document' do
+    hits = []
+    session = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      body = env['PATH_INFO'] == '/top' ? '<iframe src="/f1"></iframe>' : env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+    session.execute_script('history.pushState(null, "", "/top2")')
+    session.execute_script('history.go(-2); location.href = "/x"')
+    expect(session).to have_current_path('/x')
+    expect(session.evaluate_script('history.length')).to eq(2)
+  end
+
+  # A form of the page's planning a navigation of a frame a traversal makes the document of again plans none (HTML
+  # "apply the history step"; Chrome and Firefox: the frame at /f1, /x never requested).
+  it "cancels a form's navigation of a frame the traversal takes back" do
+    hits = []
+    session = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      body = env['PATH_INFO'] == '/top' ? '<iframe name=n src="/f1"></iframe><form id=f method=post target=n action="/x"></form>' : env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+    session.execute_script('history.back(); f.submit()')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f1')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f1')
+    expect(session.evaluate_script('history.length')).to eq(2)
   end
 
   it "goes back rather than to a frame's src set after it" do
