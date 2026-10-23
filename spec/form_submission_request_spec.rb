@@ -143,17 +143,27 @@ RSpec.describe "a form submission's request" do
 
   # A POST navigation carries its initiating document's origin (Fetch "append a request Origin header"; Chrome and
   # Firefox send it): the page's, and 'null' for an opaque-origin frame's submission to the page.
+  # Its referrer policy withholds it as 'null' where it would withhold the origin (Fetch "append a request Origin
+  # header": a `no-referrer` page's, measured in Chrome and Firefox; a `noreferrer` form's too, as HTML and Fetch have
+  # it, where Chrome and Firefox send the origin), and a document of an opaque origin sends 'null' — a sandboxed frame's
+  # to the page or a new window, a `Content-Security-Policy: sandbox` page's.
   {
-    'the page'                 => ['<form action="/r" method="post"><button>go</button></form>', 'http://www.example.com'],
-    'an opaque frame, to _top' => ['<iframe sandbox="allow-forms allow-top-navigation" srcdoc="<form action=/r method=post target=_top><button>go</button></form>"></iframe>', 'null']
-  }.each do |name, (body, origin)|
+    'the page'                   => ['<form action="/r" method="post"><button>go</button></form>', false, 'http://www.example.com'],
+    'a no-referrer page'         => ['<meta name="referrer" content="no-referrer"><form action="/r" method="post"><button>go</button></form>', false, 'null'],
+    'a noreferrer form'          => ['<form action="/r" method="post" rel="noreferrer"><button>go</button></form>', false, 'null'],
+    'a sandboxed page'           => ['<form action="/r" method="post"><button>go</button></form>', true, 'null'],
+    'an opaque frame, to _top'   => ['<iframe sandbox="allow-forms allow-top-navigation" srcdoc="<form action=/r method=post target=_top><button>go</button></form>"></iframe>', false, 'null'],
+    'an opaque frame, to _blank' => ['<iframe sandbox="allow-forms allow-popups" srcdoc="<form action=/r method=post target=_blank><button>go</button></form>"></iframe>', false, 'null']
+  }.each do |name, (body, sandboxed, origin)|
     it "sends the Origin of #{name} on a POST navigation" do
       origins = []
       app = lambda {|env|
         origins << env['HTTP_ORIGIN'] if env['PATH_INFO'] == '/r'
         next html.('<body>r') if env['PATH_INFO'] == '/r'
 
-        html.("<body>#{body}")
+        status, headers, page = html.("<body>#{body}")
+        headers = headers.merge('content-security-policy' => 'sandbox allow-forms allow-scripts') if sandboxed
+        [status, headers, page]
       }
       session = simulated_session(app)
       session.visit '/'
@@ -162,7 +172,7 @@ RSpec.describe "a form submission's request" do
       else
         session.click_button('go')
       end
-      expect(session).to have_current_path('/r')
+      poll_until { origins.any? }
       expect(origins).to eq([origin])
     end
   end

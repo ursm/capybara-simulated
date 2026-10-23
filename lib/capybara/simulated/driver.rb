@@ -472,6 +472,12 @@ module Capybara
       # reference to hook, so their window announces its own load like any other.
       # (…`activation_realm` the realm of `source`'s whose window chose the new one, whose user activation a new window
       # consumes — not one a name found)
+      # The initiator of a new window's POST: the form document's (`post[:initiator]`, its URL, and `post[:origin_null]`,
+      # whether its origin is opaque — an entered frame's, not the page's), else the source page's.
+      private def post_initiator(post, source)
+        {initiator: post[:initiator] || source&.raw_current_url, origin_null: post[:origin_null] == true}
+      end
+
       def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil)
         name = name.to_s
         # (…the policy the opening hyperlink sets, else its document's)
@@ -486,7 +492,7 @@ module Capybara
         opener_handle ||= handle_for(source) if opener && source
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
           if post
-            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
+            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, **post_initiator(post, source))
           else
             navigate_window(existing[:browser], url, source: source, referrer: referrer, referrer_policy: referrer_policy)
           end
@@ -511,7 +517,7 @@ module Capybara
           if post
             # A `<form target=_blank method=post>` loads the new window via POST,
             # carrying the opener's URL as referrer (unless rel=noreferrer → '').
-            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
+            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, **post_initiator(post, source))
           # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
           # isolate — load the document directly from a click-time snapshot (a
           # deferred target=_blank nav may revoke the URL first) or, failing that,

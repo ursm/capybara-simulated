@@ -3304,16 +3304,18 @@ module Capybara
             navigate(url, referrer_policy: policy, replace: replace)
           end
         else
+          # (…a POST's Origin the form document's: `realm_request_initiator`)
+          site, origin_null = realm_request_initiator(@current_realm_id.to_i)
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
-                                    post: {body: body, content_type: content_type})
+                                    post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
           elsif named_frame
             navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator)
           elsif frame_entry
             navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator)
           else
-            navigate_post(url, body, content_type, referrer_policy: policy, replace: replace)
+            navigate_post(url, body, content_type, referrer_policy: policy, replace: replace, origin_null: origin_null)
           end
         end
       end
@@ -3367,7 +3369,7 @@ module Capybara
         if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body,
                                                      content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
                                                      is_reload: is_reload, is_history: from_history && !is_reload,
-                                                     dest: 'document', referrer_source: initiator, site_seed: site_seed))
+                                                     dest: 'document', referrer_source: initiator, site_seed: site_seed, origin_null: origin_null))
           # Same post-response pipeline as the network POST below: a network error commits
           # an error document at the target URL; 307/308 re-POST, other redirects GET;
           # an attachment downloads.
@@ -3400,7 +3402,9 @@ module Capybara
         apply_default_request_env(env, referer: hop_referer)
         # (…and its initiating document's origin, as every POST navigation carries it — 'null' where that is opaque or a
         # redirect has tainted it, none where the initiator is unknown: `navigation_request_headers`)
-        env['HTTP_ORIGIN'] = (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
+        if initiator && !initiator.to_s.empty?
+          env['HTTP_ORIGIN'] = request_origin_header((!origin_null && url_origin(initiator)) || 'null', referrer_policy, url)
+        end
         response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return commit_error_document(url)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -9410,6 +9414,24 @@ module Capybara
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = 'strict-origin-when-cross-origin'
 
+      # The `Origin` header a request carries (Fetch "append a request Origin header"): its serialized origin `origin`
+      # ('null' once tainted or opaque) — which, for a request not in mode 'cors', its referrer policy `policy` withholds
+      # as 'null' where that policy would withhold the origin from `target` (an empty / unknown one the default).
+      def request_origin_header(origin, policy, target, cors: false)
+        return origin if cors || origin == 'null'
+
+        case REFERRER_POLICIES.include?(policy.to_s) ? policy.to_s : DEFAULT_REFERRER_POLICY
+        when 'no-referrer'
+          'null'
+        when 'no-referrer-when-downgrade', 'strict-origin', 'strict-origin-when-cross-origin'
+          origin.start_with?('https:') && !target.to_s.start_with?('https:') ? 'null' : origin
+        when 'same-origin', 'origin-when-cross-origin'
+          url_origin(target) == origin ? origin : 'null'
+        else
+          origin
+        end
+      end
+
       # The `Referer` value a request carries under a Referrer-Policy — nil = send none
       # (https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer).
       # `referrer_url` is the request's referrer (the initiating document); `target_url`
@@ -9724,7 +9746,7 @@ module Capybara
           # every non-GET/HEAD request, so a same-origin POST carries it too). After a
           # cross-origin redirect the origin is the opaque "null".
           if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
-            env['HTTP_ORIGIN'] = effective_origin
+            env['HTTP_ORIGIN'] = request_origin_header(effective_origin, ref_policy, target, cors: cors)
           end
           # Fetch-Metadata request headers — emitted for every fetch/XHR/SW request (a mode is set;
           # the nil-mode internal callers — ESM / asset GET / beacon — are left alone). Sec-Fetch-Site
@@ -9876,6 +9898,9 @@ module Capybara
             # hop out of a same-origin request keeps the real origin (redirect-origin
             # "same origin to other origin" sends the document origin, not null).
             effective_origin = 'null' if cors && crossed && url_origin(next_url) != url_origin(target)
+            # (…a document's navigation request tainted as every mode is — Fetch "HTTP-redirect fetch": a redirect to
+            # another origin from a URL not of the request's own)
+            effective_origin = 'null' if navigation && redirect_taints_origin?(effective_origin == 'null', req_origin, target, next_url)
             # Fetch "HTTP-redirect fetch": a CROSS-ORIGIN redirect strips the request's
             # `Authorization` — credentials sent to the first origin must not be replayed to a
             # different one (nor seed that origin's auth cache below).
@@ -10639,6 +10664,26 @@ module Capybara
         entry = @frame_leaving_entries&.delete(realm_id)
         entry[:form_state] = capture_frame_form_state(realm_id) if entry
       end
+      # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
+      # and whose origin an Origin header carries — a local document's (about:blank, srcdoc) its creator's, the nearest
+      # ancestor's of a fetchable URL — and whether that document's own origin is opaque (a sandbox's)].
+      def realm_request_initiator(realm)
+        opaque = document_origin_opaque?(realm)
+        url    = realm.zero? ? @current_url : frame_realm_url(realm)
+        until realm.zero? || url.to_s.match?(%r{\Ahttps?://}i)
+          realm = @runtime.frame_realm_parent(realm).to_i
+          url   = realm.zero? ? @current_url : frame_realm_url(realm)
+        end
+        [url, opaque]
+      end
+      # …the page's own document as one of an opaque origin too: a `Content-Security-Policy: sandbox` response's.
+      def document_origin_opaque?(realm)
+        return frame_document_origin_opaque?(realm) unless realm.zero?
+
+        @runtime.call('__csimDocumentOriginOpaque') == true
+      rescue StandardError
+        false
+      end
       def frame_realm_url(realm_id)
         return @runtime.loading_frame_realm_url(realm_id) unless @runtime.frame_realm_alive?(realm_id)
 
@@ -11361,14 +11406,14 @@ module Capybara
       end
       # …by the document of realm `realm`, its Referer `initiator` ([url, policy]): a GET, or a POST of `post` ([body,
       # content type]).
-      # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares, that document's URL — the page's where it is a
-      # local one, about:blank's or srcdoc's, whose origin is the one that made it)
+      # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares and whose origin a POST's Origin carries, that
+      # document's: `realm_request_initiator`)
       def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil)
-        source, policy = initiator
-        site = source.to_s.match?(%r{\Ahttps?://}i) ? source : @current_url
+        source, policy    = initiator
+        site, origin_null = realm_request_initiator(realm)
         from_document(realm) do
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, origin_null: frame_document_origin_opaque?(realm))
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, origin_null: origin_null)
           else
             navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob)
           end
@@ -12170,7 +12215,7 @@ module Capybara
         # tainted by a cross-origin redirect — matching the fetch path's `effective_origin`
         # convention. Omitted only when the initiator is unknown (a disposed realm → nil url).
         if initiator_url && !initiator_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
-          env['HTTP_ORIGIN'] = (!origin_null && url_origin(initiator_url)) || 'null'
+          env['HTTP_ORIGIN'] = request_origin_header((!origin_null && url_origin(initiator_url)) || 'null', referrer_policy, target)
         end
       end
 
