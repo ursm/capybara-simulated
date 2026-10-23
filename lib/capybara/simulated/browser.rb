@@ -2417,7 +2417,7 @@ module Capybara
         return unless entry
         @restoring_history_state = entry[:state]
         if entry[:method] == :post
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil)
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin])
         else
           navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil)   # user traversal: site 'none'
         end
@@ -3343,7 +3343,7 @@ module Capybara
         picks && picks[entry['index'].to_i]
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false, origin_null: false)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false, origin_null: false, origin: nil)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
@@ -3355,10 +3355,14 @@ module Capybara
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
         referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
         hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
+        # (…its origin the initiating document's — 'null' where that is opaque or a redirect has tainted it, none where the
+        # initiator is unknown — or, re-posted from its session history entry, the one it was first sent with: the
+        # document state's initiator origin)
+        origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
         @history_before_navigation = nil if depth.zero?
         unless from_history || depth > 0
           capture_outgoing_form_state
-          record_navigation_history({method: :post, url: url, body: body, content_type: content_type}, replace: replace)
+          record_navigation_history({method: :post, url: url, body: body, content_type: content_type, origin: origin}, replace: replace)
         end
         # A controlled top-level POST navigation (form submission) goes to the SW's fetch
         # event first — same model as `navigate` (the SW reads the body via
@@ -3369,7 +3373,7 @@ module Capybara
         if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body,
                                                      content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
                                                      is_reload: is_reload, is_history: from_history && !is_reload,
-                                                     dest: 'document', referrer_source: initiator, referrer_policy: referrer_policy, site_seed: site_seed, origin_null: origin_null))
+                                                     dest: 'document', referrer_source: initiator, referrer_policy: referrer_policy, site_seed: site_seed, origin_null: origin == 'null'))
           # Same post-response pipeline as the network POST below: a network error commits
           # an error document at the target URL; 307/308 re-POST, other redirects GET;
           # an attachment downloads.
@@ -3379,7 +3383,7 @@ module Capybara
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
-                                   origin_null: redirect_taints_origin?(origin_null, initiator, url, next_url))
+                                   origin: redirected_origin(origin, url, next_url))
             end
 
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -3400,11 +3404,8 @@ module Capybara
         env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: hop_referer)
-        # (…and its initiating document's origin, as every POST navigation carries it — 'null' where that is opaque or a
-        # redirect has tainted it, none where the initiator is unknown: `navigation_request_headers`)
-        if initiator && !initiator.to_s.empty?
-          env['HTTP_ORIGIN'] = request_origin_header((!origin_null && url_origin(initiator)) || 'null', referrer_policy, url)
-        end
+        # (…and its origin, as every POST navigation carries it: `navigation_request_headers`)
+        env['HTTP_ORIGIN'] = request_origin_header(origin, referrer_policy, url) if origin
         response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return commit_error_document(url)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -3417,7 +3418,7 @@ module Capybara
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           else
             return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
-                                 origin_null: redirect_taints_origin?(origin_null, initiator, url, next_url))
+                                 origin: redirected_origin(origin, url, next_url))
           end
         end
         return download_in_place(url, headers, resp_body) if download_response?(headers)
@@ -12399,6 +12400,10 @@ module Capybara
       # on the initiator's origin) keeps the real Origin; a later hop that redirects same-origin-to-
       # current keeps it too. Monotonic: once opaque, an opaque origin is same-origin with nothing, so
       # it stays null.
+      # …a request's origin `origin` (serialized, nil for none) after a redirect from `current_url` to `location_url`.
+      def redirected_origin(origin, current_url, location_url)
+        origin && (redirect_taints_origin?(origin == 'null', origin, current_url, location_url) ? 'null' : origin)
+      end
       def redirect_taints_origin?(already_null, initiator_url, current_url, location_url)
         already_null ||
           (url_origin(current_url) != url_origin(location_url) && url_origin(initiator_url) != url_origin(current_url))

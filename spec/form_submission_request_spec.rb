@@ -178,6 +178,27 @@ RSpec.describe "a form submission's request" do
     end
   end
 
+  # …and a reload or a traversal re-posting it sends the origin it was first sent with (HTML: the document state's
+  # initiator origin).
+  it 'sends the Origin it was first sent with on a re-post from its session history entry' do
+    origins = []
+    app = lambda {|env|
+      origins << env['HTTP_ORIGIN'] if env['PATH_INFO'] == '/r'
+      next html.('<body>r') if env['PATH_INFO'] == '/r'
+      next html.('<body>other') if env['PATH_INFO'] == '/other'
+
+      html.('<body><form action="/r" method="post"><button>go</button></form>')
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.click_button('go')
+    session.refresh
+    session.visit '/other'
+    session.go_back
+    expect(session).to have_current_path('/r')
+    expect(origins).to eq(['http://www.example.com'] * 3)
+  end
+
   # …and a submission to a named frame is that frame's navigation request: Sec-Fetch-Dest 'iframe', and a POST its
   # Origin (Fetch "create a navigation request"; Fetch Metadata).
   it 'sends the Fetch metadata and Origin of a navigation for a form submitted to a named frame' do
