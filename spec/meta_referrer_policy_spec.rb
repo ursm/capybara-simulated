@@ -112,4 +112,31 @@ RSpec.describe 'the meta referrer policy' do
     end
     expect(referers).to eq([['/a', nil], ['/self', nil], ['/a', nil], ['/post', nil]])
   end
+
+  # …and a fetch's or an XHR's whose request sets none: Fetch's "main fetch" gives it the policy container's — a
+  # `same-origin` page's cross-origin request sends no Referer, and a POST of it `Origin: null`; a same-origin one, the
+  # page's URL.
+  it "sets a page's fetch and XHR Referer by its policy where the request sets none" do
+    seen = []
+    s = simulated_session(->(env) {
+      seen << [env['PATH_INFO'], env['HTTP_REFERER'], env['HTTP_ORIGIN']] if env['PATH_INFO'].start_with?('/r')
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><meta name="referrer" content="same-origin"><p>x']]
+    })
+    s.visit '/p'
+    s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const xhr = (url) => new Promise((resolve) => { const x = new XMLHttpRequest(); x.open('GET', url); x.onloadend = resolve; x.send(); });
+      fetch('http://other.example.com/r1', {method: 'POST', mode: 'no-cors', body: 'x'})
+        .then(() => fetch('/r2'))
+        .then(() => xhr('http://other.example.com/r3'))
+        .then(() => xhr('/r4'))
+        .then(() => done(1), () => done(0));
+    JS
+    expect(seen).to eq([
+      ['/r1', nil, 'null'],
+      ['/r2', 'http://www.example.com/p', nil],
+      ['/r3', nil, 'http://www.example.com'],
+      ['/r4', 'http://www.example.com/p', nil]
+    ])
+  end
 end

@@ -4493,7 +4493,7 @@ module Capybara
       # the pipe). The JS-side XHR checks the return shape to pick
       # between inline processing and waiting for `__csim_
       # deliverHijackedFetches`.
-      def rack_fetch_async(method, url, body, headers_json, credentials: 'same-origin', client_url: nil, client_origin: nil, client_realm: nil)
+      def rack_fetch_async(method, url, body, headers_json, credentials: 'same-origin', client_url: nil, client_origin: nil, client_realm: nil, referrer_policy: nil)
         headers = begin
           JSON.parse(headers_json.to_s)
         rescue JSON::ParserError
@@ -4521,7 +4521,7 @@ module Capybara
         Thread.current[:csim_fetch_env] = nil
         # (…a CORS request as an XHR's is, by its client)
         resp = rack_fetch(method, url, body, headers, 'follow', 'cors', credentials: credentials, env_extras: env_extras, client_url: client_url,
-                          client_origin: client_origin, client_realm: client_realm)
+                          client_origin: client_origin, client_realm: client_realm, referrer_policy: referrer_policy)
         # (…nil, a network error, as `rack_fetch` answers one)
         return resp unless hijacked
         # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is)
