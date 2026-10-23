@@ -3546,6 +3546,7 @@ module Capybara
             redirect_history_entry(next_url, get: true)
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
+          return navigation_made_no_document(url) if no_content_response?(sw['status'])
           return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
           @current_url = url
           record_response(sw['status'] || 200, sw_headers)
@@ -3582,6 +3583,7 @@ module Capybara
                                  origin: redirected_origin(origin, url, next_url))
           end
         end
+        return navigation_made_no_document(url) if no_content_response?(status)
         return download_in_place(url, headers, resp_body) if download_response?(headers)
         @current_url = url
         record_response(status, headers)
@@ -6941,6 +6943,11 @@ module Capybara
             target      = next_url
             redirected  = true
             next
+          end
+          # (…none made of a 204 / 205: the frame stays at the document it is at, `no_document` — `no_content_response?`)
+          if no_content_response?(status)
+            resp_body.close if resp_body.respond_to?(:close)
+            return {'no_document' => true}
           end
           body ||= read_rack_body(resp_body)
           out = response_hash(status, headers, body, target, redirected)
@@ -10523,12 +10530,17 @@ module Capybara
         return @runtime.realm_direct_call(realm_id, '__csimFragmentNavigate', url.to_s, replace == true) if frame_fragment_navigation?(realm_id, url)
 
         supersede_frame_navigation(realm_id)
-        # (…and a navigation a form of its parent's document planned for it, its request not yet sent: a link's targeting
-        # it, Chrome and Firefox sending none — the frame's own `location` cancels it from its realm, location.js)
+        cancel_parent_form_navigation(realm_id)
+        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, navigation_referrer(initiator_realm, policy), frame_sandbox_now(realm_id), initiator_realm, replace]
+      end
+      # …and a navigation a form of its parent's document planned for frame realm `realm_id`, its request not yet sent —
+      # one of the frame's own replacing it: a link's targeting it, a form's of its own document (Chrome and Firefox
+      # sending none; the frame's own `location` cancels it from its realm, location.js) — its pending `load` kept, the
+      # replacing navigation's own.
+      private def cancel_parent_form_navigation(realm_id)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle, true) unless handle.zero?
-        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, navigation_referrer(initiator_realm, policy), frame_sandbox_now(realm_id), initiator_realm, replace]
       end
       # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
       # another realm's — one the navigation's own made, nested in it.
@@ -10734,6 +10746,7 @@ module Capybara
       def frame_submit_self(realm_id, target = '', request = nil)
         return false if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
+        cancel_parent_form_navigation(realm_id) if frame_self_target?(target.to_s)
         pending = ((@pending_frame_submit ||= {})[realm_id] = {})
         return false unless request.is_a?(Hash)
         unless @runtime.frame_realm_alive?(realm_id)
@@ -11007,7 +11020,7 @@ module Capybara
         response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url, rid)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
-        return if download_response?(headers)
+        return if download_response?(headers) || no_content_response?(status)
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, history_state: history_state, csp: response_csp(headers))
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
@@ -11178,6 +11191,7 @@ module Capybara
                                                    site_seed: site, origin_null: redirect_taints_origin?(origin_null, initiator, get_url, next_url),
                                                    resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
         end
+        return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
         if download_response?(headers)
           return save_downloaded_response(get_url, headers, resp_body, realm: realm_id)
         end
@@ -11273,6 +11287,7 @@ module Capybara
           return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, referrer: referrer, is_reload: is_reload, is_history: is_history, record: false,
                                                    site_seed: site, origin_null: taint, resulting_client_id: next_rid)
         end
+        return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
         if download_response?(headers)
           save_downloaded_response(url, headers, resp_body, realm: realm_id)
           return
@@ -11700,6 +11715,7 @@ module Capybara
           return unless frame_redirect_followed?(next_url, depth, entry[:realm_id]) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
           return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
         end
+        return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
         if download_response?(headers)
           save_downloaded_response(url, headers, body, realm: entry[:realm_id])
           return
@@ -11733,6 +11749,7 @@ module Capybara
             return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer)
           end
         end
+        return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
         if download_response?(headers)
           save_downloaded_response(url, headers, resp_body, realm: entry[:realm_id])
           return
@@ -11888,6 +11905,7 @@ module Capybara
               redirect_history_entry(next_url, get: true)
               return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
+            return navigation_made_no_document(url) if no_content_response?(sw['status'])
             return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
             @current_url = url
             record_response(sw['status'] || 200, sw_headers)
@@ -11924,6 +11942,7 @@ module Capybara
           # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
           # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
           # which within_window assertions read.
+          return navigation_made_no_document(url) if no_content_response?(status)
           return download_in_place(url, headers, body) if download_response?(headers)
           @current_url = url
           record_response(status, headers)
@@ -11961,6 +11980,10 @@ module Capybara
       # and what its flushed timers planned still stands, the page they ran in being the one that stays. One that has none
       # yet — an aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened
       # on, which within_window assertions read.
+      # Whether a navigation's response is a 204 / 205 — HTML "navigate" ("populate a session history entry's document"):
+      # the navigation aborted, the navigable at the document it is at, no `load` and no session history entry (Chrome,
+      # measured 2026-10-24: the page's link and form, a frame's form, link, `location` and `src` alike).
+      private def no_content_response?(status) = [204, 205].include?(status.to_i)
       private def download_in_place(url, headers, body)
         save_downloaded_response(url, headers, body)
         navigation_made_no_document(url)

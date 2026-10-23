@@ -108,6 +108,60 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     end
   end
 
+  # …and to one of the frame's own document's forms submitted to it after (Chrome: POST /g alone, one load).
+  it "gives way to a form of the frame's own submitted after it" do
+    hits = []
+    session = session_with(hits)
+    session.visit '/top'
+    session.execute_script('frames[0].document.body.innerHTML = "<form id=g method=post action=/g></form>"')
+    session.execute_script('window.loads = 0; fr.onload = () => loads++; f.submit(); frames[0].g.submit()')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/g')
+    expect(hits).not_to include('POST /x')
+    expect(session.evaluate_script('loads')).to eq(1)
+  end
+
+  # A 204 / 205 makes no document (HTML "navigate"): every navigation of it leaves its navigable at the document it is
+  # at, with no `load` and no session history entry (Chrome, measured 2026-10-24).
+  describe 'a 204 response' do
+    let(:app) do
+      lambda {|env|
+        next [204, {}, []] if env['PATH_INFO'] == '/204'
+
+        body = case env['PATH_INFO']
+               when '/top' then '<iframe name=n src="/blank"></iframe><form id=f method=post target=n action="/204"></form>' \
+                                '<form id=g method=post action="/204"></form><a id=a href="/204">a</a><a id=fa target=n href="/204">fa</a>'
+               else env['PATH_INFO']
+               end
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      }
+    end
+
+    {'a link' => 'a.click()', 'a form' => 'g.submit()', 'its location set' => 'location.href = "/204"'}.each do |name, js|
+      it "keeps the page where #{name} gets one" do
+        session = simulated_session(app)
+        session.visit '/top'
+        session.execute_script(js)
+        expect(session.current_path).to eq('/top')
+        expect(session.evaluate_script('history.length')).to eq(1)
+      end
+    end
+
+    {
+      'a form targeting it' => 'f.submit()', 'a link targeting it' => 'fa.click()',
+      'its location set' => 'frames[0].location = "/204"', 'its src set' => 'document.querySelector("iframe").src = "/204"'
+    }.each do |name, js|
+      it "keeps a frame where #{name} gets one" do
+        session = simulated_session(app)
+        session.visit '/top'
+        session.execute_script("window.loads = 0; document.querySelector('iframe').onload = () => loads++; #{js}")
+        session.evaluate_script('1')
+        expect(session.evaluate_script('[frames[0].location.pathname, frames[0].document.body.textContent, loads]')).to eq(['/blank', '/blank', 0])
+        expect(session.evaluate_script('history.length')).to eq(1)
+      end
+    end
+  end
+
   it "sends nothing where the frame's srcdoc is set after it" do
     hits = []
     session = session_with(hits)
