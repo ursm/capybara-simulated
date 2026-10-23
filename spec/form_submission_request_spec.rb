@@ -251,8 +251,9 @@ RSpec.describe "a form submission's request" do
     expect(seen).to eq(%w[/a /b /b])
   end
 
-  # A redirect to a URL no fetch follows is a network error, committed at the URL that redirected — which a reload
-  # requests again (Fetch "main fetch"; Chrome: ERR_UNSAFE_REDIRECT).
+  # A redirect to a URL of a fetch scheme that is no HTTP(S) one is a network error, committed at the URL that
+  # redirected — which a reload requests again (HTML "create navigation params by fetching"; Chrome:
+  # ERR_UNSAFE_REDIRECT)…
   %w[about:blank data:text/html,x blob:http://www.example.com/x].each do |target|
     it "fails a navigation redirected to #{target.split(':').first}:" do
       seen = []
@@ -271,8 +272,25 @@ RSpec.describe "a form submission's request" do
     end
   end
 
-  # …as is one past the redirect limit: twenty redirects followed, the twenty-first not, the last URL requested the
-  # error document's (Fetch "HTTP-redirect fetch"; Chrome: ERR_TOO_MANY_REDIRECTS).
+  # …and one to a URL of no fetch scheme is handed off: nothing committed, the page and its history as they were (Chrome:
+  # ERR_ABORTED).
+  %w[mailto:a@b.c myapp://cb?code=1].each do |target|
+    it "leaves the page as it was for a navigation redirected to #{target.split(':').first}:" do
+      app = lambda {|env|
+        next [302, {'location' => target}, []] if env['PATH_INFO'] == '/a'
+
+        html.('<body>start')
+      }
+      session = simulated_session(app)
+      session.visit '/start'
+      session.visit '/a'
+      expect(session.current_url).to eq('http://www.example.com/start')
+      expect(session.evaluate_script('[document.body.textContent, history.length]')).to eq(['start', 1])
+    end
+  end
+
+  # …and one past the redirect limit fails as well: twenty redirects followed, the twenty-first not, the last URL
+  # requested the error document's (Fetch "HTTP-redirect fetch"'s redirect count; Firefox — Chrome follows nineteen).
   it 'fails a navigation past its redirect limit' do
     seen = []
     app = lambda {|env|

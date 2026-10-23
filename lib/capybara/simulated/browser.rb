@@ -3386,17 +3386,13 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
-              # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
-              # redirected: Fetch "main fetch", "HTTP-redirect fetch")
-              return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+              return unless redirect_followed?(url, next_url, depth)
               redirect_history_entry(next_url, get: false)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
                                    origin: redirected_origin(origin, url, next_url))
             end
 
-            # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
-            # redirected: Fetch "main fetch", "HTTP-redirect fetch")
-            return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+            return unless redirect_followed?(url, next_url, depth)
             redirect_history_entry(next_url, get: true)
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
@@ -3427,9 +3423,7 @@ module Capybara
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
           to_get = Native.redirect_to_get(status.to_i, 'POST')
-          # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
-          # redirected: Fetch "main fetch", "HTTP-redirect fetch")
-          return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+          return unless redirect_followed?(url, next_url, depth)
           redirect_history_entry(next_url, get: to_get)
           if to_get
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -4733,7 +4727,7 @@ module Capybara
         # deferred fetch runs, @worker_initializing keeps the drain loops pumping
         # (worker_drive_pending?); the runner's post-idle-bail grace window covers the
         # POST-init autonomous worker work the counters can't see.
-        sw_script = !service && target.match?(%r{\Ahttps?://}i) ? sw_controller_for_navigation(target) : nil
+        sw_script = !service && http_url?(target) ? sw_controller_for_navigation(target) : nil
         # Resolve the worker script body on the main thread before
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
@@ -4759,13 +4753,13 @@ module Capybara
         # has no fetch to time, and an SW-intercepted worker script (`sw_script`, deferred) is timed
         # by the SW path. `csim_asset_meta` is the fetch fact `fetch_worker_script`'s `rack_fetch_body`
         # just stashed (cleared at the top of the spawn so a failed one can't leak).
-        if !service && !shared && !sw_script && body && target.match?(%r{\Ahttps?://}i)
+        if !service && !shared && !sw_script && body && http_url?(target)
           Thread.current[:csim_worker_rt] = {'url' => target, 'meta' => Thread.current[:csim_asset_meta]}
         end
         # A dedicated or shared worker's global scope is at the URL its script came from at last — its same-origin redirects
         # followed (HTML "run a worker": the worker global scope's url is the response's), which its location, its imports'
         # base and its requests' referrer read. (A service worker's script may not redirect.)
-        if !service && !sw_script && body && target.match?(%r{\Ahttps?://}i) && Thread.current[:csim_asset_url].to_s.match?(%r{\Ahttps?://}i)
+        if !service && !sw_script && body && http_url?(target) && http_url?(Thread.current[:csim_asset_url])
           target = Thread.current[:csim_asset_url].to_s
         end
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
@@ -5039,7 +5033,7 @@ module Capybara
       # A worker-script redirect hop must stay http(s) and same-origin (the request's
       # mode is 'same-origin'); anything else is a network error for the chain.
       private def same_origin_script_hop?(next_url, original_url)
-        next_url.to_s.match?(%r{\Ahttps?://}i) && url_origin(next_url) == url_origin(original_url.to_s)
+        http_url?(next_url) && url_origin(next_url) == url_origin(original_url.to_s)
       end
 
       # A controlled worker's `importScripts(url)`, routed through its SW's fetch event —
@@ -6222,7 +6216,7 @@ module Capybara
       # arrives after load via `clients.claim()`, so a controller snapshotted when the realm was
       # BUILT is stale by then, and would report such a worker uncontrolled.
       private def worker_controller_handle(url, shared, creator_controller)
-        return sw_client_controller_for(url)&.first if url.to_s.match?(%r{\Ahttps?://}i)
+        return sw_client_controller_for(url)&.first if http_url?(url)
         # A SHARED worker has no single creating context to inherit from.
         return nil if shared
 
@@ -7977,10 +7971,10 @@ module Capybara
       # document — the same http(s) gate rack_fetch's client identity uses (an
       # opaque-origin about:blank / javascript: realm falls back to the top).
       private def origin_tainted?(url, cors, client_url: nil)
-        return false if cors || !url.to_s.match?(%r{\Ahttps?://}i)
+        return false if cors || !http_url?(url)
         res = url_origin(url.to_s)
         return false unless res
-        base = client_url.to_s.match?(%r{\Ahttps?://}i) ? client_url : @current_url
+        base = http_url?(client_url) ? client_url : @current_url
         doc  = url_origin(base)
         doc.nil? || doc != res
       end
@@ -8025,7 +8019,7 @@ module Capybara
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
-        elsif key.match?(%r{\Ahttps?://}i)
+        elsif http_url?(key)
           # The requesting DOCUMENT identity is pinned to what it was when the load started —
           # on the async path this runs on a background thread, and a concurrent navigation
           # must not swing the CORS / SameSite / Referer verdicts to a document that never
@@ -8263,7 +8257,7 @@ module Capybara
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
-        elsif key.match?(%r{\Ahttps?://}i)
+        elsif http_url?(key)
           # A font is a CORS fetch (CSS Fonts 4 §4.9.1): a cross-origin face without
           # `Access-Control-Allow-Origin` fails, as in Chrome.
           result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin',
@@ -9271,7 +9265,7 @@ module Capybara
 
             next [bytes, abs]
           end
-          r = controller.positive? && abs.match?(%r{\Ahttps?://}i) ? sw_direct_fetch(controller, JSON.generate(
+          r = controller.positive? && http_url?(abs) ? sw_direct_fetch(controller, JSON.generate(
             method: 'GET', url: abs, headers: {}, body_b64: '', mode: 'cors', destination: 'script',
             credentials: 'same-origin', clientId: sw_worker_client_id(handle)
           ), handle) : nil
@@ -9527,8 +9521,8 @@ module Capybara
         # request's as it is, which also keeps a worker thread's fetch (its URLs resolved in its own isolate) off the main
         # realm, whose current document only its own thread may ask about. (An absolute URL is taken as already serialized:
         # every caller resolves it first, JS-side or through parse_url / resolve_against.)
-        target = url.to_s.match?(%r{\Ahttps?://}i) ? url.to_s : resolve_against_current(url.to_s)
-        return nil unless target.is_a?(String) && target.match?(%r{\Ahttps?://}i)
+        target = http_url?(url) ? url.to_s : resolve_against_current(url.to_s)
+        return nil unless target.is_a?(String) && http_url?(target)
         # Fetch "port blocking" (https://fetch.spec.whatwg.org/#port-blocking): a
         # request to a blocked port is a network error before any connection —
         # fetch() rejects with TypeError, a sync XHR throws NetworkError
@@ -9555,7 +9549,7 @@ module Capybara
         # context (about:blank / javascript: / data: realm reporting its own location)
         # falls back to the top document, keeping the creator-inherited behavior those
         # contexts had before client threading.
-        client = client_url.to_s.match?(%r{\Ahttps?://}i) ? client_url : @current_url
+        client = http_url?(client_url) ? client_url : @current_url
         # …and its ORIGIN, where the realm says it (`client_origin`, its document's): a sandboxed document at a real URL
         # is of an opaque origin ("null") its URL does not carry — every request it makes cross-origin, as Fetch has it.
         client_origin = client_origin.to_s.empty? ? url_origin(client) : client_origin.to_s
@@ -9693,7 +9687,7 @@ module Capybara
                 widen_cookie_site.(target) unless cors_mode == 'navigate'   # (…a hop the cache answered a hop all the same)
                 redirected = true
                 next_url   = resolve_against(loc, target)
-                return nil unless next_url.to_s.match?(%r{\Ahttps?://}i)
+                return nil unless http_url?(next_url)
                 target = carry_fragment(target, next_url)
                 return nil if bad_port?(target)   # a cached redirect to a blocked port is still a network error
                 next
@@ -9907,7 +9901,7 @@ module Capybara
             # The UA only follows http(s) redirects: a Location that resolves to a
             # non-HTTP(S) URL (data:, an `invalidurl:` scheme, …) is a network error
             # (redirect-location data/invalid in follow mode).
-            unless next_url.to_s.match?(%r{\Ahttps?://}i)
+            unless http_url?(next_url)
               resp_body.close if resp_body.respond_to?(:close)
               return nil
             end
@@ -10394,7 +10388,7 @@ module Capybara
             entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
             if entry
               navigate_frame(url, entry: entry, referrer: referrer)
-            elsif url.match?(%r{\Ahttps?://}i)
+            elsif http_url?(url)
               # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so
               # it carries correct navigation request headers (Referer under policy / Sec-Fetch);
               # non-http(s) and relative URLs stay on the JS src-reassignment path via
@@ -10514,7 +10508,7 @@ module Capybara
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
             navigate_realm_self_post(realm_id, cur[:url], cur[:body], cur[:content_type], is_reload: true)
-          elsif cur && cur[:url].to_s.match?(%r{\Ahttps?://}i)
+          elsif cur && http_url?(cur[:url])
             # Reload the CURRENT history entry (isReloadNavigation), not the frame's `src`: after a
             # back/forward the src is stale, so `history.go(0)` / `location.reload()` must refetch the
             # entry's URL. (A blob:/data:/srcdoc frame keeps the JS reload path — it reuses retained
@@ -10690,7 +10684,7 @@ module Capybara
       def realm_request_initiator(realm)
         opaque = document_origin_opaque?(realm)
         url    = realm.zero? ? @current_url : frame_realm_url(realm)
-        until realm.zero? || url.to_s.match?(%r{\Ahttps?://}i)
+        until realm.zero? || http_url?(url)
           realm = @runtime.frame_realm_parent(realm).to_i
           url   = realm.zero? ? @current_url : frame_realm_url(realm)
         end
@@ -10894,7 +10888,7 @@ module Capybara
         # relative URL against the frame's base on rebuild — routed through the frame's PARENT realm
         # (where the owning iframe lives), not unconditionally to main.
         parent = @runtime.frame_realm_parent(realm_id)
-        unless get_url.is_a?(String) && get_url.match?(%r{\Ahttps?://}i)
+        unless get_url.is_a?(String) && http_url?(get_url)
           # (…one a redirect reached a network error — Fetch's HTTP-redirect fetch takes no location URL of another
           # scheme — its failed load committed at the URL)
           return reload_frame_realm_by_id(realm_id, get_url.to_s, '', 'text/html') if depth.positive?
@@ -11313,7 +11307,7 @@ module Capybara
       # `realm`'s, a window realm's; this window's, another window's browser), else the session's default host's — a
       # frame's that comes to none, none (nil: no cookies).
       def document_cookie_url(url = nil, realm = nil)
-        url = opener_cookie_url(realm) unless url.to_s.match?(%r{\Ahttps?://}i)
+        url = opener_cookie_url(realm) unless http_url?(url)
         return url if cookie_host(url)
 
         realm.to_i.positive? && !@runtime.window_realm_meta.key?(realm.to_i) ? nil : @default_host
@@ -11622,10 +11616,9 @@ module Capybara
           end
           # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
-          # the one above, which a traversal or a reload replays here. A redirect to one is a network error (Fetch's
-          # HTTP-redirect fetch: a location URL of no HTTP(S) scheme), its failed load committed at the URL.
+          # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
+          # `redirect_followed?`.)
           if url.to_s.match?(/\Ablob:/i)
-            return commit_error_document(url.to_s) unless depth.zero?
             blob ||= blob_snapshot(url)
             return blob ? boot_blob_document(url, blob[:bytes], blob[:type], flushed: true) : fail_blob_document(url)
           end
@@ -11645,9 +11638,7 @@ module Capybara
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
               next_url = carry_fragment(url, resolve_location(loc, url))
-              # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
-              # redirected: Fetch "main fetch", "HTTP-redirect fetch")
-              return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+              return unless redirect_followed?(url, next_url, depth)
               redirect_history_entry(next_url, get: true)
               return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
@@ -11677,9 +11668,7 @@ module Capybara
             # the original fragment in the final URL.
             next_url = carry_fragment(url, next_url)
             body.close if body.respond_to?(:close)
-            # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
-            # redirected: Fetch "main fetch", "HTTP-redirect fetch")
-            return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+            return unless redirect_followed?(url, next_url, depth)
             redirect_history_entry(next_url, get: true)
             # Thread the initiator + widened site so the chain's SameSite verdict
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
@@ -11726,13 +11715,17 @@ module Capybara
       # yet — an aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened
       # on, which within_window assertions read.
       private def download_in_place(url, headers, body)
+        save_downloaded_response(url, headers, body)
+        navigation_made_no_document(url)
+      end
+      # …as a navigation handed off to external software makes none (`redirect_followed?`).
+      private def navigation_made_no_document(url)
         if window_has_document?
           @history, @history_idx = @history_before_navigation if @history_before_navigation
         else
           @current_url = url
         end
         @history_before_navigation = nil
-        save_downloaded_response(url, headers, body)
         restore_flushed_nav_intents
         nil
       end
@@ -11825,7 +11818,7 @@ module Capybara
         opts['csp'] = csp if csp
         # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
         # navigation went to the network, as a navigation does not yet wait for its activation)
-        if @current_url.to_s.match?(%r{\Ahttps?://}i)
+        if http_url?(@current_url)
           controller = sw_client_controller_for(@current_url.to_s)
           controller = nil if controller && controller[1] && !@worker_init_lock.synchronize { @workers[controller[0]]&.dig(:sw_activated) }
           opts['controller'] = controller if controller
@@ -12288,7 +12281,7 @@ module Capybara
           referrer, container_policy = realm_referrer_initiator(@runtime.frame_realm_parent(rid).to_i)
           policy = container_policy if policy.empty?
         end
-        url = referrer unless url.match?(%r{\Ahttps?://}i)
+        url = referrer unless http_url?(url)
         LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy)
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
@@ -12303,7 +12296,7 @@ module Capybara
           rid = @runtime.frame_realm_parent(rid).to_i
         end
         site = registrable_site(rid.positive? ? frame_realm_url(rid) : @current_url) or return nil
-        same = urls.all? {|u| u && !u.match?(/\Adata:/i) && (!u.match?(%r{\Ahttps?://}i) || registrable_site(u) == site) }
+        same = urls.all? {|u| u && !u.match?(/\Adata:/i) && (!http_url?(u) || registrable_site(u) == site) }
         same ? site : nil
       end
       # …and whether a request to `hop` a dedicated worker makes — on its own thread — is cross-site for cookies by the one
@@ -12458,12 +12451,29 @@ module Capybara
 
       # A top-level navigation that FAILED — a network error: Chrome still commits an error document at the target URL, so
       # the URL moves even though nothing loaded.
-      # Whether `url` is one HTTP fetch follows a redirect to: an http(s) URL.
-      def fetchable_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
       def commit_error_document(url)
         @current_url = url
         record_response(0, {'content-type' => 'text/html'})
         boot_response_into_ctx('')
+      end
+      # Whether `url` is an HTTP(S) URL — one a fetch goes over the network for, and the only kind a redirect is followed to.
+      def http_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
+      # …or one of a fetch scheme (Fetch §4.4): `about`, `blob`, `data`, `file` or HTTP(S).
+      def fetch_scheme_url?(url) = url.to_s.match?(%r{\A(?:about|blob|data|file|https?):}i)
+      # Whether a top-level navigation's redirect from `url` to `next_url`, its `depth`th, is followed (HTML "create
+      # navigation params by fetching", Fetch "HTTP-redirect fetch"): an HTTP(S) URL within the redirect limit is. Any
+      # other ends it — one of no fetch scheme (`mailto:`, an app's own) handed off, the window keeping its document and its
+      # history as a download does (Chrome: ERR_ABORTED); any other a network error, its error document committed at
+      # `url`, the last URL requested (Chrome: ERR_UNSAFE_REDIRECT, ERR_TOO_MANY_REDIRECTS).
+      private def redirect_followed?(url, next_url, depth)
+        return true if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+
+        if fetch_scheme_url?(next_url) || http_url?(next_url)
+          commit_error_document(url)
+        else
+          navigation_made_no_document(url)
+        end
+        false
       end
 
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
