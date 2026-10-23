@@ -132,7 +132,7 @@ module Capybara
         # policy), so a returned eval/call has already run its end-of-script
         # microtasks.
         def eval(src)                               = @ctx.eval(src)
-        def eval_void(src)                          = @ctx.eval_void(src)
+        def eval_void(src, filename: '<eval>')      = @ctx.eval_void(src, filename: filename)
         def eval_primitive(src, filename: '<eval>') = @ctx.eval_primitive(src, filename: filename)
         def call(name, *args)                       = @ctx.call(name, *args)
 
@@ -891,10 +891,12 @@ module Capybara
       rescue StandardError
         nil
       end
-      # …and the document base URL of a frame realm, loading or loaded (nil for none: a realm gone, or the page's).
-      def frame_realm_base_url(realm_id)
-        realm = frame_realms[realm_id] || loading_frame_realms[realm_id] or return nil
-        realm.call('__csimBaseURL').to_s
+      # …and a call of `name` in realm `realm_id` (0 the page's), loading or loaded, made on its context directly — from
+      # inside a V8 callback (the module resolver), where `call`'s script-cache warm must not run — nil where the realm is
+      # gone.
+      def realm_direct_call(realm_id, name, *args)
+        realm = realm_id.to_i.zero? ? ctx : (frame_realms[realm_id] || loading_frame_realms[realm_id]) or return nil
+        realm.call(name, *args)
       rescue StandardError
         nil
       end
@@ -1545,7 +1547,8 @@ module Capybara
           # business raising. `eval_void` says so outright, replacing the trailing
           # `;undefined` this used to append. Lexical declarations persist as a
           # side effect of eval, independent of the completion value.
-          c.eval_void("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}")
+          # (…named its label, as a module's referrer: an `import()` in it resolves against its script's base URL)
+          c.eval_void("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}", filename: label.to_s)
         })
         # A javascript: URL's source (url-parse.js `runJavascriptURL`), run as a top-level Script, as HTML runs it — its
         # declarations the global's wherever they sit — its completion value handed back only where it is a primitive:
@@ -1596,7 +1599,9 @@ module Capybara
             const LEADS_USE_STRICT = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*["']use strict["']/;
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
-              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body)) return runEval(label || 'csim-eval', body);
+              // (…and one that may `import()`: run as a script named its label, the referrer its import resolves through —
+              // the `(0, eval)` path's is the anonymous `<eval>` of every one of them)
+              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body) || body.includes('import(')) return runEval(label || 'csim-eval', body);
               indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
           })();

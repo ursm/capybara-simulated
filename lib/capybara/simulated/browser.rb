@@ -9386,23 +9386,24 @@ module Capybara
 
       # HTML "resolve a module specifier" against `base_url` (the referrer's) through `realm`'s import map: the URL, or
       # the specifier itself where it resolves to none (a bare one nothing maps), which then fails to fetch.
-      # (…an inline script's — no URL of its own — the document base URL of the realm it runs in: a frame's, not the
-      # page's, its `<base href>` heeded)
+      # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`__csimInlineScriptBase`:
+      # a frame's, not the page's, its `<base href>` heeded, one inserted after it not); a script the realm knows by no
+      # name — a handler's, a string timer's — its document's base URL now)
       def resolve_module_specifier(specifier, base_url, realm)
-        base = module_base_url(base_url) || realm_document_base_url(realm.to_i) || effective_module_base(nil)
+        base = module_base_url(base_url) || realm_text(realm, '__csimInlineScriptBase', base_url.to_s) ||
+               realm_text(realm, '__csimBaseURL') || effective_module_base(nil)
         Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier
       end
-      # …the document base URL of realm `realm` (0 the page), nil where it has none to say.
-      private def realm_document_base_url(realm)
-        url = (realm.zero? ? @runtime.call('__csimBaseURL') : @runtime.frame_realm_base_url(realm)).to_s
-        url.empty? ? nil : url
-      rescue StandardError
-        nil
+      # …a string realm `realm` (0 the page) answers `name` with, nil for none.
+      private def realm_text(realm, name, *args)
+        text = @runtime.realm_direct_call(realm.to_i, name, *args).to_s
+        text.empty? ? nil : text
       end
 
       # The base a module specifier resolves against: the importer's URL — for a nested relative import, and for a
       # dynamic `import()` the referring script's. An inline script / module has no real URL — its pseudo-name is
-      # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `__csim_runScript`) — so it resolves against the PAGE URL.
+      # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `__csim_runScript`) — and, its document's base URL out of
+      # reach, resolves against the PAGE URL.
       private def effective_module_base(base)
         module_base_url(base) || @current_url || @default_host
       end
