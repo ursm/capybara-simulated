@@ -67,7 +67,6 @@ module Capybara
         # initiating frame's realm id). Deferred + applied against that realm,
         # like __csimFrameNavigate — see Browser#frame_submit_self.
         '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i, a[1].to_s, a[2]) == true },
-        '__csimFrameHistoryGo'       => ->(b, *a) { b.frame_history_go(a[0].to_i, a[1].to_i); nil },
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.

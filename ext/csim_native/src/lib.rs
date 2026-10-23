@@ -94,6 +94,7 @@ mod request_state;
 mod response_state;
 mod search_params;
 mod select_options;
+mod session_history;
 mod sw_router;
 mod system_clipboard;
 mod text_setters;
@@ -257,6 +258,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 0))?;
     native.define_module_function("event_stream_feed", magnus::function!(event_stream::feed_for_ruby, 2))?;
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
+    // The page's joint session history, its frames' with it (session_history.rs).
+    session_history::define(native, ruby)?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     // Each session's cookie store (cookie_jar.rs).

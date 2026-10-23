@@ -311,10 +311,10 @@ module Capybara
         @last_polled_gen              = nil
         @idle_settle_polls            = 0
         @ticking                      = false
-        @history                      = []
-        @history_idx                  = -1
-        # (…and the history a navigation began from, for one that downloads: `download_in_place`)
-        @history_before_navigation    = nil
+        # The page's joint session history, its frames' with it (session_history.rs), and what a replay of each entry
+        # sends and restores, by its id (`history_entry`).
+        @session_history              = Native::SessionHistory.new
+        @history_entries              = {}
         # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
         @restoring_history_state      = nil
         @cors_preflight_cache         = {}
@@ -2284,17 +2284,16 @@ module Capybara
       # cross-`visit` back-navigation (Selenium parity); only callers that want
       # per-document isolation invoke it.
       def reset_history!
-        @history.clear
-        @history_idx               = -1
-        @history_before_navigation = nil
-        @pending_history_traverse  = nil
+        @session_history.clear
+        @history_entries.clear
+        @pending_history_traverse = nil
       end
 
-      # Move through the history stack by `delta`. Per HTML spec, a
-      # same-document traversal (within a chain of pushState entries
-      # rooted at a single navigation) updates `location` and fires
-      # `popstate` with the entry's state — no full reload. A cross-
-      # document traversal replays the entry (full navigate / re-POST).
+      # Traverse the page's session history by `delta` steps — the joint history of the page and its frames
+      # (session_history.rs), whichever navigable's `history` asked: each navigable whose active entry the step moves
+      # traverses to its entry, a same-document one (a pushState's, a fragment's) by its location updated and a
+      # `popstate` (HTML "update document for history step application"), another by the entry's document made again
+      # (a navigation from history, a re-POST its POST's).
       # Returns the traversal kind so a cross-window caller
       # (`window_history_go`) knows whether to fire the target window's
       # deferred `load`: `:same_document` (pushState traversal — popstate
@@ -2303,12 +2302,13 @@ module Capybara
       def history_go(delta, force: false)
         delta = delta.to_i
         return if delta == 0
-        target = @history_idx + delta
-        return if target < 0 || target >= @history.size
-        if same_document_traversal?(@history_idx, target)
+        return unless (plan = history_plan(delta))
+
+        step, changes = plan
+        if changes.all? {|(_, _, same_document)| same_document }
           # …unless this is the page being navigated away from, running its last
           # due-now step: the navigation already under way wins, and moving the
-          # index here would leave it pointing at an entry that isn't the document
+          # step here would leave it pointing at an entry that isn't the document
           # about to commit (see `flush_outgoing_page_init`).
           #
           # Hard to reach on purpose since the page's own init runs with the load
@@ -2316,26 +2316,20 @@ module Capybara
           # goes: a traversal has to come due in the instant between the last of
           # those and the navigation. It stays because the flush CAN still fire one
           # — a timer that came due while the test was busy in Ruby — and the cost
-          # of being wrong there is a history index that doesn't describe the
+          # of being wrong there is a history step that doesn't describe the
           # document.
           return :same_document if @flushing_outgoing_page
           # Pure pushState traversal — no VM rebuild, safe to run
           # inline; the popstate dispatch happens within the current
           # call's JS context.
-          @history_idx = target
-          entry   = @history[target]
-          old_url = @current_url
-          @current_url = entry[:url]
-          @runtime.call('__csimUpdateLocation', @current_url)
-          @runtime.call('__csimDispatchPopState', entry[:state])
-          # (…and a `hashchange` queued where the fragment moved — HTML "update document for history step application")
-          @runtime.call('__csimQueueHashChange', old_url, @current_url) if fragment_of(old_url) != fragment_of(@current_url)
+          @session_history.go_to(step)
+          changes.each {|nav, id, _| traverse_same_document(nav, id) }
           :same_document
         elsif force
           # Ruby-driven (`page.go_back`), or a non-active window driven by its
           # opener (`w.history.back()`) — no live JS call on THIS window's
           # isolate to interrupt, safe to rebuild the Context synchronously.
-          perform_history_traverse(target)
+          perform_history_traverse(delta)
           :cross_document
         else
           # JS-driven (`history.back()` from a page handler): replaying
@@ -2345,79 +2339,153 @@ module Capybara
           # in-flight call on the isolate). Stash the intent
           # and drain after the call returns — mirrors
           # `location_assign` / `location_reload`.
-          @pending_history_traverse = target
+          @pending_history_traverse = delta
           :cross_document
         end
       end
 
       def consume_pending_history_traverse
-        return unless (target = @pending_history_traverse)
+        return unless (delta = @pending_history_traverse)
         @pending_history_traverse = nil
-        perform_history_traverse(target)
+        invalidate_find_cache
+        perform_history_traverse(delta)
       end
 
-      private def perform_history_traverse(target)
-        # Before the index below moves (see `flush_outgoing_page_init`).
-        flush_outgoing_page_init if @timers_active
-        capture_outgoing_form_state
-        @history_idx = target
-        replay_history_entry(@history[target])
-        restore_form_state(@history[target])
-        restore_flushed_nav_intents
+      # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `plan`) — past
+      # one whose frame's entry a traversal cannot make again alone (a srcdoc or a blob document it left, a data: one's,
+      # which have no bytes to come back to: `recordable_frame_url?`), on to the next step.
+      private def history_plan(delta)
+        step = delta.positive? ? 1 : -1
+        loop do
+          plan = @session_history.plan(delta) or return nil
+          return plan unless plan[1].any? {|nav, id, same_document| !nav.zero? && !same_document && !recordable_frame_url?(@session_history.url(id)) }
+
+          delta += step
+        end
+      end
+
+      private def perform_history_traverse(delta)
+        return unless (plan = history_plan(delta))
+
+        step, changes = plan
+        if (page = changes.find {|nav, _, same_document| nav.zero? && !same_document })
+          # Before the step below moves (see `flush_outgoing_page_init`).
+          flush_outgoing_page_init if @timers_active
+          capture_outgoing_form_state
+          @session_history.go_to(step)
+          replay_history_entry(page[1])
+          restore_form_state(page[1])
+          restore_flushed_nav_intents
+          return
+        end
+        # (…its frames' entries, each frame's document made again — the one it leaves snapshotted first, so a traversal
+        # forward again restores it, keeping how it was reached: a POST entry re-POSTs)
+        frames = changes.filter_map {|nav, id, same_document| [nav, id, navigable_realm(nav)] unless same_document }
+        frames.each {|_, _, realm| leave_frame_entry(realm) if realm }
+        @session_history.go_to(step)
+        changes.each {|nav, id, same_document| traverse_same_document(nav, id) if same_document }
+        frames.each {|_, id, realm| reload_frame_to_entry(realm, history_entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
+      rescue StandardError => e
+        log_console('warn', "history traversal failed: #{e.message}")
+      end
+
+      # Navigable `nav` (0 the page) traversed to its entry `id` of the document it is at: its location the entry's URL, a
+      # `popstate` with its state, and a `hashchange` queued where the fragment moved.
+      private def traverse_same_document(nav, id)
+        entry = history_entry(id)
+        if nav.zero?
+          old_url = @current_url
+          @current_url = entry[:url]
+          @runtime.call('__csimUpdateLocation', @current_url)
+          @runtime.call('__csimDispatchPopState', entry[:state])
+          @runtime.call('__csimQueueHashChange', old_url, @current_url) if fragment_of(old_url) != fragment_of(@current_url)
+          return
+        end
+        return unless (realm = navigable_realm(nav)) && @runtime.frame_realm_alive?(realm)
+
+        old_url = frame_realm_url(realm)
+        @runtime.realm_call(realm, '__csimUpdateLocation', entry[:url])
+        @runtime.realm_call(realm, '__csimDispatchPopState', entry[:state])
+        @runtime.realm_call(realm, '__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
       end
 
       # Snapshot the OUTGOING document's form-control state into the history entry
       # we are leaving, so a later back/forward traversal to it restores the
       # values the user/script had set (HTML "persisted user state"), not the
       # markup defaults. Captured while the outgoing VM is still live — before
-      # record_history advances the index or boot rebuilds the context.
+      # record_history adds the next entry or boot rebuilds the context.
       def capture_outgoing_form_state
-        return if @history_idx < 0 || (entry = @history[@history_idx]).nil?
+        return unless (id = @session_history.active(0))
         state = @runtime.call('__csimCaptureFormState')
-        entry[:form_state] = state if state
+        update_history_entry(id, form_state: state) if state
       end
 
       # Re-apply a history entry's captured form state after its document has been
       # rebuilt. The JS setters set the dirty value flag WITHOUT firing
       # input/change, so a restored value doesn't look like a fresh user edit.
-      def restore_form_state(entry)
-        return unless entry && (state = entry[:form_state])
+      def restore_form_state(id)
+        return unless (state = history_entry(id)[:form_state])
         @runtime.call('__csimRestoreFormState', state)
       end
 
-      # Same-document = every entry between `from` and `to` (inclusive)
-      # is a `:push_state` entry (or the boundary just changed state on
-      # the current URL). A `:visit` entry between them means we'd
-      # cross a real navigation, which needs a fresh document.
       # A URL's fragment — nil where it has none, which an empty one is not.
       def fragment_of(url)
         url.to_s.include?('#') ? url.to_s.split('#', 2)[1] : nil
       end
 
-      def same_document_traversal?(from, to)
-        lo, hi = [from, to].sort
-        ((lo + 1)..hi).all? {|i| @history[i] && @history[i][:kind] == :push_state }
+      # The page's navigation to `entry[:url]` recorded: an entry of the step after the current one — one in place of
+      # the current entry, `replace` (a `location.replace`) — of a new document state, of the same one for a
+      # `:push_state` kind (a pushState's, a fragment's). What a replay of it sends and restores is the entry's here,
+      # by its id (`history_entry`).
+      def record_history(entry, replace: false)
+        same_document = entry[:kind] == :push_state
+        id = replace ? @session_history.replace(0, 0, entry[:url], same_document) : @session_history.push(0, 0, entry[:url], same_document)
+        set_history_entry(id, entry.except(:url, :kind))
       end
+      # Session history entry `id` as a replay reads it: its URL (session_history.rs) and what the host keeps of it — how
+      # it was reached (a POST's method and body, its origin, referrer and referrer policy), its classic history API
+      # state, its form state.
+      def history_entry(id)
+        (@history_entries[id] || {}).merge(url: @session_history.url(id))
+      end
+      # …each change to what the host keeps made by a new record, so a history saved before it (`save_history`) keeps
+      # the one it had.
+      private def update_history_entry(id, **fields)
+        @history_entries[id] = (@history_entries[id] || {}).merge(fields)
+      end
+      private def set_history_entry(id, data)
+        @history_entries[id] = data
+        return if @history_entries.size < (@history_entries_pruned_at ||= 64)
 
-      def record_history(entry)
-        # Discard any forward-history tail (a real browser drops the
-        # redo stack the moment you navigate after a `go_back`).
-        @history = @history[0..@history_idx] if @history_idx + 1 < @history.size
-        @history << entry.merge(kind: entry[:kind] || :visit)
-        @history_idx = @history.size - 1
+        live = @session_history.ids.to_set
+        @history_entries.select! {|key, _| live.include?(key) }
+        @history_entries_pruned_at = [64, @history_entries.size * 2].max
       end
-      # …and one in place of the current entry (a `location.replace`), the forward tail kept.
-      def replace_history(entry)
-        return record_history(entry) if @history.empty?
-        @history[@history_idx] = entry.merge(kind: entry[:kind] || :visit)
+      # The session history as it stands, kept for a navigation that may end in no document (a download, a hand-off):
+      # slot 0 a page's navigation, 1 a frame's.
+      private def save_history(slot)
+        @session_history.save(slot)
+        (@saved_history_entries ||= [])[slot] = @history_entries.dup
+      end
+      private def restore_history(slot)
+        return unless @session_history.restore(slot)
+
+        @history_entries.merge!(@saved_history_entries[slot])
+        @saved_history_entries[slot] = nil
+      end
+      private def forget_history(slot)
+        @session_history.forget(slot)
+        @saved_history_entries[slot] = nil if @saved_history_entries
       end
       # `is_reload` distinguishes a RELOAD of the current entry (`refresh`) from a
       # history TRAVERSAL (`go_back`/`go_forward`) — a controlling SW observes the
       # difference on `event.request.isReloadNavigation` / `.isHistoryNavigation`.
       # (…its document made with the entry's classic history API state — `history.state` before its scripts run, as a
       # reload or a traversal to it gives it, HTML "update document for history step application")
-      def replay_history_entry(entry, is_reload: false)
-        return unless entry
+      def replay_history_entry(id, is_reload: false)
+        return unless id
+
+        entry = history_entry(id)
         @restoring_history_state = entry[:state]
         if entry[:method] == :post
           navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin],
@@ -3364,12 +3432,12 @@ module Capybara
         origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
         # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
         # redirect rewrites: `redirect_history_entry`)
-        @history_before_navigation = window_has_document? ? [@history.dup, @history_idx] : nil if depth.zero?
+        save_navigation_history if depth.zero?
         unless from_history || depth > 0
           capture_outgoing_form_state
           # (…the request as it was sent — its origin, its referrer and referrer policy — what a reload or a traversal
           # re-posts: HTML's document state)
-          record_navigation_history({method: :post, url: url, body: body, content_type: content_type, origin: origin, referer: referer, referrer_policy: referrer_policy}, replace: replace)
+          record_history({method: :post, url: url, body: body, content_type: content_type, origin: origin, referer: referer, referrer_policy: referrer_policy}, replace: replace)
         end
         # A controlled top-level POST navigation (form submission) goes to the SW's fetch
         # event first — same model as `navigate` (the SW reads the body via
@@ -3545,9 +3613,8 @@ module Capybara
         # (Capybara's reset_session spec covers exactly this); start the
         # next test back on the main document.
         reset_frame_scope
-        @history.clear
-        @history_idx               = -1
-        @history_before_navigation = nil
+        @session_history.clear
+        @history_entries.clear
         @cors_preflight_cache = {}   # CORS-preflight cache is per browsing context
         # A JS-driven history.back()/go() that scheduled a deferred traverse but
         # never drained (the page navigated away first) must not survive the reset
@@ -10524,11 +10591,11 @@ module Capybara
           entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
           url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
           cur   = current_frame_history_entry(realm_id)
-          if entry && cur && cur[:method] == 'POST'
+          if entry && cur && cur[:method] == :post
             navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true)
           elsif entry && !url.empty?
             navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true)
-          elsif cur && cur[:method] == 'POST'
+          elsif cur && cur[:method] == :post
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
             navigate_realm_self_post(realm_id, cur[:url], cur[:body], cur[:content_type], is_reload: true)
@@ -10607,154 +10674,117 @@ module Capybara
         end
       end
       # ── Frame session history ──────────────────────────────────────────────
-      # A nested browsing context (iframe) keeps its OWN back/forward history of
-      # the documents it navigates through, with each entry's form-control state
-      # captured for restoration (HTML "persisted user state" / bfcache). Keyed by
-      # [parent realm, iframe element handle] — stable across the frame-realm
-      # rebuilds a navigation triggers (the element outlives its realm).
+      # A nested browsing context (iframe) keeps its entries in the page's joint session history (session_history.rs): a
+      # nested history of its parent's document state, by its navigable (navigables.rs's id for it: a container removed
+      # and inserted again has a new one), each entry's form-control state captured for restoration (HTML "persisted
+      # user state" / bfcache). Its `history.back()` traverses the page's history, as the page's does (`history_go`).
       #
-      # `iframe.contentWindow.history.back()` runs while the frame realm is on the
-      # V8 stack, so (like frame_navigate_self) DEFER the traversal and drain it
-      # after the call returns — rebuilding the realm inline would terminate it.
-      def frame_history_go(realm_id, delta)
-        return if realm_id.nil? || realm_id.zero?
-        @pending_frame_traverse = {realm_id: realm_id, delta: delta.to_i}
+      # Navigable of frame realm `realm_id` and its parent's (0 the page), and the parent realm — nil for a realm that is
+      # no frame of this page's (a same-isolate window's).
+      def frame_navigable(realm_id)
+        parent = @runtime.frame_realm_parent(realm_id).to_i
+        return nil if frame_container_handle(realm_id, parent).zero?
+        return nil if (nav = @runtime.frame_realm_navigable(realm_id)).zero?
+
+        parent_nav = parent.zero? ? 0 : @runtime.frame_realm_navigable(parent)
+        return nil if parent_nav.zero? && !parent.zero?
+
+        [nav, parent_nav, parent]
       end
-      def consume_pending_frame_traverse
-        return if @pending_frame_traverse.nil?
-        pt = @pending_frame_traverse
-        @pending_frame_traverse = nil
-        invalidate_find_cache
-        perform_frame_traverse(pt[:realm_id], pt[:delta])
-      rescue StandardError => e
-        log_console('warn', "frame history traversal failed: #{e.message}")
+      # …the live frame realm of navigable `nav`, or nil.
+      def navigable_realm(nav)
+        @runtime.frame_realm_navigables.select {|realm, n| n == nav && @runtime.frame_realm_alive?(realm) }.keys.max
       end
-      def perform_frame_traverse(realm_id, delta)
-        # The traversal was deferred; the frame may have been disposed (a competing
-        # nav) between flag and drain — drop it gracefully.
-        return unless @runtime.frame_realm_alive?(realm_id)
-        return unless (h = frame_history_of(realm_id))
-        target = h[:idx] + delta
-        # (…to an entry a traversal can make again alone: an HTTP(S) document refetched, about:blank — one past a srcdoc or
-        # a blob document it left, which has no bytes to come back to)
-        step = delta.positive? ? 1 : -1
-        target += step while target.between?(0, h[:entries].size - 1) && !recordable_frame_url?(h[:entries][target][:url])
-        return if target.negative? || target >= h[:entries].size
-        # Snapshot the entry we're leaving so a later forward traversal restores it (keeping how it
-        # was reached, so a POST entry re-POSTs when traversed back to).
-        leave_frame_entry(realm_id, h) if h[:idx] >= 0
-        reload_frame_to_entry(realm_id, h[:entries][target])
-        h[:idx] = target   # advance only after the rebuild succeeds
+      # The id of the active entry of frame realm `realm_id`'s navigable — `create`, made where it has none (its
+      # parent's first), its URL the document's the frame is at; nil for none.
+      def frame_history_id(realm_id, create: false)
+        return nil unless (nav, parent_nav, parent = frame_navigable(realm_id))
+        return @session_history.active(nav) unless create
+
+        frame_history_id(parent, create: true) unless parent.zero?
+        @session_history.seed(nav, parent_nav, frame_realm_url(realm_id).to_s)
       end
-      # Record a frame navigation away from `realm_id` to `new_url`: snapshot the
-      # OUTGOING document (URL + form state) into the current entry — seeding entry
-      # 0 the first time — then drop any forward tail and push the new entry: every frame navigation's, a form's, a
-      # link's, a location's (`location.replace`'s replacing the current one instead: `replace_frame_entry`).
+      # Record a frame navigation away from `realm_id` to `new_url`: snapshot the OUTGOING document (URL + form state)
+      # into the current entry, then add the new one — every frame navigation's, a form's, a link's, a location's
+      # (`location.replace`'s replacing the current one instead: `replace_frame_entry`) — the page's history's forward
+      # steps dropped.
       # `post` (a {body, content_type}) records that this entry was reached by a POST submission,
       # so a later reload / history traversal re-POSTs it (with the body) rather than GET-ing the URL.
       # (…whatever its URL, so the entry a reload reads is the document's the frame is at: one a traversal cannot make
       # again alone — a blob's, a data: one's, whose bytes are its document's — passed over by a traversal,
-      # `perform_frame_traverse`)
+      # `history_plan`)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
         # (…none of a javascript: URL's, which runs in the document it is at — HTML "navigate", its result at most
         # replacing it)
         return if new_url.to_s.match?(/\Ajavascript:/i)
+        return unless (nav, parent_nav, = frame_navigable(realm_id))
 
-        return unless (h = frame_history_of(realm_id, create: true))
-
-        snapshot_frame_history(realm_id, h)
+        save_frame_history(realm_id)
         # (…the first in place of the frame's initial about:blank, which no traversal goes back to: HTML "navigate" — a
         # navigable whose active document is its initial about:blank replaces it)
-        if h[:idx].negative? && @runtime.first_frame_realm?(realm_id) && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
-          h[:entries] = [entry_for_frame_nav(new_url, post)]
-          h[:idx]     = 0
-          return
-        end
-        h[:idx] = 0 if h[:idx].negative?
-        leave_frame_entry(realm_id, h)
-        h[:entries] = h[:entries][0..h[:idx]]
-        h[:entries] << entry_for_frame_nav(new_url, post)
-        h[:idx] = h[:entries].size - 1
+        initial = frame_history_id(realm_id).nil? && @runtime.first_frame_realm?(realm_id) && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
+        frame_history_id(realm_id, create: true)
+        leave_frame_entry(realm_id) unless initial
+        id = initial ? @session_history.replace(nav, parent_nav, new_url.to_s, false) : @session_history.push(nav, parent_nav, new_url.to_s, false)
+        set_history_entry(id, entry_for_frame_nav(post))
       end
-      # …whether a frame's session history entry for `url` can be made again by a traversal alone (`perform_frame_traverse`).
+      # …whether a frame's session history entry for `url` can be made again by a traversal alone (`history_plan`).
       def recordable_frame_url?(url) = http_url?(url) || url.to_s.match?(ABOUT_BLANK)
-      def entry_for_frame_nav(url, post)
-        entry = {url: url.to_s, form_state: nil}
-        entry.merge!(method: 'POST', body: post[:body], content_type: post[:content_type]) if post
-        entry
+      def entry_for_frame_nav(post)
+        post ? {method: :post, body: post[:body], content_type: post[:content_type]} : {}
       end
-      # …and a navigation of it its session history records no entry for — a location's: the current entry made its, where
-      # the frame has a history (one an earlier navigation recorded) for a reload or a traversal to read, so neither goes
-      # back to the document it left.
+      # …and a navigation of it its session history records no entry for — a location's: the current entry made its, so
+      # neither a reload nor a traversal goes back to the document it left.
       def replace_frame_entry(realm_id, url)
-        return unless (cur = current_frame_history_entry(realm_id))
+        return unless (nav, parent_nav, = frame_navigable(realm_id)) && frame_history_id(realm_id, create: true)
 
-        snapshot_frame_history(realm_id, frame_history_of(realm_id))
-        cur.replace(url: url.to_s, form_state: nil)
-      end
-      # The session history of frame realm `realm_id`'s container, nil for none.
-      # (…its navigable's, which its container keeps while it is in its document — one inserted again a new navigable's,
-      # with none: `frame_realm_navigable` — made where `create` and it has none; nil for none)
-      def frame_history_of(realm_id, create: false)
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        return nil if handle.zero?
-
-        key       = [parent, handle]
-        navigable = @runtime.frame_realm_navigable(realm_id)
-        h = @frame_histories&.[](key)
-        return h if h && h[:navigable] == navigable
-
-        (@frame_histories ||= {})[key] = {entries: [], idx: -1, navigable: navigable} if create
+        save_frame_history(realm_id)
+        set_history_entry(@session_history.replace(nav, parent_nav, url.to_s, false), {})
       end
       # …kept as it stood before a navigation recorded or replaced an entry of it, which one that ends in no document —
       # a download, a navigation handed off — restores (`frame_navigation_made_no_document`): neither is a navigation of
       # the frame (HTML, Chrome).
-      def snapshot_frame_history(realm_id, h)
-        @frame_history_before = h && [realm_id, h, h[:entries].map(&:dup), h[:idx]]
+      def save_frame_history(realm_id)
+        save_history(1)
+        @frame_history_saved_for = realm_id
       end
       def frame_navigation_made_no_document(realm_id)
-        before, @frame_history_before = @frame_history_before, nil
-        return unless before && before[0] == realm_id
+        return unless @frame_history_saved_for == realm_id
 
-        _, h, entries, idx = before
-        h[:entries] = entries
-        h[:idx]     = idx
+        @frame_history_saved_for = nil
+        restore_history(1)
+      end
+      # …and kept no more: the navigation made a document.
+      def frame_navigation_made_document
+        @frame_history_saved_for = nil
+        forget_history(1)
       end
       # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
       # whether to re-POST.
       def current_frame_history_entry(realm_id)
-        h = frame_history_of(realm_id)
-        h && h[:idx] >= 0 ? h[:entries][h[:idx]] : nil
+        id = frame_history_id(realm_id)
+        id && history_entry(id)
       end
-      # The history entry for the document currently loaded in `realm_id`: its URL
-      # plus a snapshot of its form-control state.
-      def frame_history_entry(realm_id)
-        {url: frame_realm_url(realm_id), form_state: capture_frame_form_state(realm_id)}
-      end
-      # Refresh the outgoing entry's url + form-state snapshot while PRESERVING how it was reached
-      # (a POST entry's method / body / content_type) — leaving a document doesn't change the request
-      # that loaded it, so a later traversal back re-POSTs rather than GET-ing.
-      def snapshot_outgoing_entry(realm_id, prev)
-        snap = frame_history_entry(realm_id)
-        prev ? prev.merge(snap) : snap
-      end
-      # The frame history `h` leaving its current entry for the document in `realm_id`: snapshotted now, and its form
-      # state again as the document is unloaded (`frame_document_unloaded`) — what its pagehide / unload handlers left
-      # is what a traversal back restores (Chrome). The snapshot taken now stands when the navigation never commits.
-      def leave_frame_entry(realm_id, h)
+      # The frame realm `realm_id` leaving its current entry: the entry's URL and form state snapshotted now — keeping how
+      # it was reached (a POST entry's method / body / content_type: leaving a document doesn't change the request that
+      # loaded it, so a later traversal back re-POSTs rather than GET-ing) — and its form state again as the document is
+      # unloaded (`frame_document_unloaded`): what its pagehide / unload handlers left is what a traversal back restores
+      # (Chrome). The snapshot taken now stands when the navigation never commits.
+      def leave_frame_entry(realm_id)
         # (…a document no entry was recorded for — a blob's, a data: one's — leaving the entry before it as it is)
-        return unless recordable_frame_url?(frame_realm_url(realm_id))
+        return unless recordable_frame_url?(url = frame_realm_url(realm_id))
+        return unless (id = frame_history_id(realm_id))
 
-        entry = h[:entries][h[:idx]] = snapshot_outgoing_entry(realm_id, h[:entries][h[:idx]])
-        (@frame_leaving_entries ||= {})[realm_id] = entry
+        @session_history.set_url(id, url)
+        update_history_entry(id, form_state: capture_frame_form_state(realm_id))
+        (@frame_leaving_entries ||= {})[realm_id] = id
       end
       # A frame's document unloaded (its pagehide and unload fired, its realm still alive): the history entry its
       # navigation is leaving takes its form state as its handlers left it.
       def frame_document_unloaded(realm_id)
-        entry = @frame_leaving_entries&.delete(realm_id)
-        entry[:form_state] = capture_frame_form_state(realm_id) if entry
+        id = @frame_leaving_entries&.delete(realm_id)
+        update_history_entry(id, form_state: capture_frame_form_state(realm_id)) if id
       end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
       # and whose origin an Origin header carries — a local document's (about:blank, srcdoc) its creator's, the nearest
@@ -10824,7 +10854,7 @@ module Capybara
         end
         # An entry reached by a POST submission re-POSTS (with the recorded body); a normal entry
         # re-GETs. The method drives both the SW fetch event and the network fallback.
-        is_post   = entry[:method] == 'POST'
+        is_post   = entry[:method] == :post
         body      = entry[:body].to_s
         post_args = is_post ? {method: 'POST', body: body, content_type: entry[:content_type]} : {}
         # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a
@@ -11142,8 +11172,8 @@ module Capybara
       # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
       # so a Post/Redirect/Get entry stays a GET.
       def tag_frame_entry_post(realm_id, body, content_type)
-        cur = current_frame_history_entry(realm_id)
-        cur.merge!(method: 'POST', body: body, content_type: content_type) if cur
+        id = frame_history_id(realm_id)
+        update_history_entry(id, method: :post, body: body, content_type: content_type) if id
       end
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
@@ -11158,7 +11188,7 @@ module Capybara
 
         new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
         return if new_id.zero?
-        @frame_history_before = nil   # (…its navigation made a document: `snapshot_frame_history`)
+        frame_navigation_made_document
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
           # (…an entered frame's scope following it to its new document, as `reload_current_frame_realm` keeps it)
@@ -11239,7 +11269,6 @@ module Capybara
         consume_pending_frame_submit
         consume_pending_page_submission
         consume_pending_frame_reload
-        consume_pending_frame_traverse
         consume_pending_reload
         consume_pending_history_traverse
         consume_pending_aux_window
@@ -11269,7 +11298,7 @@ module Capybara
       def refresh
         # Before the replay below commits anything (see `flush_outgoing_page_init`).
         flush_outgoing_page_init if @timers_active
-        replay_history_entry(@history[@history_idx], is_reload: true)
+        replay_history_entry(@session_history.active(0), is_reload: true)
         restore_flushed_nav_intents
       end
       # `history.pushState(state, '', '/path')` ships the URL through
@@ -11283,19 +11312,17 @@ module Capybara
       # the URL are mirrored on Ruby's slot so a subsequent back to
       # this entry restores the same state.
       def history_state(url, state = nil, realm_id = 0)
-        return note_frame_same_document_url(realm_id.to_i, url) unless realm_id.to_i.zero?
+        return frame_history_state(realm_id.to_i, url, state, push: false) unless realm_id.to_i.zero?
 
         if url
           resolved = resolve_against_current(url.to_s)
           record_url_transition(resolved)
           @current_url = resolved
         end
-        return if @history_idx < 0
-        @history[@history_idx] = (@history[@history_idx] || {}).merge(
-          url:   @current_url,
-          state: state,
-          kind:  @history[@history_idx] ? @history[@history_idx][:kind] : :push_state
-        )
+        return unless (id = @session_history.active(0))
+
+        @session_history.set_url(id, @current_url)
+        update_history_entry(id, state: state)
       end
       # `history.pushState(state, _, url)` from SPA navigation (Turbo
       # Visit, InstantClick, …) appends a new browser-history entry.
@@ -11303,7 +11330,7 @@ module Capybara
       # within the pushState chain (fires `popstate`) and only crosses
       # to a real reload when the back hits a `:visit` boundary.
       def history_push(url, state = nil, realm_id = 0)
-        return note_frame_same_document_url(realm_id.to_i, url) unless realm_id.to_i.zero?
+        return frame_history_state(realm_id.to_i, url, state, push: true) unless realm_id.to_i.zero?
 
         resolved = resolve_against_current(url.to_s)
         record_url_transition(resolved)
@@ -11311,34 +11338,29 @@ module Capybara
         record_history({method: :get, url: resolved, state: state, kind: :push_state})
       end
 
-      # A SAME-DOCUMENT URL change (pushState / replaceState / a fragment navigation) made by a
-      # NESTED browsing context. It belongs to that frame's own session history — mirroring it onto
-      # the top document's would make `current_url` report a URL no window is at, which is what an
-      # iframe'd SPA does on every navigation. Recorded as the current entry's URL (rather than a
-      # new entry) so a later `location.reload()` refetches the pushState'd URL, not the stale
-      # `src`; in-frame same-document TRAVERSAL over such entries is still unmodelled.
+      # A SAME-DOCUMENT URL change (pushState / replaceState / a fragment navigation) made by a NESTED browsing context:
+      # an entry of that frame's session history (a step of the page's joint one) — mirroring it onto the page's would
+      # make `current_url` report a URL no window is at, which is what an iframe'd SPA does on every navigation — or,
+      # `push` not, its current entry's URL and state made the new ones, so a later `location.reload()` refetches the
+      # pushState'd URL, not the stale `src`.
       # A same-isolate window realm (a popup) has no iframe container and so no entry to update —
       # its handle is 0, and not touching the top history is already the fix there.
-      private def note_frame_same_document_url(realm_id, url)
-        return nil if url.nil? || realm_id.zero?
+      private def frame_history_state(realm_id, url, state, push:)
+        return nil if realm_id.zero? || !(id = frame_history_id(realm_id, create: true))
 
-        return nil unless (h = frame_history_of(realm_id, create: true))
-
-        if h[:idx].negative?
-          # Seed entry 0 from the document as it is NOW — this runs before the location update,
-          # so it still reads the URL the frame was loaded at.
-          h[:entries] << frame_history_entry(realm_id)
-          h[:idx] = 0
+        nav, parent, = frame_navigable(realm_id)
+        if push
+          id = @session_history.push(nav, parent, url.to_s, true)
+          set_history_entry(id, {state: state})
+        else
+          @session_history.set_url(id, url.to_s) if url
+          update_history_entry(id, state: state)
         end
-        h[:entries][h[:idx]] = (h[:entries][h[:idx]] || {}).merge(url: url.to_s)
         nil
       end
 
-      # Total history entries (after forward-tail truncation), surfaced
-      # to JS `history.length` via the `__historyLength` host fn.
-      def history_length
-        [@history.size, 1].max
-      end
+      # `history.length`: the number of steps of the page's session history — its frames' navigations' too.
+      def history_length = @session_history.length
       # The host a URL names, or nil for one with none (about:blank / data: / a relative current_url before the first
       # navigate).
       def cookie_host(url)
@@ -11635,7 +11657,7 @@ module Capybara
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed).to_i
         return if new_id.zero?
-        @frame_history_before = nil   # (…its navigation made a document: `snapshot_frame_history`)
+        frame_navigation_made_document
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
         if entry.equal?(@frame_stack.last)
           entry[:realm_id]  = new_id
@@ -11716,10 +11738,10 @@ module Capybara
             return
           end
           # (…the session history as it stands, which a download it ends in restores: `navigate_post`'s)
-          @history_before_navigation = window_has_document? ? [@history.dup, @history_idx] : nil if depth.zero?
+          save_navigation_history if depth.zero?
           unless from_history || depth > 0
             capture_outgoing_form_state
-            record_navigation_history({method: :get, url: url}, replace: replace)
+            record_history({method: :get, url: url}, replace: replace)
           end
           # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
@@ -11808,13 +11830,14 @@ module Capybara
       # become a GET where the redirect makes one — so a reload gets the page it was redirected to, not the chain run
       # again: a Post/Redirect/Get page's not the form submitted again (Chrome).
       private def redirect_history_entry(url, get:)
-        return unless (entry = @history_idx >= 0 && @history[@history_idx])
+        return unless (id = @session_history.active(0))
 
-        @history[@history_idx] = get ? entry.except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get, url: url) : entry.merge(url: url)
+        @session_history.set_url(id, url)
+        @history_entries[id] = (@history_entries[id] || {}).except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get) if get
       end
-      private def record_navigation_history(entry, replace: false)
-        @history_before_navigation = [@history.dup, @history_idx] if window_has_document?
-        replace ? replace_history(entry) : record_history(entry)
+      # …the history kept as it stood before, for a window that has a document to stay at.
+      private def save_navigation_history
+        window_has_document? ? save_history(0) : forget_history(0)
       end
       # A navigation's response that downloads makes no document: a window that has one stays at it — its URL and its
       # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a),
@@ -11828,11 +11851,11 @@ module Capybara
       # …as a navigation handed off to external software makes none (`redirect_followed?`).
       private def navigation_made_no_document(url)
         if window_has_document?
-          @history, @history_idx = @history_before_navigation if @history_before_navigation
+          restore_history(0)
         else
           @current_url = url
         end
-        @history_before_navigation = nil
+        forget_history(0)
         restore_flushed_nav_intents
         nil
       end
@@ -11892,9 +11915,9 @@ module Capybara
         @runtime.call('__csimFollowWindowClock') unless @workers.empty?
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.
-        # Per-frame session histories are scoped to this document tree; drop them.
+        # Its frames are new navigables, which the nested histories its document state kept from before are not.
         reset_frame_scope
-        @frame_histories       = nil
+        @session_history.rebuilt
         @frame_leaving_entries = nil
         reset_timer_state
         # The response content type drives both the parser choice (XML vs HTML —
@@ -12072,7 +12095,7 @@ module Capybara
       #    `/pushed` — the outgoing document's entries are real, they just don't
       #    move the incoming document's URL. Running here reproduces that: the
       #    mirrors (`history_state` / `history_push` / `history_go`, which all take
-      #    effect IMMEDIATELY on `@current_url` and `@history`) act on the outgoing
+      #    effect IMMEDIATELY on `@current_url` and the session history) act on the outgoing
       #    entry, and this navigation's `record_history` / `@current_url = url`
       #    then commit on top. Flushing AFTER the commit — where this used to
       #    live — let a late SPA redirect rewrite the incoming URL instead:
@@ -12105,7 +12128,7 @@ module Capybara
       NAV_INTENT_SLOTS = %i[
         @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
-        @pending_frame_reload @pending_frame_traverse
+        @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS
       LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator].freeze
@@ -12115,8 +12138,8 @@ module Capybara
         saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
         NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
         # A same-document `history.back()` from the flushed page takes effect INLINE
-        # (`history_go`), moving `@history_idx` under the navigation now committing —
-        # the document would end up being the incoming page while the index pointed at
+        # (`history_go`), moving the history step under the navigation now committing —
+        # the document would end up being the incoming page while the step pointed at
         # the entry the outgoing page stepped to, so a later `go_forward` replayed the
         # wrong entry. Chrome resolves the race the other way (measured, 151: a
         # `history.back()` fired while a slow document is in flight CANCELS that
@@ -12592,7 +12615,7 @@ module Capybara
         return false unless outcome == :follow
 
         # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
-        current_frame_history_entry(realm_id)&.store(:url, next_url.to_s)
+        (id = frame_history_id(realm_id)) && @session_history.set_url(id, next_url.to_s)
         true
       end
       # …the end itself: `:follow`, `:fail` (a network error) or `:hand_off`.
