@@ -72,6 +72,26 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(session.evaluate_script('history.length')).to eq(3)
   end
 
+  # …a document still loading too, moved once it is there — not loaded again, whose script would click again (Chrome:
+  # one GET of /slow, length 3).
+  it "moves a frame still loading to the fragment a link asks for" do
+    hits = []
+    session = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      body = case env['PATH_INFO']
+             when '/top' then '<iframe name=n src="/blank"></iframe><a id=l target=n href="/slow#e">l</a>'
+             when '/slow' then 'slow<script>parent.document.getElementById("l").click()</script><p id=e>e'
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/slow"')
+    expect(session.evaluate_script('frames[0].location.hash')).to eq('#e')
+    expect(hits.count('/slow')).to eq(1)
+    expect(session.evaluate_script('history.length')).to eq(3)
+  end
+
   it "sends nothing where the frame's srcdoc is set after it" do
     hits = []
     session = session_with(hits)

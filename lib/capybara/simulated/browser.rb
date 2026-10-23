@@ -3276,6 +3276,7 @@ module Capybara
         !@pending_location.nil? ||
           @pending_reload ||
           !(@pending_frame_nav || {}).empty? ||
+          !(@pending_frame_fragments || []).empty? ||
           !(@pending_frame_submit || []).empty? ||
           !@pending_page_submission.nil? ||
           !(@pending_frame_reload || []).empty?
@@ -10518,8 +10519,11 @@ module Capybara
         # A fragment of the document the frame is at, which HTML "navigate to a fragment" moves to within it at once, no
         # navigation ongoing: the one already under way — a cross-document one stashed — going on (Chrome: `location =
         # '/other'` and then a link to its document's `#b` pushes the fragment's entry and lands at /other).
-        if @runtime.frame_realm_alive?(realm_id) && frame_fragment_navigation?(realm_id, url)
-          return @runtime.realm_call(realm_id, '__csimFragmentNavigate', url.to_s, replace == true)
+        # (…a document still loading moved once its realm is there to ask: `consume_pending_frame_nav`)
+        if frame_fragment_navigation?(realm_id, url)
+          return @runtime.realm_call(realm_id, '__csimFragmentNavigate', url.to_s, replace == true) if @runtime.frame_realm_alive?(realm_id)
+
+          return (@pending_frame_fragments ||= []) << [realm_id, url.to_s, replace == true]
         end
 
         supersede_frame_navigation(realm_id)
@@ -10546,6 +10550,17 @@ module Capybara
       rescue StandardError
         nil
       end
+      # …the fragment navigations of frames whose documents were still loading as they were asked for, each made within
+      # its document now that its realm is there — or left for the next drain while it is still loading.
+      def consume_pending_frame_fragments
+        return if @pending_frame_fragments.nil? || @pending_frame_fragments.empty?
+
+        waiting, @pending_frame_fragments = @pending_frame_fragments.partition {|realm_id, *| @runtime.loading_frame_realms.key?(realm_id) }
+        @pending_frame_fragments.each do |realm_id, url, replace|
+          @runtime.realm_call(realm_id, '__csimFragmentNavigate', url, replace) if @runtime.frame_realm_alive?(realm_id)
+        end
+        @pending_frame_fragments = waiting
+      end
       # Whether `url` is a fragment navigation of frame realm `realm_id`'s document (url_ops.rs `is_fragment_navigation`).
       def frame_fragment_navigation?(realm_id, url)
         (here = frame_realm_url(realm_id)) && Native.url_fragment_navigation(here.to_s, url.to_s)
@@ -10554,6 +10569,7 @@ module Capybara
         # Window-realm self-navs are realm navs too — drain them at every frame-nav
         # drain point (before the frame-nav early-return so a window-only nav lands).
         consume_pending_window_nav
+        consume_pending_frame_fragments
         return if @pending_frame_nav.nil? || @pending_frame_nav.empty?
         navs = @pending_frame_nav
         @pending_frame_nav = nil
@@ -10592,6 +10608,8 @@ module Capybara
         ensure
           @navigation_sandbox = saved_sandbox
         end
+        # (…and a fragment one a document those made asked for as it loaded: there now)
+        consume_pending_frame_fragments
       end
       # A same-origin WINDOW realm (window.open in this isolate) navigating itself
       # via `win.location = …`. Like frame_navigate_self, defer (the call lands here
@@ -12241,7 +12259,7 @@ module Capybara
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
         @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
-        @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
+        @pending_window_nav @pending_frame_nav @pending_frame_fragments @pending_frame_submit @pending_page_submission
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS
