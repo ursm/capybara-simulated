@@ -125,13 +125,14 @@ RSpec.describe "a form submission's request" do
     "top.location.href = '/y'; f.submit()"                        => '/t?q=1',
     "top.location.href = '/y'; f.submit(); frameElement.remove()" => '/t?q=1',
     'top.location.reload(); f.submit()'                           => '/t?q=1',
-    "f.submit(); top.document.getElementById('g').submit()"       => '/m?q=m'
+    "f.submit(); top.document.getElementById('g').submit()"       => '/m?q=m',
+    "top.location.href = '/y'; f.submit(); h.submit()"            => '/t?q=1'
   }.each do |js, path|
     it "navigates the page a frame's form targets after `#{js}`" do
       app = lambda {|env|
         next html.("<body>#{env['PATH_INFO']}") unless env['PATH_INFO'] == '/'
 
-        html.('<body><form id="g" action="/m"><input name="q" value="m"></form><iframe srcdoc="<form id=f action=/t target=_top><input name=q value=1></form>"></iframe>')
+        html.('<body><form id="g" action="/m"><input name="q" value="m"></form><iframe srcdoc="<form id=f action=/t target=_top><input name=q value=1></form><form id=h action=/hs></form>"></iframe>')
       }
       session = simulated_session(app)
       session.visit '/'

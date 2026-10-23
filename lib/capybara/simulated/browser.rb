@@ -3104,6 +3104,7 @@ module Capybara
           !@pending_history_traverse.nil? ||
           !(@pending_frame_nav || {}).empty? ||
           !(@pending_frame_submit || []).empty? ||
+          !@pending_page_submission.nil? ||
           !(@pending_frame_reload || []).empty?
       end
 
@@ -7556,6 +7557,7 @@ module Capybara
         # auxiliary windows a page asked for, which a `visit` must leave pending.
         consume_pending_frame_nav
         consume_pending_frame_submit
+        consume_pending_page_submission
         true
       end
 
@@ -10205,7 +10207,7 @@ module Capybara
         @pending_location = nil
         @pending_reload   = nil
         # (…a frame's submission to the page as well, which was the page's navigation planned last: `frame_submit_self`)
-        @pending_frame_submit&.delete_if {|_, entry| entry[:page] }
+        @pending_page_submission = nil
       end
       def consume_pending_location
         return unless (url = @pending_location)
@@ -10354,10 +10356,7 @@ module Capybara
       # Context) while we're still inside the V8 call, which V8
       # terminates with a `ScriptTerminatedError`. Stash the intent
       # and drain it from `tick_real_time` after the call returns.
-      def location_reload
-        cancel_planned_navigation
-        @pending_reload = true
-      end
+      def location_reload   ; @pending_reload = true ; end
       def consume_pending_reload
         return unless @pending_reload
         @pending_reload = nil
@@ -10439,23 +10438,34 @@ module Capybara
       # `frame_navigate_self`). Keyed by realm id; deferred + drained from
       # `drain_pending_navigation` so we never serialize/navigate while the
       # form's `submit()` is still on the V8 stack.
-      # (…`target` the one its request names: one that navigates the page is the page's navigation planned last — the one
-      # planned before it superseded, a location's, a reload, a link's or a form's of the page, Chrome's `location.href =
-      # …; frames[0].f.submit()` — and is superseded in turn by one the page plans after it (`cancel_planned_navigation`):
-      # its request and route taken now, whatever becomes of the frame by the time the page navigates)
+      # (…`target` the one its request names: one that navigates the page is the page's navigation planned last, in a slot
+      # of the page's (`@pending_page_submission`), not the frame's — the one planned before it superseded, a location's, a
+      # reload, a link's or a form's of the page, Chrome's `location.href = …; frames[0].f.submit()` — and superseded in
+      # turn by one the page plans after it (`cancel_planned_navigation`), whatever the frame plans: its request and route
+      # taken now, whatever becomes of the frame by the time the page navigates)
       def frame_submit_self(realm_id, target = '')
         return if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
-        pending = ((@pending_frame_submit ||= {})[realm_id] = {})
+        (@pending_frame_submit ||= {})[realm_id] = {}
         return unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
         return unless choose_named_navigable(realm_id, target) == :top
 
         spec = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
+        @pending_frame_submit.delete(realm_id)
         return unless spec.is_a?(Hash)
 
         cancel_planned_navigation
         @runtime.call('__csimSupersedePlanned')
-        pending.merge!(spec: spec, route: frame_submission_route(realm_id, spec), page: true)
+        @pending_page_submission = {realm_id: realm_id, spec: spec, route: frame_submission_route(realm_id, spec)}
+      end
+      def consume_pending_page_submission
+        return unless (pending = @pending_page_submission)
+
+        @pending_page_submission = nil
+        invalidate_find_cache
+        submit_frame_route(pending[:realm_id], pending[:spec], pending[:route])
+      rescue StandardError => e
+        log_console('warn', "nested-context form submission failed: #{e.message}")
       end
       def consume_pending_frame_submit
         return if @pending_frame_submit.nil? || @pending_frame_submit.empty?
@@ -11014,6 +11024,7 @@ module Capybara
         consume_pending_location
         consume_pending_frame_nav
         consume_pending_frame_submit
+        consume_pending_page_submission
         consume_pending_frame_reload
         consume_pending_frame_traverse
         consume_pending_reload
@@ -11831,7 +11842,7 @@ module Capybara
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
         @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
-        @pending_window_nav @pending_frame_nav @pending_frame_submit
+        @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload @pending_frame_traverse
       ].freeze
       private_constant :NAV_INTENT_SLOTS
