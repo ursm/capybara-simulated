@@ -242,4 +242,16 @@ RSpec.describe 'the blob URL store' do
     s.click_link 'go'
     expect(s.evaluate_script('document.body.textContent')).to eq('BLOB')
   end
+
+  # A frame's own link to a blob URL navigates the frame to it — revoked straight after the click or not (Chrome).
+  [false, true].each do |revoke|
+    it "navigates a frame its own blob link targets#{' however soon it is revoked' if revoke}" do
+      s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>TOP<iframe srcdoc="x"></iframe>']] })
+      s.visit '/'
+      s.within_frame(0) do
+        s.execute_script("const u = URL.createObjectURL(new Blob(['<p>BLOB'], {type: 'text/html'})); const a = document.createElement('a'); a.href = u; document.body.append(a); a.click();#{' URL.revokeObjectURL(u);' if revoke}")
+      end
+      expect(poll_until { s.evaluate_script('frames[0].document.body && frames[0].document.body.textContent').then {|t| t if t == 'BLOB' } }).to eq('BLOB')
+    end
+  end
 end

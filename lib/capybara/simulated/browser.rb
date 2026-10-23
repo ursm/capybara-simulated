@@ -11338,6 +11338,12 @@ module Capybara
           reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
           return
         end
+        # A `blob:` URL, which no server answers: the blob its navigation began with, which the container holds
+        # (`__csimTakeFrameNavBlob`), else the one it names now — none a failed load at the URL.
+        if url.to_s.match?(/\Ablob:/i)
+          blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s)) || blob_snapshot(url)
+          return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
+        end
         env = rack_env_for(url, method: 'GET')
         # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
         apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
