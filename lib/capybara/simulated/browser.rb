@@ -3291,7 +3291,8 @@ module Capybara
           elsif frame_entry
             navigate_frame(url, entry: frame_entry)
           else
-            navigate(url)
+            # (…replacing the session history entry of a document not completely loaded yet: `request.replace`)
+            navigate(url, replace: spec['replace'] == true)
           end
         else
           if new_window
@@ -3303,7 +3304,7 @@ module Capybara
           elsif frame_entry
             navigate_frame_post(url, body, content_type, entry: frame_entry)
           else
-            navigate_post(url, body, content_type)
+            navigate_post(url, body, content_type, replace: spec['replace'] == true)
           end
         end
       end
@@ -3331,7 +3332,7 @@ module Capybara
         picks && picks[entry['index'].to_i]
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil)
+      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false)
         raise 'too many redirects' if depth > 10
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
@@ -3346,7 +3347,7 @@ module Capybara
         @history_before_navigation = nil if depth.zero?
         unless from_history || depth > 0
           capture_outgoing_form_state
-          record_navigation_history({method: :post, url: url, body: body, content_type: content_type})
+          record_navigation_history({method: :post, url: url, body: body, content_type: content_type}, replace: replace)
         end
         # A controlled top-level POST navigation (form submission) goes to the SW's fetch
         # event first — same model as `navigate` (the SW reads the body via
@@ -10482,11 +10483,18 @@ module Capybara
       # whatever the frame plans: its request and route taken now, whatever becomes of the frame by the time the page
       # navigates; true where it is, the frame's plan of it the frame's to drop — handed over, not asked of the frame,
       # whose realm a frame still being built does not answer)
+      # (…a frame still being built — its realm not yet one the host can ask — has its request taken as it is, routed as it
+      # is drained, its navigables known by then)
       def frame_submit_self(realm_id, target = '', request = nil)
         return false if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
-        (@pending_frame_submit ||= {})[realm_id] = {}
-        return false unless request.is_a?(Hash) && [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
+        pending = ((@pending_frame_submit ||= {})[realm_id] = {})
+        return false unless request.is_a?(Hash)
+        unless @runtime.frame_realm_alive?(realm_id)
+          pending[:spec] = request
+          return true
+        end
+        return false unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
         return false unless choose_named_navigable(realm_id, target) == :top
 
         @pending_frame_submit.delete(realm_id)
@@ -10514,8 +10522,8 @@ module Capybara
             next unless @runtime.frame_realm_alive?(realm_id)
             spec = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
             next unless spec.is_a?(Hash)
-            route = frame_submission_route(realm_id, spec)
           end
+          route ||= frame_submission_route(realm_id, spec)
           invalidate_find_cache
           submit_frame_route(realm_id, spec, route)
         rescue StandardError => e
@@ -10741,7 +10749,7 @@ module Capybara
             navigate_realm_self_post(realm_id, url, body, content_type)
           end
         when :top
-          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type]) }
+          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type], replace: spec['replace'] == true) }
         when Integer
           if method == 'GET'
             navigate_realm_self_get(chosen, url, referrer: initiator)
@@ -11345,7 +11353,7 @@ module Capybara
         site = source.to_s.match?(%r{\Ahttps?://}i) ? source : @current_url
         from_document(realm) do
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site)
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace)
           else
             navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob)
           end
