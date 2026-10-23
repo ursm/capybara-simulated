@@ -379,21 +379,25 @@ impl RealmArena {
     // element of another namespace named so only a wrapper.
     pub(crate) fn list_of_options(&self, select: NodeId) -> Vec<NodeId> {
         let mut out = Vec::new();
-        self.collect_options(select, false, &mut out);
+        self.find_option(select, false, &mut |o| {
+            out.push(o);
+            false
+        });
         out
     }
-    fn collect_options(&self, node: NodeId, in_optgroup: bool, out: &mut Vec<NodeId>) {
-        let Some(n) = self.get(node) else { return };
-        for &c in &n.children {
-            let Some(e) = self.get(c).filter(|e| e.kind == NodeKind::Element) else { continue };
+    // …its options in order until `found` says one is the one wanted: whether one was.
+    fn find_option(&self, node: NodeId, in_optgroup: bool, found: &mut impl FnMut(NodeId) -> bool) -> bool {
+        let Some(n) = self.get(node) else { return false };
+        n.children.iter().any(|&c| {
+            let Some(e) = self.get(c).filter(|e| e.kind == NodeKind::Element) else { return false };
             match if e.is_html() { &*e.local_name } else { "" } {
-                "option" => out.push(c),
-                "hr" | "datalist" | "select" => {}
-                "optgroup" if in_optgroup => {}
-                "optgroup" => self.collect_options(c, true, out),
-                _ => self.collect_options(c, in_optgroup, out),
+                "option" => found(c),
+                "hr" | "datalist" | "select" => false,
+                "optgroup" if in_optgroup => false,
+                "optgroup" => self.find_option(c, true, found),
+                _ => self.find_option(c, in_optgroup, found),
             }
-        }
+        })
     }
     // The select whose list of options `option` is in (`collect_options` the other way): its parent, or past one
     // optgroup, or past the elements a customizable select wraps them in — none across an option, a datalist, an hr or
@@ -533,13 +537,23 @@ impl RealmArena {
         }
         (0..options.len()).filter(|&i| state[i] != before[i]).map(|i| (options[i], state[i])).collect()
     }
-    // Whether a change of `nodes` under `parent` touches a select's options — an option or an optgroup among them, or a
-    // select or an optgroup the parent; or, the parent in a select, an option one of them holds (a customizable select's
-    // wrapper of one: its insertion steps run for every inclusive descendant) — so that its select is asked for a reset.
+    // …and whether `option`'s insertion into `select`'s list of options can change what it leaves (HTML's option
+    // insertion steps run it): not where the option is not selected and the select is a list box, or has a selected
+    // option already — found without listing the rest, as a `document.write` loop's options each ask (rule 3).
+    pub(crate) fn option_insertion_runs_selectedness(&self, select: NodeId, option: NodeId) -> bool {
+        if self.option_initialised(option) & STATE_SELECTED != 0 {
+            return true;
+        }
+        !self.is_list_box(select) && !self.find_option(select, false, &mut |o| o != option && self.option_initialised(o) & STATE_SELECTED != 0)
+    }
+    // Whether a change of `nodes` under `parent` touches a select's options — an option or an optgroup among them; or,
+    // the parent in a select, an option one of them holds (a customizable select's wrapper of one: its insertion steps
+    // run for every inclusive descendant) — so that its select is asked for a reset. A text node or an element holding
+    // no option, a select's child or not, touches none (a loop appending them ran the algorithm over every option).
     // (…the tags first, as the overwhelming majority of a page's changes are of none, into none: rule 3)
     pub(crate) fn affects_selectedness(&self, parent: NodeId, nodes: &[NodeId]) -> bool {
         let named = |id: NodeId, names: &[&str]| self.get(id).is_some_and(|n| names.iter().any(|&name| n.is_html_named(name)));
-        if named(parent, &["select", "optgroup"]) || nodes.iter().any(|&n| named(n, &["option", "optgroup"])) {
+        if nodes.iter().any(|&n| named(n, &["option", "optgroup"])) {
             return true;
         }
         let holder = |n: &&NodeId| self.get(**n).is_some_and(|d| d.kind == NodeKind::Element && !d.children.is_empty());
@@ -570,6 +584,16 @@ impl RealmArena {
         };
         let mut changed = Vec::new();
         let mut just = None;
+        // (…one option inserted into its list of options, the overwhelming case — a loop appending them — initialised
+        // alone, and the algorithm run only where its insertion can change what it leaves: rule 3)
+        if let [option] = *nodes {
+            if inserted && self.get(option).is_some_and(|n| n.is_html_named("option")) && self.option_select(option) == Some(select) {
+                changed.extend(self.initialise_options(option));
+                if !self.option_insertion_runs_selectedness(select, option) {
+                    return Some((select, changed));
+                }
+            }
+        }
         if inserted {
             // (…each listed option held by an inserted node, its ancestors up to the select looked up in them)
             let inserted: std::collections::HashSet<NodeId> = nodes.iter().copied().collect();
@@ -737,6 +761,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
     crate::dom::register(scope, ns, "buttonType", button_type, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
+    crate::dom::register(scope, ns, "optionInsertionRunsSelectedness", option_insertion_runs_selectedness, context_id);
     crate::dom::register(scope, ns, "askForReset", ask_for_reset, context_id);
     crate::dom::register(scope, ns, "optionSelect", option_select, context_id);
     crate::dom::register(scope, ns, "elementAncestor", element_ancestor_op, context_id);
@@ -1096,6 +1121,14 @@ fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let states = arena.selectedness(select, just);
     let changed = arena.apply_option_states(states);
     rv.set(crate::dom::nodes_value(scope, cid, &changed));
+}
+
+// __dom.optionInsertionRunsSelectedness(selectNid, optionNid) -> whether the option's insertion can change what the
+// selectedness setting algorithm leaves (`option_insertion_runs_selectedness`).
+fn option_insertion_runs_selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let (Some(select), Some(option)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
+    rv.set_bool(crate::dom::realm(scope, cid).option_insertion_runs_selectedness(select, option));
 }
 
 // __dom.optionSelect(nid) -> the select whose list of options the option is in (`option_select`), as `node_value`
