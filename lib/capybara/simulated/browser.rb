@@ -9386,17 +9386,29 @@ module Capybara
 
       # HTML "resolve a module specifier" against `base_url` (the referrer's) through `realm`'s import map: the URL, or
       # the specifier itself where it resolves to none (a bare one nothing maps), which then fails to fetch.
+      # (…an inline script's — no URL of its own — the document base URL of the realm it runs in: a frame's, not the
+      # page's, its `<base href>` heeded)
       def resolve_module_specifier(specifier, base_url, realm)
-        base = effective_module_base(base_url)
+        base = module_base_url(base_url) || realm_document_base_url(realm.to_i) || effective_module_base(nil)
         Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier
+      end
+      # …the document base URL of realm `realm` (0 the page), nil where it has none to say.
+      private def realm_document_base_url(realm)
+        url = (realm.zero? ? @runtime.call('__csimBaseURL') : @runtime.frame_realm_base_url(realm)).to_s
+        url.empty? ? nil : url
+      rescue StandardError
+        nil
       end
 
       # The base a module specifier resolves against: the importer's URL — for a nested relative import, and for a
       # dynamic `import()` the referring script's. An inline script / module has no real URL — its pseudo-name is
       # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `__csim_runScript`) — so it resolves against the PAGE URL.
       private def effective_module_base(base)
-        base = nil unless base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
-        base || @current_url || @default_host
+        module_base_url(base) || @current_url || @default_host
+      end
+      # …the importer's URL where it has a real one.
+      private def module_base_url(base)
+        base if base.is_a?(String) && base =~ %r{\A[a-z]+://}i && !base.start_with?('inline:')
       end
 
       def resolve_against(url, base)

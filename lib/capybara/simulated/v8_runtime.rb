@@ -891,6 +891,13 @@ module Capybara
       rescue StandardError
         nil
       end
+      # …and the document base URL of a frame realm, loading or loaded (nil for none: a realm gone, or the page's).
+      def frame_realm_base_url(realm_id)
+        realm = frame_realms[realm_id] || loading_frame_realms[realm_id] or return nil
+        realm.call('__csimBaseURL').to_s
+      rescue StandardError
+        nil
+      end
 
       # A frame whose document URL is opaque — about:blank (empty src), about:srcdoc,
       # or empty — has no scope of its own; its controller is inherited from the

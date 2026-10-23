@@ -232,4 +232,24 @@ RSpec.describe 'import maps' do
     s.visit '/'
     expect(s.find('#out', text: /a/).text).to eq('a1 a2')
   end
+
+  # An inline script's `import()` resolves against the document base URL of the realm it runs in: a frame's document's,
+  # not the page's, and a `<base href>`'s (HTML "resolve a module specifier": the referring script's base URL, an inline
+  # one's its document's).
+  it "resolves an inline script's import() against its document's base URL" do
+    app = lambda {|env|
+      body = case env['PATH_INFO']
+             when %r{d\.js\z} then next [200, {'content-type' => 'text/javascript'}, ["export default '#{env['PATH_INFO']}'"]]
+             when '/dir/g' then '<script>import("./d.js").then((m) => { window.got = m.default; })</script>'
+             when '/b' then '<base href="/bdir/"><script>import("./d.js").then((m) => { window.got = m.default; })</script>'
+             else '<iframe src="/dir/g"></iframe>'
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    expect(s.evaluate_async_script('const done = arguments[0]; const w = () => frames[0].got ? done(frames[0].got) : setTimeout(w, 10); w();')).to eq('/dir/d.js')
+    s.visit '/b'
+    expect(s.evaluate_async_script('const done = arguments[0]; const w = () => window.got ? done(window.got) : setTimeout(w, 10); w();')).to eq('/bdir/d.js')
+  end
 end
