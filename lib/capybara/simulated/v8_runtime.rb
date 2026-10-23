@@ -1597,11 +1597,14 @@ module Capybara
             // them). Route strict-prologue scripts through the real top-level
             // `ctx.eval` path too, same as leading lexical declarations.
             const LEADS_USE_STRICT = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*["']use strict["']/;
+            // A dynamic `import(…)`, a comment or whitespace before its parenthesis (`import ('x')`, `import /*c*/ (`) as
+            // the language allows: the bridge's `MAY_IMPORT` too.
+            const MAY_IMPORT = /\\bimport\\s*[(/]/;
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
               // (…and one that may `import()`: run as a script named its label, the referrer its import resolves through —
               // the `(0, eval)` path's is the anonymous `<eval>` of every one of them)
-              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body) || body.includes('import(')) return runEval(label || 'csim-eval', body);
+              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body) || MAY_IMPORT.test(body)) return runEval(label || 'csim-eval', body);
               indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
             };
           })();
