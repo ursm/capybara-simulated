@@ -3345,7 +3345,6 @@ module Capybara
       end
 
       def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false, origin_null: false, origin: nil)
-        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
@@ -3387,18 +3386,18 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
-              # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
-              # "main fetch")
-              return commit_error_document(url) unless fetchable_url?(next_url)
-              redirect_history_entry(next_url, get: false, depth: depth)
+              # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
+              # redirected: Fetch "main fetch", "HTTP-redirect fetch")
+              return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+              redirect_history_entry(next_url, get: false)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
                                    origin: redirected_origin(origin, url, next_url))
             end
 
-            # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
-            # "main fetch")
-            return commit_error_document(url) unless fetchable_url?(next_url)
-            redirect_history_entry(next_url, get: true, depth: depth)
+            # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
+            # redirected: Fetch "main fetch", "HTTP-redirect fetch")
+            return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+            redirect_history_entry(next_url, get: true)
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
           return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
@@ -3428,10 +3427,10 @@ module Capybara
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
           to_get = Native.redirect_to_get(status.to_i, 'POST')
-          # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
-          # "main fetch")
-          return commit_error_document(url) unless fetchable_url?(next_url)
-          redirect_history_entry(next_url, get: to_get, depth: depth)
+          # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
+          # redirected: Fetch "main fetch", "HTTP-redirect fetch")
+          return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+          redirect_history_entry(next_url, get: to_get)
           if to_get
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           else
@@ -9426,8 +9425,8 @@ module Capybara
       # throwaway arrays per hop (perf).
       CACHE_MODES_SKIP_READ  = %w[no-store reload].freeze
       CACHE_MODES_SERVE_STALE = %w[force-cache only-if-cached].freeze
-      # The redirects a top-level navigation follows before it fails.
-      NAVIGATION_REDIRECT_LIMIT = 10
+      # The redirects a navigation follows before it fails (Fetch "HTTP-redirect fetch": a redirect count of 20).
+      NAVIGATION_REDIRECT_LIMIT = 20
       REFERRER_POLICIES = %w[
         no-referrer no-referrer-when-downgrade origin origin-when-cross-origin
         same-origin strict-origin strict-origin-when-cross-origin unsafe-url
@@ -10879,7 +10878,7 @@ module Capybara
       # through to the top document), and recording them here would push an entry where a
       # `location.replace` must overwrite. A form GET submission (the default) IS a history push.
       def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, resulting_client_id: nil, referrer: nil)
-        raise 'too many redirects' if depth > 10
+        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
         record_frame_nav(realm_id, get_url) if record && depth.zero? && !is_reload && !is_history
         # The navigation's reserved client id — threaded through the redirect re-entries
@@ -10971,7 +10970,7 @@ module Capybara
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
       def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false, site_seed: nil, origin_null: false, resulting_client_id: nil, referrer: nil)
-        raise 'too many redirects' if depth > 10
+        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
         # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
         # a fresh submission records history. The POST method/body is tagged onto the entry AFTER a
@@ -11445,7 +11444,7 @@ module Capybara
       # shape) under that document's policy, determined anew at each redirect hop.
       # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
       def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false)
-        raise 'too many redirects' if depth > 10
+        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
 
         invalidate_find_cache
@@ -11480,7 +11479,7 @@ module Capybara
       end
 
       def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator)
-        raise 'too many redirects' if depth > 10
+        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
 
         invalidate_find_cache
@@ -11573,7 +11572,6 @@ module Capybara
       # (…`blob`: a `blob:` URL's blob as the navigation began — `{bytes:, type:}`, `blob_snapshot` — which a revoke after
       # it began does not take back: HTML resolves the URL's blob URL entry as it parses it)
       def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false, blob: nil)
-        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
@@ -11647,10 +11645,10 @@ module Capybara
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
               next_url = carry_fragment(url, resolve_location(loc, url))
-              # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
-              # "main fetch")
-              return commit_error_document(url) unless fetchable_url?(next_url)
-              redirect_history_entry(next_url, get: true, depth: depth)
+              # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
+              # redirected: Fetch "main fetch", "HTTP-redirect fetch")
+              return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+              redirect_history_entry(next_url, get: true)
               return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
             return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
@@ -11679,10 +11677,10 @@ module Capybara
             # the original fragment in the final URL.
             next_url = carry_fragment(url, next_url)
             body.close if body.respond_to?(:close)
-            # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
-            # "main fetch")
-            return commit_error_document(url) unless fetchable_url?(next_url)
-            redirect_history_entry(next_url, get: true, depth: depth)
+            # (…a redirect to a URL no fetch follows, or one past the redirect limit, a network error committed at the URL that
+            # redirected: Fetch "main fetch", "HTTP-redirect fetch")
+            return commit_error_document(url) unless fetchable_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
+            redirect_history_entry(next_url, get: true)
             # Thread the initiator + widened site so the chain's SameSite verdict
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -11713,10 +11711,7 @@ module Capybara
       # …and the current entry made a redirect's from it (Fetch "HTTP-redirect fetch"): its URL the redirect's, a POST
       # become a GET where the redirect makes one — so a reload gets the page it was redirected to, not the chain run
       # again: a Post/Redirect/Get page's not the form submitted again (Chrome).
-      # …where the redirect is followed: the redirect limit not reached by it (the entry the last URL requested where it
-      # is: Chrome).
-      private def redirect_history_entry(url, get:, depth:)
-        return if depth + 1 > NAVIGATION_REDIRECT_LIMIT
+      private def redirect_history_entry(url, get:)
         return unless (entry = @history_idx >= 0 && @history[@history_idx])
 
         @history[@history_idx] = get ? entry.except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get, url: url) : entry.merge(url: url)

@@ -271,6 +271,20 @@ RSpec.describe "a form submission's request" do
     end
   end
 
+  # …as is one past the redirect limit: twenty redirects followed, the twenty-first not, the last URL requested the
+  # error document's (Fetch "HTTP-redirect fetch"; Chrome: ERR_TOO_MANY_REDIRECTS).
+  it 'fails a navigation past its redirect limit' do
+    seen = []
+    app = lambda {|env|
+      seen << env['PATH_INFO']
+      [302, {'location' => "/loop#{env['PATH_INFO'][/\d+/].to_i + 1}"}, []]
+    }
+    session = simulated_session(app)
+    session.visit '/loop0'
+    expect(seen).to eq((0..20).map {|i| "/loop#{i}" })
+    expect(session.current_url).to eq('http://www.example.com/loop20')
+  end
+
   # …and a re-post that ends in a download leaves the entry the POST's: the next reload re-posts it (Chrome).
   it 'keeps the entry of a re-post that ends in a download' do
     seen = []
