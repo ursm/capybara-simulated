@@ -72,22 +72,26 @@ RSpec.describe "a page form's planned navigation of a named frame" do
     expect(session.evaluate_script('history.length')).to eq(3)
   end
 
-  # …a document still loading too, moved once it is there — not loaded again, whose script would click again (Chrome:
-  # one GET of /slow, length 3).
+  # …a document still loading too, moved at once — not loaded again, whose script would click again — its script reading
+  # the fragment there and then, and its own `load`'s navigation after it (Chrome: one GET of /slow, length 3; `#e` in
+  # the script, `#z` at the end — which, its document not completely loaded in its `load`, replaces the entry: HTML
+  # "Location-object navigate").
   it "moves a frame still loading to the fragment a link asks for" do
     hits = []
     session = simulated_session(lambda {|env|
       hits << env['PATH_INFO']
       body = case env['PATH_INFO']
              when '/top' then '<iframe name=n src="/blank"></iframe><a id=l target=n href="/slow#e">l</a>'
-             when '/slow' then 'slow<script>parent.document.getElementById("l").click()</script><p id=e>e'
+             when '/slow' then 'slow<script>parent.document.getElementById("l").click(); parent.seen = location.hash; ' \
+                               'onload = () => { location.hash = "z" }</script><p id=e>e'
              else env['PATH_INFO']
              end
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
     })
     session.visit '/top'
     session.execute_script('frames[0].location = "/slow"')
-    expect(session.evaluate_script('frames[0].location.hash')).to eq('#e')
+    expect(session.evaluate_script('seen')).to eq('#e')
+    expect(session.evaluate_script('frames[0].location.hash')).to eq('#z')
     expect(hits.count('/slow')).to eq(1)
     expect(session.evaluate_script('history.length')).to eq(3)
   end
