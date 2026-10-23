@@ -3387,11 +3387,17 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw_headers))
             next_url = carry_fragment(url, resolve_location(loc, url))
             if [307, 308].include?(sw['status'].to_i)
+              # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
+              # "main fetch")
+              return commit_error_document(url) unless fetchable_url?(next_url)
               redirect_history_entry(next_url, get: false, depth: depth)
               return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site,
                                    origin: redirected_origin(origin, url, next_url))
             end
 
+            # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
+            # "main fetch")
+            return commit_error_document(url) unless fetchable_url?(next_url)
             redirect_history_entry(next_url, get: true, depth: depth)
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
           end
@@ -3422,6 +3428,9 @@ module Capybara
           # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
           # the body.
           to_get = Native.redirect_to_get(status.to_i, 'POST')
+          # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
+          # "main fetch")
+          return commit_error_document(url) unless fetchable_url?(next_url)
           redirect_history_entry(next_url, get: to_get, depth: depth)
           if to_get
             return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
@@ -11638,6 +11647,9 @@ module Capybara
             sw_headers = sw['headers'] || {}
             if (loc = redirect_location(sw['status'].to_i, sw_headers))
               next_url = carry_fragment(url, resolve_location(loc, url))
+              # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
+              # "main fetch")
+              return commit_error_document(url) unless fetchable_url?(next_url)
               redirect_history_entry(next_url, get: true, depth: depth)
               return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site)
             end
@@ -11667,6 +11679,9 @@ module Capybara
             # the original fragment in the final URL.
             next_url = carry_fragment(url, next_url)
             body.close if body.respond_to?(:close)
+            # (…a redirect to a URL no fetch follows a network error, committed at the URL that redirected: Fetch
+            # "main fetch")
+            return commit_error_document(url) unless fetchable_url?(next_url)
             redirect_history_entry(next_url, get: true, depth: depth)
             # Thread the initiator + widened site so the chain's SameSite verdict
             # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
@@ -11698,10 +11713,10 @@ module Capybara
       # …and the current entry made a redirect's from it (Fetch "HTTP-redirect fetch"): its URL the redirect's, a POST
       # become a GET where the redirect makes one — so a reload gets the page it was redirected to, not the chain run
       # again: a Post/Redirect/Get page's not the form submitted again (Chrome).
-      # …where the redirect is followed: a fetchable URL, and the redirect limit not reached by it (the entry the last URL
-      # requested where it is: Chrome).
+      # …where the redirect is followed: the redirect limit not reached by it (the entry the last URL requested where it
+      # is: Chrome).
       private def redirect_history_entry(url, get:, depth:)
-        return if depth + 1 > NAVIGATION_REDIRECT_LIMIT || !url.to_s.match?(%r{\Ahttps?://}i)
+        return if depth + 1 > NAVIGATION_REDIRECT_LIMIT
         return unless (entry = @history_idx >= 0 && @history[@history_idx])
 
         @history[@history_idx] = get ? entry.except(:body, :content_type, :origin, :referer, :referrer_policy).merge(method: :get, url: url) : entry.merge(url: url)
@@ -12448,6 +12463,8 @@ module Capybara
 
       # A top-level navigation that FAILED — a network error: Chrome still commits an error document at the target URL, so
       # the URL moves even though nothing loaded.
+      # Whether `url` is one HTTP fetch follows a redirect to: an http(s) URL.
+      def fetchable_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
       def commit_error_document(url)
         @current_url = url
         record_response(0, {'content-type' => 'text/html'})

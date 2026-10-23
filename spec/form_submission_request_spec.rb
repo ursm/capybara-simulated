@@ -251,6 +251,26 @@ RSpec.describe "a form submission's request" do
     expect(seen).to eq(%w[/a /b /b])
   end
 
+  # A redirect to a URL no fetch follows is a network error, committed at the URL that redirected — which a reload
+  # requests again (Fetch "main fetch"; Chrome: ERR_UNSAFE_REDIRECT).
+  %w[about:blank data:text/html,x blob:http://www.example.com/x].each do |target|
+    it "fails a navigation redirected to #{target.split(':').first}:" do
+      seen = []
+      app = lambda {|env|
+        seen << env['PATH_INFO']
+        next [302, {'location' => target}, []] if env['PATH_INFO'] == '/a'
+
+        html.('<body>b')
+      }
+      session = simulated_session(app)
+      session.visit '/a'
+      expect(session.current_url).to eq('http://www.example.com/a')
+      expect(session.evaluate_script('document.body?.textContent || ""')).to eq('')
+      session.refresh
+      expect(seen).to eq(%w[/a /a])
+    end
+  end
+
   # …and a re-post that ends in a download leaves the entry the POST's: the next reload re-posts it (Chrome).
   it 'keeps the entry of a re-post that ends in a download' do
     seen = []
