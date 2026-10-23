@@ -285,6 +285,24 @@ RSpec.describe 'the joint session history' do
     expect(session.evaluate_script('history.length')).to eq(2)
   end
 
+  # …a traversal asked for after another judged from where that one goes: two backs, the second the frame's, ahead
+  # of its `src` set after them.
+  it "goes back twice rather than to a frame's src set after both" do
+    hits = []
+    session = simulated_session(lambda {|env|
+      hits << env['PATH_INFO']
+      body = env['PATH_INFO'] == '/top' ? '<iframe src="/f1"></iframe>' : env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+    session.execute_script('history.pushState(null, "", "/top2")')
+    session.execute_script('history.back(); history.back(); document.querySelector("iframe").src = "/x"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f1')
+    expect(hits).not_to include('/x')
+  end
+
   # The page navigated on: its frames' steps stay steps of the document it left (Chrome: 3 after /b), and a traversal
   # back to it makes it again, its frames with it.
   it "keeps a frame's steps once the page has navigated on" do

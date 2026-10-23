@@ -2367,7 +2367,9 @@ module Capybara
         return [0, 0] if delta.to_i.zero? || !history_of_page?(realm)
 
         token = (@traversal_tokens = @traversal_tokens.to_i + 1)
-        documents = history_plan(delta.to_i)&.last&.any? {|_, _, same_document| !same_document }
+        # (…judged from the step those queued before it reach: the steps from here to where it goes, theirs and its own)
+        ahead     = (@planned_traversals || []).sum {|_, d, *| d }
+        documents = history_plan(ahead + delta.to_i)&.last&.any? {|_, _, same_document| !same_document }
         (@planned_traversals ||= []) << [token, delta.to_i, realm.to_i, documents]
         [token, documents ? 0 : 1]
       end
