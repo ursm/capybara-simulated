@@ -153,4 +153,24 @@ RSpec.describe 'the load of a document with frames' do
     session.visit '/'
     expect(session.evaluate_script('log')).to eq(%w[fl wrote])
   end
+
+  # A frame entered with `within_frame` navigated by a link or a form fires its container's `load` as the new document
+  # loads, as any frame navigation does (Chrome: one each).
+  it "fires the container's load for an entered frame's navigation" do
+    app = lambda {|env|
+      body = case env['PATH_INFO']
+             when '/f' then '<a href="/g">g</a><form action="/p" method="post"><button>p</button></form>'
+             when '/g', '/p' then env['PATH_INFO']
+             else '<script>var log = [];</script><iframe src="/f" onload="log.push(this.contentWindow.location.pathname)"></iframe>'
+             end
+      html.("<body>#{body}")
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    session.within_frame(0) { session.click_link('g') }
+    expect(session.evaluate_script('log')).to eq(%w[/f /g])
+    session.visit '/'
+    session.within_frame(0) { session.click_button('p') }
+    expect(session.evaluate_script('log')).to eq(%w[/f /p])
+  end
 end

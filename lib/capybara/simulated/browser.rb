@@ -11545,6 +11545,9 @@ module Capybara
           @frame_stack[(idx + 1)..].each {|descendant| @runtime.dispose_frame_realm(descendant[:realm_id]) }
           entry[:realm_id] = new_id
         end
+        # (…its container's `load` fired as the navigation's document loads, as a frame reached by its realm's is:
+        # `reload_frame_realm_by_id`)
+        frame_realm_host_call(parent, '__csimFireFrameElementLoad', entry[:iframe_handle])
         invalidate_find_cache
         settle
       end
