@@ -2373,14 +2373,15 @@ module Capybara
       private def perform_history_traverse(delta)
         return unless (plan = history_plan(delta))
 
-        if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document }
+        if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document } && @timers_active
           # Before the step below moves (see `flush_outgoing_page_init`) — and the step planned after it, as the history
           # stands once what the page's timers did to it (a pushState dropping the forward steps) is in.
-          flush_outgoing_page_init if @timers_active
-          return restore_flushed_nav_intents unless (plan = history_plan(delta))
+          flush_outgoing_page_init
+          flushed = true
+          plan = history_plan(delta)
         end
         step, changes = plan
-        if (page = changes.find {|nav, _, same_document| nav.zero? && !same_document })
+        if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
           capture_outgoing_form_state
           @session_history.go_to(step)
           replay_history_entry(page[1])
@@ -2388,6 +2389,7 @@ module Capybara
           restore_flushed_nav_intents
           return
         end
+        return restore_flushed_nav_intents unless changes
         # (…its frames' entries, each frame's document made again — the one it leaves snapshotted first, so a traversal
         # forward again restores it, keeping how it was reached: a POST entry re-POSTs)
         frames = changes.filter_map {|nav, id, same_document| [nav, id, navigable_realm(nav)] unless same_document }
@@ -2395,6 +2397,9 @@ module Capybara
         @session_history.go_to(step)
         changes.each {|nav, id, same_document| traverse_same_document(nav, id) if same_document }
         frames.each {|_, id, realm| reload_frame_to_entry(realm, history_entry(id)) if realm && @runtime.frame_realm_alive?(realm) }
+        # (…none of the page's documents made again, after all: the page stays, and what its flushed timers planned
+        # still stands — taken once the traversal is in)
+        restore_flushed_nav_intents if flushed
       end
 
       # Navigable `nav` (0 the page) traversed to its entry `id` of the document it is at: its location the entry's URL, a
@@ -10876,8 +10881,9 @@ module Capybara
         # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a
         # fresh document, so it must NOT restore the (possibly stale) snapshot the entry was left with.
         restore = is_reload ? nil : entry[:form_state]
-        # …and its classic history API state, which the document made starts with (as the page's: `replay_history_entry`).
-        @restoring_frame_history_state = [entry[:state]] unless is_reload
+        # …and its classic history API state, which the document made starts with (as the page's: `replay_history_entry`),
+        # as `[state]`.
+        history_state = is_reload ? nil : [entry[:state]]
         # A traversal / reload is a navigation: route it through the controlling SW's fetch event
         # first — the refetch happens here, Ruby-side, bypassing the __csimFrameWindow interception
         # the initial load uses. A respondWith serves the document; a network error fails the
@@ -10901,7 +10907,7 @@ module Capybara
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
           # does the single utf8_text re-tag, matching the network path below.
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
-                                   response_content_type(sw['headers'] || {}), restore_state: restore, client_id: rid, csp: response_csp(sw['headers'] || {}))
+                                   response_content_type(sw['headers'] || {}), restore_state: restore, history_state: history_state, client_id: rid, csp: response_csp(sw['headers'] || {}))
           return
         end
         env = rack_env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
@@ -10914,15 +10920,7 @@ module Capybara
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
         return if download_response?(headers)
-        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, csp: response_csp(headers))
-      ensure
-        @restoring_frame_history_state = nil
-      end
-      # The classic history API state the frame document a traversal makes starts with, as `[state]` — taken by the
-      # first frame realm made after it is set (`create_frame_realm`), none of those its document goes on to make.
-      def take_restoring_frame_history_state
-        state, @restoring_frame_history_state = @restoring_frame_history_state, nil
-        state
+        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers), restore_state: restore, history_state: history_state, csp: response_csp(headers))
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
       # its shadow trees' controls left out, its action resolved against its document): routed, then navigated.
@@ -11204,7 +11202,7 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, client_id: nil, csp: nil)
+      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, history_state: nil, client_id: nil, csp: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
@@ -11212,7 +11210,7 @@ module Capybara
         seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, navigation_sandbox(realm_id)) or return
         return unless unload_frame_document(parent, realm_id)
 
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed).to_i
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, history_state: history_state).to_i
         return if new_id.zero?
         frame_navigation_made_document
         begin

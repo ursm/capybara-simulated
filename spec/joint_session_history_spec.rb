@@ -108,6 +108,19 @@ RSpec.describe 'the joint session history' do
     expect(session.evaluate_script('frames[0].history.state')).to eq({'a' => 1})
   end
 
+  # …that frame's, not one a handler of the document it leaves makes on the way.
+  it "restores the state to the traversed frame alone" do
+    session.visit '/top'
+    session.execute_script('frames[0].history.pushState({a: 1}, "", "/f1x")')
+    session.execute_script('frames[0].location = "/f2"')
+    expect(frame_path).to eq('/f2')
+    session.execute_script('frames[0].addEventListener("pagehide", () => document.body.append(document.createElement("iframe")))')
+    session.go_back
+    expect(frame_path).to eq('/f1x')
+    expect(session.evaluate_script('frames[0].history.state')).to eq({'a' => 1})
+    expect(session.evaluate_script('frames[1] && frames[1].history.state')).to be_nil
+  end
+
   # A frame's container removed: its navigable destroyed, its steps none of the page's (HTML "destroy a child
   # navigable"; Chrome keeps them, the spec says otherwise).
   it "drops a removed frame's steps" do
@@ -129,6 +142,15 @@ RSpec.describe 'the joint session history' do
     session.go_forward
     expect(session.current_path).to eq('/top2')
     expect(length).to eq(2)
+  end
+
+  # …and, the page staying after all (the traversal now a same-document one), what those timers planned still stands.
+  it "keeps what the outgoing page's timers planned when it stays" do
+    session.visit '/top'
+    session.visit '/b'
+    session.execute_script('setTimeout(() => { history.pushState(null, "", "/b2"); location.href = "/f2" }, 0)')
+    session.go_back
+    expect(session).to have_current_path('/f2')
   end
 
   # The application's error in a traversal's request is the test's, as a visit's is.
