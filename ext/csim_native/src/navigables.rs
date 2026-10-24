@@ -81,6 +81,11 @@ pub(crate) struct Navigables {
     // bindings read with no call (`parkedNavigables`): none, the common page's, keeps a proxy's trap a load of a word.
     parked: HashMap<i32, NodeId>,
     parked_count: crate::dom::SharedWord,
+    // …and the last realms of those destroyed so, no document after it made: a WindowProxy over one reads its browsing
+    // context discarded (`lost_navigable`), as a removed frame's does — those not yet dropped from every realm's
+    // WindowProxies (`take_lost`) as well.
+    lost: HashSet<i32>,
+    newly_lost: Vec<i32>,
 }
 
 impl Navigables {
@@ -89,7 +94,7 @@ impl Navigables {
     // WindowProxy a page holds of it) goes on in another realm. (One a navigation replaces reads so between its neutering
     // and its successor's linking, where nothing of its own runs but its backup custom element reactions.)
     pub(crate) fn lost_navigable(&self, cid: i32) -> bool {
-        self.discarded.contains(&cid) && self.containers.contains_key(&cid)
+        (self.discarded.contains(&cid) && self.containers.contains_key(&cid)) || self.lost.contains(&cid)
     }
     // …and whether its document is fully active (HTML): its context not disposed — by its frame's removal, or a
     // navigation that replaced it.
@@ -112,7 +117,7 @@ impl RealmArena {
     }
     // …and how many realms are discarded, for the bindings (`discarded_count`).
     fn note_discarded(&mut self) {
-        let n = self.navigables.discarded.len();
+        let n = self.navigables.discarded.len() + self.navigables.lost.len();
         self.navigables.discarded_count.set(u32::try_from(n).unwrap_or(u32::MAX));
     }
     fn note_linked(&mut self) {
@@ -127,8 +132,39 @@ impl RealmArena {
             .filter(|&(&c, child)| child.realm.is_none() && self.get(c).is_some_and(|n| !nav.discarded.contains(&n.realm)))
             .filter_map(|(&c, child)| child.last.map(|last| (last, c)))
             .collect();
+        // (…one no longer so whose navigable is gone with no document after the last — its container left its document,
+        // or that document is discarded — lost, not one that went on to its next document or gave up making it, nor one
+        // whose last realm is dropped already: no window of its is left to ask)
+        let gone: Vec<i32> = nav
+            .parked
+            .iter()
+            .filter(|&(last, &c)| {
+                !parked.contains_key(last)
+                    && nav.discarded.contains(last)
+                    && !(nav.children.contains_key(&c) && self.get(c).is_some_and(|n| !nav.discarded.contains(&n.realm)))
+            })
+            .map(|(&last, _)| last)
+            .collect();
         self.navigables.parked_count.set(u32::try_from(parked.len()).unwrap_or(u32::MAX));
         self.navigables.parked = parked;
+        if !gone.is_empty() {
+            self.navigables.lost.extend(&gone);
+            self.navigables.newly_lost.extend(gone);
+            self.note_discarded();
+        }
+    }
+    // The realms lost so since last asked (`lost`), whose WindowProxies the asker drops from every realm.
+    pub(crate) fn take_lost(&mut self) -> Vec<i32> {
+        std::mem::take(&mut self.navigables.newly_lost)
+    }
+    // …and the navigable between two documents whose last one was realm `realm`'s given up on: its next document made
+    // nowhere (its build fell back, or failed), it is no longer made as a WindowProxy of it is used.
+    pub(crate) fn unpark(&mut self, realm: i32) {
+        let Some(container) = self.navigables.parked.get(&realm).copied() else { return };
+        if let Some(child) = self.navigables.children.get_mut(&container) {
+            child.last = None;
+        }
+        self.note_linked();
     }
     // The container of the navigable between two documents whose last one was realm `realm`'s (`parked`).
     pub(crate) fn parked_navigable(&self, realm: i32) -> Option<NodeId> {
@@ -255,13 +291,12 @@ impl RealmArena {
     pub(crate) fn top_level_realm(&self, realm: i32) -> i32 {
         self.navigables.tops.get(&realm).copied().unwrap_or(realm)
     }
-    // `container`'s navigable destroyed — its container left its document. Returns the realm its last document was in
-    // where it is between two documents, none active: the window a WindowProxy of it is still over, nothing else to drop
-    // it with.
-    pub(crate) fn discard_navigable(&mut self, container: NodeId) -> Option<i32> {
-        let child = self.navigables.children.remove(&container);
+    // `container`'s navigable destroyed — its container left its document. Whether that lost one between two documents
+    // (`lost`), whose WindowProxies are then to be dropped.
+    pub(crate) fn discard_navigable(&mut self, container: NodeId) -> bool {
+        self.navigables.children.remove(&container);
         self.note_linked();
-        child.filter(|c| c.realm.is_none()).and_then(|c| c.last)
+        !self.navigables.newly_lost.is_empty()
     }
     // The realms whose documents are the active documents of the child navigables of realm `cid`'s document — the
     // containers in it — and, the page's, the windows its script opened: in the order they were made (realm ids only
@@ -400,6 +435,7 @@ impl RealmArena {
             self.note_linked();
         } else {
             nav.discarded.remove(&cid);
+            nav.lost.remove(&cid);
             nav.unloading.remove(&cid);
             nav.prompting.remove(&cid);
             nav.windows.retain(|&w| w != cid);
@@ -697,6 +733,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigableRealm", parked_navigable_realm, context_id);
+    crate::dom::register(scope, ns, "takeLostNavigables", take_lost_navigables, context_id);
+    crate::dom::register(scope, ns, "unparkNavigable", unpark_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
@@ -789,12 +827,29 @@ fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_uint32(crate::dom::realm(scope, cid).realm_navigable(realm));
 }
 
-// __dom.discardNavigable(containerNid) -> the realm a WindowProxy of it is left over, or -1 — the container's navigable
-// destroyed: it left its document.
+// __dom.discardNavigable(containerNid) -> whether that lost a navigable between two documents — the container's
+// navigable destroyed: it left its document.
 fn discard_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
-    rv.set_int32(crate::dom::realm(scope, cid).discard_navigable(container).unwrap_or(-1));
+    rv.set_bool(crate::dom::realm(scope, cid).discard_navigable(container));
+}
+
+// __dom.takeLostNavigables() -> the realms whose navigables were destroyed between two documents since last asked
+// (`take_lost`).
+fn take_lost_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let lost = crate::dom::realm(scope, cid).take_lost();
+    let values: Vec<v8::Local<'_, v8::Value>> = lost.into_iter().map(|r| v8::Integer::new(scope, r).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.unparkNavigable(realm) — the navigable between two documents whose last one was realm `realm`'s given up on
+// (`unpark`).
+fn unpark_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return };
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).unpark(realm);
 }
 
 // __dom.setRealmDocument(docNid) — this realm's window's document.

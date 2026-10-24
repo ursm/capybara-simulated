@@ -19,6 +19,8 @@ RSpec.describe "a frame's WindowProxy across its navigations" do
       when '/a' then html.('<title>A</title>')
       when '/b' then html.('<title>B</title><script>window.sawSelf = parent.fw.document === document</script>')
       when '/s' then html.('<script>window.held = () => parent.frames[0]</script>')
+      when '/n' then html.('<iframe src="/m"></iframe>')
+      when '/m' then html.('<iframe src="/a"></iframe>')
       else html.('')
       end
     })
@@ -41,6 +43,19 @@ RSpec.describe "a frame's WindowProxy across its navigations" do
     expect(session.evaluate_script('[kept.document.URL, fw.document.URL, fw === frames[0], kept === frames[1].held()]')).to eq(
       ['about:blank', 'about:blank', true, true]
     )
+  end
+
+  it 'is gone with a navigable destroyed before its next document is made' do
+    session.visit '/'
+    expect(poll_until { session.evaluate_script('frames[0].document.title') == 'A' }).to be(true)
+    session.execute_script('window.fw = frames[0]; const f = document.querySelector("iframe"); f.src = "about:blank"; f.remove()')
+    expect(session.evaluate_script('[fw.closed, fw.parent, fw.top]')).to eq([true, nil, nil])
+    # (…and with the document its container is in, navigated away)
+    session.visit '/n'
+    expect(poll_until { session.evaluate_script('frames[0].frames[0]?.document.title') == 'A' }).to be(true)
+    session.execute_script('window.g = frames[0].frames[0]; frames[0].document.querySelector("iframe").src = "about:blank"; frames[0].location.href = "/a"')
+    expect(poll_until { session.evaluate_script('frames[0].document.title') == 'A' && session.evaluate_script('g.closed') }).to be(true)
+    expect(session.evaluate_script('[g.parent, g.top]')).to eq([nil, nil])
   end
 
   # (…a bounded gap: HTML's WindowProxy reports the next window without it, which no JS Proxy can — platform-globals.js)

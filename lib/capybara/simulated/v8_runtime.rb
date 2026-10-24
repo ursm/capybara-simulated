@@ -530,6 +530,12 @@ module Capybara
       rescue StandardError
         nil
       end
+      # …and those of the navigables destroyed between two documents, no document after the last one made.
+      def evict_lost_window_proxies
+        ctx.call('__csimEvictLostWindowProxies', proxy_holders)
+      rescue StandardError
+        nil
+      end
       # The realms that may hold a WindowProxy of another's window: every live one.
       def proxy_holders = [0] + frame_realms.keys + loading_frame_realms.keys
       # Whether the window of window realm `id` is closed (navigables.rs `window_closed`, by its key).
@@ -580,6 +586,8 @@ module Capybara
         # (`RealmArena::discard_realm`).
         ctx.eval_void("globalThis.__csimRunBackupReactionsOf && globalThis.__csimRunBackupReactionsOf(#{id.to_i});") rescue nil
         ctx.eval_void("globalThis.__dom && globalThis.__dom.discardRealm(#{id.to_i});") rescue nil
+        # (…its document discarded, the navigables in it between two documents lost with it)
+        evict_lost_window_proxies
         fr = frame_realms.delete(id)
         fr.dispose rescue nil if fr
         discarded_realm_ids << id.to_i
@@ -915,9 +923,14 @@ module Capybara
           dispose_frame_realm(id, keep_proxies: kept == true)   # also revokes the realm's blob URLs
           nil
         })
-        # …and a navigable destroyed between two documents: the WindowProxies of it, over its last one's window, dropped.
+        # …and a navigable given up on between two documents: the WindowProxies of it, over its last one's window, dropped
+        # — or, those of every navigable destroyed so (navigables.rs `lost`).
         c.attach('__csim_windowProxiesGone', ->(id) {
           evict_window_proxies(id.to_i)
+          nil
+        })
+        c.attach('__csim_lostWindowProxies', -> {
+          evict_lost_window_proxies
           nil
         })
         # …and a frame's container removed: its navigable destroyed, its session history with it (session_history.rs).

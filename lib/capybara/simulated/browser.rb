@@ -11615,8 +11615,9 @@ module Capybara
           frame_realm_host_call(parent, '__csimFireFrameElementLoad', handle)
         rescue StandardError
           # The element rebind/load failed — don't strand the freshly built realm
-          # (it's no longer referenced by any iframe), then surface the error.
-          @runtime.dispose_frame_realm(new_id)
+          # (it's no longer referenced by any iframe), then surface the error — the WindowProxies of the frame, over its
+          # window already, kept for its navigable's next document (or its destruction) to retarget or drop.
+          @runtime.dispose_frame_realm(new_id, keep_proxies: true)
           raise
         end
         invalidate_find_cache
