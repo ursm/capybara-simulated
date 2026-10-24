@@ -1331,9 +1331,11 @@ module Capybara
         # module at all, whoever answered it: HTML "fetch a single module script")
         src = nil if src && !inline_src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         return handles[url] = nil unless src
-        # (…its fetch options' referrer policy, for an `import()` it makes)
-        module_policies(realm_key(target))[url_s] = policy unless policy.to_s.empty?
         return compile_inline_module(src, url_s, target) if inline_src
+        # (…its fetch options' referrer policy, for an `import()` it makes — a fetched module's, which the map keys by its
+        # URL: an inline one's name is its document's base URL, every inline module's alike, so an `import()` it makes is
+        # fetched under its document's policy)
+        module_policies(realm_key(target))[url_s] = policy unless policy.to_s.empty?
         @browser.note_module_source_map(url_s, src)
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory
@@ -1447,8 +1449,8 @@ module Capybara
       end
       # …and realm -> {module URL -> the referrer policy its fetch options carry}, where its graph's element set one
       # (`referrerpolicy`): what an `import()` the module makes is fetched under (HTML HostLoadImportedModule: the
-      # referencing script's fetch options), kept as the module map keeps the module — its first fetch's. Invalidated as
-      # the handles are.
+      # referencing script's fetch options), kept as the module map keeps the module — its first fetch's (a fetched
+      # module's alone: `native_module_for`). Invalidated as the handles are.
       def module_policies(realm)
         key = [ctx.object_id, ctx.generation]
         if @module_policies_key != key

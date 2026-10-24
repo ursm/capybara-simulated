@@ -37,6 +37,8 @@ struct Face {
     rule: Option<u32>,
     identity: Option<String>,
     reflected: Option<[String; 11]>,
+    // …and the referrer its downloads are requested with, its rule's (`FaceRecord::referrer`): none for a script's face.
+    referrer: Option<String>,
     // What font matching reads of it, while its family and descriptors hold.
     record: Option<FaceRecord>,
 }
@@ -50,6 +52,7 @@ impl Face {
             }
             let mut record = crate::font_faces::parse(&block, "about:blank").unwrap_or_default();
             record.sources = self.sources.clone().unwrap_or_default();
+            record.referrer = self.referrer.clone();
             self.record = Some(record);
         }
         self.record.as_ref().expect("made above")
@@ -130,7 +133,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
     let sources = sources.map(Option::unwrap_or_default);
     let status = if error.is_some() { ERROR } else { UNLOADED };
-    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, record: None };
+    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, referrer: None, record: None };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
@@ -285,17 +288,19 @@ fn settle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_bool(open);
 }
 
-// __dom.ffConnect(state, rule, identity, declared, family) — the face is CSS-connected (CSS Font Loading §2.2): of the
-// rule `rule`, made of its `declared` descriptors (`FACE_ATTRIBUTE_DESCRIPTORS`' order, empty for one the rule does not
-// declare), what makes it that face `identity`, its family the rule's `family` as the style engine took and serialized
-// it (`math` stays `math`, which the constructor's stricter reading would have quoted); with no `identity`, the rule it
-// is of already declaring `declared` now — reflected where they changed since (`Face::reflect`).
+// __dom.ffConnect(state, rule, identity, declared, family, referrer) — the face is CSS-connected (CSS Font Loading
+// §2.2): of the rule `rule`, made of its `declared` descriptors (`FACE_ATTRIBUTE_DESCRIPTORS`' order, empty for one the
+// rule does not declare), what makes it that face `identity`, its family the rule's `family` as the style engine took
+// and serialized it (`math` stays `math`, which the constructor's stricter reading would have quoted), its downloads
+// referred by `referrer` (its sheet's location: CSS Values 4 "fetch a style resource"); with no `identity`, the rule
+// it is of already declaring `declared` now — reflected where they changed since (`Face::reflect`).
 fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(face) = face(scope, args.get(0)) else { return };
     let rule = args.get(1).uint32_value(scope);
     let identity = (!args.get(2).is_null_or_undefined()).then(|| args.get(2).to_rust_string_lossy(scope));
     let declared = v8::Local::<v8::Array>::try_from(args.get(3)).ok();
     let family = args.get(4).to_rust_string_lossy(scope);
+    let referrer = args.get(5).is_string().then(|| args.get(5).to_rust_string_lossy(scope)).filter(|r| !r.is_empty());
     let mut values: [String; 11] = Default::default();
     for (k, value) in values.iter_mut().enumerate() {
         if let Some(v) = declared.and_then(|a| a.get_index(scope, k as u32)) {
@@ -303,6 +308,10 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
     }
     let mut f = face.borrow_mut();
+    if f.referrer != referrer {
+        f.referrer = referrer;
+        f.record = None;
+    }
     match identity {
         // (…a face just made of its rule's descriptors has them already)
         Some(identity) => {
@@ -329,13 +338,13 @@ fn sources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // own, else the first of its sources, in order, that gives one (font_files.rs `face_file`) — what `load()` loads.
 fn file_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(face), Ok(fetch)) = (face(scope, args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1))) else { return rv.set_null() };
-    let (file, sources, bucket) = {
+    let (file, sources, bucket, referrer) = {
         let mut f = face.borrow_mut();
         let bucket = f.record().local_style();
-        (f.file.clone(), f.sources.clone().unwrap_or_default(), bucket)
+        (f.file.clone(), f.sources.clone().unwrap_or_default(), bucket, f.referrer.clone())
     };
     let cid = crate::dom::realm_id(scope, &args);
-    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, None, fetch);
+    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, referrer.as_deref(), fetch);
     crate::font_files::answer_file(scope, &mut rv, file);
 }
 

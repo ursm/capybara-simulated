@@ -5072,7 +5072,8 @@ fn style_font_faces_unguarded(
         let rule = crate::font_faces::rule_face(&face.declared);
         items.push(v8::Integer::new_from_unsigned(scope, face.id).into());
         items.push(v8::Boolean::new(scope, rule.is_face).into());
-        for value in [&rule.family, &rule.src, &rule.identity].into_iter().chain(&rule.attributes) {
+        let referrer = face.record.as_ref().and_then(|r| r.referrer.clone()).unwrap_or_default();
+        for value in [&rule.family, &rule.src, &rule.identity, &referrer].into_iter().chain(&rule.attributes) {
             items.push(v8::String::new(scope, value).map_or_else(|| v8::undefined(scope).into(), Into::into));
         }
     }

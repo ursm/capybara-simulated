@@ -9622,11 +9622,12 @@ module Capybara
       # descendants of a module script", HostLoadImportedModule: the referring script's base URL its referrer)].
       # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`__csimInlineScriptBase`:
       # a frame's, not the page's, its `<base href>` heeded, one inserted after it not); a script the realm knows by no
-      # name — a handler's, a string timer's — its document's base URL now)
+      # name — a handler's, a string timer's — its document's base URL now, and no referring script at all: the request
+      # referred by its client, nil)
       def resolve_module_request(specifier, base_url, realm)
-        base = module_base_url(base_url) || realm_text(realm, '__csimInlineScriptBase', base_url.to_s) ||
-               realm_text(realm, '__csimBaseURL') || effective_module_base(nil)
-        [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier, base]
+        referrer = module_base_url(base_url) || realm_text(realm, '__csimInlineScriptBase', base_url.to_s)
+        base     = referrer || realm_text(realm, '__csimBaseURL') || effective_module_base(nil)
+        [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier, referrer]
       end
       # …a string realm `realm` (0 the page) answers `name` with, nil for none.
       private def realm_text(realm, name, *args)

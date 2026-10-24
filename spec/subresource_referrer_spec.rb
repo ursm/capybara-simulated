@@ -134,7 +134,7 @@ RSpec.describe 'a subresource request' do
       next [200, {'content-type' => 'font/woff2'}, ['']] if path.end_with?('.woff2')
 
       css = {
-        '/css/a.css' => '@import "/imp/i.css"; @font-face{font-family:A;src:url(/fa.woff2)}',
+        '/css/a.css' => '@import "/imp/i.css"; @font-face{font-family:A;src:url(/fa.woff2)} @font-face{font-family:C;src:url(/fc.woff2)}',
         '/imp/i.css' => '@font-face{font-family:I;src:url(/fi.woff2)}',
         '/o.css'     => '@font-face{font-family:O;src:url(http://www.example.com/fo.woff2)}'
       }[path]
@@ -146,10 +146,13 @@ RSpec.describe 'a subresource request' do
     })
     session.visit '/p'
     session.evaluate_script('Promise.all(["A", "I", "O", "S"].map((f) => document.fonts.load(`16px ${f}`)))')
+    # (…a CSS-connected face's own `load()` alike)
+    session.evaluate_script('[...document.fonts].find((f) => f.family === "C").load().then(() => 1, () => 1)')
     session.evaluate_script('1')
-    expect(referers.slice('/imp/i.css', '/fa.woff2', '/fi.woff2', '/fo.woff2', '/fs.woff2')).to eq(
+    expect(referers.slice('/imp/i.css', '/fa.woff2', '/fc.woff2', '/fi.woff2', '/fo.woff2', '/fs.woff2')).to eq(
       '/imp/i.css' => 'http://www.example.com/p',
       '/fa.woff2'  => 'http://www.example.com/css/a.css',
+      '/fc.woff2'  => 'http://www.example.com/css/a.css',
       '/fi.woff2'  => 'http://www.example.com/imp/i.css',
       '/fo.woff2'  => 'http://other.test/',
       '/fs.woff2'  => 'http://www.example.com/p'
@@ -176,11 +179,17 @@ RSpec.describe 'a subresource request' do
 
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><script type=module src=/m/entry.js></script>' \
                                               '<script src=/c/classic.js></script><script>import("/n/frominline.js")</script>' \
-                                              '<script type=module referrerpolicy=origin src=/r/entry.js></script>']]
+                                              '<script type=module referrerpolicy=origin src=/r/entry.js></script>' \
+                                              '<script type=module referrerpolicy=no-referrer>window.a = () => import("/i/a.js")</script>' \
+                                              '<script type=module>window.b = () => import("/i/b.js")</script>']]
     })
     session.visit '/page/p'
     session.evaluate_script('1')
-    expect(referers.except('/page/p')).to eq(
+    session.execute_script('a(); b()')
+    session.evaluate_script('1')
+    # (…`/i/a.js` aside: an inline module's own `referrerpolicy` its `import()` does not keep yet — the policies are keyed
+    # by URL — though no other inline module's leaks into another's: `/i/b.js`)
+    expect(referers.except('/page/p', '/i/a.js')).to eq(
       '/m/entry.js'       => 'http://www.example.com/page/p',
       '/n/child.js'       => 'http://www.example.com/m/entry.js',
       '/o/grand.js'       => 'http://www.example.com/n/child.js',
@@ -190,8 +199,25 @@ RSpec.describe 'a subresource request' do
       '/n/frominline.js'  => 'http://www.example.com/page/p',
       '/r/entry.js'       => 'http://www.example.com/',
       '/r/child.js'       => 'http://www.example.com/',
-      '/r/dyn.js'         => 'http://www.example.com/'
+      '/r/dyn.js'         => 'http://www.example.com/',
+      '/i/b.js'           => 'http://www.example.com/page/p'
     )
+  end
+
+  # …a handler's `import()` by its client, the document — no script refers it (HTML: a handler's function has no
+  # [[ScriptOrModule]]) — though it resolves against the document's base URL.
+  it "is referred by its document for an event handler's import()" do
+    refs = referers
+    session = simulated_session(lambda {|env|
+      refs[env['PATH_INFO']] = env['HTTP_REFERER']
+      next [200, {'content-type' => 'text/javascript'}, ['']] if env['PATH_INFO'].end_with?('.js')
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><base href="/other/dir/"><button onclick="import(\'./h.js\')">h</button>']]
+    })
+    session.visit '/page/p'
+    session.click_button 'h'
+    session.evaluate_script('1')
+    expect(referers).to include('/other/dir/h.js' => 'http://www.example.com/page/p')
   end
 
   it "is referred under a frame's meta policy parsed before it" do
