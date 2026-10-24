@@ -478,7 +478,8 @@ module Capybara
         {initiator: post[:initiator] || source&.raw_current_url, origin_null: post[:origin_null] == true}
       end
 
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil)
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil,
+                          user_activated: nil)
         name = name.to_s
         # (…the policy the opening hyperlink sets, else its document's)
         referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
@@ -493,7 +494,7 @@ module Capybara
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
           # one is made)
-          activated = source && activation_realm ? source.source_activated?(activation_realm) : false
+          activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
           if post
             existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, user_activated: activated,
                                                                                   **post_initiator(post, source))
@@ -502,8 +503,10 @@ module Capybara
           end
           return existing[:handle]
         end
-        # (…the window's own navigation carrying whether its opener had it: the source snapshot's, taken as it opens)
-        activated = source && activation_realm ? source.consume_user_activation(activation_realm) : source.nil?
+        # (…the window's own navigation carrying whether its opener had it: the source snapshot's — its plan's, where a
+        # hyperlink or a form planned it, else taken as it opens)
+        had = source && activation_realm ? source.consume_user_activation(activation_realm) : source.nil?
+        activated = user_activated.nil? ? had : user_activated
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser

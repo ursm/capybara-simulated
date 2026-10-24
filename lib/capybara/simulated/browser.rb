@@ -1386,10 +1386,11 @@ module Capybara
           elsif new_window_target?(target)
             open_hyperlink_window(
               resolve_against_current(url, use_base: true),
-              target:      target,
-              opener:      action['opener'],
-              link_policy: action['referrerPolicy'],
-              blob:        action['blob']
+              target:         target,
+              opener:         action['opener'],
+              link_policy:    action['referrerPolicy'],
+              blob:           action['blob'],
+              user_activated: action['userActivated'] == true
             )
           # In-page anchor links (`#frag` / current-page + `#frag`) move
           # the hash but don't fetch a new document. Pure-fragment also
@@ -2066,8 +2067,9 @@ module Capybara
       # A hyperlink's new window (HTML "follow the hyperlink" with a target that names none): named by its target but
       # for `_blank` — a second link of the name navigates the window the first opened — with the opener `opener` says
       # (token_list.rs `noopener`), and loaded with its document's URL as the referrer (steps 8-9), under the policy its
-      # `rel` / `referrerpolicy` set (`link_policy`: '' for its document's) — the document of realm `realm_id`'s.
-      def open_hyperlink_window(url, target:, opener:, link_policy:, blob: nil, realm_id: @current_realm_id.to_i)
+      # `rel` / `referrerpolicy` set (`link_policy`: '' for its document's) — the document of realm `realm_id`'s — and with
+      # its plan's activation (`user_activated`, navigation_plan.rs), where it was planned.
+      def open_hyperlink_window(url, target:, opener:, link_policy:, blob: nil, realm_id: @current_realm_id.to_i, user_activated: nil)
         referrer, document_policy = realm_referrer_initiator(realm_id)
         @driver.open_aux_window(
           url,
@@ -2077,7 +2079,8 @@ module Capybara
           opener:           !!opener,
           blob_snapshot:    blob,
           referrer:         referrer || '',
-          referrer_policy:  link_policy.to_s.empty? ? document_policy : link_policy.to_s
+          referrer_policy:  link_policy.to_s.empty? ? document_policy : link_policy.to_s,
+          user_activated:   user_activated
         )
       end
 
@@ -2088,10 +2091,11 @@ module Capybara
           # (…`opener` the link's noopener's answer; open_aux_window forces noopener anyway for a cross-partition blob)
           open_hyperlink_window(
             resolve_against_current(url, use_base: true),
-            target:      target,
-            opener:      pending['opener'],
-            link_policy: pending['referrerPolicy'],
-            blob:        pending['blob']
+            target:         target,
+            opener:         pending['opener'],
+            link_policy:    pending['referrerPolicy'],
+            blob:           pending['blob'],
+            user_activated: pending['userActivated'] == true
           )
         elsif pure_fragment_navigation?(url, use_base: true)
           update_current_hash(resolve_against_current(url, use_base: true))
@@ -2583,7 +2587,9 @@ module Capybara
       # difference on `event.request.isReloadNavigation` / `.isHistoryNavigation`.
       # (…its document made with the entry's classic history API state — `history.state` before its scripts run, as a
       # reload or a traversal to it gives it, HTML "update document for history step application")
-      def replay_history_entry(id, is_reload: false)
+      # (…`user_activated` a reload's: whether the document it reloads had transient activation as it began — HTML's source
+      # snapshot of the navigable's active document — a traversal's none)
+      def replay_history_entry(id, is_reload: false, user_activated: false)
         return unless id
 
         entry = history_entry(id)
@@ -2593,10 +2599,11 @@ module Capybara
         # measured: `location.reload()` sends the page's own URL, a re-posted `no-referrer` form none)
         referred = is_reload && entry[:method] != :post ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
         if entry[:method] == :post
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin], **referred)
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin],
+                                                                         user_activated: user_activated, **referred)
         else
           # (…a user traversal: site 'none')
-          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil, **referred)
+          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil, user_activated: user_activated, **referred)
         end
       ensure
         @restoring_history_state = nil
@@ -3476,7 +3483,7 @@ module Capybara
         elsif method == 'GET'
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
-                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy)
+                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy, user_activated: activated)
           elsif named_frame
             navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id.to_i, user_activated: activated)
           elsif frame_entry
@@ -3489,7 +3496,7 @@ module Capybara
           site, origin_null = realm_request_initiator(@current_realm_id.to_i)
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
-                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
+                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy, user_activated: activated,
                                     post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
           elsif named_frame
             navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id.to_i, user_activated: activated)
@@ -10860,11 +10867,14 @@ module Capybara
       # Context) while we're still inside the V8 call, which V8
       # terminates with a `ScriptTerminatedError`. Stash the intent
       # and drain it from `tick_real_time` after the call returns.
-      def location_reload   ; @pending_reload = true ; end
+      # (…`user_activated` whether the page had transient activation as `location.reload()` was called)
+      def location_reload(user_activated: false)
+        @pending_reload = [user_activated]
+      end
       def consume_pending_reload
-        return unless @pending_reload
+        return unless (reload = @pending_reload)
         @pending_reload = nil
-        refresh
+        refresh(user_activated: reload[0])
       end
       # `frame.contentWindow.location.reload()` from a nested browsing context.
       # Like `frame_navigate_self`, the JS side flags the initiating realm here
@@ -11746,22 +11756,24 @@ module Capybara
         url = in_top_context { resolve_against_current(pending['url'].to_s, use_base: true) }
         open_hyperlink_window(
           url,
-          target:      pending['target'],
-          opener:      pending['opener'],
-          link_policy: pending['referrerPolicy'],
-          blob:        pending['blob'],
-          realm_id:    0
+          target:         pending['target'],
+          opener:         pending['opener'],
+          link_policy:    pending['referrerPolicy'],
+          blob:           pending['blob'],
+          realm_id:       0,
+          user_activated: pending['userActivated'] == true
         )
       rescue StandardError => e
         log_console('warn', "aux-window open failed: #{e.message}")
       end
       # POST-after-POST resubmits with the original body; GET-after-GET
        # is just a re-GET. Replay the current history entry.
-      def refresh
+      # (…`user_activated` whether the page had transient activation as the reload began: the driver's own reload asks it now)
+      def refresh(user_activated: source_activated?(0))
         # Before the replay below commits anything (see `flush_outgoing_page_init`).
         flush_outgoing_page_init if @timers_active
         save_navigation_history
-        replay_history_entry(@session_history.active(0), is_reload: true)
+        replay_history_entry(@session_history.active(0), is_reload: true, user_activated: user_activated)
         restore_flushed_nav_intents
       end
       # `history.pushState(state, '', '/path')` ships the URL through
@@ -13713,7 +13725,7 @@ module Capybara
         def visit(url, **)
           driver_action(:visit, "visit #{url}") { super }
         end
-        def refresh
+        def refresh(**)
           driver_action(:refresh, 'refresh') { super }
         end
         def go_back

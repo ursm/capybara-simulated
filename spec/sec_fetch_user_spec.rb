@@ -26,6 +26,7 @@ RSpec.describe 'Sec-Fetch-User', :https do
         <form action="/posted" method=post><button>post</button></form>
         <button id=src onclick="frames[0].frameElement.src = '/src-clicked'">src</button>
         <button id=other onclick="o.location = '/other-clicked'">other</button>
+        <button id=reload onclick="location.reload()">reload</button>
         <iframe src="/blank"></iframe>
         <script>window.w = open('', 'pop')</script>
       HTML
@@ -62,6 +63,15 @@ RSpec.describe 'Sec-Fetch-User', :https do
     session.visit '/'
     session.click_button 'post'
     expect(poll_until { seen['/posted'] }).to eq('?1')
+    # (…a reload's the document's it reloads: activated by the click that reloads it, not by the driver's own)
+    session.visit '/'
+    seen.delete('/')
+    session.click_button 'reload'
+    expect(poll_until { seen.key?('/') && seen['/'] }).to eq('?1')
+    seen.delete('/')
+    session.refresh
+    expect(poll_until { seen.key?('/') }).to be(true)
+    expect(seen['/']).to be_nil
   end
 
   # (…a window of a browser of its own, which its opener's click navigates)

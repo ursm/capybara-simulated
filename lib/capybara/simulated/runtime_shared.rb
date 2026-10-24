@@ -48,7 +48,7 @@ module Capybara
         # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
         '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include', binary: a[7] == true, integrity: a[8] || '') },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true, initiator_realm: a[2], policy: a[3].to_s, user_activated: a[4] == true); nil },
-        '__locationReload'           => ->(b, *_) { b.location_reload; nil },
+        '__locationReload'           => ->(b, *a) { b.location_reload(user_activated: a[0] == true); nil },
         '__csimCancelPlannedNavigation' => ->(b, *_) { b.cancel_planned_navigation; nil },
         # A nested browsing context navigated (a[1] = the frame's realm id) — its OWN
         # location, or (a[3] = the initiating realm id) a link whose target names it,
