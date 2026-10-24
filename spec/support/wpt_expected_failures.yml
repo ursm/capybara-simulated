@@ -2751,18 +2751,12 @@ fetch/metadata/generated/element-link-prefetch.https.optional.sub.html:
 - 'sec-fetch-dest attributes: as=track'
 - 'sec-fetch-dest attributes: as=video'
 - 'sec-fetch-dest attributes: as=worker'
-- 'sec-fetch-mode attributes: crossorigin'
-- 'sec-fetch-mode attributes: crossorigin=anonymous'
-- 'sec-fetch-mode attributes: crossorigin=use-credentials'
 - sec-fetch-storage-access - Cross-site no attributes
 fetch/metadata/generated/element-picture.https.sub.html:
 - sec-fetch-storage-access - img[src] - Cross-site, no attributes
 - sec-fetch-storage-access - img[srcset] - Cross-site, no attributes
 - sec-fetch-storage-access - source[srcset] - Cross-site, no attributes
 fetch/metadata/generated/element-script.https.sub.html:
-- 'sec-fetch-mode - attributes: crossorigin'
-- 'sec-fetch-mode - attributes: crossorigin=anonymous'
-- 'sec-fetch-mode - attributes: crossorigin=use-credentials'
 - sec-fetch-storage-access - Cross-site, no attributes
 fetch/metadata/generated/element-video-poster.https.sub.html: HARNESS_ERROR
 fetch/metadata/generated/element-video-poster.sub.html: HARNESS_ERROR
@@ -3012,25 +3006,6 @@ fetch/metadata/generated/worker-dedicated-importscripts.https.sub.html:
 - sec-fetch-storage-access - Cross-site
 fetch/metadata/paint-worklet.https.html:
 - The fetch metadata for paint worklet
-fetch/metadata/preload.https.sub.html:
-- 'preload fetch web-platform.test:8443: sec-fetch-mode'
-- 'preload fetch www.not-web-platform.test:8443: sec-fetch-mode'
-- 'preload fetch www.web-platform.test:8443: sec-fetch-mode'
-- 'preload font web-platform.test:8443: sec-fetch-mode'
-- 'preload font www.not-web-platform.test:8443: sec-fetch-mode'
-- 'preload font www.web-platform.test:8443: sec-fetch-mode'
-- 'preload image web-platform.test:8443: sec-fetch-mode'
-- 'preload image www.not-web-platform.test:8443: sec-fetch-mode'
-- 'preload image www.web-platform.test:8443: sec-fetch-mode'
-- 'preload script web-platform.test:8443: sec-fetch-mode'
-- 'preload script www.not-web-platform.test:8443: sec-fetch-mode'
-- 'preload script www.web-platform.test:8443: sec-fetch-mode'
-- 'preload style web-platform.test:8443: sec-fetch-mode'
-- 'preload style www.not-web-platform.test:8443: sec-fetch-mode'
-- 'preload style www.web-platform.test:8443: sec-fetch-mode'
-- 'preload track web-platform.test:8443: sec-fetch-mode'
-- 'preload track www.not-web-platform.test:8443: sec-fetch-mode'
-- 'preload track www.web-platform.test:8443: sec-fetch-mode'
 fetch/metadata/redirect/multiple-redirect-https-downgrade-upgrade.sub.html:
 - Https downgrade-upgrade track
 - "[harness] TIMEOUT"
@@ -3043,8 +3018,6 @@ fetch/metadata/redirect/redirect-https-downgrade.sub.html:
 fetch/metadata/report.https.sub.html:
 - "[harness] TIMEOUT"
 - "[harness] no subtests"
-fetch/metadata/style.https.sub.html:
-- 'Same-Origin, cors style: sec-fetch-mode'
 fetch/metadata/text.https.html:
 - The fetch metadata for text module
 fetch/metadata/track.https.sub.html:

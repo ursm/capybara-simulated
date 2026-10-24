@@ -3835,10 +3835,11 @@ module Capybara
 
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
       # An element's GET of `url` (a script inserted, a `<link>` that is no sheet, a hint) as its node document — realm
-      # `realm` — requests it, under the policy its `referrerpolicy` sets (`policy`): `rack_fetch`'s answer.
-      def subresource_fetch(url, realm, policy, dest = nil)
+      # `realm` — requests it, under the policy its `referrerpolicy` sets (`policy`): `rack_fetch`'s answer — a CORS
+      # request of `credentials` where its `crossorigin` makes it one (`mode`).
+      def subresource_fetch(url, realm, policy, dest = nil, mode = nil, credentials = 'same-origin')
         client = request_client(realm, policy)
-        rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
+        rack_fetch('GET', url, '', nil, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
       def rack_fetch_body(url, cors_mode: nil, credentials: 'same-origin', client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil,
