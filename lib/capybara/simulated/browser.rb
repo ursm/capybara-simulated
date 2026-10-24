@@ -3954,6 +3954,7 @@ module Capybara
           'cached'          => result['cached'],
           'redirected'      => result['redirected'] == true,
           'type'            => result['type'],
+          'tainted'         => result['tainted'] == true,
           'tao'             => result['tao'],
           'serverTiming'    => result['serverTiming'],
           'contentEncoding' => result['contentEncoding']
@@ -9966,6 +9967,11 @@ module Capybara
         same_origin_mode = cors_mode == 'same-origin'
         doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil
         crossed          = false
+        # (…and, whatever the mode, whether a hop left the client's origin: what a no-mode caller's response is tainted by —
+        # an element's no-cors load through the asset cache, whose resource is not CORS-same-origin then: a sheet's
+        # origin-clean flag unset, `styleSheetOriginClean`)
+        tainted          = false
+        marked           = ->(out) { out['tainted'] = true if out && tainted && !crossed; out }
         # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
         # (like the navigation path), computed vs the request's referrer-source origin below. A SW
         # re-fetch seeds it with the widened site the network hops accumulated BEFORE the SW
@@ -10056,6 +10062,7 @@ module Capybara
           # BEFORE the cache so a cross-origin request never takes the cache fast path
           # (which would bypass the opaque filter / same-origin-mode error / cors type).
           crossed ||= !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
+          tainted ||= client_origin == 'null' || url_origin(target) != client_origin
           return nil if same_origin_mode && crossed   # 'same-origin' mode forbids a cross-origin hop
           # HTTP cache (RFC 9111 + Fetch "HTTP-network-or-cache fetch"), gated by the request's
           # cache MODE. GET-only, same-origin (a cross-origin hop always redispatches so the mode
@@ -10094,7 +10101,7 @@ module Capybara
             end
             # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
-            return response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded)
+            return marked.(response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded))
           end
           # only-if-cached forbids the network: no usable stored response → a network error.
           return nil if cache_mode == 'only-if-cached'
@@ -10250,7 +10257,7 @@ module Capybara
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.
             cached_headers = cross_origin ? cors_exposed_headers(cache_entry.headers, with_credentials) : cache_entry.headers
-            return response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers, encoded: cache_entry.encoded)
+            return marked.(response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers, encoded: cache_entry.encoded))
           end
           # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
@@ -10388,7 +10395,7 @@ module Capybara
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
           return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size) if no_cors_mode && crossed
-          out = response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
+          out = marked.(response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers))
           # (…a document's navigation request's the method its last hop went with, which its session history entry
           # keeps: a POST's through a 307 / 308 still one, a 303's a GET)
           out['method'] = method.to_s if navigation && out
@@ -13335,7 +13342,9 @@ module Capybara
       # 304's, which have none whatever the app gave (Chrome's and Firefox's) — is as long as one says (the engine's
       # `message_length`): what is past it dropped, what falls short of it a `CutShortBody` (a fetch's body then fails as
       # it is read; a document renders what came, as Firefox does — Chrome commits an empty one).
+      # (…one of a status no response can have — no three digits — none at all: a network error, as a malformed one is)
       def framed_response(method, status, headers, body)
+        return nil unless (0..999).cover?(status.to_i)
         return [status, headers, body] if headers.any? {|k, _| k.to_s.casecmp?('transfer-encoding') }
 
         fields         = headers.filter_map {|k, v| v if k.to_s.casecmp?('content-length') }

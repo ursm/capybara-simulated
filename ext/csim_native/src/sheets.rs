@@ -48,6 +48,9 @@ pub(crate) struct StoredSheet {
     pub(crate) disabled: bool,
     pub(crate) media_text: Vec<u16>,
     pub(crate) modification_disallowed: bool,
+    // …and whether its origin-clean flag is unset (CSSOM §6.1.2): a sheet of a response that is no CORS-same-origin one —
+    // a no-cors request's of another origin, a failed load's — whose rules no script reads nor edits.
+    pub(crate) origin_dirty: bool,
     // …and, for a sheet an owner has (`owner`, sheet_owners.rs `ownerSheet`): whether a script unset its disabled flag
     // (`enabled`: it takes part whatever its document's style sheet sets say), and whether those sets left it out when
     // last asked (`set_excluded`: the flag "add a CSS style sheet" set, kept once the owner lets it go).
@@ -163,6 +166,7 @@ impl SheetStore {
             disabled: false,
             media_text: Vec::new(),
             modification_disallowed: false,
+            origin_dirty: false,
             owner: None,
             enabled: false,
             set_excluded: false,
@@ -219,8 +223,8 @@ impl SheetStore {
         let stored = self.parse(lock, source, quirks, version);
         if let Some(sheet) = self.sheets.get_mut(&id) {
             let (media_text, modification_disallowed) = (std::mem::take(&mut sheet.media_text), sheet.modification_disallowed);
-            let (owner, enabled, set_excluded) = (sheet.owner, sheet.enabled, sheet.set_excluded);
-            *sheet = StoredSheet { disabled: sheet.disabled, media_text, modification_disallowed, owner, enabled, set_excluded, ..stored };
+            let (owner, enabled, set_excluded, origin_dirty) = (sheet.owner, sheet.enabled, sheet.set_excluded, sheet.origin_dirty);
+            *sheet = StoredSheet { disabled: sheet.disabled, media_text, modification_disallowed, origin_dirty, owner, enabled, set_excluded, ..stored };
         }
         self.waiting_since(before)
     }
@@ -325,6 +329,7 @@ impl SheetStore {
             disabled: false,
             media_text: Vec::new(),
             modification_disallowed: false,
+            origin_dirty: false,
             owner: None,
             enabled: false,
             set_excluded: false,

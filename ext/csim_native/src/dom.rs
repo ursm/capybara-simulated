@@ -2874,6 +2874,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "adoptedSheetPut", adopted_sheet_put, context_id);
     register(scope, ns, "adoptedSheetsTruncate", adopted_sheets_truncate, context_id);
     register(scope, ns, "sheetModificationDisallowed", sheet_modification_disallowed, context_id);
+    register(scope, ns, "sheetOriginClean", sheet_origin_clean, context_id);
     register(scope, ns, "mediaQueries", media_queries, context_id);
     register(scope, ns, "mediaAppend", media_append, context_id);
     register(scope, ns, "mediaDelete", media_delete, context_id);
@@ -4749,6 +4750,20 @@ fn sheet_modification_disallowed(scope: &mut v8::PinScope<'_, '_>, args: v8::Fun
         Some(stored.modification_disallowed)
     });
     rv.set_bool(set.unwrap_or(false));
+}
+// __dom.sheetOriginClean(handle[, clean]) -> whether the sheet's origin-clean flag is set (`StoredSheet::origin_dirty`);
+// with `clean`, that set or unset — as its owner's response decides (the bindings' `linkElementSheet`).
+fn sheet_origin_clean(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(sheet) = handle_arg(scope, &args, 0) else { return rv.set_bool(true) };
+    let clean = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
+    let dirty = with_sheets(scope, &args, |store, _| {
+        let stored = store.stored_mut(sheet)?;
+        if let Some(clean) = clean {
+            stored.origin_dirty = !clean;
+        }
+        Some(stored.origin_dirty)
+    });
+    rv.set_bool(!dirty.unwrap_or(false));
 }
 // __dom.mediaText(text) -> `text` as a media list, as the engine serializes one.
 fn media_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

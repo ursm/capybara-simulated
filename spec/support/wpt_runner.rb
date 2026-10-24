@@ -336,7 +336,9 @@ module WptRunner
     head, _, body = raw.partition(/\r?\n\r?\n/)
     lines         = head.split(/\r?\n/)
     status_line   = lines.shift.to_s          # e.g. "HTTP/1.1 280 HELLO"
-    code          = (status_line[/\A\S+\s+(\d{3})/, 1] || '200').to_i
+    # (…one that is no HTTP status line no response at all: a status no response has, -1, which the driver takes for a
+    # network error, as a browser does a malformed response — css/cssom's malformed-http-response.asis)
+    code          = status_line.match?(%r{\AHTTP/\d}) ? (status_line[/\A\S+\s+(\d{3})/, 1] || '200').to_i : -1
     reason        = status_line[/\A\S+\s+\d{3}\s+(.+)/, 1]
     pairs         = lines.filter_map {|l| n, v = l.split(':', 2); [n, v] unless n.to_s.empty? }
     hdrs          = combine_headers(pairs)

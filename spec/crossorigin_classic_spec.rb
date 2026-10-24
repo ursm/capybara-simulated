@@ -8,7 +8,8 @@ require_relative 'support/https_app_host'
 # A classic script's or a style sheet's `crossorigin` makes its fetch a CORS request (HTML "potentially CORS-enabled
 # request"): a response of another origin that does not allow it no script or sheet — its element's `error` — where one
 # without the attribute, a no-cors request, loads whatever it says — a link whose `crossorigin` changes fetched again, and
-# a shadow tree's link of the one mode answered by none of the other's.
+# a shadow tree's link of the one mode answered by none of the other's — and a sheet origin-clean only where its response
+# is CORS-same-origin (CSSOM): its rules another origin's no-cors one hides, a SecurityError.
 RSpec.describe 'a crossorigin classic script or style sheet', :https do
   include PollUntil
 
@@ -53,6 +54,20 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
     expect(poll_until { session.evaluate_script('events.length') == 5 && session.evaluate_script('events.sort()') }).to eq(
       ['error c.css?deny', 'error s.js?deny', 'load c.css?allow', 'load s.js', 'load s.js?allow']
     )
+  end
+
+  it "hides a no-cors sheet of another origin's rules" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      for (const [id, href, cors] of [['plain', 'https://other.example.com/c.css', false], ['cors', 'https://other.example.com/c.css?allow', true],
+                                       ['data', 'data:text/css,p{}', false]]) {
+        const l = Object.assign(document.createElement('link'), {id, rel: 'stylesheet', href});
+        if (cors) l.crossOrigin = 'anonymous';
+        document.head.append(l);
+      }
+    JS
+    read = ->(id) { session.evaluate_script("(() => { try { return String(document.getElementById('#{id}').sheet.cssRules.length); } catch (e) { return e.name; } })()") }
+    expect(%w[plain cors data].map(&read)).to eq(%w[SecurityError 1 1])
   end
 
   it 'fetches a link again as its crossorigin changes, and keys a shadow tree link by its mode' do
