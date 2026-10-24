@@ -454,6 +454,26 @@ RSpec.describe 'Sandboxing' do
     end
   end
 
+  # …a frame's `src` navigation whose response downloads too, the frame's container's attribute as the navigation began
+  # asked (the frame with no document of its own yet): a sandboxed one without `allow-downloads` saves nothing.
+  it "downloads a frame's src response as its container's sandbox allows" do
+    Dir.mktmpdir do |dir|
+      prev = ENV['CSIM_DOWNLOADS_DIR']
+      ENV['CSIM_DOWNLOADS_DIR'] = dir
+      s = simulated_session(lambda {|env|
+        next [200, {'content-type' => 'text/plain', 'content-disposition' => "attachment; filename=#{env['QUERY_STRING']}.txt"}, ['x']] if env['PATH_INFO'] == '/attachment'
+
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="/attachment?plain"></iframe><iframe sandbox="allow-same-origin" src="/attachment?sb">' \
+                                                '</iframe><iframe sandbox="allow-same-origin allow-downloads" src="/attachment?ad"></iframe>']]
+      })
+      s.visit '/'
+      s.evaluate_script('1')
+      expect(Dir.children(dir).sort).to eq(%w[ad.txt plain.txt])
+    ensure
+      ENV['CSIM_DOWNLOADS_DIR'] = prev
+    end
+  end
+
   # "Allowed to download" asks both ends of the navigation: the document that made it — a top-level one its response's
   # CSP sandboxes — and the navigable it targets, a frame's as its container's `sandbox` attribute is now, whatever its
   # document was made with (Chrome's figures, measured).

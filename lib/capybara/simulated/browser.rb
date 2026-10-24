@@ -6908,7 +6908,7 @@ module Capybara
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil, reloading_realm: nil)
+                                 referrer_policy: nil, reloading_realm: nil, sandbox: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -7006,7 +7006,7 @@ module Capybara
           end
           # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate")
           if download_response?(headers)
-            from_document(container_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s]) }
+            from_document(container_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
             return {'no_document' => true}
           end
           body ||= read_rack_body(resp_body)
@@ -12566,12 +12566,13 @@ module Capybara
       # …refused where the navigation's source — the realm whose document made it (`@download_source`, none for the
       # driver's own) — or its target — a frame's (`realm`, the frame realm), none for the top-level one — is sandboxed
       # against downloads: no `allow-downloads` (HTML "allowed to download", navigables.rs `download_allowed`).
-      def save_downloaded_response(url, headers, body, realm: nil)
+      # (…`sandbox` the `[attribute]` a frame's navigation began with where the frame has no document of its own to ask)
+      def save_downloaded_response(url, headers, body, realm: nil, sandbox: nil)
         # (…a frame's session history as it stood before: a download is no navigation of it)
         frame_navigation_made_no_document(realm) if realm
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         source = @download_source || realm
-        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, navigation_sandbox(realm))
+        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox || navigation_sandbox(realm))
 
         filename = disposition_filename(content_disposition_header(headers).to_s)
         filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?

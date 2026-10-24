@@ -469,11 +469,16 @@ impl RealmArena {
     // else as `frame_sandbox` has it — with its container document's flags).
     pub(crate) fn download_allowed(&self, source: Option<i32>, target: Option<i32>, begun: Option<Option<&str>>) -> bool {
         let flags = |realm: i32| self.realm_state(realm).map_or(0, |s| s.location.sandbox);
-        let target = target.and_then(|t| self.live_container(t)).map_or(0, |c| {
-            let around = self.get(c).map_or(0, |n| flags(n.realm));
-            let attribute = begun.map_or_else(|| self.frame_sandbox(c), |b| b.map(str::to_owned));
-            around | crate::sandbox::sandboxing(None, attribute.as_deref())
-        });
+        let target = match target.and_then(|t| self.live_container(t)) {
+            Some(c) => {
+                let around = self.get(c).map_or(0, |n| flags(n.realm));
+                let attribute = begun.map_or_else(|| self.frame_sandbox(c), |b| b.map(str::to_owned));
+                around | crate::sandbox::sandboxing(None, attribute.as_deref())
+            }
+            // (…a frame with no document yet — its first navigation's — sandboxed by the attribute it began with, the
+            // document holding its container the source)
+            None => begun.flatten().map_or(0, |a| crate::sandbox::sandboxing(None, Some(a))),
+        };
         (source.map_or(0, flags) | target) & crate::sandbox::DOWNLOADS == 0
     }
     // The realm whose navigable `_top` or `_parent` (`keyword`) chooses from realm `current`'s, where its document may
