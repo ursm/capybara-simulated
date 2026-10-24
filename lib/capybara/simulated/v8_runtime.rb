@@ -1172,14 +1172,15 @@ module Capybara
         @browser.log_console('warn', "frame realm load failed: #{e.message}")
         # A realm created before the failure (load threw) is untracked — not in
         # frame_realms — so nothing would ever drain or dispose it. Tear it down here
-        # (safe: it's non-executing in the rescue), including any module handles its
-        # scripts compiled before the throw, and take it off its container's navigable,
-        # which was linked to it before the load (none of its parent's child realms).
+        # (safe: it's non-executing in the rescue), taken off its container's navigable,
+        # which was linked to it before the load (none of its parent's child realms):
+        # dispose_frame_realm unwinds what it registered — the module handles its scripts
+        # compiled before the throw among them — and marks it discarded, the WindowProxies
+        # retargeted over it kept for the navigable's next document or its destruction to
+        # retarget or drop; the explicit dispose is the backstop, as it is untracked.
         if realm
           realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, -1) rescue nil if container
-          @realm_module_handles&.delete(realm.id)
-          @module_sw_ctxs&.delete(realm.id)
-          @module_policies&.delete(realm.id)
+          dispose_frame_realm(realm.id, keep_proxies: true)
           realm.dispose rescue nil
         end
         nil
