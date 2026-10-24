@@ -2542,7 +2542,6 @@ fetch/api/policies/referrer-origin-worker.html:
 - Request's referrer is origin
 fetch/api/policies/referrer-origin.html:
 - Cross-origin referrer is overridden by client origin
-- Request's referrer is origin
 fetch/api/redirect/redirect-keepalive.https.any.js:
 - "[keepalive][iframe][load] mixed content redirect"
 fetch/api/redirect/redirect-origin.any.js:

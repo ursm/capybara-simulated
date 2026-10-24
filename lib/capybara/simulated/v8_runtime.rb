@@ -471,7 +471,7 @@ module Capybara
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       # `history_state` the `[state]` of the classic history API state its document starts with, a traversal's to its
       # entry (Browser#reload_frame_to_entry).
-      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil)
+      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil, referrer_policy: nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
@@ -480,7 +480,7 @@ module Capybara
         # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.)
         dispose_frame_realm_tree(old_id)
         create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], seed['docOrigin'], seed['locationOrigin'], nil, nil, seed['viewport'], client_id, seed['margins'], seed['sandbox'],
-                           history_state: history_state, referrer: referrer)
+                           history_state: history_state, referrer: referrer, referrer_policy: referrer_policy)
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
@@ -863,8 +863,11 @@ module Capybara
       # id (or nil on failure — then the bridge keeps its same-realm fallback).
       # The bridge maps `iframe.contentWindow` to `RustyRacer.contextGlobal(id)`.
       def attach_frame_realm_loader(c)
-        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0, referrer = nil) {
-          RuntimeShared.safe_call { create_frame_realm(c, url, body, content_type, parent_id, container, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins, frame_sandbox, referrer: referrer) }
+        c.attach('__csim_createFrameRealm', ->(url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0, referrer = nil, policy_header = nil) {
+          RuntimeShared.safe_call do
+            create_frame_realm(c, url, body, content_type, parent_id, container, frame_doc_origin, frame_location_origin, js_url_source, frame_about_base, frame_viewport, client_id, frame_margins,
+                               frame_sandbox, referrer: referrer, referrer_policy: @browser.referrer_policy_header({'referrer-policy' => policy_header}))
+          end
         })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
@@ -945,7 +948,7 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0, history_state: nil, referrer: nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0, history_state: nil, referrer: nil, referrer_policy: nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -1001,9 +1004,9 @@ module Capybara
         realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
         # (…and its classic history API state, a traversal's to its entry: `reload_frame_realm`)
         realm.call('__csimSetHistoryState', history_state[0]) if history_state
-        # (…and its referrer, its navigation's request's — and, a srcdoc or initial about:blank document, the referrer
-        # policy of its container's document, whose policy container it clones: HTML)
-        inherited = url.to_s.match?(/\Aabout:(?:srcdoc|blank)\b/i) ? @browser.inherited_referrer_policy(parent_id) : nil
+        # (…and its referrer, its navigation's request's — and the referrer policy its response's header sets, or, a srcdoc
+        # or initial about:blank document, that of its container's document, whose policy container it clones: HTML)
+        inherited = referrer_policy || (url.to_s.match?(/\Aabout:(?:srcdoc|blank)\b/i) ? @browser.inherited_referrer_policy(parent_id) : nil)
         realm.call('__csimSetPendingReferrer', referrer.to_s, inherited.to_s) unless referrer.to_s.empty? && inherited.to_s.empty?
         # The navigation's reserved client id — this document's realm ADOPTS it as its
         # service-worker Client identity (`event.resultingClientId` resolves to THIS

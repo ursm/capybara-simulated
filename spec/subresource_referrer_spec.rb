@@ -70,6 +70,28 @@ RSpec.describe 'a subresource request' do
     )
   end
 
+  # A document's `Referrer-Policy` response header sets its policy container's (HTML "create and initialize a Document
+  # object"), the page's and a frame's alike — its subresources and its navigations referring under it (Chrome).
+  it "is referred under its document's Referrer-Policy header" do
+    refs = referers
+    session = simulated_session(lambda {|env|
+      path = env['PATH_INFO']
+      refs[path] = env['HTTP_REFERER']
+      next [200, {'content-type' => 'text/css'}, ['p{}']] if path.end_with?('.css')
+
+      body, headers = case path
+                      when '/ph' then ['<link rel=stylesheet href=/ph.css><iframe src="/hf"></iframe>', {'referrer-policy' => 'no-referrer'}]
+                      when '/hf' then ['<link rel=stylesheet href=/hf.css>', {'referrer-policy' => 'origin'}]
+                      else [path, {}]
+                      end
+      [200, {'content-type' => 'text/html'}.merge(headers), ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/ph'
+    session.execute_script('frames[0].location = "/hfnext"')
+    expect(session.evaluate_script('frames[0].location.pathname')).to eq('/hfnext')
+    expect(referers.slice('/ph.css', '/hf.css', '/hfnext')).to eq('/ph.css' => nil, '/hf.css' => 'http://www.example.com/', '/hfnext' => 'http://www.example.com/')
+  end
+
   it "is referred under a frame's meta policy parsed before it" do
     session.visit '/top2'
     expect(referers.slice('/mf.css', '/mf.js')).to eq('/mf.css' => nil, '/mf.js' => nil)
