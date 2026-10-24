@@ -1215,8 +1215,9 @@ module Capybara
       # `handles` its module-handle cache — the main ctx + `native_module_handles`
       # by default, or a frame realm + its realm-local cache (Module handles are
       # context-bound; sharing the main cache would link a frame's imports
-      # against main-context modules). True where its graph was fetched and ran (a throw in it logged), false where it
-      # could not be fetched — the element's `error` (HTML "execute the script element": a null result). `policy` the
+      # against main-context modules). True where its graph was fetched and ran (a throw in it reported), false where it
+      # could not be fetched — the element's `error` (HTML "execute the script element": a null result) — or its error to
+      # rethrow, `ModuleError#to_a`, which the bridge reports before the element's `load`. `policy` the
       # referrer policy its element's `referrerpolicy` sets ('' for none), which its graph's every fetch is made under (HTML
       # "fetch the descendants of a module script": the descendant script fetch options keep it).
       def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, policy: nil, sw: nil)
@@ -1247,7 +1248,6 @@ module Capybara
         rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
           # (…its graph's failure to link — an export none of its modules has — its error to rethrow too)
           # ScriptTerminatedError deliberately propagates (a watchdog terminate must escalate).
-          @browser.log_console('error', "module link error in #{url}: #{e.message}")
           return module_error(e.message).to_a
         end
         true
@@ -1255,10 +1255,11 @@ module Capybara
       # What a module of the graph came to where it is no module record (HTML "fetch a single module script"): it could
       # not be fetched — the graph's result null, the element's `error` — or it has an error to rethrow, the graph's
       # (`ModuleError`, kept as the URL's handle): it could not be parsed, or a specifier it imports resolves to none — the
-      # element's `load`, the error reported at its window (HTML "run a module script"), by its kind and its message, as
-      # the bridge makes it anew (`[name, message]`: the value V8 threw is its once, and only as it is thrown).
-      ModuleError = Data.define(:name, :message) do
-        def to_a = [name, message]
+      # element's `load`, the error reported at its window (HTML "run a module script"), by its kind, its message and where
+      # V8 found it (none for a specifier: the document's), as the bridge makes it anew (`[name, message, filename,
+      # lineno]`: the value V8 threw is its once, and only as it is thrown).
+      ModuleError = Data.define(:name, :message, :filename, :lineno) do
+        def to_a = [name, message, filename, lineno]
       end
       class ModuleFetchFailed < StandardError; end
       class ModuleParseFailed < StandardError
@@ -1269,15 +1270,19 @@ module Capybara
           super(error.message)
         end
       end
-      # …of V8's message for a failure (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its kind, and its text
-      # without the location the host appended.
+      # …of V8's message for a failure (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its kind, its text, and
+      # the location the host appended to it.
       def module_error(text)
-        name, message = text.to_s.sub(/ at \S+\z/, '').split(': ', 2)
-        message ? ModuleError.new(name, message) : ModuleError.new('SyntaxError', name.to_s)
+        text = text.to_s
+        at   = text.match(/ at (\S+?)(?::(\d+))?\z/)
+        text = text[0, at.begin(0)] if at
+        name, message = text.split(': ', 2)
+        name, message = 'SyntaxError', name.to_s unless message
+        ModuleError.new(name, message, at&.[](1), at&.[](2)&.to_i)
       end
-      # …a specifier none of a module's imports resolve (HTML "resolve a module specifier": a TypeError; Chrome's text).
+      # …a specifier none of a module's imports resolve (HTML "resolve a module specifier": a TypeError).
       def unresolved_specifier(specifier)
-        ModuleError.new('TypeError', "Failed to resolve module specifier \"#{specifier}\". Relative references must start with either \"/\", \"./\", or \"../\".")
+        ModuleError.new('TypeError', RuntimeShared.unresolved_specifier(specifier), nil, nil)
       end
 
       # A `.json` module is exposed as the default export of its parsed value;
@@ -1321,7 +1326,11 @@ module Capybara
         return handles[url] if !inline_src && handles.key?(url)
         url_s = url.to_s
         src   = inline_src
-        if src.nil? && (sw = module_sw_ctxs[realm_key(target)])
+        # (…a `blob:` or `data:` one's its own, which no network nor service worker fetches)
+        local = inline_src.nil? && @browser.local_module_source(url_s)
+        if local
+          src, content_type = local
+        elsif src.nil? && (sw = module_sw_ctxs[realm_key(target)])
           # Only the graph's ENTRY fetch carries the element's integrity
           # attribute; every other module resolves integrity from the import map
           # (HTML "resolve a module integrity metadata").
@@ -1341,7 +1350,7 @@ module Capybara
           src = r && r['body']
           content_type = r && r['contentType']
         end
-        if src.nil?
+        if src.nil? && !local
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh.
           src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), policy, referrer)
@@ -1387,7 +1396,6 @@ module Capybara
         end
         handles[url] = m
       rescue RustyRacer::ParseError => e
-        @browser.log_console('error', "module parse error in #{url}: #{e.message}")
         handles[url] = module_error(e.message)
       end
       def compile_inline_module(src, url, target)
@@ -1399,7 +1407,6 @@ module Capybara
         ScriptCache.queue_warm(target, sha, url, body, version, kind: :module, stale: !cached.nil?) if cached.nil? || m.cache_rejected?
         m
       rescue RustyRacer::ParseError => e
-        @browser.log_console('error', "module parse error in #{url}: #{e.message}")
         module_error(e.message)
       end
 
@@ -1430,7 +1437,7 @@ module Capybara
         c.attach('__csim_evalEsmEntry', ->(url, inline, policy, *sw) {
           esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, policy: policy, sw: esm_sw_ctx(sw)) })
         })
-        c.dynamic_import_resolver = ->(specifier, referrer, initiating) {
+        c.dynamic_import_resolver = lambda do |specifier, referrer, initiating|
           target, handles =
             if initiating && initiating.id != 0
               [initiating, realm_module_handles(initiating.id)]
@@ -1438,14 +1445,19 @@ module Capybara
               [ctx, native_module_handles]
             end
           resolved, base = @browser.resolve_module_request(specifier, referrer, realm_key(target))
-          raise unresolved_specifier(specifier).message unless resolved
+          raise ModuleParseFailed, unresolved_specifier(specifier) unless resolved
           policy = module_policies(realm_key(target))[referrer.to_s]
           m = native_module_for(resolved, nil, target, handles, referrer: base, policy: policy)
           raise "module not found: #{resolved}" unless m
-          raise m.message if m.is_a?(ModuleError)
+          raise ModuleParseFailed, m if m.is_a?(ModuleError)
           instantiate_native_module(m, resolved, target, handles, policy)
           m
-        }
+        rescue ModuleParseFailed => e
+          # (…its graph's error to rethrow the console's alone: the `import()` rejects with the engine's Error, of no kind
+          # — a static graph's the bridge reports, which logs it)
+          @browser.log_console('error', "#{e.error.name}: #{e.error.message}")
+          raise
+        end
       end
 
       # Per-realm module-handle caches, keyed by realm id (Module handles are

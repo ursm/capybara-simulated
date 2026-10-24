@@ -139,4 +139,26 @@ RSpec.describe 'a module script’s MIME type' do
     JS
     expect(poll_until { session.evaluate_script('window.got') }).to eq(['/scope/plain.js error false', '/scope/good.js load true'])
   end
+  # …a `data:` or `blob:` module's its URL's, or its blob's type — fetched by no network, each one's own response (Fetch
+  # "scheme fetch") — a static import of one, a dynamic one, and a blob module importing over the network; a blob of no
+  # type is no module (Chrome: "Expected a JavaScript module script but the server responded with a MIME type of """).
+  it 'is a data: or blob: URL’s own' do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, ['export default 5;']] if env['PATH_INFO'] == '/five.js'
+      next [200, {'content-type' => 'text/javascript'}, ['import "data:text/javascript,window.dataran=1";']] if env['PATH_INFO'] == '/d.js'
+
+      [200, {'content-type' => 'text/html'}, [<<~HTML]]
+        <!DOCTYPE html><meta charset="utf-8"><script>
+          window.log = [];
+          const url = (type) => URL.createObjectURL(new Blob(['import f from "http://www.example.com/five.js"; window.blobran = f;'], {type}));
+          import(url('text/javascript')).then(() => log.push('blob ' + window.blobran), () => log.push('blob failed'));
+          import(url('')).then(() => log.push('untyped ran'), () => log.push('untyped failed'));
+          import('data:text/javascript,window.dyndata=2').then(() => log.push('data ' + window.dyndata));
+        </script>
+        <script type="module" src="/d.js" onload="log.push('static ' + window.dataran)" onerror="log.push('static error')"></script>
+      HTML
+    })
+    session.visit '/'
+    expect(poll_until { (l = session.evaluate_script('log')).size == 4 && l.sort }).to eq(['blob 5', 'data 2', 'static 1', 'untyped failed'])
+  end
 end

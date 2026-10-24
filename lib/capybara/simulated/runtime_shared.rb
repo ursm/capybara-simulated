@@ -278,6 +278,12 @@ module Capybara
         s = s.dup.force_encoding(Encoding::UTF_8) unless s.encoding == Encoding::UTF_8
         s.valid_encoding? ? s : s.scrub
       end
+
+      # The TypeError's text for a module specifier that resolves to none (HTML "resolve a module specifier": a bare one
+      # no import map maps) — Chrome's, a window's module graph and a worker's alike.
+      def self.unresolved_specifier(specifier)
+        "Failed to resolve module specifier \"#{specifier}\". Relative references must start with either \"/\", \"./\", or \"../\"."
+      end
       # …and a JS string that carries bytes, one per code unit (a form's encoded body: `latin1ToBytes`'s input), as the
       # bytes it carries.
       def self.latin1_bytes(s) = s.to_s.encode(Encoding::ISO_8859_1).b

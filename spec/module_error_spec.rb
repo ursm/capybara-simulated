@@ -68,4 +68,36 @@ RSpec.describe 'a module script’s error' do
     expect(s.evaluate_async_script('dyn.then(arguments[0])')).to eq('rejected')
     expect(requests).not_to include('/foo')
   end
+  # …at where V8 found it — the module's URL and line, the document's at 0 for a specifier — with no stack of the
+  # driver's, an error of the realm's own kind whatever the page put in its place (Chrome: `bad.js`, line 2); and an
+  # inline module whose graph cannot be fetched fires `error` as an external one does (HTML "execute the script element").
+  it 'is reported where V8 found it, of the realm’s own kind, and fires an inline module’s error' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><script>
+        window.seen = [];
+        window.SyntaxError = function (m) { window.hijacked = m; };
+        onerror = (message, filename, lineno, colno, error) => {
+          seen.push([error instanceof Object.getPrototypeOf(RangeError.prototype).constructor, error.name, filename.replace(location.origin, ''), lineno, error.stack]);
+        };
+      </script>
+      <script type="module" src="/bad.js"></script>
+      <script type="module" src="/bare.js"></script>
+      <script type="module" onerror="seen.push('inline error')">import "/missing.js";</script>
+    HTML
+    s = simulated_session(lambda {|env|
+      js = {'/bad.js' => "1;\nexport let x = ;", '/bare.js' => 'import "foo";'}[env['PATH_INFO']]
+      next [js ? 200 : 404, {'content-type' => 'text/javascript'}, [js.to_s]] if env['PATH_INFO'].end_with?('.js')
+
+      [200, {'content-type' => 'text/html'}, [page]]
+    })
+    s.visit '/'
+    expect(poll_until { (e = s.evaluate_script('seen')).size == 3 && e }).to eq(
+      [
+        [true, 'SyntaxError', '/bad.js', 2, "SyntaxError: Unexpected token ';'"],
+        [true, 'TypeError', '/', 0, %(TypeError: #{Capybara::Simulated::RuntimeShared.unresolved_specifier('foo')})],
+        'inline error'
+      ]
+    )
+    expect(s.evaluate_script('window.hijacked')).to be_nil
+  end
 end

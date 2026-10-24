@@ -102,7 +102,7 @@ module Capybara
           if spec.match?(%r{\A[a-z][a-z0-9+.-]*:}i) then spec
           elsif spec.start_with?('/', './', '../') then Native.url_parts(spec, base)&.first
           end
-        resolved or raise "Failed to resolve module specifier '#{spec}'"
+        resolved or raise RuntimeShared.unresolved_specifier(spec)
       end
     end
   end

@@ -9553,6 +9553,18 @@ module Capybara
       # it fails.
       private def decode_data_url_body(url) = Native.data_url(url)&.last || ''
 
+      # A window's module script's source no network fetches — a `blob:` URL's, its blob's bytes as the URL names it now
+      # (`blob_snapshot`), a `data:` one's its own — and its MIME type, the blob's type or the URL's: [bytes, type], [nil,
+      # nil] where it names none (a revoked blob), nil for a URL of another scheme.
+      def local_module_source(url)
+        if url.start_with?('blob:')
+          blob = blob_snapshot(url)
+          [blob&.[](:bytes), blob&.[](:type)]
+        elsif url.start_with?('data:')
+          Native.data_url(url)&.reverse || [nil, nil]
+        end
+      end
+
       # Run a worker isolate's own event loop until it goes idle NOW: drain microtasks,
       # then — if a timer is already due — fire it and loop, so the microtasks that
       # timer's callback queues get drained in turn. A single `drain_microtasks;
