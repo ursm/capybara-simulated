@@ -159,6 +159,31 @@ RSpec.describe 'one fetch per asset per document' do
     expect(hits.values_at('/p.css', '/p.js', '/q.js')).to eq([1, 1, 2])
   end
 
+  # …and a failed fetch the element's alone: a link inserted again after its sheet failed fetches it again (Chrome:
+  # its memory cache keeps no error), and a preload of another destination is none a sheet takes (HTML's map of
+  # preloaded resources keys by it).
+  it 'fetches again what failed, and what was preloaded as another destination' do
+    hits = Hash.new(0)
+    retry_app = ->(env) {
+      path = env['PATH_INFO']
+      hits[path] += 1
+      case path
+      when '/flip.css' then hits[path] == 1 ? [404, {'content-type' => 'text/css'}, ['']] : [200, {'content-type' => 'text/css'}, ['p { color: rgb(0, 128, 0) }']]
+      when '/s.css' then [200, {'content-type' => 'text/css'}, ['p { width: 10px }']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="preload" as="script" href="/s.css"><link rel="stylesheet" href="/flip.css" id="l"><p id="p">p</p>']]
+      end
+    }
+    s = simulated_session(retry_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.events = [];
+      const l = Object.assign(document.createElement('link'), {rel: 'stylesheet', href: '/flip.css', onload: () => events.push('load'), onerror: () => events.push('error')});
+      document.head.append(l, Object.assign(document.createElement('link'), {rel: 'stylesheet', href: '/s.css'}));
+    JS
+    expect(s.evaluate_script("[events, getComputedStyle(document.getElementById('p')).color]")).to eq([['load'], 'rgb(0, 128, 0)'])
+    expect(hits.values_at('/flip.css', '/s.css')).to eq([2, 2])
+  end
+
   # …and a frame's document is a document of its own: navigated again, it fetches its sheet again (Chrome: a reloaded
   # frame's no-cache sheet and script are fetched anew).
   it 'fetches a frame\'s asset again when the frame loads again' do

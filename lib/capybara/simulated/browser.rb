@@ -4081,15 +4081,17 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
-        # (…a CORS request's by its mode and credentials: one document's client is of its one origin, which the
-        # process-wide cache keys by too — a frame's its own, a no-cors one's as well, as whether its response is opaque
-        # to its client is the client's origin's — worked out only where that cache is asked)
-        memo_key = mode ? "#{mode} #{credentials} #{key}" : key
+        # (…by its destination — a preload of one `as` is no other's response, HTML's map of preloaded resources — and a
+        # CORS request's by its mode and credentials: one document's client is of its one origin, which the process-wide
+        # cache keys by too — a frame's its own, a no-cors one's as well, as whether its response is opaque to its client
+        # is the client's origin's — worked out only where that cache is asked)
+        memo_key = mode ? "#{dest} #{mode} #{credentials} #{key}" : "#{dest} #{key}"
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
-        # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. A failed one too (a 404,
-        # a network error), which each of those asked for again. `no-store` alone is fetched every time, and a document
-        # that loads again — a frame reloaded — has a memo of its own.
+        # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is fetched
+        # every time, and a document that loads again — a frame reloaded — has a memo of its own. A failed one is kept by
+        # none (Chrome's memory cache keeps no error: a link inserted again fetches it again), but by the element whose
+        # fetch it was (handles.js `elementAsset`).
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
         memo = document && @page_asset_src&.[](document.to_i)
@@ -4117,10 +4119,7 @@ module Capybara
         body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, client: client)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
-        unless body
-          memo[memo_key] = [nil, meta, nil] if memo && !Thread.current[:csim_asset_no_store]
-          return nil
-        end
+        return nil unless body
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them:
         # `rack_fetch_body`)
