@@ -416,9 +416,11 @@ RSpec.describe "a form submission's request" do
       s.click_button 'go'
     end
     s.within_frame(2) { s.execute_script('location.href = "/y"') }
+    # (…and a frame's not entered alike, its script submitting it)
+    s.execute_script('const d = frames[1].document; d.write("<form method=post action=\\"http://a.test/blank2\\"></form>"); d.close(); d.forms[0].submit()')
     s.evaluate_script('1')
-    expect(seen.slice('a.test/r1', 'c.test/end', 'a.test/blank').transform_values(&:first)).to eq(
-      'a.test/r1' => 'http://a.test', 'c.test/end' => 'null', 'a.test/blank' => 'http://a.test'
+    expect(seen.slice('a.test/r1', 'c.test/end', 'a.test/blank', 'a.test/blank2').transform_values(&:first)).to eq(
+      'a.test/r1' => 'http://a.test', 'c.test/end' => 'null', 'a.test/blank' => 'http://a.test', 'a.test/blank2' => 'http://a.test'
     )
     expect(seen['b.test/y'].last).to be_nil
   end
