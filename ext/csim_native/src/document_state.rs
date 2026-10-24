@@ -93,8 +93,8 @@ impl DocumentStates {
     pub(crate) fn will_refresh(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_some_and(|s| s.will_refresh)
     }
-    pub(crate) fn set_will_refresh(&mut self, doc: NodeId) {
-        self.0.entry(doc).or_default().will_refresh = true;
+    pub(crate) fn set_will_refresh(&mut self, doc: NodeId, will: bool) {
+        self.0.entry(doc).or_default().will_refresh = will;
     }
     // The document freed: its state let go of with it.
     pub(crate) fn forget(&mut self, doc: NodeId) {
@@ -299,7 +299,7 @@ impl RealmArena {
     // document keeps none: it is the realm's `location`) — or, with `fallback_base`, HTML's "fallback base URL": that
     // URL, but for an about:blank / about:srcdoc document the base URL it inherited from its creator, where it has one
     // (an opaque URL can be no base). '' where it has none at all.
-    fn document_url(&self, doc: NodeId, fallback_base: bool) -> String {
+    pub(crate) fn document_url(&self, doc: NodeId, fallback_base: bool) -> String {
         let texts = self.document_states.1.get(&doc);
         let text = |field: usize| texts.and_then(|t| t.texts[field].as_deref()).filter(|t| !t.is_empty());
         let realm = || self.get(doc).and_then(|n| self.realm_state(n.realm)).map(|s| s.location.href());

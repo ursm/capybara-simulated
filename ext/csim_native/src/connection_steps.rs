@@ -54,9 +54,10 @@ pub(crate) fn connection_steps(n: &NodeData) -> u32 {
         "source" => CONNECT_SOURCE,
         "iframe" | "frame" => CONNECT_FRAME,
         "meta" => {
-            flag(n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")), CONNECT_DEFAULT_STYLE)
+            let pragma = |name: &str| n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case(name));
+            flag(pragma("default-style"), CONNECT_DEFAULT_STYLE)
                 | flag(crate::url_ops::names_referrer(n), CONNECT_META_REFERRER)
-                | flag(n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("refresh")), CONNECT_REFRESH)
+                | flag(pragma("refresh"), CONNECT_REFRESH)
         }
         _ => 0,
     };

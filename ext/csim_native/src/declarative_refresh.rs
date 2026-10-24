@@ -7,6 +7,7 @@ use crate::dom::{nid_arg, realm, realm_id, register, NodeId, RealmArena};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "declarativeRefresh", declarative_refresh_op, context_id);
+    register(scope, ns, "forgetDeclarativeRefresh", forget_declarative_refresh_op, context_id);
 }
 
 // The value's parts: its delay in seconds and the URL string it names, none for the document's own — None where it is
@@ -62,27 +63,36 @@ impl RealmArena {
     // HTML's shared declarative refresh steps for document `doc` of realm `cid` and the value `input` — a `<meta>`'s
     // (`meta`) or a `Refresh` header's: the delay in milliseconds and the URL to navigate to once it is up, or None for
     // none: a document with no browsing context, one that refreshes already, a value that is none, a URL that fails to
-    // parse or is a `javascript:` one — and
-    // for a `<meta>`, whose document's sandboxing blocks automatic features, none either, though it then refreshes
-    // no more.
+    // parse or is a `javascript:` one — and for a `<meta>` whose document's sandboxing blocks automatic features, none
+    // either, though it then refreshes no more.
     fn declarative_refresh(&mut self, cid: i32, doc: NodeId, input: &str, meta: bool) -> Option<(f64, String)> {
         if !self.document_states.has_browsing_context(doc) || self.document_states.will_refresh(doc) {
             return None;
         }
         let (seconds, url) = parse(input)?;
+        // (…none named its document's URL, as it is — its fragment kept, a navigation to it a fragment one — where a named
+        // one, an empty one too, is parsed against its base URL)
         let url = match url {
             Some(url) => self.parse_document_url(doc, url)?,
-            None => self.parse_document_url(doc, "")?,
+            None => ada_url::Url::parse(&self.document_url(doc, false), None).ok()?,
         };
         if url.protocol().eq_ignore_ascii_case("javascript:") {
             return None;
         }
-        self.document_states.set_will_refresh(doc);
+        self.document_states.set_will_refresh(doc, true);
         if meta && self.sandboxed(cid, crate::sandbox::AUTOMATIC_FEATURES) {
             return None;
         }
         Some(((seconds * 1000.0).min(f64::from(i32::MAX)), url.href().to_owned()))
     }
+}
+
+// __dom.forgetDeclarativeRefresh(docNid) — the document begins anew (a reused one's next load): it refreshes no more as
+// its last did, and may again.
+fn forget_declarative_refresh_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).document_states.set_will_refresh(doc, false);
 }
 
 // __dom.declarativeRefresh(docNid, input, meta) -> `[delayMs, url]` (`declarative_refresh`), or null.

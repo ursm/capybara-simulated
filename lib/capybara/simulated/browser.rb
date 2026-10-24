@@ -10863,8 +10863,13 @@ module Capybara
 
             headers = resp['headers'] || {}
             body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
-            made = {csp: response_csp(headers), referrer: resp['referrer'], referrer_policy: referrer_policy_header(headers), client_id: resp['resulting_client_id'],
-                    refresh: refresh_header(headers)}
+            made = {
+              csp:             response_csp(headers),
+              referrer:        resp['referrer'],
+              referrer_policy: referrer_policy_header(headers),
+              client_id:       resp['resulting_client_id'],
+              refresh:         refresh_header(headers)
+            }
           end
           # (…any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
           if body.nil?
@@ -11171,14 +11176,14 @@ module Capybara
       # The referrer policy a response's `Referrer-Policy` header sets — its last valid token (Referrer Policy "parse a
       # referrer policy from a Referrer-Policy header") — nil for none: a redirect's for the next hop, a document's for its
       # policy container (HTML "create and initialize a Document object"), which its `<meta>` elements may set anew.
-      # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
-      # object"), none for none.
-      def refresh_header(headers) = (value = header_field(headers || {}, 'refresh')) && Array(value).join(',')
       def referrer_policy_header(headers)
         rp = header_field(headers || {}, 'referrer-policy') or return nil
         # (…its tokens matched as they are, case and all: an unknown one — `No-Referrer` — none, as the spec's parse has it)
         Array(rp).join(',').split(',').map(&:strip).reverse.find {|t| REFERRER_POLICIES.include?(t) }
       end
+      # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
+      # object"), none for none — one given more than once combined as Fetch's "get a header" does.
+      def refresh_header(headers) = (value = header_field(headers || {}, 'refresh')) && Array(value).join(', ')
       # The client a subresource request of realm `realm` is made as (Fetch "client"): its URL — the referrer source, whose
       # site Sec-Fetch-Site compares — its referrer policy, or the one the request's element sets (`element_policy`), its
       # origin where that is opaque ('null': a sandboxed document's), and the realm itself, whose ancestors make it cross-site
@@ -11666,8 +11671,19 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, history_state: nil, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil,
-                                   refresh: nil)
+      def reload_frame_realm_by_id(
+        realm_id,
+        url,
+        bytes,
+        content_type,
+        restore_state: nil,
+        history_state: nil,
+        client_id: nil,
+        csp: nil,
+        referrer: nil,
+        referrer_policy: nil,
+        refresh: nil
+      )
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
@@ -11675,8 +11691,19 @@ module Capybara
         seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, navigation_sandbox(realm_id)) or return
         return unless unload_frame_document(parent, realm_id)
 
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, history_state: history_state, referrer: referrer, referrer_policy: referrer_policy,
-                                                                                                                              refresh: refresh).to_i
+        new_id = @runtime.reload_frame_realm(
+          realm_id,
+          parent.to_i,
+          url,
+          document_payload(bytes),
+          content_type,
+          client_id,
+          seed,
+          history_state:   history_state,
+          referrer:        referrer,
+          referrer_policy: referrer_policy,
+          refresh:         refresh
+        ).to_i
         return if new_id.zero?
         frame_navigation_made_document
         begin
