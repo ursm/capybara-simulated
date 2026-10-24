@@ -4081,7 +4081,7 @@ module Capybara
         return nil unless key.is_a?(String)
         # (…a CORS request's by its client's origin too: its document's, a frame's its own)
         client   = mode && request_client(realm.to_i, policy, referrer: referrer)
-        memo_key = mode ? "#{mode} #{credentials} #{client[:origin] || url_origin(client[:url])} #{key}" : key
+        memo_key = mode ? "#{mode} #{credentials} #{client_origin_of(client)} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
         # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
@@ -11200,6 +11200,9 @@ module Capybara
       # document's realm the host may ask from its thread). And the request's referrer: the client's URL ("client"), or
       # `referrer` where the request names one of its own — a font's sheet's location, an imported module's referring
       # script's base URL — its initiator (Sec-Fetch-Site, Origin) the client's origin all the same.
+      # The origin a request of request client `client` is made as — its own where it is opaque, else its URL's, the page's
+      # for a client of no http(s) URL (an about:blank frame, a blob: document) — as `rack_fetch` judges its request.
+      def client_origin_of(client) = client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url)
       def request_client(realm, element_policy = nil, referrer: nil)
         realm = realm.to_i
         if realm.negative?
