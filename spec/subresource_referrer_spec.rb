@@ -88,7 +88,8 @@ RSpec.describe 'a subresource request' do
       [200, {'content-type' => 'text/html'}.merge(headers), ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
     })
     session.visit '/ph'
-    session.execute_script('frames[0].location = "/hfnext"')
+    # (…the frame's own navigation, its script's: one the page's script made would be the page's, referred as none)
+    session.execute_script(%q{frames[0].eval('location = "/hfnext"')})
     expect(session.evaluate_script('frames[0].location.pathname')).to eq('/hfnext')
     expect(referers.slice('/ph.css', '/hf.css', '/hfnext')).to eq('/ph.css' => nil, '/hf.css' => 'http://www.example.com/', '/hfnext' => 'http://www.example.com/')
   end

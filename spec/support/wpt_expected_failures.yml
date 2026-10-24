@@ -3137,7 +3137,6 @@ fetch/metadata/generated/window-history.sub.html:
 - sec-fetch-user - Not sent to non-trustworthy same-site destination - history.back
 - sec-fetch-user - Not sent to non-trustworthy same-site destination - history.forward
 fetch/metadata/generated/window-location.https.sub.html:
-- sec-fetch-user - location with user activation
 - sec-fetch-user - location.assign with user activation
 - sec-fetch-user - location.href with user activation
 - sec-fetch-user - location.replace with user activation
@@ -3200,10 +3199,6 @@ fetch/metadata/track.https.sub.html:
 - Same-Origin, CORS track
 - Same-Site track
 - "[harness] TIMEOUT"
-fetch/metadata/window-open.https.sub.html:
-- 'Cross-site window, user-activated: sec-fetch-user'
-- 'Same-origin window, user-activated: sec-fetch-user'
-- 'Same-site window, user-activated: sec-fetch-user'
 hr-time/navigation-start-post-before-unload.html:
 - timeOrigin should be set after beforeunload
 hr-time/performance-tojson.html:

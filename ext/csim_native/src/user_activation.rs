@@ -15,6 +15,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "userInputNotify", user_input_notify, context_id);
     crate::dom::register(scope, ns, "userActivation", user_activation, context_id);
     crate::dom::register(scope, ns, "consumeActivation", consume_activation, context_id);
+    crate::dom::register(scope, ns, "sourceActivation", source_activation, context_id);
     crate::dom::register(scope, ns, "showPickerRefusal", show_picker_refusal, context_id);
     crate::dom::register(scope, ns, "isReadOnly", is_read_only, context_id);
 }
@@ -136,6 +137,15 @@ fn user_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         _ => false,
     };
     rv.set_bool(active);
+}
+
+// __dom.sourceActivation(realm) -> HTML's source snapshot params' "has transient activation" for a navigation the
+// document of realm `realm` begins (the calling realm's where none is given): whether its window has transient
+// activation now, which the navigation's request then carries (its user-activation, Fetch's `Sec-Fetch-User`).
+fn source_activation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let source = args.get(0).int32_value(scope).filter(|&r| r >= 0).unwrap_or(cid);
+    rv.set_bool(realm(scope, cid).transiently_activated(source));
 }
 
 // __dom.consumeActivation() -> whether the calling realm's window had transient activation, which is consumed

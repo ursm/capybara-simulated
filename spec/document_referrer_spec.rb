@@ -21,8 +21,11 @@ RSpec.describe 'document.referrer' do
   it "is a frame's navigation's" do
     session.visit '/top'
     expect(session.evaluate_script('[frames[0].document.referrer, frames[1].document.referrer]')).to eq(%w[http://www.example.com/top http://www.example.com/top])
-    session.execute_script('frames[0].location = "/f2"')
+    # (…the document whose script navigates it: the frame's own, then the page's)
+    session.execute_script(%q{frames[0].eval('location = "/f2"')})
     expect(session.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/f')
+    session.execute_script('frames[0].location = "/f3"')
+    expect(session.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/top')
     session.execute_script('l.click()')
     expect(session.evaluate_script('frames[1].location.pathname')).to eq('/g')
     expect(session.evaluate_script('frames[1].document.referrer')).to eq('http://www.example.com/top')
@@ -70,7 +73,8 @@ RSpec.describe 'document.referrer' do
     end
   end
 
-  # A reload or a traversal makes the document with its document state's referrer (HTML): the page's and a frame's.
+  # A reload or a traversal makes the document with its document state's referrer (HTML): the page's and a frame's —
+  # the frame's the page's, whose script navigated it (the Location-object navigation's source document, its incumbent).
   it "is kept by a frame's traversal" do
     session.visit '/top'
     session.execute_script('frames[0].location = "/f2"')
@@ -78,7 +82,7 @@ RSpec.describe 'document.referrer' do
     session.execute_script('frames[0].location = "/f3"')
     expect(session.evaluate_script('frames[0].location.pathname')).to eq('/f3')
     session.go_back
-    expect(session.evaluate_script('[frames[0].location.pathname, frames[0].document.referrer]')).to eq(%w[/f2 http://www.example.com/f])
+    expect(session.evaluate_script('[frames[0].location.pathname, frames[0].document.referrer]')).to eq(%w[/f2 http://www.example.com/top])
   end
 
   it "is kept by the page's traversal" do

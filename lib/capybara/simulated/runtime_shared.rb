@@ -47,7 +47,7 @@ module Capybara
         # A controlled document's external classic script → its controller's fetch
         # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
         '__csim_swScriptFetch'       => ->(b, *a) { b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', a[5] || 'no-cors', a[6] || 'include', binary: a[7] == true, integrity: a[8] || '') },
-        '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true, initiator_realm: a[2], policy: a[3].to_s); nil },
+        '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true, initiator_realm: a[2], policy: a[3].to_s, user_activated: a[4] == true); nil },
         '__locationReload'           => ->(b, *_) { b.location_reload; nil },
         '__csimCancelPlannedNavigation' => ->(b, *_) { b.cancel_planned_navigation; nil },
         # A nested browsing context navigated (a[1] = the frame's realm id) — its OWN
@@ -55,11 +55,11 @@ module Capybara
         # under the policy (a[4]) its `rel` / `referrerpolicy` sets.
         # Deferred + applied by re-navigating the owning iframe, so a frame's
         # `location.href = …` navigates the frame, not the top page.
-        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i, a[3].nil? ? a[1].to_i : a[3].to_i, a[4].to_s, replace: a[2] == true); nil },
+        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i, a[3].nil? ? a[1].to_i : a[3].to_i, a[4].to_s, replace: a[2] == true, user_activated: a[5] == true); nil },
         # A same-origin window realm (window.open in this isolate) navigating itself
         # (a[0] = url, a[1] = the window's realm id). Deferred + applied by reloading
         # that realm's document in place — see Browser#window_realm_navigate_self.
-        '__csimWindowRealmNavigate'  => ->(b, *a) { b.window_realm_navigate_self(a[0], a[1].to_i, a[3]); nil },
+        '__csimWindowRealmNavigate'  => ->(b, *a) { b.window_realm_navigate_self(a[0], a[1].to_i, a[3], user_activated: a[4] == true); nil },
         # A nested browsing context reloading its OWN location (a[0] = the frame's
         # realm id). Deferred + applied by re-navigating the owning iframe to its
         # current document — see Browser#frame_reload_self.
