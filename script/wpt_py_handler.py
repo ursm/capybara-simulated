@@ -159,13 +159,12 @@ class Headers:
 
 class RequestHeaders(dict):
     # A DICT SUBCLASS whose base storage is {LOWERCASED name: [values]} in first-seen order —
-    # exactly wptserve's RequestHeaders (`key = isomorphic_encode(header).lower()`), whose dict
-    # fast path (`dict(request.headers)[name][0]`, access-control-allow-lists.py) and items() —
-    # not overridden, as wptserve's is not: each name its LIST of values (subresource.py reads
-    # `val[0]`, record-headers.py json-dumps them) — therefore yield lowercase names
-    # (test-request-headers-worker reads ["referer"]). The
-    # on-the-wire ordered pairs (original case + duplicates) live in `_raw` for
-    # raw_items()/__str__ — that is where echo-headers' verbatim casing comes from.
+    # exactly wptserve's RequestHeaders (`key = isomorphic_encode(header).lower()`). Its dict fast
+    # path (`dict(request.headers)[name][0]`, access-control-allow-lists.py) and its items(), not
+    # overridden as wptserve's is not, yield lowercase names (test-request-headers-worker reads
+    # ["referer"]) each with its LIST of values (subresource.py reads `val[0]`, record-headers.py
+    # json-dumps them). The on-the-wire ordered pairs (original case + duplicates) live in `_raw`
+    # for raw_items()/__str__ — that is where echo-headers' verbatim casing comes from.
     def __init__(self, pairs):
         self._raw = [(_b(k), _b(v)) for k, v in pairs]
         for bk, bv in self._raw:

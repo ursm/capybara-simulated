@@ -276,6 +276,22 @@ RSpec.describe 'Sandboxing' do
     expect(seen.slice('/a', '/t')).to eq('/a' => ['cross-site', nil, nil], '/t' => ['cross-site', 'null', nil])
   end
 
+  # …and every load of a document of an opaque origin is cross-site, an image's too (Fetch Metadata: an opaque origin is
+  # same-origin and same-site with none).
+  it "loads a sandboxed document's image as its opaque origin", :https do
+    seen = {}
+    s = simulated_session(lambda {|env|
+      seen[env['QUERY_STRING']] = env['HTTP_SEC_FETCH_SITE'] if env['PATH_INFO'] == '/i.png'
+      next [200, {'content-type' => 'image/png'}, ['']] if env['PATH_INFO'] == '/i.png'
+      next [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="/i.png?sandboxed">']] if env['PATH_INFO'] == '/sb'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe sandbox src="/sb"></iframe><img src="/i.png?page">']]
+    })
+    s.visit '/'
+    s.within_frame(0) { s.evaluate_script('1') }
+    expect(poll_until { seen.size == 2 && seen }).to eq('page' => 'same-origin', 'sandboxed' => 'cross-site')
+  end
+
   # …and a form a frame's document submits, which the host navigates: as the container said when it was submitted —
   # not as it said when a navigation that made no document (a download) began.
   let(:submitting) {

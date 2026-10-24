@@ -4268,7 +4268,7 @@ module Capybara
         # Forward the streaming host's cookie jar so the server can
         # authenticate the user the same way the browser would — scoped to
         # the EventSource target's host, like every other request.
-        cookies = cookie_header_for(uri.to_s, secure: uri.scheme == 'https' || secure_cookie_channel?(uri.to_s))
+        cookies = cookie_header_for(uri.to_s, secure: uri.scheme == 'https' || potentially_trustworthy_url?(uri.to_s))
         lines << "Cookie: #{cookies}" unless cookies.empty?
         socket.write(lines.join("\r\n") << "\r\n\r\n")
         socket.flush
@@ -8277,7 +8277,7 @@ module Capybara
           # issued this request.
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
                               referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
-                              cookie_cross_site: client.cookie_cross_site, dest: 'image')
+                              cookie_cross_site: client.cookie_cross_site, client_origin: client.origin, dest: 'image')
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
           # after; a 404 is a response too, the entry keeping its status.
@@ -10093,8 +10093,9 @@ module Capybara
           if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
             env['HTTP_ORIGIN'] = request_origin_header(effective_origin, ref_policy, target, cors: cors)
           end
-          # Fetch-Metadata request headers — emitted for every fetch/XHR/SW request (a mode is set;
-          # the nil-mode internal callers — ESM / asset GET / beacon — are left alone). Sec-Fetch-Site
+          # Fetch-Metadata request headers — emitted for every fetch/XHR/SW request (a mode is set) and every element load
+          # that names its destination (`dest`, a no-cors one but where it asks for CORS); the internal callers of neither —
+          # a beacon, a worker's script — are left alone. Sec-Fetch-Site
           # widens across the redirect chain vs the loop-invariant `sec_initiator` (see above). -Mode
           # is the request mode (a SW's `fetch(event.request)` re-issues a 'navigate'-mode request,
           # `new Request(…,{mode})` a 'same-origin' one); -Dest is 'empty' for a script-initiated
@@ -11780,7 +11781,7 @@ module Capybara
         "#{env['rack.url_scheme']}://#{env['HTTP_HOST'] || env['SERVER_NAME']}#{env['SCRIPT_NAME']}#{env['PATH_INFO']}"
       end
       def env_secure_channel?(env)
-        %w[https wss].include?(env['rack.url_scheme']) || secure_cookie_channel?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}")
+        %w[https wss].include?(env['rack.url_scheme']) || potentially_trustworthy_url?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}")
       end
 
       # The context a cookie is set or retrieved in, as the session's cookie store (cookie_jar.rs) takes it: through an
@@ -11843,7 +11844,7 @@ module Capybara
         url = document_cookie_url(url, realm) or return ''
         cookies = cookie_header_for(
           url,
-          secure:     secure_cookie_channel?(url),
+          secure:     potentially_trustworthy_url?(url),
           http:       false,
           cross_site: frame_ancestor_cross_site?(realm, url),
           lax_ok:     false
@@ -11857,7 +11858,7 @@ module Capybara
         store_cookie(
           url,
           s,
-          secure:     secure_cookie_channel?(url),
+          secure:     potentially_trustworthy_url?(url),
           http:       false,
           cross_site: frame_ancestor_cross_site?(realm, url)
         )
@@ -12897,11 +12898,13 @@ module Capybara
       # tell (a frame still parsing has none the host could ask), a srcdoc document its container's referrer and, with
       # none of its own, policy; an opaque one none (Referrer Policy "determine request's referrer"). Read on the main
       # thread, which a realm's URL is asked on; a frame gone, the top-level one's.
-      LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy)
+      LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy, :origin)
       def load_client(realm, target_url, referrer_policy: nil, opaque: false)
         rid    = realm.to_i
         policy = opaque ? 'no-referrer' : referrer_policy.to_s
-        return LoadClient.new(@current_url, opaque, @current_url, policy) unless rid.positive? && (url = frame_realm_url(rid))
+        # (…its origin `null` where it is opaque — a sandboxed document's, a data: one's — every request of it cross-site)
+        origin = opaque ? 'null' : nil
+        return LoadClient.new(@current_url, opaque, @current_url, policy, origin) unless rid.positive? && (url = frame_realm_url(rid))
 
         referrer = url
         if url.match?(/\Aabout:srcdoc\z/i)
@@ -12909,7 +12912,7 @@ module Capybara
           policy = container_policy if policy.empty?
         end
         url = referrer unless http_url?(url)
-        LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy)
+        LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy, origin)
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
       # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's.
@@ -13156,7 +13159,7 @@ module Capybara
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
         # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
         # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
-        env = env.reject {|k, _| k.start_with?('HTTP_SEC_FETCH_') } unless secure_cookie_channel?(url)
+        env = env.reject {|k, _| k.start_with?('HTTP_SEC_FETCH_') } unless potentially_trustworthy_url?(url)
         # External fetch: if the network is blocked (WebMock) or the
         # host is unreachable, fall back to @app — Rails will 404 or
         # otherwise handle it, matching the pre-cross-host behavior
@@ -13309,10 +13312,11 @@ module Capybara
         false
       end
 
-      # Is this URL a secure cookie CHANNEL? One of a potentially trustworthy origin (Secure Contexts, the engine's:
-      # url_ops.rs `potentially_trustworthy` — https, wss, a loopback host or `localhost`: Chrome sets and sends Secure
-      # cookies on http://localhost / 127.0.0.1, where app suites run) — and the Fetch Metadata a request sends.
-      def secure_cookie_channel?(url)
+      # Whether a URL is of a potentially trustworthy origin (Secure Contexts, the engine's: url_ops.rs
+      # `potentially_trustworthy` — https, wss, a loopback host or `localhost`): a secure cookie channel (Chrome sets and
+      # sends Secure cookies on http://localhost / 127.0.0.1, where app suites run), and one a request's Fetch Metadata
+      # goes to.
+      def potentially_trustworthy_url?(url)
         Native.potentially_trustworthy_origin(parse_url(url.to_s)&.fetch(:origin).to_s)
       end
 
@@ -13326,7 +13330,7 @@ module Capybara
         return if sc.nil? || sc.empty?
 
         url = document_cookie_url unless cookie_host(url)
-        secure     = secure_cookie_channel?(url)
+        secure     = potentially_trustworthy_url?(url)
         site       = env && (env['csim.cookie_site'] || env['HTTP_SEC_FETCH_SITE'])
         cross_site = !env.nil? && (site == 'cross-site' || env['csim.cookie_cross_site'] == true)
         top_level  = !env.nil? && (env['csim.cookie_top_level'] == true ||

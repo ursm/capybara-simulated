@@ -8,6 +8,7 @@ require 'json'
 require 'open3'
 require 'tmpdir'
 require 'digest'
+require 'securerandom'
 # The reftest raster diff reads both renderings' PNGs with the driver's own decoder.
 require_relative 'raster'
 
@@ -347,7 +348,11 @@ module WptRunner
   # tokens. Unknown tokens are left verbatim so a new, unhandled pattern shows
   # up loudly as a literal `{{…}}` in a failing assertion rather than silently
   # mis-substituting to something plausible.
-  def substitute(body, req_path, query = {}, host: nil, scheme: 'http')
+  # wptserve's non-ASCII subdomains (its config's `subdomains`), as its substitution writes them: IDNA A-labels.
+  SUB_IDN_LABELS = {'élève' => 'xn--lve-6lad', '天気の良い日' => 'xn--n8j6ds53lwwkrqhv28a'}.freeze
+
+  # (…`headers` the request's Rack env, whose headers `{{headers[name]}}` names)
+  def substitute(body, req_path, query = {}, host: nil, scheme: 'http', headers: {})
     # The `{{host}}` / `{{ports}}` / `{{domains}}` / `{{location}}` tokens resolve to the
     # ORIGIN OF THE DOCUMENT fetching this `.sub.` resource — get-host-info.sub.js builds
     # HTTP_ORIGIN from them and a test compares it to its own document origin. So derive
@@ -406,15 +411,19 @@ module WptRunner
       when 'location[host]'            then loc_host
       when 'location[port]'            then cur_port
       when 'location[path]'            then req_path
-      when /\Adomains\[(\w*)\]\z/      then (m = Regexp.last_match(1)).empty? ? host : "#{m}.#{host}"
-      when /\Ahosts\[alt\]\[(\w*)\]\z/ then (m = Regexp.last_match(1)).empty? ? alt_host : "#{m}.#{alt_host}"
-      when /\Ahosts\[\]\[(\w*)\]\z/    then (m = Regexp.last_match(1)).empty? ? host : "#{m}.#{host}"
+      when /\Adomains\[([^\]]*)\]\z/      then (m = Regexp.last_match(1)).empty? ? host : "#{SUB_IDN_LABELS.fetch(m, m)}.#{host}"
+      when /\Ahosts\[alt\]\[([^\]]*)\]\z/ then (m = Regexp.last_match(1)).empty? ? alt_host : "#{SUB_IDN_LABELS.fetch(m, m)}.#{alt_host}"
+      when /\Ahosts\[\]\[([^\]]*)\]\z/    then (m = Regexp.last_match(1)).empty? ? host : "#{SUB_IDN_LABELS.fetch(m, m)}.#{host}"
       # `{{GET[name]}}` → the value of the `name` query parameter (wptserve's
       # request-substitution). Absent params substitute to the empty string, which
       # the form-action tests rely on (`?action=` → an empty action attribute).
       # (A repeated param resolves to Rack's last value; wptserve takes the first.
       # No vendored `.sub.` template references a repeated GET parameter.)
       when /\AGET\[(\w+)\]\z/          then query[Regexp.last_match(1)].to_s
+      # …`{{headers[name]}}` the request's own header (empty for none) and `{{uuid()}}` a fresh UUID each time it is
+      # written, as wptserve's are (fetch/metadata keys each subtest's recorded headers by one)
+      when /\Aheaders\[([^\]]+)\]\z/    then headers["HTTP_#{Regexp.last_match(1).upcase.tr('-', '_')}"].to_s
+      when 'uuid()'                    then SecureRandom.uuid
       else whole
       end
     end
@@ -862,7 +871,7 @@ module WptRunner
 
         ct   = WptRunner::CONTENT_TYPES.fetch(File.extname(path).downcase, 'text/plain')
         body = File.binread(file)
-        body = WptRunner.substitute(body, path, req.GET, host: req.host, scheme: req.scheme) if File.basename(path).include?('.sub.')
+        body = WptRunner.substitute(body, path, req.GET, host: req.host, scheme: req.scheme, headers: req.env) if File.basename(path).include?('.sub.')
         resp_headers = {'content-type' => ct}
         # wptserve serves a sibling `<file>.headers` as extra response headers
         # (e.g. Last-Modified for document.lastModified). Merge any it declares.
@@ -980,8 +989,9 @@ module WptRunner
   # a harness file reports its own subtests, a reftest is judged by its rendering.
   def candidate_files
     @candidate_files ||= Dir.glob("#{TREES}/**/*.{html,htm,xhtml,xht}", base: ROOT).reject {|rel|
+      # (…a `tools/` directory none either, as WPT's manifest has it: fetch/metadata's are its generator's templates)
       reference_or_manual?(rel) ||
-        (rel.split('/') & %w[support resources reftest reference]).any? ||
+        (rel.split('/') & %w[support resources reftest reference tools]).any? ||
         skipped?(rel)
     }
   end
@@ -1009,7 +1019,7 @@ module WptRunner
   # JS_TREES.
   def js_files
     @js_files ||= Dir.glob("#{JS_TREES}/**/*.{any,window,worker}.js", base: ROOT).reject {|rel|
-      (rel.split('/') & %w[support resources]).any? || skipped?(rel)
+      (rel.split('/') & %w[support resources tools]).any? || skipped?(rel)
     }
   end
 
