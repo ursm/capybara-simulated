@@ -22,13 +22,16 @@ struct DocumentState {
     // `document.write` that would open it then ignored.
     destructive_ignored: u32,
     current_script: Option<NodeId>,
+    // Whether it will declaratively refresh (HTML: a `<meta http-equiv=refresh>` or a `Refresh` header said so already,
+    // which no later one undoes): the engine's alone, which no binding writes (declarative_refresh.rs).
+    will_refresh: bool,
 }
 
 impl Default for DocumentState {
     // A document is complete and in no-quirks mode until it says otherwise (DOM "create a document": mode "no-quirks";
     // the parser makes one loading).
     fn default() -> Self {
-        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0, destructive_ignored: 0, current_script: None }
+        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0, destructive_ignored: 0, current_script: None, will_refresh: false }
     }
 }
 
@@ -85,6 +88,13 @@ impl DocumentStates {
     // DOMParser / XHR one (the bindings' flag, dom-nodes.js `DOC_NO_BROWSING_CONTEXT`).
     pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)
+    }
+    // Whether `doc` will declaratively refresh, and that it will.
+    pub(crate) fn will_refresh(&self, doc: NodeId) -> bool {
+        self.0.get(&doc).is_some_and(|s| s.will_refresh)
+    }
+    pub(crate) fn set_will_refresh(&mut self, doc: NodeId) {
+        self.0.entry(doc).or_default().will_refresh = true;
     }
     // The document freed: its state let go of with it.
     pub(crate) fn forget(&mut self, doc: NodeId) {

@@ -2755,48 +2755,6 @@ fetch/metadata/generated/element-link-prefetch.https.optional.sub.html:
 - 'sec-fetch-mode attributes: crossorigin=anonymous'
 - 'sec-fetch-mode attributes: crossorigin=use-credentials'
 - sec-fetch-storage-access - Cross-site no attributes
-fetch/metadata/generated/element-meta-refresh.https.optional.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest
-- sec-fetch-mode
-- sec-fetch-site - Cross-Site -> Cross-Site
-- sec-fetch-site - Cross-Site -> Same Origin
-- sec-fetch-site - Cross-Site -> Same-Site
-- sec-fetch-site - Cross-site
-- sec-fetch-site - HTTPS downgrade-upgrade
-- sec-fetch-site - Same origin
-- sec-fetch-site - Same site
-- sec-fetch-site - Same-Origin -> Cross-Site
-- sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Origin -> Same Origin
-- sec-fetch-site - Same-Origin -> Same-Site
-- sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Site -> Cross-Site
-- sec-fetch-site - Same-Site -> Same Origin
-- sec-fetch-site - Same-Site -> Same-Site
-- sec-fetch-storage-access - Cross-site
-- sec-fetch-storage-access - Same site
-- sec-fetch-user
-fetch/metadata/generated/element-meta-refresh.optional.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest - Not sent to non-trustworthy cross-site destination
-- sec-fetch-dest - Not sent to non-trustworthy same-origin destination
-- sec-fetch-dest - Not sent to non-trustworthy same-site destination
-- sec-fetch-mode - Not sent to non-trustworthy cross-site destination
-- sec-fetch-mode - Not sent to non-trustworthy same-origin destination
-- sec-fetch-mode - Not sent to non-trustworthy same-site destination
-- sec-fetch-site - HTTPS downgrade (header not sent)
-- sec-fetch-site - HTTPS downgrade-upgrade
-- sec-fetch-site - HTTPS upgrade
-- sec-fetch-site - Not sent to non-trustworthy cross-site destination
-- sec-fetch-site - Not sent to non-trustworthy same-origin destination
-- sec-fetch-site - Not sent to non-trustworthy same-site destination
-- sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination
-- sec-fetch-storage-access - Not sent to non-trustworthy same-origin destination
-- sec-fetch-storage-access - Not sent to non-trustworthy same-site destination
-- sec-fetch-user - Not sent to non-trustworthy cross-site destination
-- sec-fetch-user - Not sent to non-trustworthy same-origin destination
-- sec-fetch-user - Not sent to non-trustworthy same-site destination
 fetch/metadata/generated/element-picture.https.sub.html:
 - sec-fetch-storage-access - img[src] - Cross-site, no attributes
 - sec-fetch-storage-access - img[srcset] - Cross-site, no attributes
@@ -2916,48 +2874,6 @@ fetch/metadata/generated/header-link.sub.html:
 - sec-fetch-user rel=stylesheet - Not sent to non-trustworthy cross-site destination
 - sec-fetch-user rel=stylesheet - Not sent to non-trustworthy same-origin destination
 - sec-fetch-user rel=stylesheet - Not sent to non-trustworthy same-site destination
-fetch/metadata/generated/header-refresh.https.optional.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest
-- sec-fetch-mode
-- sec-fetch-site - Cross-Site -> Cross-Site
-- sec-fetch-site - Cross-Site -> Same Origin
-- sec-fetch-site - Cross-Site -> Same-Site
-- sec-fetch-site - Cross-site
-- sec-fetch-site - HTTPS downgrade-upgrade
-- sec-fetch-site - Same origin
-- sec-fetch-site - Same site
-- sec-fetch-site - Same-Origin -> Cross-Site
-- sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Origin -> Same Origin
-- sec-fetch-site - Same-Origin -> Same-Site
-- sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Site -> Cross-Site
-- sec-fetch-site - Same-Site -> Same Origin
-- sec-fetch-site - Same-Site -> Same-Site
-- sec-fetch-storage-access - Cross-site
-- sec-fetch-storage-access - Same site
-- sec-fetch-user
-fetch/metadata/generated/header-refresh.optional.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest - Not sent to non-trustworthy cross-site destination
-- sec-fetch-dest - Not sent to non-trustworthy same-origin destination
-- sec-fetch-dest - Not sent to non-trustworthy same-site destination
-- sec-fetch-mode - Not sent to non-trustworthy cross-site destination
-- sec-fetch-mode - Not sent to non-trustworthy same-origin destination
-- sec-fetch-mode - Not sent to non-trustworthy same-site destination
-- sec-fetch-site - HTTPS downgrade (header not sent)
-- sec-fetch-site - HTTPS downgrade-upgrade
-- sec-fetch-site - HTTPS upgrade
-- sec-fetch-site - Not sent to non-trustworthy cross-site destination
-- sec-fetch-site - Not sent to non-trustworthy same-origin destination
-- sec-fetch-site - Not sent to non-trustworthy same-site destination
-- sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination
-- sec-fetch-storage-access - Not sent to non-trustworthy same-origin destination
-- sec-fetch-storage-access - Not sent to non-trustworthy same-site destination
-- sec-fetch-user - Not sent to non-trustworthy cross-site destination
-- sec-fetch-user - Not sent to non-trustworthy same-origin destination
-- sec-fetch-user - Not sent to non-trustworthy same-site destination
 fetch/metadata/generated/script-json-module-import-static.https.sub.html:
 - sec-fetch-dest
 - sec-fetch-mode
@@ -4961,6 +4877,30 @@ html/rendering/widgets/the-select-element/option-only-label.html:
 - "== html/rendering/widgets/the-select-element/option-label-ref.html"
 html/rendering/widgets/the-select-element/select-label-appearance.html:
 - "== html/rendering/widgets/the-select-element/select-label-appearance-ref.html"
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-attribute-changes.html:
+- Meta color-scheme initially 'dark'.
+- Set content attribute of meta color-scheme to 'dark'.
+- Set meta name to color-scheme.
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-first-valid-applies.html:
+- Tree order decides which meta color-scheme applies.
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-insert.html:
+- Inserted meta color-scheme applies
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-normal-descendant-change.html:
+- Normal initially dark
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-remove-head.html:
+- Meta color-scheme applies.
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-remove.html:
+- First meta applies.
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-single-value-in-body.html:
+- Meta color-scheme in body should apply.
+html/semantics/document-metadata/the-meta-element/color-scheme/meta-color-scheme-single-value-in-head.html:
+- Meta color-scheme in head applies.
+html/semantics/document-metadata/the-meta-element/http-equiv-and-name-1.html:
+- "<meta> set the color-scheme to dark"
+html/semantics/document-metadata/the-meta-element/http-equiv-and-name-2.html:
+- "<meta> set the content-language to de-DE"
+html/semantics/document-metadata/the-meta-element/pragma-directives/http-equiv-enumerated-ascii-case-insensitive.html:
+- keyword content-security-policy
 html/semantics/forms/customizable-combobox/customizable-combobox-appearance.html:
 - "== html/semantics/forms/customizable-combobox/customizable-combobox-appearance-ref.html"
 html/semantics/forms/customizable-combobox/customizable-combobox-option-attributes.html:
@@ -5583,14 +5523,10 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-refresh-
   with timeout 0 (XMLHttpRequest)
 - document.open() aborts documents that are queued for navigation through <meta> refresh
   with timeout 0 (fetch())
-- document.open() aborts documents that are queued for navigation through <meta> refresh
-  with timeout 0 (image loading)
 - document.open() aborts documents that are queued for navigation through Refresh
   header with timeout 0 (XMLHttpRequest)
 - document.open() aborts documents that are queued for navigation through Refresh
   header with timeout 0 (fetch())
-- document.open() aborts documents that are queued for navigation through Refresh
-  header with timeout 0 (image loading)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/abort-while-navigating.window.js:
 - "[harness] TIMEOUT"
 - document.open() aborts documents that are navigating through Location (XMLHttpRequest)
@@ -5801,11 +5737,6 @@ resource-timing/nested-context-navigations-embed.html:
   navigations by the parent
 - Test that embed refreshes are not observable by the parent
 - "[harness] TIMEOUT"
-resource-timing/nested-context-navigations-iframe.html:
-- Test that cross-site iframe refreshes are not observable by the parent
-- Test that crossorigin iframe refreshes are not observable by the parent
-- Test that iframe refreshes are not observable by the parent
-- "[harness] TIMEOUT"
 resource-timing/nested-context-navigations-object.html:
 - Test that cross-site object navigations are not observable by the parent
 - Test that cross-site object navigations are not observable by the parent, even after
@@ -5846,8 +5777,6 @@ resource-timing/resource_reparenting.html:
 - Testing resource entries
 resource-timing/resource_subframe_self_navigation.html:
 - Subsequent <embed> navigations don't appear in the resource-timing buffer.
-- Subsequent <frame> navigations don't appear in the resource-timing buffer.
-- Subsequent <iframe> navigations don't appear in the resource-timing buffer.
 - Subsequent <object> navigations don't appear in the resource-timing buffer.
 - "[harness] TIMEOUT"
 resource-timing/same-origin-from-cross-origin-redirect.html:

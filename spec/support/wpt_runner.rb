@@ -9,6 +9,7 @@ require 'open3'
 require 'tmpdir'
 require 'digest'
 require 'securerandom'
+require 'cgi/escape'
 # The reftest raster diff reads both renderings' PNGs with the driver's own decoder.
 require_relative 'raster'
 
@@ -389,6 +390,8 @@ module WptRunner
     # web-platform.test its SECURE_ORIGIN). A NON-family host (www.example.com) keeps the
     # request host: its own document origin is the family root there.
     host = SUB_HOST if sub_family
+    markup = %w[.html .htm .xht .xhtml .xml .svg].include?(File.extname(req_path.to_s))
+    escape = markup ? CGI.method(:escapeHTML) : :itself.to_proc
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.
@@ -421,10 +424,13 @@ module WptRunner
       # the form-action tests rely on (`?action=` → an empty action attribute).
       # (A repeated param resolves to Rack's last value; wptserve takes the first.
       # No vendored `.sub.` template references a repeated GET parameter.)
-      when /\AGET\[(\w+)\]\z/          then query[Regexp.last_match(1)].to_s
+      # (…HTML-escaped in a markup file, as wptserve's `sub` is there — `sub(html)` for .html / .xml / .svg and the like,
+      # `sub(none)` for any other: a quote in an attribute value the template puts it in stays in it, meta refresh
+      # parsing.html's `content="{{GET[input]}}"`, where an es-module.sub.js `import` keeps its URL's `&`)
+      when /\AGET\[(\w+)\]\z/          then escape.(query[Regexp.last_match(1)].to_s)
       # …`{{headers[name]}}` the request's own header (empty for none) and `{{uuid()}}` a fresh UUID each time it is
       # written, as wptserve's are (fetch/metadata keys each subtest's recorded headers by one)
-      when /\Aheaders\[([^\]]+)\]\z/    then headers["HTTP_#{Regexp.last_match(1).upcase.tr('-', '_')}"].to_s
+      when /\Aheaders\[([^\]]+)\]\z/    then escape.(headers["HTTP_#{Regexp.last_match(1).upcase.tr('-', '_')}"].to_s)
       when 'uuid()'                    then SecureRandom.uuid
       else whole
       end
@@ -856,7 +862,8 @@ module WptRunner
             next resp if resp
           end
         end
-        file = File.expand_path(File.join(WptRunner::ROOT, path))
+        # (…its path percent-decoded, as wptserve's file lookup unquotes it: meta refresh's `support/url foo`)
+        file = File.expand_path(File.join(WptRunner::ROOT, Rack::Utils.unescape_path(path)))
         # wptserve answers a directory request (e.g. GET `/`) with a 200 HTML listing;
         # Document.currentScript's xhr-test gates on status === 200, and responsetype's
         # DONE cases assert the body is non-empty — so serve a minimal non-empty listing.
@@ -967,7 +974,7 @@ module WptRunner
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,domxpath,hr-time,resource-timing,css/css-font-loading,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,cookies,urlpattern,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,css/geometry,web-animations,service-workers,websockets,webstorage,WebCryptoAPI,selection,IndexedDB,web-locks,requestidlecallback,css/css-sizing/aspect-ratio}'
+  TREES = '{dom,domparsing,domxpath,hr-time,resource-timing,css/css-font-loading,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,html/semantics/document-metadata/the-meta-element,cookies,urlpattern,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,css/geometry,web-animations,service-workers,websockets,webstorage,WebCryptoAPI,selection,IndexedDB,web-locks,requestidlecallback,css/css-sizing/aspect-ratio}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -980,7 +987,7 @@ module WptRunner
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,cookies,urlpattern,service-workers,webstorage,websockets,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB,web-locks,requestidlecallback}'
+  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,html/semantics/document-metadata/the-meta-element,cookies,urlpattern,service-workers,webstorage,websockets,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB,web-locks,requestidlecallback}'
 
   def test_files
     @test_files ||= (harness_files + js_files + reftest_files).sort

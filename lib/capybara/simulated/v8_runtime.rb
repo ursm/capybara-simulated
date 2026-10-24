@@ -472,7 +472,7 @@ module Capybara
       # the iframe element at the new id (`__csimRebindFrameRealm`).
       # `history_state` the `[state]` of the classic history API state its document starts with, a traversal's to its
       # entry (Browser#reload_frame_to_entry).
-      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil, referrer_policy: nil)
+      def reload_frame_realm(old_id, parent_id, url, body, content_type, client_id, seed, history_state: nil, referrer: nil, referrer_policy: nil, refresh: nil)
         # A re-navigated document discards its child browsing contexts, so dispose the old realm's
         # DESCENDANT frame realms too — not just old_id. The JS src-reassignment path gets this for
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
@@ -482,7 +482,7 @@ module Capybara
         # WindowProxies of the frame kept, over the new document's window next.
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], seed['docOrigin'], seed['locationOrigin'], nil, nil, seed['viewport'], client_id, seed['margins'], seed['sandbox'],
-                           history_state: history_state, referrer: referrer, referrer_policy: referrer_policy)
+                           history_state: history_state, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh)
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
@@ -1004,7 +1004,8 @@ module Capybara
         realm
       end
 
-      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0, history_state: nil, referrer: nil, referrer_policy: nil)
+      def create_frame_realm(parent_ctx, url, body, content_type, parent_id = 0, container = nil, frame_doc_origin = nil, frame_location_origin = nil, js_url_source = nil, frame_about_base = nil, frame_viewport = nil, client_id = nil, frame_margins = nil, frame_sandbox = 0, history_state: nil, referrer: nil, referrer_policy: nil,
+                             refresh: nil)
         depth = (frame_realm_depths[parent_id] || 0) + 1
         if depth > MAX_FRAME_DEPTH
           @browser.log_console('warn', "iframe nesting depth #{depth} exceeds #{MAX_FRAME_DEPTH}; not building #{url}")
@@ -1130,6 +1131,9 @@ module Capybara
         # window's (`create_window_realm`).
         retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        # (…and the `Refresh` header its response has, its declarative refresh: HTML "create and initialize a Document
+        # object")
+        realm.call('__csimRefreshHeader', refresh) if refresh
         # This document, loaded, refreshes the service-worker client record it made as it began loading
         # (bridge.entry.js __csimLoadDocument) — an UNCONTROLLED context is still a client of its origin
         # and must show up in `matchAll({includeUncontrolled: true})`.
@@ -1213,7 +1217,8 @@ module Capybara
         referrer_policy: nil,
         retarget_from: nil,
         csp: nil,
-        client_id: nil
+        client_id: nil,
+        refresh: nil
       )
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
@@ -1267,6 +1272,9 @@ module Capybara
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
+        # (…and the `Refresh` header its response has, its declarative refresh: HTML "create and initialize a Document
+        # object")
+        realm.call('__csimRefreshHeader', refresh) if refresh
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
         realm.call('__csimFireWindowLoad') rescue nil

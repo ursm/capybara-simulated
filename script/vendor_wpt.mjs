@@ -116,6 +116,8 @@ const TREES = [
                                        // requests by, so the objective bar for the engine behind both
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
   'fetch/content-length',              // a response's Content-Length: repeated values, a mismatch as a network error
+  'html/semantics/document-metadata/the-meta-element', // <meta>: its pragmas — http-equiv=refresh (the shared declarative
+                                       // refresh steps, declarative_refresh.rs), content-language, default-style — and names
   'fetch/metadata',                    // Fetch Metadata request headers (Sec-Fetch-Site / -Mode / -Dest / -User) of every
                                        // request kind — navigations, frames, forms, subresources, redirects, sandboxed and
                                        // opaque initiators — the request metadata browser.rb's navigation paths and

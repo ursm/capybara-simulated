@@ -10863,7 +10863,8 @@ module Capybara
 
             headers = resp['headers'] || {}
             body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
-            made = {csp: response_csp(headers), referrer: resp['referrer'], referrer_policy: referrer_policy_header(headers), client_id: resp['resulting_client_id']}
+            made = {csp: response_csp(headers), referrer: resp['referrer'], referrer_policy: referrer_policy_header(headers), client_id: resp['resulting_client_id'],
+                    refresh: refresh_header(headers)}
           end
           # (…any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
           if body.nil?
@@ -11170,6 +11171,9 @@ module Capybara
       # The referrer policy a response's `Referrer-Policy` header sets — its last valid token (Referrer Policy "parse a
       # referrer policy from a Referrer-Policy header") — nil for none: a redirect's for the next hop, a document's for its
       # policy container (HTML "create and initialize a Document object"), which its `<meta>` elements may set anew.
+      # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
+      # object"), none for none.
+      def refresh_header(headers) = (value = header_field(headers || {}, 'refresh')) && Array(value).join(',')
       def referrer_policy_header(headers)
         rp = header_field(headers || {}, 'referrer-policy') or return nil
         # (…its tokens matched as they are, case and all: an unknown one — `No-Referrer` — none, as the spec's parse has it)
@@ -11295,7 +11299,7 @@ module Capybara
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
                                    response_content_type(sw['headers'] || {}), restore_state: restore, history_state: history_state, client_id: rid, csp: response_csp(sw['headers'] || {}),
                                    referrer: frame_entry_referrer(entry, is_reload) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) },
-                                   referrer_policy: referrer_policy_header(sw['headers']))
+                                   referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
           return
         end
         env = rack_env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
@@ -11314,7 +11318,7 @@ module Capybara
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers),
                                  restore_state: restore, history_state: history_state, csp: response_csp(headers),
                                  referrer: frame_entry_referrer(entry, is_reload) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) },
-                                 referrer_policy: referrer_policy_header(headers))
+                                 referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
       # The referrer of the document a traversal (or, `is_reload`, a reload) to frame session history entry `entry` makes:
       # the one the entry's document was made with (HTML's document state) for a traversal, the request's — the block's —
@@ -11494,7 +11498,7 @@ module Capybara
           end
           return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                          referrer: referrer_header(compute_referrer(referrer_policy.to_s, source, get_url)), referrer_policy: referrer_policy_header(sw['headers']))
+                                          referrer: referrer_header(compute_referrer(referrer_policy.to_s, source, get_url)), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
         end
         site      = widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, get_url))
         response = dispatch_navigation_request(
@@ -11525,7 +11529,7 @@ module Capybara
           return save_downloaded_response(get_url, headers, resp_body, realm: realm_id)
         end
         reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: sent_referrer,
-                                 referrer_policy: referrer_policy_header(headers))
+                                 referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
@@ -11603,7 +11607,7 @@ module Capybara
           return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
           tag_frame_entry_post(realm_id, body, content_type)
           reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                   referrer: referrer_header(compute_referrer(referrer_policy.to_s, source, url.to_s)), referrer_policy: referrer_policy_header(sw['headers']))
+                                   referrer: referrer_header(compute_referrer(referrer_policy.to_s, source, url.to_s)), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
           return
         end
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
@@ -11650,7 +11654,7 @@ module Capybara
         end
         tag_frame_entry_post(realm_id, body, content_type)
         reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: sent_referrer,
-                                 referrer_policy: referrer_policy_header(headers))
+                                 referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
       # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
@@ -11662,7 +11666,8 @@ module Capybara
       # Rebuild a frame realm reached via contentWindow (no @frame_stack entry):
       # recover its container element handle + parent realm, swap in a fresh realm
       # built from `html`, re-point the iframe at it, and fire the element load.
-      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, history_state: nil, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil)
+      def reload_frame_realm_by_id(realm_id, url, bytes, content_type, restore_state: nil, history_state: nil, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil,
+                                   refresh: nil)
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
@@ -11670,7 +11675,8 @@ module Capybara
         seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, navigation_sandbox(realm_id)) or return
         return unless unload_frame_document(parent, realm_id)
 
-        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, history_state: history_state, referrer: referrer, referrer_policy: referrer_policy).to_i
+        new_id = @runtime.reload_frame_realm(realm_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, history_state: history_state, referrer: referrer, referrer_policy: referrer_policy,
+                                                                                                                              refresh: refresh).to_i
         return if new_id.zero?
         frame_navigation_made_document
         begin
@@ -12112,7 +12118,7 @@ module Capybara
           return
         end
         reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry, csp: response_csp(headers), referrer: env['HTTP_REFERER'],
-                                   referrer_policy: referrer_policy_header(headers))
+                                   referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
 
       # An entered frame's navigation request to `url` (`method`): Fetch Metadata (dest `iframe`), its Referer `referrer`'s
@@ -12176,7 +12182,7 @@ module Capybara
         # `tag_frame_entry_post`)
         tag_frame_entry_post(entry[:realm_id], body, content_type)
         reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry, csp: response_csp(headers), referrer: env['HTTP_REFERER'],
-                                   referrer_policy: referrer_policy_header(headers))
+                                   referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
 
       # Tear down a frame's realm and rebuild it from `html`, then re-point the
@@ -12197,7 +12203,7 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, csp: nil, referrer: nil, referrer_policy: nil)
+      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, csp: nil, referrer: nil, referrer_policy: nil, refresh: nil)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
@@ -12208,7 +12214,7 @@ module Capybara
         # `__csimTakeFrameNavBlob`)
         frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
-        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed, referrer: referrer, referrer_policy: referrer_policy).to_i
+        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh).to_i
         return if new_id.zero?
         frame_navigation_made_document
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
@@ -12531,6 +12537,8 @@ module Capybara
         opts['referrerPolicy'] = policy if policy
         csp = response_csp(@last_response_headers || {})
         opts['csp'] = csp if csp
+        refresh = refresh_header(@last_response_headers)
+        opts['refresh'] = refresh if refresh
         # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
         # navigation went to the network, as a navigation does not yet wait for its activation)
         if http_url?(@current_url)

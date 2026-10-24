@@ -2990,6 +2990,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::combobox::install(scope, ns, context_id);
     crate::input_types::install(scope, ns, context_id);
     crate::data_url::install(scope, ns, context_id);
+    crate::declarative_refresh::install(scope, ns, context_id);
     crate::event_stream::install(scope, ns, context_id);
     crate::fetch_rules::install(scope, ns, context_id);
     crate::headers::install(scope, ns, context_id);

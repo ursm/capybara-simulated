@@ -30,6 +30,7 @@ pub(crate) const CONNECT_DEFAULT_STYLE: u32 = 1 << 12;
 pub(crate) const CONNECT_NONCE: u32 = 1 << 13;
 pub(crate) const CONNECT_CUSTOM: u32 = 1 << 14;
 pub(crate) const CONNECT_META_REFERRER: u32 = 1 << 15;
+pub(crate) const CONNECT_REFRESH: u32 = 1 << 16;
 
 // What connecting `n` runs (`CONNECT_*`); none for a node that is no element.
 pub(crate) fn connection_steps(n: &NodeData) -> u32 {
@@ -55,6 +56,7 @@ pub(crate) fn connection_steps(n: &NodeData) -> u32 {
         "meta" => {
             flag(n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("default-style")), CONNECT_DEFAULT_STYLE)
                 | flag(crate::url_ops::names_referrer(n), CONNECT_META_REFERRER)
+                | flag(n.plain_attr("http-equiv").is_some_and(|v| v.eq_ignore_ascii_case("refresh")), CONNECT_REFRESH)
         }
         _ => 0,
     };
