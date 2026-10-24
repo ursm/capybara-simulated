@@ -12997,8 +12997,17 @@ module Capybara
       # pre-SW network redirect already happened + widened `site_seed`), so this is a single hop — no
       # redirect loop. Returns the response wire hash for the fetch-event JSON, or `PRELOAD_NETWORK_ERROR`
       # on a network error.
-      def navigation_preload_response(url, referrer_source, referrer_policy, site_seed, origin_null, header_value, dest: 'iframe', cookie_cross_site: false,
-                                      origin_url: referrer_source)
+      def navigation_preload_response(
+        url,
+        referrer_source,
+        referrer_policy,
+        site_seed,
+        origin_null,
+        header_value,
+        dest: 'iframe',
+        cookie_cross_site: false,
+        origin_url: referrer_source
+      )
         site = widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, url))
         response = dispatch_navigation_request(
           url,
