@@ -494,23 +494,24 @@ module Capybara
       # Navigate a window realm (`win.location = …`): a FRESH realm for the new
       # document, like reload_frame_realm — an in-place `__csimLoadDocument` on an
       # already-loaded realm does NOT re-run inline scripts, but a fresh realm does.
-      # Returns the new realm's context id. (The opener's WindowProxy, keyed by the
-      # old id, goes stale across this — acceptable while no window.open test scripts
-      # the window after navigating it; a stable WindowProxy is future work.)
-      def reload_window_realm(old_id, url, body, content_type)
+      # Returns the new realm's context id; `made` what its response gives the document (`create_window_realm`).
+      def reload_window_realm(old_id, url, body, content_type, **made)
         meta = window_realm_meta[old_id] || {}
         # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
         # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
         dispose_frame_realm_tree(old_id)
-        new_id = create_window_realm(
+        create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base], window_key: meta[:window_key]
+          opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base], window_key: meta[:window_key], retarget_from: old_id,
+          **made
         )
-        # (…the window the same WindowProxy in every realm that holds one — `window.open()`'s `w` its new document's)
-        if new_id
-          ([ctx] + frame_realms.values).each {|realm| realm.call('__csimRetargetWindowProxy', old_id, new_id) rescue nil }
-        end
-        new_id
+      end
+      # Whether the window of window realm `id` is closed (navigables.rs `window_closed`, by its key).
+      def window_realm_closed?(id)
+        key = window_realm_meta.dig(id.to_i, :window_key) or return false
+        ctx.call('__csimWindowRealmClosed', key.to_i) == true
+      rescue StandardError
+        false
       end
 
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
@@ -1150,7 +1151,25 @@ module Capybara
       # a native `__csimFrameWindowProxyFor`, so `popup.document` is a real
       # same-isolate Document (cross-window adoptNode works). The single isolate also
       # makes a same-origin window far cheaper than today's isolate-per-window.
-      def create_window_realm(url, body, content_type, opener_id: nil, window_name: nil, doc_origin: nil, location_origin: nil, about_base: nil, window_key: nil, referrer: nil, referrer_policy: nil)
+      # (…`retarget_from` the realm whose document this one replaces — its window the same WindowProxy wherever a realm
+      # holds one, retargeted before the document's scripts run: `__csimRetargetWindowProxy` — `csp` its response's
+      # Content-Security-Policy, `client_id` the client its navigation reserved)
+      def create_window_realm(
+        url,
+        body,
+        content_type,
+        opener_id: nil,
+        window_name: nil,
+        doc_origin: nil,
+        location_origin: nil,
+        about_base: nil,
+        window_key: nil,
+        referrer: nil,
+        referrer_policy: nil,
+        retarget_from: nil,
+        csp: nil,
+        client_id: nil
+      )
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm so its location setter routes to
         # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
@@ -1176,6 +1195,11 @@ module Capybara
           realm.eval_void("__dom.takeOpenerOrigins(#{opener_id.to_i});") unless opener_id.nil?
         else
           realm.call('__csimUpdateLocation', url.to_s)
+          # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a
+          # Document object"; its sandboxing a CSP `sandbox`'s)
+          realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
+          realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
+          realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};") if client_id
         end
         realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
         realm.call('__csimSetDocumentOrigin', doc_origin.to_s)         unless doc_origin.nil?
@@ -1196,6 +1220,7 @@ module Capybara
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
+        ([ctx] + frame_realms.values).each {|r| r.call('__csimRetargetWindowProxy', retarget_from, realm.id) rescue nil } if retarget_from
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil

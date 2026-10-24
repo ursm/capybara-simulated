@@ -6910,7 +6910,7 @@ module Capybara
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil, initiator_realm: nil, sandbox: nil)
+                                 referrer_policy: nil, initiator_realm: nil, sandbox: nil, download_realm: container_realm)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -7017,8 +7017,9 @@ module Capybara
           # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
           # frame builder's, whose container's document `container_realm` is, alone — a named-frame form's navigation
           # still makes a document of it)
-          if container_realm && download_response?(headers)
-            from_document(container_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
+          # (…a window's navigation's alike, `download_realm` the document that navigated it)
+          if download_realm && download_response?(headers)
+            from_document(download_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
             return {'no_document' => true}
           end
           body ||= read_rack_body(resp_body)
@@ -10787,22 +10788,30 @@ module Capybara
         @pending_window_nav = nil
         navs.each do |realm_id, spec|
           invalidate_find_cache
+          # (…none of a window closed since: HTML "cannot navigate")
+          next if @runtime.window_realm_closed?(realm_id)
+
           body, ctype, url = spec[:body], spec[:ctype], spec[:url]
+          made = {}
           # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
           # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
-          # (`frame_navigation_fetch`) — a response that makes no document (a 204) leaving it at the one it is at.
+          # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
+          # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
+          # sent its referrer, its reserved client its own.
           if body.nil? && http_url?(url)
-            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: spec[:initiator])
+            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: spec[:initiator], download_realm: spec[:initiator])
             next if resp.nil? || resp['no_document']
 
-            body, ctype, url = resp['body'], response_content_type(resp['headers'] || {}), resp['url'] || url
+            headers = resp['headers'] || {}
+            body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
+            made = {csp: response_csp(headers), referrer: resp['referrer'], referrer_policy: referrer_policy_header(headers), client_id: resp['resulting_client_id']}
           end
           # (…any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
           if body.nil?
             log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
             next
           end
-          @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s)
+          @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, **made)
         rescue StandardError => e
           log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
