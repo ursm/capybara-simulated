@@ -3819,6 +3819,13 @@ module Capybara
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
+      # An element's GET of `url` (a script inserted, a `<link>` that is no sheet, a hint) as its node document — realm
+      # `realm` — requests it, under the policy its `referrerpolicy` sets (`policy`): `rack_fetch`'s answer.
+      def subresource_fetch(url, realm, policy)
+        client = request_client(realm, policy)
+        rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:url], client_url: client[:url],
+                                                  client_origin: client[:origin], client_realm: client[:realm])
+      end
       def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil)
         result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy,
                                                                      client_realm: client_realm)
@@ -8426,7 +8433,7 @@ module Capybara
         client = request_client(realm)
         # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
         # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
-        cached = [client[:origin] || url_origin(client[:url]).to_s, key]
+        cached = [client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url).to_s, key]
         @@font_file_lock.synchronize do
           if @@font_file_cache.key?(cached)
             path, meta = @@font_file_cache[cached]
@@ -9871,7 +9878,8 @@ module Capybara
         # frame's ancestors too, the top-level document included (its own document is the client); a dedicated worker's
         # by the site for cookies it was made with (worker_cross_site?). None for a load with no client at all.
         widen_cookie_site = lambda {|hop|
-          cookie_client ||= cors_mode ? (doc_origin || sec_initiator) : (client_url || sec_initiator)
+          # (…a client of an opaque origin judged by it: `null`, cross-site to every site — a sandboxed frame's)
+          cookie_client ||= cors_mode ? (doc_origin || sec_initiator) : (client_origin == 'null' ? 'null' : (client_url || sec_initiator))
           next if cookie_client.nil?
 
           cross = cookie_cross_site_document?(cookie_client, hop) ||

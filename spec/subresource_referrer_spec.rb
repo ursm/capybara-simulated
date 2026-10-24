@@ -21,6 +21,8 @@ RSpec.describe 'a subresource request' do
              when '/f' then '<link rel=stylesheet href=/f.css><script src=/f.js></script><script type=module src=/fm.js></script>' \
                             '<script>import("/fi.js")</script><style>@font-face{font-family:X;src:url(/ff.woff)}</style>'
              when '/m' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/m.css>'
+             when '/top2' then '<iframe src="/mf"></iframe>'
+             when '/mf' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/mf.css><script src=/mf.js></script>'
              when '/e' then '<link rel=stylesheet referrerpolicy=no-referrer href=/e.css><script referrerpolicy=origin src=/e.js></script>'
              end
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
@@ -38,6 +40,24 @@ RSpec.describe 'a subresource request' do
   it "is referred under its document's policy" do
     session.visit '/m'
     expect(referers).to include('/m.css' => nil)
+  end
+
+  it "is referred under a frame's meta policy parsed before it" do
+    session.visit '/top2'
+    expect(referers.slice('/mf.css', '/mf.js')).to eq('/mf.css' => nil, '/mf.js' => nil)
+  end
+
+  # …a frame's whose `<meta name="referrer">` comes before its sheet (its policy taken as the parser inserts it), and a
+  # script a document inserts — or another realm's code inserts into it (its node document requesting it).
+  it "is referred under a frame's meta policy and by an inserted script's document" do
+    session.visit '/top'
+    session.execute_script(<<~JS)
+      const d = frames[0].document;
+      const s = d.createElement('script'); s.referrerPolicy = 'origin'; s.src = '/inj.js'; d.body.append(s);
+      const t = document.createElement('script'); t.src = '/pagedyn.js'; document.body.append(t);
+    JS
+    session.evaluate_script('1')
+    expect(referers.slice('/inj.js', '/pagedyn.js')).to eq('/inj.js' => 'http://www.example.com/', '/pagedyn.js' => 'http://www.example.com/top')
   end
 
   # A font is a CORS request of its client (CSS Fonts 4 §4.9.1): one a frame of the font's origin loads, another origin's
