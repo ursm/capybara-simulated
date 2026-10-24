@@ -780,8 +780,11 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
 }
 // __dom.navigationAllowed(target) -> whether this realm's document may navigate realm `target`'s navigable
-// (`RealmArena::navigation_allowed`).
+// (`RealmArena::navigation_allowed`) — none it may that names no realm.
 fn navigation_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if !args.get(0).is_int32() {
+        return rv.set_bool(false);
+    }
     let target = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).navigation_allowed(cid, target));

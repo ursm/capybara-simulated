@@ -231,13 +231,13 @@ RSpec.describe 'Sandboxing' do
   # A Location of another window navigated by a document its sandboxing does not allow to navigate it (HTML "allowed by
   # sandboxing to navigate"): a SecurityError, the navigation not made — its top without `allow-top-navigation`, a
   # sibling's frame with no `allow-same-origin` of its own to share — while one with `allow-top-navigation` navigates it,
-  # its request one of its opaque origin's.
+  # and any document its own child's, each request one of its opaque origin's.
   it "refuses a sandboxed document another window's Location it may not navigate" do
     sites = {}
     s = simulated_session(lambda {|env|
       sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
       body = case env['PATH_INFO']
-             when '/' then '<iframe id=a sandbox="allow-scripts" srcdoc="x"></iframe><iframe id=b sandbox="allow-scripts allow-top-navigation" srcdoc="x"></iframe><iframe id=c></iframe>'
+             when '/' then '<iframe id=a sandbox="allow-scripts" srcdoc="<iframe src=/k></iframe>"></iframe><iframe id=b sandbox="allow-scripts allow-top-navigation" srcdoc="x"></iframe><iframe id=c></iframe>'
              else env['PATH_INFO']
              end
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
@@ -247,6 +247,10 @@ RSpec.describe 'Sandboxing' do
     expect(s.within_frame('a') { [s.evaluate_script(try.(%(top.location.href = "/x"))), s.evaluate_script(try.(%(parent.frames[2].location = "/y")))] }).to eq(%w[SecurityError SecurityError])
     s.evaluate_script('1')
     expect(s.current_path).to eq('/')
+    # (…its own child's it navigates, cross-site to it, as every request of an opaque origin's is)
+    expect(s.within_frame('a') { s.evaluate_script(try.(%(frames[0].location = "http://www.example.com/k2"))) }).to eq('navigated')
+    s.evaluate_script('1')
+    expect(sites['/k2']).to eq('cross-site')
     expect(s.within_frame('b') { s.evaluate_script(try.(%(top.location.href = "/z"))) }).to eq('navigated')
     expect(s).to have_current_path('/z')
     # (…its request one of an opaque origin's, cross-site to every URL: Fetch Metadata)

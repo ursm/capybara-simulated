@@ -3472,7 +3472,7 @@ module Capybara
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy)
           elsif named_frame
-            navigate_realm_self_get(named_frame, url, referrer: initiator)
+            navigate_realm_self_get(named_frame, url, referrer: initiator, **opaque_initiator(@current_realm_id))
           elsif frame_entry
             navigate_frame(url, entry: frame_entry, referrer: initiator)
           else
@@ -3486,7 +3486,7 @@ module Capybara
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
                                     post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
           elsif named_frame
-            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator)
+            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, **opaque_initiator(@current_realm_id))
           elsif frame_entry
             navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator)
           else
@@ -10723,7 +10723,7 @@ module Capybara
               # non-http(s) and relative URLs stay on the JS src-reassignment path via
               # navigate_realm_self_get. An entry of the frame's session history, or — a `location.replace`'s —
               # the current one replaced.
-              navigate_realm_self_get(realm_id, url, record: !replace, referrer: referrer)
+              navigate_realm_self_get(realm_id, url, record: !replace, referrer: referrer, **opaque_initiator(initiator))
             else
               replace ? replace_frame_entry(realm_id, url) : record_frame_nav(realm_id, url)
               frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, sandbox)
@@ -11247,9 +11247,9 @@ module Capybara
         case chosen
         when :self
           if method == 'GET'
-            navigate_realm_self_get(realm_id, url, referrer: initiator)
+            navigate_realm_self_get(realm_id, url, referrer: initiator, **opaque_initiator(realm_id))
           else
-            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator)
+            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator, **opaque_initiator(realm_id))
           end
         when :top
           # (…adding the page's entry, whether the frame's document is completely loaded or not: a form's replaces only its
@@ -11257,9 +11257,9 @@ module Capybara
           in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type]) }
         when Integer
           if method == 'GET'
-            navigate_realm_self_get(chosen, url, referrer: initiator)
+            navigate_realm_self_get(chosen, url, referrer: initiator, **opaque_initiator(realm_id))
           else
-            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator)
+            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator, **opaque_initiator(realm_id))
           end
         when :window
           log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
@@ -11866,17 +11866,20 @@ module Capybara
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares and whose origin a POST's Origin carries, that
       # document's: `realm_request_initiator` — one of an opaque origin, a sandboxed frame's, cross-site to every URL)
       def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil)
-        source, policy    = initiator
-        site, origin_null = realm_request_initiator(realm)
-        seed              = origin_null ? 'cross-site' : nil
+        source, policy = initiator
+        site           = realm_request_initiator(realm).first
+        opaque         = opaque_initiator(realm)
         from_document(realm) do
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, origin_null: origin_null, site_seed: seed)
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, **opaque)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob, site_seed: seed)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob, site_seed: opaque[:site_seed])
           end
         end
       end
+      # What a navigation the document of realm `realm` initiates carries of its origin where that is opaque (a sandboxed
+      # document's): cross-site to every URL (Fetch Metadata, `site_seed`), its Origin `null` — none for a tuple one's.
+      private def opaque_initiator(realm) = document_origin_opaque?(realm.to_i) ? {site_seed: 'cross-site', origin_null: true} : {}
 
       # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
       # shape) under that document's policy, determined anew at each redirect hop.
