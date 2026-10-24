@@ -1047,6 +1047,9 @@ pub(crate) struct RealmState {
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
+    // The URLs of the classic scripts it fetched whose errors are muted (HTML "muted errors": a response of another
+    // origin), as each was last fetched (script.rs `scriptMuted`).
+    pub(crate) muted_scripts: std::collections::HashSet<String>,
     // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascadeRekey`).
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
     // The parents its document's parse changed since its last layout pass began (mutation_observers.rs `noteParsed`).

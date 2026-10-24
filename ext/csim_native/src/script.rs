@@ -240,9 +240,26 @@ fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
+// __dom.scriptMuted(url[, muted]) -> whether the classic script fetched from `url` has its errors muted (`muted_scripts`);
+// with `muted`, that set for it, as its fetch found.
+fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let muted = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) else { return rv.set_bool(false) };
+    if let Some(muted) = muted {
+        if muted {
+            state.muted_scripts.insert(url.clone());
+        } else {
+            state.muted_scripts.remove(&url);
+        }
+    }
+    rv.set_bool(state.muted_scripts.contains(&url));
+}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
+    crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
     crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);

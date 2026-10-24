@@ -9,7 +9,8 @@ require_relative 'support/https_app_host'
 # request"): a response of another origin that does not allow it no script or sheet — its element's `error` — where one
 # without the attribute, a no-cors request, loads whatever it says — a link whose `crossorigin` changes fetched again, and
 # a shadow tree's link of the one mode answered by none of the other's — and a sheet origin-clean only where its response
-# is CORS-same-origin (CSSOM): its rules another origin's no-cors one hides, a SecurityError.
+# is CORS-same-origin (CSSOM): its rules another origin's no-cors one hides, a SecurityError — and a classic script's
+# errors muted where its response is not (HTML): "Script error.", with no location and no error.
 RSpec.describe 'a crossorigin classic script or style sheet', :https do
   include PollUntil
 
@@ -28,6 +29,8 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       allow = env['QUERY_STRING'] == 'allow' ? {'access-control-allow-origin' => '*'} : {}
       case env['PATH_INFO']
       when '/s.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ['']]
+      when '/bad.js' then [200, {'content-type' => 'text/javascript'}, ['let = = ;']]
+      when '/t.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ["window.later = () => { throw new Error('later') }; throw new Error('now')"]]
       when '/c.css' then [200, {'content-type' => 'text/css'}.merge(allow), ['p{color:rgb(1,2,3)}']]
       when '/missing.css' then [404, {'content-type' => 'text/css'}, ['']]
       when '/x.xhtml'
@@ -78,6 +81,33 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
     links = %w[plain cors data missing].map { read.("document.getElementById('#{_1}').sheet") }
     expect(links).to eq(%w[SecurityError 1 1 0])
     expect([read.('imported(0)'), read.('imported(1)')]).to eq(%w[SecurityError 1])
+  end
+
+  it "mutes the errors of another origin's no-cors script" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.reports = [];
+      window.onerror = (message, filename, lineno, colno, error) => { reports.push([message, filename, lineno, colno, error === null]); };
+      for (const [src, cors] of [['https://other.example.com/t.js', false], ['https://other.example.com/t.js?allow', true], ['/t.js', false]]) {
+        const s = Object.assign(document.createElement('script'), {src});
+        if (cors) s.crossOrigin = 'anonymous';
+        s.onload = () => setTimeout(later);
+        document.head.append(s);
+      }
+      // (…one that does not compile as well)
+      for (const src of ['https://other.example.com/bad.js', '/bad.js']) document.head.append(Object.assign(document.createElement('script'), {src}));
+    JS
+    expect(poll_until { session.evaluate_script('reports.length') == 8 }).to be(true)
+    muted = ['Script error.', '', 0, 0, true]
+    reports = session.evaluate_script('reports').map {|r| r[0] == 'Script error.' ? r : [r[0], r[1].sub(/\A.*\//, ''), r[4]] }
+    expect(reports.tally).to eq(
+      muted                                                  => 3,
+      ['Error: now', 't.js?allow', false]                    => 1,
+      ['Error: later', 't.js?allow', false]                  => 1,
+      ['Error: now', 't.js', false]                          => 1,
+      ['Error: later', 't.js', false]                        => 1,
+      ["SyntaxError: Unexpected token '='", 'bad.js', false] => 1
+    )
   end
 
   it "hides an `<?xml-stylesheet?>` sheet of another origin's rules" do
