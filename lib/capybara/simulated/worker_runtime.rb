@@ -49,10 +49,9 @@ module Capybara
       # reported in the worker's global as a classic script's exception is (HTML
       # "run a module script").
       def eval_module_graph(src, url, fetch_import, service: true)
-        @fetch_import = fetch_import
         root = @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: url.to_s)
         (@modules ||= {})[url.to_s] = root
-        link(root, url.to_s)
+        link(root, url.to_s, fetch_import)
         if service
           raise 'Top-level await is disallowed in a service worker' if root.graph_async?
 
@@ -65,32 +64,34 @@ module Capybara
 
       # A dedicated or shared worker's `import()`, from a classic script (of `url`) or a module: the module its specifier
       # names, fetched by `fetch_import` and linked as a static import's is — each one module however often it is
-      # imported — whose evaluation the engine finishes before it settles the import's promise.
+      # imported — whose evaluation the engine finishes before it settles the import's promise. (…`fetch_import` its own,
+      # not the graph's: an imported module's descendants are fetched as it is, HTML's ContinueDynamicImport loading
+      # them with no load state of the graph's)
       def accept_dynamic_imports(url, fetch_import)
-        @fetch_import = fetch_import
         @ctx.dynamic_import_resolver = lambda do |specifier, referrer, _initiating|
           # (…a classic script's referrer no URL — none, or the name it was evaluated under: `<eval>` — the worker's own its
           # base, the URL its script was run from)
           ref  = referrer.to_s
           base = ref.match?(/\A[a-z][a-z0-9+.-]*:/i) ? ref : url
           resolved = resolve_specifier(specifier.to_s, base)
-          module_for(resolved).tap {|m| link(m, resolved) if m.status == :uninstantiated }
+          module_for(resolved, fetch_import).tap {|m| link(m, resolved, fetch_import) if m.status == :uninstantiated }
         end
       end
 
       private
 
-      def link(root, url)
+      def link(root, url, fetch_import)
         root.instantiate do |spec, ref|
-          module_for(resolve_specifier(spec.to_s, (ref || url).to_s))
+          module_for(resolve_specifier(spec.to_s, (ref || url).to_s), fetch_import)
         end
       end
       # (…the module `resolved` names, one however often it is imported: its source and its URL — the response's, a
-      # redirect's end, which a fetch answering a pair gives and the module's own imports resolve against — fetched once)
-      def module_for(resolved)
+      # redirect's end, which a fetch answering a pair gives and the module's own imports resolve against — fetched once,
+      # by `fetch_import`)
+      def module_for(resolved, fetch_import)
         @modules ||= {}
         @modules[resolved] ||= begin
-          src, final = @fetch_import.call(resolved)
+          src, final = fetch_import.call(resolved)
           final = final.to_s.empty? ? resolved : final.to_s
           @modules[final] ||= @ctx.compile_module(RuntimeShared.utf8_text(src.to_s.dup), filename: final)
         end

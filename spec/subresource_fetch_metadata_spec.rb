@@ -20,7 +20,9 @@ RSpec.describe 'a subresource request', :https do
       seen_site[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_SITE'], env['HTTP_REFERER']]
       case env['PATH_INFO']
       when '/w.js', '/sw.js' then [200, {'content-type' => 'text/javascript'}, ["importScripts('/i.js'); postMessage(1);"]]
-      when '/i.js' then [200, {'content-type' => 'text/javascript'}, ['']]
+      when '/i.js', '/m2.js', '/d3.js' then [200, {'content-type' => 'text/javascript'}, ['']]
+      when '/mw.js' then [200, {'content-type' => 'text/javascript'}, ["import './m2.js'; import('./d2.js');"]]
+      when '/d2.js' then [200, {'content-type' => 'text/javascript'}, ["import './d3.js';"]]
       when '/f.woff' then [404, {}, ['']]
       else [200, {'content-type' => 'text/html'}, [<<~HTML]]
         <!DOCTYPE html><meta charset=utf-8>
@@ -55,6 +57,18 @@ RSpec.describe 'a subresource request', :https do
     session.execute_script(%q{new Worker('data:text/javascript,importScripts("' + location.origin + '/i.js")')})
     expect(poll_until { seen['/i.js'] }).to eq(%w[script no-cors])
     expect(seen_site['/i.js']).to eq(['cross-site', nil])
+  end
+
+  # (…a module worker's graph of its destination, an `import()` and what that imports a script's)
+  it "fetches a module worker's graph as the worker, its import() as a script" do
+    session.visit '/'
+    session.execute_script("new Worker('/mw.js', {type: 'module'})")
+    expect(poll_until { seen['/d3.js'] && seen.slice('/mw.js', '/m2.js', '/d2.js', '/d3.js') }).to eq(
+      '/mw.js' => %w[worker same-origin],
+      '/m2.js' => %w[worker cors],
+      '/d2.js' => %w[script cors],
+      '/d3.js' => %w[script cors]
+    )
   end
 
   it 'refuses a beacon over the keepalive quota' do
