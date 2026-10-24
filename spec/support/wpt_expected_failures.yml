@@ -2067,8 +2067,6 @@ custom-elements/registries/global.window.js:
 - importNode() should throw with global registry from another document
 custom-elements/registries/initial-about-blank.window.js:
 - Each navigable document has its own registry
-custom-elements/registries/per-document.html:
-- Navigating from the initial about:blank must replace window.customElements
 custom-elements/registries/scoped-custom-element-registry-customelementregistry-attribute-in-xhtml.xhtml:
 - XHTML parser should create a custom element candidate with null registry if customelementregistry
   is set
@@ -5960,9 +5958,6 @@ resource-timing/render-blocking-status-link.html:
 - Validate render blocking status of link resources in PerformanceResourceTiming
 resource-timing/render-blocking-status-script.html:
 - Validate render blocking status of script resources in PerformanceResourceTiming
-resource-timing/resource-reload-TAO.html:
-- "[harness] TIMEOUT"
-- "[harness] no subtests"
 resource-timing/resource-timing-level1.sub.html: HARNESS_ERROR
 resource-timing/resource_connection_reuse_mixed_content.html:
 - There should be 2 PerformanceEntries

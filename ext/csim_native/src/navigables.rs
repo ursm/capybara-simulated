@@ -15,6 +15,10 @@ struct Child {
     // The realm the navigable's active document is in — none while it has none yet (an `about:blank` frame no script
     // has looked into) or is between two of them.
     realm: Option<i32>,
+    // …and the realm its most recent one was in, kept between two of them: the window its WindowProxy was over until
+    // its next document's is made (`set_frame_realm`), or that a proxy is to be dropped with when it is destroyed
+    // before then (`discard_navigable`).
+    last: Option<i32>,
     name: Vec<u16>,
     // Which navigable it is, of those the isolate made: a container removed and inserted again has a new one (HTML
     // "destroy a child navigable", then its insertion steps' "create a new child navigable"), whose session history and
@@ -149,23 +153,26 @@ impl RealmArena {
         }
     }
     // Realm `realm`'s document is the active document of `container`'s navigable now, or (None) none is; the navigable
-    // made the first time it is given one, its target name the container's `name`.
-    pub(crate) fn set_frame_realm(&mut self, container: NodeId, realm: Option<i32>) {
+    // made the first time it is given one, its target name the container's `name`. Returns the realm of the document
+    // the navigable had before this one, where it had one in another realm: its WindowProxy's window until now (HTML: a
+    // browsing context's WindowProxy is one however its active document changes).
+    pub(crate) fn set_frame_realm(&mut self, container: NodeId, realm: Option<i32>) -> Option<i32> {
         if !self.navigables.children.contains_key(&container) {
             if realm.is_none() {
-                return;
+                return None;
             }
             let name = self.get(container).and_then(|n| n.plain_attr_units("name")).unwrap_or_default();
             self.navigables.made += 1;
             let id = self.navigables.made;
-            self.navigables.children.insert(container, Child { realm: None, name, id });
+            self.navigables.children.insert(container, Child { realm: None, last: None, name, id });
         }
         let nav = &mut self.navigables;
-        let Some(child) = nav.children.get_mut(&container) else { return };
+        let Some(child) = nav.children.get_mut(&container) else { return None };
         if let Some(old) = child.realm.take() {
             nav.containers.remove(&old);
         }
         child.realm = realm;
+        let previous = realm.and_then(|r| child.last.replace(r).filter(|&last| last != r));
         if let Some(realm) = realm {
             nav.containers.insert(realm, container);
             let activation = self.take_unbuilt_activation(container);
@@ -177,6 +184,7 @@ impl RealmArena {
             }
         }
         self.note_linked();
+        previous
     }
     // Whether `container`'s navigable's target name is `name` — its container's `name` while it has no navigable yet.
     pub(crate) fn target_name_is(&self, container: NodeId, node: &crate::dom::NodeData, name: &[u16]) -> bool {
@@ -227,10 +235,13 @@ impl RealmArena {
     pub(crate) fn top_level_realm(&self, realm: i32) -> i32 {
         self.navigables.tops.get(&realm).copied().unwrap_or(realm)
     }
-    // `container`'s navigable destroyed — its container left its document.
-    pub(crate) fn discard_navigable(&mut self, container: NodeId) {
-        self.navigables.children.remove(&container);
+    // `container`'s navigable destroyed — its container left its document. Returns the realm its last document was in
+    // where it is between two documents, none active: the window a WindowProxy of it is still over, nothing else to drop
+    // it with.
+    pub(crate) fn discard_navigable(&mut self, container: NodeId) -> Option<i32> {
+        let child = self.navigables.children.remove(&container);
         self.note_linked();
+        child.filter(|c| c.realm.is_none()).and_then(|c| c.last)
     }
     // The realms whose documents are the active documents of the child navigables of realm `cid`'s document — the
     // containers in it — and, the page's, the windows its script opened: in the order they were made (realm ids only
@@ -706,13 +717,13 @@ fn set_window_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     crate::dom::realm(scope, cid).set_window_name(cid, name);
 }
 
-// __dom.setFrameRealm(containerNid, realm) — realm `realm`'s document (-1: none) is the active document of the
-// container's navigable, the container this realm's.
-fn set_frame_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return };
+// __dom.setFrameRealm(containerNid, realm) -> the realm of the navigable's document before, or -1 — realm `realm`'s
+// document (-1: none) is the active document of the container's navigable, the container this realm's.
+fn set_frame_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
     let realm = args.get(1).int32_value(scope).filter(|&r| r >= 0);
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).set_frame_realm(container, realm);
+    rv.set_int32(crate::dom::realm(scope, cid).set_frame_realm(container, realm).unwrap_or(-1));
 }
 
 // __dom.frameRealm(containerNid) -> the realm the container's navigable's active document is in, or -1.
@@ -738,11 +749,12 @@ fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_uint32(crate::dom::realm(scope, cid).realm_navigable(realm));
 }
 
-// __dom.discardNavigable(containerNid) — the container's navigable destroyed: it left its document.
-fn discard_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return };
+// __dom.discardNavigable(containerNid) -> the realm a WindowProxy of it is left over, or -1 — the container's navigable
+// destroyed: it left its document.
+fn discard_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_int32(-1) };
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).discard_navigable(container);
+    rv.set_int32(crate::dom::realm(scope, cid).discard_navigable(container).unwrap_or(-1));
 }
 
 // __dom.setRealmDocument(docNid) — this realm's window's document.

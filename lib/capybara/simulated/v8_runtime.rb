@@ -516,6 +516,11 @@ module Capybara
         realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
         @browser.sw_adopt_client_id(realm.id, client_id.to_s)
       end
+      # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
+      # new one's window — one object however its active document changes (HTML) — before the new document's scripts run.
+      def retarget_window_proxies(from, to)
+        ([ctx] + frame_realms.values + loading_frame_realms.values).each {|r| r.call('__csimRetargetWindowProxy', from, to) rescue nil }
+      end
       # Whether the window of window realm `id` is closed (navigables.rs `window_closed`, by its key).
       def window_realm_closed?(id)
         key = window_realm_meta.dig(id.to_i, :window_key) or return false
@@ -1031,7 +1036,8 @@ module Capybara
         # BEFORE the document loads, so a frame whose load handler reads window.name (its navigable's target name, made
         # from the container's `name` and kept across its navigations) to identify itself sees it
         # (declarative-shadow declarative-child-frame).
-        realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, realm.id) if container
+        # …the realm of the document it had before, if any, what the WindowProxies of it are over until it loads.
+        retarget_from = realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, realm.id).to_i if container
         # (…and which navigable that is, and whether its document is the first that navigable has — its initial
         # about:blank where it is about:blank: `first_frame_realm?`; a container inserted again a new navigable's)
         navigable = realm.call('__csimRealmNavigable', realm.id).to_i
@@ -1087,6 +1093,9 @@ module Capybara
             realm.call('__csim_swSetControllerDirect', *ctrl)
           end
         end
+        # The navigable's WindowProxy, held in any realm, its new document's window's from its first script on — as a
+        # window's (`create_window_realm`).
+        retarget_window_proxies(retarget_from, realm.id) if retarget_from.to_i >= 0
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # This document, loaded, refreshes the service-worker client record it made as it began loading
         # (bridge.entry.js __csimLoadDocument) — an UNCONTROLLED context is still a client of its origin
@@ -1222,7 +1231,7 @@ module Capybara
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
-        ([ctx] + frame_realms.values).each {|r| r.call('__csimRetargetWindowProxy', retarget_from, realm.id) rescue nil } if retarget_from
+        retarget_window_proxies(retarget_from, realm.id) if retarget_from
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
