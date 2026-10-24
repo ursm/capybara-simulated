@@ -350,6 +350,8 @@ module WptRunner
   # mis-substituting to something plausible.
   # wptserve's non-ASCII subdomains (its config's `subdomains`), as its substitution writes them: IDNA A-labels.
   SUB_IDN_LABELS = {'élève' => 'xn--lve-6lad', '天気の良い日' => 'xn--n8j6ds53lwwkrqhv28a'}.freeze
+  # …each label of a subdomain (`www.élève`, wptserve's two-label product too) written so.
+  def idn_labels(subdomain) = subdomain.split('.').map {|label| SUB_IDN_LABELS.fetch(label, label) }.join('.')
 
   # (…`headers` the request's Rack env, whose headers `{{headers[name]}}` names)
   def substitute(body, req_path, query = {}, host: nil, scheme: 'http', headers: {})
@@ -411,9 +413,9 @@ module WptRunner
       when 'location[host]'            then loc_host
       when 'location[port]'            then cur_port
       when 'location[path]'            then req_path
-      when /\Adomains\[([^\]]*)\]\z/      then (m = Regexp.last_match(1)).empty? ? host : "#{SUB_IDN_LABELS.fetch(m, m)}.#{host}"
-      when /\Ahosts\[alt\]\[([^\]]*)\]\z/ then (m = Regexp.last_match(1)).empty? ? alt_host : "#{SUB_IDN_LABELS.fetch(m, m)}.#{alt_host}"
-      when /\Ahosts\[\]\[([^\]]*)\]\z/    then (m = Regexp.last_match(1)).empty? ? host : "#{SUB_IDN_LABELS.fetch(m, m)}.#{host}"
+      when /\Adomains\[([^\]]*)\]\z/      then (m = Regexp.last_match(1)).empty? ? host : "#{idn_labels(m)}.#{host}"
+      when /\Ahosts\[alt\]\[([^\]]*)\]\z/ then (m = Regexp.last_match(1)).empty? ? alt_host : "#{idn_labels(m)}.#{alt_host}"
+      when /\Ahosts\[\]\[([^\]]*)\]\z/    then (m = Regexp.last_match(1)).empty? ? host : "#{idn_labels(m)}.#{host}"
       # `{{GET[name]}}` → the value of the `name` query parameter (wptserve's
       # request-substitution). Absent params substitute to the empty string, which
       # the form-action tests rely on (`?action=` → an empty action attribute).

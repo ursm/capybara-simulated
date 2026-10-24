@@ -36,8 +36,8 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15], client_origin: a[16], client_realm: a[17], navigation: a[18] == true) },
-        '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1], a[2], a[3]) },
-        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
+        '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1], a[2], a[3], dest: a[4]) },
+        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2], a[3]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
         '__csimExternalAssetMeta'    => ->(b, *a) { b.external_asset_meta(a[0]) },
         '__csimExternalAssetBytes'   => ->(b, *a) { b.external_asset_bytes(a[0]) },
@@ -59,7 +59,7 @@ module Capybara
         # A same-origin window realm (window.open in this isolate) navigating itself
         # (a[0] = url, a[1] = the window's realm id). Deferred + applied by reloading
         # that realm's document in place — see Browser#window_realm_navigate_self.
-        '__csimWindowRealmNavigate'  => ->(b, *a) { b.window_realm_navigate_self(a[0], a[1].to_i); nil },
+        '__csimWindowRealmNavigate'  => ->(b, *a) { b.window_realm_navigate_self(a[0], a[1].to_i, a[3]); nil },
         # A nested browsing context reloading its OWN location (a[0] = the frame's
         # realm id). Deferred + applied by re-navigating the owning iframe to its
         # current document — see Browser#frame_reload_self.
@@ -201,7 +201,7 @@ module Capybara
         '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2]); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
-        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body: a[5], content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe', container_realm: a[9], referrer_policy: a[10], reloading_realm: a[11], sandbox: [a[12]]) },
+        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body: a[5], content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe', container_realm: a[9], referrer_policy: a[10], initiator_realm: a[11], sandbox: [a[12]]) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         # The font FILES native text metrics read (font.rs): a family's system face, as fontconfig resolves it;
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing

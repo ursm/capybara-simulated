@@ -502,10 +502,15 @@ module Capybara
         # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
         # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
         dispose_frame_realm_tree(old_id)
-        create_window_realm(
+        new_id = create_window_realm(
           url, body, content_type,
           opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base], window_key: meta[:window_key]
         )
+        # (…the window the same WindowProxy in every realm that holds one — `window.open()`'s `w` its new document's)
+        if new_id
+          ([ctx] + frame_realms.values).each {|realm| realm.call('__csimRetargetWindowProxy', old_id, new_id) rescue nil }
+        end
+        new_id
       end
 
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
@@ -1354,7 +1359,7 @@ module Capybara
         if src.nil? && !local
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh.
-          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), policy, referrer)
+          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), policy, referrer: referrer, dest: 'script')
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
           content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
         end

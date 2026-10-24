@@ -3821,14 +3821,14 @@ module Capybara
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
       # An element's GET of `url` (a script inserted, a `<link>` that is no sheet, a hint) as its node document — realm
       # `realm` — requests it, under the policy its `referrerpolicy` sets (`policy`): `rack_fetch`'s answer.
-      def subresource_fetch(url, realm, policy)
+      def subresource_fetch(url, realm, policy, dest = nil)
         client = request_client(realm, policy)
-        rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url],
+        rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
-      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil, initiator: nil)
+      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil, initiator: nil, dest: nil)
         result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy,
-                                                                     client_realm: client_realm, initiator: initiator)
+                                                                     client_realm: client_realm, initiator: initiator, dest: dest)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -3952,10 +3952,10 @@ module Capybara
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
-      def durable_source(url, realm = 0, element_policy = nil, referrer = nil)
+      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil)
         client = request_client(realm, element_policy, referrer: referrer)
         body = rack_fetch_body(url, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy], client_origin: client[:origin],
-                                    client_realm: client[:realm], initiator: client[:initiator])
+                                    client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
         fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
@@ -4038,7 +4038,8 @@ module Capybara
       # document's URL under its policy — or the one its element's `referrerpolicy` sets, `policy` — or `referrer`, an
       # imported module's referring script's base URL, under it; its cookies and Sec-Fetch-Site that document's: a frame's
       # style sheet a frame's)
-      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer = nil)
+      # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports)
+      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4074,7 +4075,7 @@ module Capybara
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy, referrer)
+        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
@@ -6909,7 +6910,7 @@ module Capybara
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil, reloading_realm: nil, sandbox: nil)
+                                 referrer_policy: nil, initiator_realm: nil, sandbox: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6929,11 +6930,12 @@ module Capybara
           initiator, document_policy = realm_referrer_initiator(container_realm.to_i)
           referrer_policy = document_policy if referrer_policy.to_s.empty?
         end
-        # (…a reload by the document reloading, under its own policy: Chrome — the container's attribute none of its)
+        # (…a navigation another document begins — a reload by the document reloading, a window's by the one that navigates
+        # it — by that one, under its own policy: Chrome — the container's attribute none of its)
         source_realm = container_realm
-        if reloading_realm && @runtime.frame_realm_alive?(reloading_realm.to_i)
-          initiator, referrer_policy = realm_referrer_initiator(reloading_realm.to_i)
-          source_realm = reloading_realm
+        if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_alive?(initiator_realm.to_i))
+          initiator, referrer_policy = realm_referrer_initiator(initiator_realm.to_i)
+          source_realm = initiator_realm
         end
         # (…its site and its Origin that document's — an about:blank one's its creator's, an opaque one's cross-site and
         # `null` (`initiating_url`, `opaque_initiator`) — its referrer source the Referer's alone)
@@ -10109,7 +10111,7 @@ module Capybara
             env['HTTP_SEC_FETCH_SITE'] = sec_site
             env['HTTP_SEC_FETCH_MODE'] = cors_mode || 'no-cors'
             # (…a document's own navigation request its destination: a SW's passthrough re-fetch alone reports 'empty')
-            env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : (dest || 'empty')
+            env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : (dest.to_s.empty? ? 'empty' : dest)
             # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
             # merge_set_cookie)
             env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
@@ -10769,9 +10771,10 @@ module Capybara
       # from the realm's own location setter, mid-flight) and drain after the action.
       # A blob: URL is resolved to bytes NOW — before the opener's typical immediate
       # `revokeObjectURL` — since the realm reload happens later (url-in-tags-revoke).
-      def window_realm_navigate_self(url, realm_id)
+      def window_realm_navigate_self(url, realm_id, initiator = nil)
         return if realm_id.nil? || realm_id.zero?
-        spec = {url: url.to_s}
+        # (…the document that navigates it — another realm's whose script navigated it cross-origin, else its own)
+        spec = {url: url.to_s, initiator: initiator.nil? ? realm_id : initiator.to_i}
         if url.to_s.start_with?('blob:') && (b = read_blob_for_window(url.to_s))
           spec[:body]  = document_payload(b[:bytes])
           spec[:ctype] = b[:type].to_s.empty? ? 'text/html' : b[:type]
@@ -10784,16 +10787,22 @@ module Capybara
         @pending_window_nav = nil
         navs.each do |realm_id, spec|
           invalidate_find_cache
-          body, ctype = spec[:body], spec[:ctype]
-          # http(s) / relative URL window-realm nav (rack fetch) is not modeled yet —
-          # only the blob/in-memory document case (which pre-resolved bytes above)
-          # loads here. Warn rather than silently drop so an unsupported popup
-          # navigation is diagnosable instead of looking like a frozen about:blank.
+          body, ctype, url = spec[:body], spec[:ctype], spec[:url]
+          # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
+          # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
+          # (`frame_navigation_fetch`) — a response that makes no document (a 204) leaving it at the one it is at.
+          if body.nil? && http_url?(url)
+            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: spec[:initiator])
+            next if resp.nil? || resp['no_document']
+
+            body, ctype, url = resp['body'], response_content_type(resp['headers'] || {}), resp['url'] || url
+          end
+          # (…any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
           if body.nil?
-            log_console('warn', "window-realm navigation to #{spec[:url]} not modeled (only blob: documents load); ignoring")
+            log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
             next
           end
-          @runtime.reload_window_realm(realm_id, spec[:url], body.to_s, ctype.to_s)
+          @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s)
         rescue StandardError => e
           log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
