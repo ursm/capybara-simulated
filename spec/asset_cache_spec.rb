@@ -168,7 +168,7 @@ RSpec.describe 'one fetch per asset per document' do
       path = env['PATH_INFO']
       hits[path] += 1
       case path
-      when '/flip.css' then hits[path] == 1 ? [404, {'content-type' => 'text/css'}, ['']] : [200, {'content-type' => 'text/css'}, ['p { color: rgb(0, 128, 0) }']]
+      when '/flip.css' then hits[path].odd? ? [404, {'content-type' => 'text/css'}, ['']] : [200, {'content-type' => 'text/css'}, ['p { color: rgb(0, 128, 0) }']]
       when '/s.css' then [200, {'content-type' => 'text/css'}, ['p { width: 10px }']]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="preload" as="script" href="/s.css"><link rel="stylesheet" href="/flip.css" id="l"><p id="p">p</p>']]
       end
@@ -182,6 +182,14 @@ RSpec.describe 'one fetch per asset per document' do
     JS
     expect(s.evaluate_script("[events, getComputedStyle(document.getElementById('p')).color]")).to eq([['load'], 'rgb(0, 128, 0)'])
     expect(hits.values_at('/flip.css', '/s.css')).to eq([2, 2])
+    # (…the same link too, once it obtains another sheet: connected again)
+    s.execute_script(<<~JS)
+      window.again = Object.assign(document.createElement('link'), {rel: 'stylesheet', href: '/flip.css?again', onload: () => events.push('again')});
+      document.head.append(again);
+    JS
+    s.execute_script('again.remove(); document.head.append(again)')
+    expect(s.evaluate_script('events')).to eq(%w[load again])
+    expect(hits['/flip.css']).to eq(4)
   end
 
   # …and a frame's document is a document of its own: navigated again, it fetches its sheet again (Chrome: a reloaded

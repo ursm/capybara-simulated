@@ -1477,9 +1477,11 @@ module Capybara
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh — a CORS request, as every
           # module script's is (HTML "fetch a single module script"), with the graph's credentials mode: a module of
-          # another origin whose response does not allow it fails to load.
-          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: 'script', mode: 'cors',
-                                                                                                             credentials: options.credentials)
+          # another origin whose response does not allow it fails to load. (…its destination its module type's, a JSON
+          # module's `json`, as a `modulepreload` of its `as` fetches it)
+          dest = json_module?(url_s) ? 'json' : 'script'
+          src  = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: dest, mode: 'cors',
+                                                                                                              credentials: options.credentials)
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
           content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
         end

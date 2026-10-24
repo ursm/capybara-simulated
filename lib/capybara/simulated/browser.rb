@@ -4091,7 +4091,7 @@ module Capybara
         # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is fetched
         # every time, and a document that loads again — a frame reloaded — has a memo of its own. A failed one is kept by
         # none (Chrome's memory cache keeps no error: a link inserted again fetches it again), but by the element whose
-        # fetch it was (handles.js `elementAsset`).
+        # fetch it was, for the sheet it obtains (handles.js `sheetAsset`).
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
         memo = document && @page_asset_src&.[](document.to_i)
