@@ -1270,15 +1270,16 @@ module Capybara
           super(error.message)
         end
       end
-      # …of V8's message for a failure (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its kind, its text, and
-      # the location the host appended to it.
-      def module_error(text)
+      # …of V8's message for a failure of the module at `url` (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its
+      # kind, its text, and the location the host appended to it — that URL, which may hold spaces (a `data:` one's), and
+      # a line; none for a failure the host names no location of (a link's).
+      def module_error(text, url = nil)
         text = text.to_s
-        at   = text.match(/ at (\S+?)(?::(\d+))?\z/)
+        at   = url && text.match(/ at #{Regexp.escape(url.to_s)}(?::(\d+))?\z/)
         text = text[0, at.begin(0)] if at
         name, message = text.split(': ', 2)
         name, message = 'SyntaxError', name.to_s unless message
-        ModuleError.new(name, message, at&.[](1), at&.[](2)&.to_i)
+        ModuleError.new(name, message, at && url.to_s, at&.[](1)&.to_i)
       end
       # …a specifier none of a module's imports resolve (HTML "resolve a module specifier": a TypeError).
       def unresolved_specifier(specifier)
@@ -1396,7 +1397,7 @@ module Capybara
         end
         handles[url] = m
       rescue RustyRacer::ParseError => e
-        handles[url] = module_error(e.message)
+        handles[url] = module_error(e.message, url_s)
       end
       def compile_inline_module(src, url, target)
         body    = RuntimeShared.utf8_text(src)
@@ -1407,7 +1408,7 @@ module Capybara
         ScriptCache.queue_warm(target, sha, url, body, version, kind: :module, stale: !cached.nil?) if cached.nil? || m.cache_rejected?
         m
       rescue RustyRacer::ParseError => e
-        module_error(e.message)
+        module_error(e.message, url)
       end
 
       def instantiate_native_module(m, importer_url, target, handles, policy = nil)
