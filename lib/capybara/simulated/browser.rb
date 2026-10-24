@@ -9617,9 +9617,9 @@ module Capybara
       end
 
       # A module request of the script named `base_url` (the referrer): [HTML "resolve a module specifier" against its base
-      # URL through `realm`'s import map — the URL, or the specifier itself where it resolves to none (a bare one nothing
-      # maps), which then fails to fetch — and that base URL, which the request is referred by (HTML "fetch the
-      # descendants of a module script", HostLoadImportedModule: the referring script's base URL its referrer)].
+      # URL through `realm`'s import map — the URL, or nil where it resolves to none (a bare one nothing maps: a
+      # TypeError, no fetch) — and that base URL, which the request is referred by (HTML "fetch the descendants of a
+      # module script", HostLoadImportedModule: the referring script's base URL its referrer)].
       # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`__csimInlineScriptBase`:
       # a frame's, not the page's, its `<base href>` heeded, one inserted after it not); a script the realm knows by no
       # name — a handler's, a string timer's — its document's base URL now, and no referring script at all: the request
@@ -9627,7 +9627,7 @@ module Capybara
       def resolve_module_request(specifier, base_url, realm)
         referrer = module_base_url(base_url) || realm_text(realm, '__csimInlineScriptBase', base_url.to_s)
         base     = referrer || realm_text(realm, '__csimBaseURL') || effective_module_base(nil)
-        [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier, referrer]
+        [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base), referrer]
       end
       # …a string realm `realm` (0 the page) answers `name` with, nil for none.
       private def realm_text(realm, name, *args)

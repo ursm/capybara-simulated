@@ -1234,7 +1234,7 @@ module Capybara
         module_sw_ctxs[realm_key(target)] = sw&.merge(root: inline_src ? nil : url.to_s)
         m = native_module_for(url, inline_src, target, handles, policy: policy)
         return false unless m
-        return true if m == MODULE_PARSE_FAILED
+        return m.to_a if m.is_a?(ModuleError)
         begin
           instantiate_native_module(m, url, target, handles, policy)
           # (…its evaluation's rejection — a top-level throw, a top-level await's — reported at its window, `error`
@@ -1242,22 +1242,43 @@ module Capybara
           m.evaluate(report: '__csimReportError')
         rescue ModuleFetchFailed
           return false
-        rescue ModuleParseFailed
-          nil   # (…logged as it was parsed)
+        rescue ModuleParseFailed => e
+          return e.error.to_a
         rescue RustyRacer::ParseError, RustyRacer::RuntimeError => e
-          # What the evaluation's report does not reach — its graph's failure to link (an export none of its modules
-          # has) — belongs on the page console (trace-visible diagnostics), not just safe_call's truncated stderr warn.
+          # (…its graph's failure to link — an export none of its modules has — its error to rethrow too)
           # ScriptTerminatedError deliberately propagates (a watchdog terminate must escalate).
-          @browser.log_console('error', "module evaluate error in #{url}: #{e.message}")
+          @browser.log_console('error', "module link error in #{url}: #{e.message}")
+          return module_error(e.message).to_a
         end
         true
       end
       # What a module of the graph came to where it is no module record (HTML "fetch a single module script"): it could
-      # not be fetched — the graph's result null, the element's `error` — or it could not be parsed, its error to rethrow
-      # the graph's — the element's `load`, the error logged (`MODULE_PARSE_FAILED`, kept as the URL's handle).
-      MODULE_PARSE_FAILED = :parse_failed
+      # not be fetched — the graph's result null, the element's `error` — or it has an error to rethrow, the graph's
+      # (`ModuleError`, kept as the URL's handle): it could not be parsed, or a specifier it imports resolves to none — the
+      # element's `load`, the error reported at its window (HTML "run a module script"), by its kind and its message, as
+      # the bridge makes it anew (`[name, message]`: the value V8 threw is its once, and only as it is thrown).
+      ModuleError = Data.define(:name, :message) do
+        def to_a = [name, message]
+      end
       class ModuleFetchFailed < StandardError; end
-      class ModuleParseFailed < StandardError; end
+      class ModuleParseFailed < StandardError
+        attr_reader :error
+
+        def initialize(error)
+          @error = error
+          super(error.message)
+        end
+      end
+      # …of V8's message for a failure (`SyntaxError: Unexpected token ';' at http://…/m.js:1`): its kind, and its text
+      # without the location the host appended.
+      def module_error(text)
+        name, message = text.to_s.sub(/ at \S+\z/, '').split(': ', 2)
+        message ? ModuleError.new(name, message) : ModuleError.new('SyntaxError', name.to_s)
+      end
+      # …a specifier none of a module's imports resolve (HTML "resolve a module specifier": a TypeError; Chrome's text).
+      def unresolved_specifier(specifier)
+        ModuleError.new('TypeError', "Failed to resolve module specifier \"#{specifier}\". Relative references must start with either \"/\", \"./\", or \"../\".")
+      end
 
       # A `.json` module is exposed as the default export of its parsed value;
       # every other body is the fetched source as-is. Module SOURCE is text,
@@ -1367,7 +1388,7 @@ module Capybara
         handles[url] = m
       rescue RustyRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
-        handles[url] = MODULE_PARSE_FAILED
+        handles[url] = module_error(e.message)
       end
       def compile_inline_module(src, url, target)
         body    = RuntimeShared.utf8_text(src)
@@ -1379,7 +1400,7 @@ module Capybara
         m
       rescue RustyRacer::ParseError => e
         @browser.log_console('error', "module parse error in #{url}: #{e.message}")
-        MODULE_PARSE_FAILED
+        module_error(e.message)
       end
 
       def instantiate_native_module(m, importer_url, target, handles, policy = nil)
@@ -1388,9 +1409,10 @@ module Capybara
         realm = realm_key(target)
         m.instantiate do |specifier, referrer|
           resolved, base = browser.resolve_module_request(specifier, referrer || importer_url, realm)
+          raise ModuleParseFailed, unresolved_specifier(specifier) unless resolved
           child = native_module_for(resolved, nil, target, handles, referrer: base, policy: policy)
           raise ModuleFetchFailed, "module not found: #{resolved}" unless child
-          raise ModuleParseFailed, "module not parsed: #{resolved}" if child == MODULE_PARSE_FAILED
+          raise ModuleParseFailed, child if child.is_a?(ModuleError)
           child
         end
       end
@@ -1406,7 +1428,7 @@ module Capybara
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
         c.attach('__csim_evalEsmEntry', ->(url, inline, policy, *sw) {
-          RuntimeShared.safe_call { eval_esm_module(url, inline, policy: policy, sw: esm_sw_ctx(sw)) } == true
+          esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, policy: policy, sw: esm_sw_ctx(sw)) })
         })
         c.dynamic_import_resolver = ->(specifier, referrer, initiating) {
           target, handles =
@@ -1416,10 +1438,11 @@ module Capybara
               [ctx, native_module_handles]
             end
           resolved, base = @browser.resolve_module_request(specifier, referrer, realm_key(target))
+          raise unresolved_specifier(specifier).message unless resolved
           policy = module_policies(realm_key(target))[referrer.to_s]
           m = native_module_for(resolved, nil, target, handles, referrer: base, policy: policy)
           raise "module not found: #{resolved}" unless m
-          raise "module not parsed: #{resolved}" if m == MODULE_PARSE_FAILED
+          raise m.message if m.is_a?(ModuleError)
           instantiate_native_module(m, resolved, target, handles, policy)
           m
         }
@@ -1464,6 +1487,10 @@ module Capybara
         target.equal?(ctx) ? 0 : target.id
       end
 
+      # What `__csim_evalEsmEntry` answers the bridge, of `eval_esm_module`'s result: true where the graph ran, false where
+      # it could not be fetched — a host failure (`safe_call`'s nil) alike — or its error to rethrow, `[name, message]`.
+      def esm_entry_result(result) = result.is_a?(Array) ? result : result == true
+
       # The optional [handle, clientId, referrer, credentials, integrity] tail
       # moduleSwCtx (bridge.entry.js) appends to __csim_evalEsmEntry, or nil.
       def esm_sw_ctx(sw)
@@ -1480,9 +1507,9 @@ module Capybara
       # Frame-document `<script type=module>` entry, bound to the realm.
       def attach_realm_esm_entry(realm)
         realm.attach('__csim_evalEsmEntry', ->(url, inline, policy, *sw) {
-          RuntimeShared.safe_call {
+          esm_entry_result(RuntimeShared.safe_call {
             eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), policy: policy, sw: esm_sw_ctx(sw))
-          } == true
+          })
         })
       end
 
