@@ -7004,8 +7004,10 @@ module Capybara
             resp_body.close if resp_body.respond_to?(:close)
             return {'no_document' => true}
           end
-          # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate")
-          if download_response?(headers)
+          # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
+          # frame builder's, whose container's document `container_realm` is, alone — a named-frame form's navigation
+          # still makes a document of it)
+          if container_realm && download_response?(headers)
             from_document(container_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
             return {'no_document' => true}
           end

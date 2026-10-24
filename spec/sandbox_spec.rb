@@ -469,6 +469,15 @@ RSpec.describe 'Sandboxing' do
       s.visit '/'
       s.evaluate_script('1')
       expect(Dir.children(dir).sort).to eq(%w[ad.txt plain.txt])
+      # (…the attribute as the navigation began, whatever it says by the time the response is in)
+      s.execute_script(<<~JS)
+        const [r1, r2] = [document.createElement('iframe'), document.createElement('iframe')];
+        document.body.append(r1, r2);
+        r1.src = '/attachment?race_allowed'; r1.setAttribute('sandbox', 'allow-same-origin');
+        r2.setAttribute('sandbox', 'allow-same-origin'); r2.src = '/attachment?race_blocked'; r2.removeAttribute('sandbox');
+      JS
+      s.evaluate_script('1')
+      expect(Dir.children(dir).sort).to eq(%w[ad.txt plain.txt race_allowed.txt])
     ensure
       ENV['CSIM_DOWNLOADS_DIR'] = prev
     end

@@ -160,6 +160,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
     crate::dom::register(scope, ns, "takeFrameSandbox", take_frame_sandbox, context_id);
+    crate::dom::register(scope, ns, "frameSandbox", frame_sandbox_op, context_id);
     crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
@@ -233,6 +234,16 @@ fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     match begun {
         Some(sandbox) => arena.frame_navigation(container).sandbox = Some(sandbox),
         None => begin(arena, container),
+    }
+}
+// __dom.frameSandbox(containerNid) -> `RealmArena::frame_sandbox` (null: none), not taken: what the navigation under way
+// began with, which "allowed to download" asks of a response that makes no document.
+fn frame_sandbox_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let cid = realm_id(scope, &args);
+    match crate::dom::realm(scope, cid).frame_sandbox(container).and_then(|s| v8::String::new(scope, &s)) {
+        Some(s) => rv.set(s.into()),
+        None => rv.set_null(),
     }
 }
 // __dom.takeFrameSandbox(containerNid) -> `RealmArena::take_frame_sandbox` (null: none): the document the navigation
