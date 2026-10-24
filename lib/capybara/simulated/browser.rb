@@ -6930,14 +6930,20 @@ module Capybara
           referrer_policy = document_policy if referrer_policy.to_s.empty?
         end
         # (…a reload by the document reloading, under its own policy: Chrome — the container's attribute none of its)
+        source_realm = container_realm
         if reloading_realm && @runtime.frame_realm_alive?(reloading_realm.to_i)
           initiator, referrer_policy = realm_referrer_initiator(reloading_realm.to_i)
+          source_realm = reloading_realm
         end
+        # (…its site and its Origin that document's — an about:blank one's its creator's, an opaque one's cross-site and
+        # `null` (`initiating_url`, `opaque_initiator`) — its referrer source the Referer's alone)
+        origin_url  = (source_realm && initiating_url(source_realm)) || initiator
+        opaque      = source_realm ? opaque_initiator(source_realm) : {}
         meth        = method.to_s.empty? ? 'GET' : method.to_s.upcase
         req_body    = body.to_s.b
         req_ct      = content_type
-        site        = nil
-        origin_null = false
+        site        = opaque[:site_seed]
+        origin_null = opaque.fetch(:origin_null, false)
         redirected  = false
         # The navigation's reserved client id (`event.resultingClientId`): every hop of the
         # chain carries the SAME id — re-minted when a hop crosses origins (a reserved client
@@ -6959,8 +6965,8 @@ module Capybara
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
-                                                          referrer_source: initiator, referrer_policy: referrer_policy, site_seed: site, origin_null: origin_null,
-                                                          resulting_client_id: rid, cookie_cross_site: cookie_cross))
+                                                          referrer_source: initiator, origin_url: origin_url, referrer_policy: referrer_policy, site_seed: site,
+                                                          origin_null: origin_null, resulting_client_id: rid, cookie_cross_site: cookie_cross))
             return nil if sw['networkError']
 
             # (…the Referer its request carried, as the network's would have: the referrer of the document it makes)
@@ -6974,8 +6980,9 @@ module Capybara
               target,
               method:            meth,
               referrer_source:   initiator,
+              origin_url:        origin_url,
               referrer_policy:   referrer_policy,
-              site:              widen_sec_fetch_site(site, sec_fetch_site(initiator, target)),
+              site:              widen_sec_fetch_site(site, sec_fetch_site(origin_url, target)),
               origin_null:       origin_null,
               body:              req_body.empty? ? nil : req_body,
               content_type:      req_ct,
@@ -6987,9 +6994,9 @@ module Capybara
           end
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
-            site        = widen_sec_fetch_site(site, sec_fetch_site(initiator, target))
+            site        = widen_sec_fetch_site(site, sec_fetch_site(origin_url, target))
             next_url    = carry_fragment(target, resolve_against(loc, target))
-            origin_null = redirect_taints_origin?(origin_null, initiator, target, next_url)
+            origin_null = redirect_taints_origin?(origin_null, origin_url, target, next_url)
             if Native.redirect_to_get(status.to_i, meth)
               meth     = 'GET'
               req_body = ''.b

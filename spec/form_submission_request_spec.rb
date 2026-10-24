@@ -397,7 +397,7 @@ RSpec.describe "a form submission's request" do
     seen = {}
     s = simulated_session(lambda {|env|
       key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"
-      seen[key] = [env['HTTP_ORIGIN'], env['HTTP_COOKIE']]
+      seen[key] = [env['HTTP_ORIGIN'], env['HTTP_COOKIE'], env['HTTP_SEC_FETCH_SITE']]
       next [307, {'location' => 'http://b.test/r2'}, ['']] if key == 'a.test/r1'
       next [307, {'location' => 'http://c.test/end'}, ['']] if key == 'b.test/r2'
       next [200, {'content-type' => 'text/html', 'set-cookie' => 's=1; SameSite=Strict'}, ['set']] if key == 'b.test/set'
@@ -422,7 +422,11 @@ RSpec.describe "a form submission's request" do
     expect(seen.slice('a.test/r1', 'c.test/end', 'a.test/blank', 'a.test/blank2').transform_values(&:first)).to eq(
       'a.test/r1' => 'http://a.test', 'c.test/end' => 'null', 'a.test/blank' => 'http://a.test', 'a.test/blank2' => 'http://a.test'
     )
-    expect(seen['b.test/y'].last).to be_nil
+    expect(seen['b.test/y'][1]).to be_nil
+    # (…and a frame an about:blank document makes loading as its creator's: same-origin)
+    s.execute_script('frames[1].document.body.append(Object.assign(frames[1].document.createElement("iframe"), {src: "http://a.test/inner"}))')
+    s.evaluate_script('1')
+    expect(seen['a.test/inner'].last).to eq('same-origin')
   end
 
   # …the initiating document taken as the navigation begins (HTML's source snapshot): one its own navigation discards

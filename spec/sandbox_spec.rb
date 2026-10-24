@@ -257,8 +257,8 @@ RSpec.describe 'Sandboxing' do
     expect(sites['/z']).to eq('cross-site')
   end
 
-  # …and a page a CSP `sandbox` makes of an opaque origin submitting a form to a named frame (the driver's submission
-  # of it): cross-site, its POST's Origin `null`.
+  # …and a page a CSP `sandbox` makes of an opaque origin loading a frame and submitting a form to it (the driver's
+  # submission of it): cross-site, its POST's Origin `null`.
   it "submits a sandboxed page's form to a named frame as its opaque origin" do
     seen = {}
     s = simulated_session(lambda {|env|
@@ -271,7 +271,8 @@ RSpec.describe 'Sandboxing' do
     s.visit '/'
     s.find_button('go').base.submit
     s.evaluate_script('1')
-    expect(seen['/t']).to eq(%w[cross-site null])
+    # (…its frame's first load cross-site too)
+    expect(seen.slice('/a', '/t')).to eq('/a' => ['cross-site', nil], '/t' => %w[cross-site null])
   end
 
   # …and a form a frame's document submits, which the host navigates: as the container said when it was submitted —
