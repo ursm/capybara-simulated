@@ -24,7 +24,7 @@ RSpec.describe 'a subresource request' do
              when '/top2' then '<iframe src="/mf"></iframe>'
              when '/a1' then '<link rel=stylesheet href=/a1.css><meta name=referrer content=no-referrer><link rel=stylesheet href=/a1b.css>'
              when '/top3' then '<iframe src="/a3"></iframe>'
-             when '/he' then '<link rel=preload as=style href=/he1.css><meta name=referrer content=no-referrer><script>1</script>'
+             when '/he' then '<link id=l rel=preload as=style href=/he1.css><meta name=referrer content=no-referrer><script>l.href = "/he2.css"</script>'
              when '/sd' then '<meta name=referrer content=origin><iframe srcdoc="<link rel=stylesheet href=/sd.css>"></iframe>'
              when '/hd' then '<meta name=referrer content=no-referrer><link id=l rel=stylesheet href=/hd1.css><meta name=referrer content=unsafe-url>' \
                              '<script>l.href = "/hd2.css"</script>'
@@ -65,8 +65,8 @@ RSpec.describe 'a subresource request' do
     session.visit '/sd'
     session.visit '/hd'
     session.evaluate_script('1')
-    expect(referers.slice('/he1.css', '/sd.css', '/hd1.css', '/hd2.css')).to eq(
-      '/he1.css' => 'http://www.example.com/he', '/sd.css' => 'http://www.example.com/', '/hd1.css' => nil, '/hd2.css' => 'http://www.example.com/hd'
+    expect(referers.slice('/he1.css', '/he2.css', '/sd.css', '/hd1.css', '/hd2.css')).to eq(
+      '/he1.css' => 'http://www.example.com/he', '/he2.css' => nil, '/sd.css' => 'http://www.example.com/', '/hd1.css' => nil, '/hd2.css' => 'http://www.example.com/hd'
     )
   end
 
