@@ -8682,8 +8682,27 @@ module Capybara
         blob && {'bytes' => blob[:bytes], 'type' => blob[:type]}
       end
       # …and whether a blob URL this window makes may be resolved so — another window of the session open — its bytes
-      # then entered in the registry as it is made (blob.js `createObjectURL`), for a worker of that window to read.
+      # then entered in the registry as it is made (blob.js `createObjectURL`), for a worker of that window to read; the
+      # ones it made before another opened entered as that one opens (`__csimFillBlobMarkers`).
       def blob_shared? = @driver.respond_to?(:other_windows?) && @driver.other_windows?(self)
+      def fill_blob_markers
+        @runtime.call('__csimFillBlobMarkers')
+      rescue StandardError
+        nil
+      end
+      # …and as a worker of this window, of origin `worker_url`'s, reads one from its thread (its module graph's): the
+      # registry's bytes — this window's entry, or another window's of this one's partition — by a worker of the URL's own
+      # origin (blob_rules.rs `usable`): [bytes, type], or nil.
+      private def worker_blob(url, worker_url)
+        origin = ->(u) { url_origin(u.to_s.delete_prefix('blob:')) }
+        theirs = origin.(url)
+        return nil unless theirs.nil? || theirs == origin.(worker_url)
+
+        maker, site = Native.blob_registry_partition(@blob_window, url)
+        return nil unless maker && (maker == @blob_window || site == blob_partition_site)
+
+        Native.blob_registry_get(maker, url)
+      end
       # A blob the page hands the host, `{'bytes' => …, 'type' => …}`, as `{bytes:, type:}` — nil for none.
       def host_blob(blob) = blob.is_a?(Hash) && blob['bytes'] ? {bytes: blob['bytes'], type: blob['type'].to_s} : nil
 
@@ -9508,8 +9527,7 @@ module Capybara
       private def worker_module_fetch(handle, controller, worker_url)
         lambda do |abs|
           if abs.start_with?('blob:')
-            maker = Native.blob_registry_partition(@blob_window, abs)&.first
-            bytes, = maker && Native.blob_registry_get(maker, abs)
+            bytes, = worker_blob(abs, worker_url)
             raise ModuleScriptUnavailable, abs unless bytes
 
             next [bytes, abs]

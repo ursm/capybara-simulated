@@ -21,12 +21,12 @@ pub(crate) fn slice_range(size: f64, start: Option<f64>, end: Option<f64>) -> (f
     (from, (to - from).max(0.0))
 }
 
-// Whether a realm of origin `here` may revoke or resolve `url`: where either names an opaque origin — or none, a URL that
-// does not parse, a realm that answers none — and else where the two are the same.
+// Whether a realm of origin `here` may revoke or resolve `url`: where the URL names an opaque origin — or none, a URL
+// that does not parse — and else where it is the realm's own (an opaque one's, a sandboxed frame's, is never another
+// origin's: Chrome refuses it the page's).
 pub(crate) fn usable(url: &str, here: &str) -> bool {
     let theirs = ada_url::Url::parse(url, None).ok().map(|u| u.origin().to_owned()).unwrap_or_default();
-    let opaque = |o: &str| o.is_empty() || o == "null";
-    opaque(&theirs) || opaque(here) || theirs == here
+    theirs.is_empty() || theirs == "null" || theirs == here
 }
 
 // A string part of a Blob's (§3.1 "process blob parts"), as its bytes: UTF-8 encoded — a lone surrogate U+FFFD, the
@@ -112,7 +112,7 @@ mod tests {
         assert!(usable("blob:http://a.test/x", "http://a.test"));
         assert!(!usable("blob:http://a.test/x", "http://b.test"));
         assert!(usable("blob:null/x", "http://b.test"));
-        assert!(usable("blob:http://a.test/x", "null"));
+        assert!(!usable("blob:http://a.test/x", "null"));
     }
 
     #[test]

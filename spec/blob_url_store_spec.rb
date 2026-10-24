@@ -319,4 +319,26 @@ RSpec.describe 'the blob URL store' do
     got = [0, 1].map {|i| s.within_frame(i) { poll_until { (g = s.evaluate_script('got')).size == 2 && g.sort } } }
     expect(got).to eq([['fetch failed', 'import failed'], %w[fetched imported]])
   end
+  # …a frame's navigation no top-level one: a frame of another origin navigating itself to the page's URL loads none,
+  # while the page navigating it there — its document the navigation's initiator — does; and a sandboxed frame, of an
+  # opaque origin, fetches none of the page's (Chrome).
+  it 'is resolved by the navigating document for a frame, and by no opaque origin' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><script>
+        window.url = URL.createObjectURL(new Blob(['<p>PAGEBLOB'], {type: 'text/html'}));
+      </script>
+      <iframe src="http://other.test/f"></iframe><iframe src="http://other.test/f"></iframe>
+      <iframe sandbox="allow-scripts" srcdoc="<script>onmessage = (e) => fetch(e.data).then(() => window.got = 'fetched', () => window.got = 'failed')</script>"></iframe>
+    HTML
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/f' ? '<!DOCTYPE html>f' : page]] })
+    s.visit '/'
+    url = s.evaluate_script('url')
+    s.execute_script("frames[2].postMessage(#{url.to_json}, '*')")
+    s.within_frame(0) { s.execute_script("location.href = #{url.to_json}") }
+    s.execute_script("frames[1].location = #{url.to_json}")
+    s.evaluate_script('1')
+    texts = [0, 1].map {|i| s.within_frame(i) { s.evaluate_script('document.body ? document.body.textContent : ""') } }
+    expect(texts).to eq(['', 'PAGEBLOB'])
+    expect(s.within_frame(2) { poll_until { s.evaluate_script('window.got') } }).to eq('failed')
+  end
 end
