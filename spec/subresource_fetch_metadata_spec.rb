@@ -13,9 +13,11 @@ RSpec.describe 'a subresource request', :https do
   include PollUntil
 
   let(:seen) { {} }
+  let(:seen_site) { {} }
   let(:session) do
     simulated_session(lambda {|env|
       seen[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_DEST'], env['HTTP_SEC_FETCH_MODE']]
+      seen_site[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_SITE'], env['HTTP_REFERER']]
       case env['PATH_INFO']
       when '/w.js', '/sw.js' then [200, {'content-type' => 'text/javascript'}, ["importScripts('/i.js'); postMessage(1);"]]
       when '/i.js' then [200, {'content-type' => 'text/javascript'}, ['']]
@@ -45,5 +47,18 @@ RSpec.describe 'a subresource request', :https do
       '/plain'  => %w[empty no-cors],
       '/json'   => %w[empty cors]
     )
+  end
+
+  # (…and a worker's import of its own: the worker the client, an opaque one's site cross-site, its URL no referrer)
+  it "sends a data: worker's import as its own" do
+    session.visit '/'
+    session.execute_script(%q{new Worker('data:text/javascript,importScripts("' + location.origin + '/i.js")')})
+    expect(poll_until { seen['/i.js'] }).to eq(%w[script no-cors])
+    expect(seen_site['/i.js']).to eq(['cross-site', nil])
+  end
+
+  it 'refuses a beacon over the keepalive quota' do
+    session.visit '/'
+    expect(session.evaluate_script("['x'.repeat(70000), 'x'.repeat(40000)].map((d, i) => navigator.sendBeacon('/q' + i, d))")).to eq([false, true])
   end
 end

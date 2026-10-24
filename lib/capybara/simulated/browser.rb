@@ -4981,6 +4981,8 @@ module Capybara
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
         record[:script_body] = body if service
+        # (…and its type, which the destination of the imports the Update probes is of)
+        record[:module] = script_type.to_s == 'module' if service
         # (…a dedicated worker's site for cookies its owner document's, kept as it was made — HTML's worker settings —
         # which its fetches, on its own thread, are judged by; a nested worker's its parent's)
         unless service
@@ -6282,7 +6284,10 @@ module Capybara
         uvc = uvc_override || sw_scope_update_via_cache(scope) || 'imports'
         # The MAIN script request carries `Service-Worker: script` (Update algorithm —
         # servers gate SW scripts on it); imported scripts must NOT (service-worker-header).
-        res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', cache_mode: uvc == 'all' ? 'default' : 'no-cache')
+        # (…its request of destination "serviceworker", mode "same-origin": the Update algorithm's — the job's client of
+        # the script's origin, which a registration's scope and script are)
+        res = rack_fetch('GET', script_url.to_s, '', {'Service-Worker' => 'script'}, 'manual', 'same-origin', cache_mode: uvc == 'all' ? 'default' : 'no-cache',
+                                                                                                             client_origin: url_origin(script_url.to_s).to_s, dest: 'serviceworker')
         return {'error' => 'network'} unless resource_loaded?(res)
         return {'error' => 'redirect'} if res['redirect_loc'] || res['redirect_status']
         return {'error' => 'network'} unless (200..299).cover?(res['status'].to_i)
@@ -6302,8 +6307,11 @@ module Capybara
         probed  = {}
         unless changed
           import_mode = uvc == 'none' ? 'no-cache' : 'default'
+          # (…each import a script's for a classic worker — importScripts' — and of the worker's destination, a CORS
+          # request, for a module one's graph)
+          import_cors, import_dest = w[:module] ? ['cors', 'serviceworker'] : [nil, 'script']
           (w[:sw_imports] || {}).each do |u, b|
-            r2 = rack_fetch('GET', u, '', {}, 'follow', cache_mode: import_mode)
+            r2 = rack_fetch('GET', u, '', {}, 'follow', import_cors, cache_mode: import_mode, client_url: script_url.to_s, dest: import_dest)
             ok = resource_loaded?(r2) && (200..299).cover?(r2['status'].to_i)
             # The probe results ARE the new version's script resource map (Chrome
             # fetches each script ONCE during Update and the new worker runs from
@@ -9168,7 +9176,9 @@ module Capybara
                   ct   = (rec['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
                   body2 = rec['body'].to_s
                 else
-                  r = rack_fetch('GET', abs, '', {}, 'follow', cache_mode: sw_uvc == 'none' ? 'no-cache' : 'default')
+                  # (…of the worker's destination, a module script's CORS request: HTML's fetch of a module worker script graph)
+                  r = rack_fetch('GET', abs, '', {}, 'follow', 'cors', cache_mode: sw_uvc == 'none' ? 'no-cache' : 'default', client_url: url.to_s,
+                                                                         dest: 'serviceworker')
                   raise "module import failed: #{abs}" unless resource_loaded?(r) && (200..299).cover?(r['status'].to_i)
 
                   ct   = (r['headers'] || {}).find {|k, _| k.to_s.casecmp('content-type').zero? }&.last
@@ -9194,10 +9204,11 @@ module Capybara
           end
           outbox << {handle: handle, kind: 'sw_eval', ok: true}
         else
-          module_fetch = worker_module_fetch(handle, controller.to_i, url.to_s)
-          rt.accept_dynamic_imports(url.to_s, module_fetch)
+          # (…a module worker's graph of the worker's destination — HTML's fetch of its module worker script graph —
+          # an `import()` of a script's, whatever script it is in)
+          rt.accept_dynamic_imports(url.to_s, worker_module_fetch(handle, controller.to_i, url.to_s, 'script'))
           if module_worker
-            run_worker_module(rt, body, url.to_s, handle, outbox, module_fetch)
+            run_worker_module(rt, body, url.to_s, handle, outbox, worker_module_fetch(handle, controller.to_i, url.to_s, shared ? 'sharedworker' : 'worker'))
           else
             run_worker_script(rt, body, url.to_s)
           end
@@ -9552,7 +9563,7 @@ module Capybara
       # here, on the worker's thread: blob_registry.rs), a `data:` one's its own — each a 2xx response of a JavaScript MIME
       # type, or none at all. Its source and its URL — the response's, a redirect's end, which its own imports resolve
       # against and its `import.meta.url` reports.
-      private def worker_module_fetch(handle, controller, worker_url)
+      private def worker_module_fetch(handle, controller, worker_url, dest)
         lambda do |abs|
           if abs.start_with?('blob:')
             bytes, = worker_blob(abs, worker_url)
@@ -9567,7 +9578,7 @@ module Capybara
             next [bytes, abs]
           end
           r = controller.positive? && http_url?(abs) ? sw_direct_fetch(controller, JSON.generate(
-            method: 'GET', url: abs, headers: {}, body_b64: '', mode: 'cors', destination: 'script',
+            method: 'GET', url: abs, headers: {}, body_b64: '', mode: 'cors', destination: dest,
             credentials: 'same-origin', clientId: sw_worker_client_id(handle)
           ), handle) : nil
           if r && !r['fallthrough']
@@ -9575,7 +9586,7 @@ module Capybara
 
             r = {'status' => r['status'], 'headers' => r['headers'] || {}, 'body' => Base64.decode64(r['body_b64'].to_s), 'url' => r['url']}
           else
-            r = rack_fetch('GET', abs, '', {}, 'follow', 'cors', client_url: worker_url)
+            r = rack_fetch('GET', abs, '', {}, 'follow', 'cors', client_url: worker_url, dest: dest)
             raise ModuleScriptUnavailable, abs unless resource_loaded?(r)
           end
           ct = r['headers'].find {|k, _| k.to_s.casecmp('content-type').zero? }&.last

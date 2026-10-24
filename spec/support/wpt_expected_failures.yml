@@ -3079,15 +3079,6 @@ fetch/metadata/generated/script-text-module-import-static.sub.html:
 - sec-fetch-user - Not sent to non-trustworthy cross-site destination
 - sec-fetch-user - Not sent to non-trustworthy same-origin destination
 - sec-fetch-user - Not sent to non-trustworthy same-site destination
-fetch/metadata/generated/serviceworker.https.sub.html:
-- sec-fetch-dest - no options - registration
-- sec-fetch-dest - no options - updating
-- sec-fetch-mode - no options - registration
-- sec-fetch-mode - no options - updating
-- 'sec-fetch-mode - options: type=classic - registration'
-- 'sec-fetch-mode - options: type=classic - updating'
-- sec-fetch-site - Same origin, no options - registration
-- sec-fetch-site - Same origin, no options - updating
 fetch/metadata/generated/svg-image.https.sub.html:
 - sec-fetch-dest no attributes
 - sec-fetch-storage-access - Cross-site no attributes
@@ -6378,8 +6369,6 @@ service-workers/service-worker/update-after-oneday.https.html:
 - Update should be triggered after a functional event when last update time is over
   24 hours
 - "[harness] TIMEOUT"
-service-workers/service-worker/update-module-request-mode.https.html:
-- headers of a main module script
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
 service-workers/service-worker/websocket-in-service-worker.https.html:
