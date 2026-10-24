@@ -42,6 +42,15 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
           Promise.reject(new Error('rejected'));
         JS
         [200, {'content-type' => 'text/javascript'}, [body]]
+      when '/i.js' then [200, {'content-type' => 'text/javascript'}, ["setTimeout(() => { throw new Error('later') }); throw new Error('now')"]]
+      when '/w.js'
+        body = <<~JS
+          self.onerror = (message) => { postMessage(['onerror', message]); return true; };
+          for (const url of ['https://other.example.com/i.js', '/i.js']) {
+            try { importScripts(url); } catch (e) { postMessage([url.split('/').pop(), e.name, e.message.includes('now')]); }
+          }
+        JS
+        [200, {'content-type' => 'text/javascript'}, [body]]
       when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script src="https://other.example.com/u.js"></script>']]
       when '/t.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ["window.later = () => { throw new Error('later') }; throw new Error('now')"]]
       when '/c.css' then [200, {'content-type' => 'text/css'}.merge(allow), ['p{color:rgb(1,2,3)}']]
@@ -139,6 +148,15 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
     expect(poll_until { session.evaluate_script('typeof frames[0]?.thrower') == 'function' }).to be(true)
     session.execute_script("dispatchEvent(new Event('ping')); setTimeout(() => frames[0].thrower())")
     expect(poll_until { session.evaluate_script('reports.length') == 8 && session.evaluate_script('reports') }).to eq([['Script error.', '', 0, 0, true]] * 8)
+  end
+
+  # (…a worker's import as well: what it throws as it runs rethrown as a NetworkError, and its callbacks' reported muted)
+  it "mutes the errors of another origin's no-cors import into a worker" do
+    session.visit '/'
+    session.execute_script("window.got = []; new Worker('/w.js').onmessage = (e) => got.push(e.data)")
+    expect(poll_until { session.evaluate_script('got.length') == 4 && session.evaluate_script('got') }).to contain_exactly(
+      ['i.js', 'NetworkError', false], ['i.js', 'Error', true], ['onerror', 'Script error.'], ['onerror', 'Error: later']
+    )
   end
 
   it "hides an `<?xml-stylesheet?>` sheet of another origin's rules" do
