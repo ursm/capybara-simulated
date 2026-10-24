@@ -40,6 +40,23 @@ RSpec.describe 'a subresource request' do
     expect(referers).to include('/m.css' => nil)
   end
 
+  # A font is a CORS request of its client (CSS Fonts 4 §4.9.1): one a frame of the font's origin loads, another origin's
+  # document has refused all the same, whichever asked first (Chrome).
+  it "keeps a font's CORS verdict its client's origin's" do
+    font = File.binread(File.expand_path('fixtures/fonts/Ahem.woff2', __dir__))
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'font/woff2'}, [font]] if env['PATH_INFO'] == '/q.woff2'
+
+      body = env['HTTP_HOST'] == 'other.test' ? 'other' : '<iframe src="http://other.test/f"></iframe>'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/'
+    load = 'new FontFace("Q", "url(http://other.test/q.woff2)").load().then(() => "ok", (e) => e.name)'
+    frame = session.within_frame(0) { session.evaluate_async_script("#{load}.then(arguments[0])") }
+    page = session.evaluate_async_script("#{load}.then(arguments[0])")
+    expect([frame, page]).to eq(%w[ok NetworkError])
+  end
+
   it "is referred under its element's policy" do
     session.visit '/e'
     expect(referers.slice('/e.css', '/e.js')).to eq('/e.css' => nil, '/e.js' => 'http://www.example.com/')

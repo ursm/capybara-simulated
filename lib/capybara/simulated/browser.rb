@@ -3819,8 +3819,9 @@ module Capybara
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
-      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil)
-        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy)
+      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy,
+                                                                     client_realm: client_realm)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -3945,9 +3946,9 @@ module Capybara
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
       def durable_source(url, realm = 0, element_policy = nil)
-        source, policy = realm_referrer_initiator(realm)
-        policy = element_policy unless element_policy.to_s.empty?
-        body = rack_fetch_body(url, client_url: source, referrer: source, referrer_policy: policy)
+        client = request_client(realm, element_policy)
+        body = rack_fetch_body(url, client_url: client[:url], referrer: client[:url], referrer_policy: client[:policy], client_origin: client[:origin],
+                                    client_realm: client[:realm])
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
         fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
@@ -8421,28 +8422,33 @@ module Capybara
       def font_file_and_meta_for(url, realm = 0)
         key = resolve_against_current(url.to_s)
         return [nil, nil] unless key.is_a?(String)
+
+        client = request_client(realm)
+        # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
+        # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
+        cached = [client[:origin] || url_origin(client[:url]).to_s, key]
         @@font_file_lock.synchronize do
-          if @@font_file_cache.key?(key)
-            path, meta = @@font_file_cache[key]
+          if @@font_file_cache.key?(cached)
+            path, meta = @@font_file_cache[cached]
             return [path, meta && meta.merge('cached' => 'cache')]
           end
         end
-        if (failed = (@font_file_failed ||= {})[key])
+        if (failed = (@font_file_failed ||= {})[cached])
           return [nil, failed]
         end
         Thread.current[:csim_font_meta] = nil
-        path = build_font_file(key, realm)
+        path = build_font_file(key, client)
         meta = Thread.current[:csim_font_meta]
         if path
-          @@font_file_lock.synchronize { @@font_file_cache[key] = [path, meta] }
+          @@font_file_lock.synchronize { @@font_file_cache[cached] = [path, meta] }
         else
-          @font_file_failed[key] = meta          # remembered for THIS session only
+          @font_file_failed[cached] = meta          # remembered for THIS session only
         end
         [path, meta]
       end
 
-      private def build_font_file(key, realm = 0)
-        bytes = font_source_bytes(key, realm)
+      private def build_font_file(key, client)
+        bytes = font_source_bytes(key, client)
         return nil unless bytes && !bytes.empty?
         bytes = Native.font_sfnt(bytes)
         return nil unless bytes
@@ -8462,16 +8468,15 @@ module Capybara
 
       # Raw font bytes for a URL: `data:` inline, http(s) via a binary-safe Rack fetch
       # (`body_raw`: a text body would mangle the font's non-ASCII).
-      private def font_source_bytes(key, realm = 0)
+      private def font_source_bytes(key, client)
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
         elsif http_url?(key)
           # A font is a CORS fetch (CSS Fonts 4 §4.9.1): a cross-origin face without
           # `Access-Control-Allow-Origin` fails, as in Chrome.
-          source, policy = realm_referrer_initiator(realm)
-          result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin',
-                              client_url: source, referrer: source, referrer_policy: policy, body_raw: true)
+          result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin', client_url: client[:url], referrer: client[:url],
+                                                                 referrer_policy: client[:policy], client_origin: client[:origin], client_realm: client[:realm], body_raw: true)
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
@@ -10979,6 +10984,23 @@ module Capybara
         id = @frame_leaving_entries&.delete(realm_id)
         update_history_entry(id, form_state: capture_frame_form_state(realm_id)) if id
       end
+      # The client a subresource request of realm `realm` is made as (Fetch "client"): its URL — the referrer source, whose
+      # site Sec-Fetch-Site compares — its referrer policy, or the one the request's element sets (`element_policy`), its
+      # origin where that is opaque ('null': a sandboxed document's), and the realm itself, whose ancestors make it cross-site
+      # for cookies — or, a negative `realm`, worker -`realm`'s: its script's URL under the default policy (a worker no
+      # document's realm the host may ask from its thread).
+      def request_client(realm, element_policy = nil)
+        realm = realm.to_i
+        if realm.negative?
+          url = @workers.dig(-realm, :script_url).to_s
+          return {url: http_url?(url) ? url : nil, policy: element_policy.to_s, origin: nil, realm: nil}
+        end
+        url, policy = realm_referrer_initiator(realm)
+        opaque = document_origin_opaque?(realm)
+        # (…which no element lifts for an opaque origin's document: it refers as none, as its navigations do)
+        policy = element_policy unless element_policy.to_s.empty? || opaque
+        {url: url, policy: policy, origin: opaque ? 'null' : nil, realm: realm.zero? ? nil : realm}
+      end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
       # and whose origin an Origin header carries — a local document's (about:blank, srcdoc) its creator's, the nearest
       # ancestor's of a fetchable URL — and whether that document's own origin is opaque (a sandbox's)].
@@ -11014,16 +11036,12 @@ module Capybara
       rescue StandardError
         ''
       end
+      # (…a realm still loading its document asked too, as its parser-time subresources are requested meanwhile)
       def frame_document_referrer_policy(realm_id)
-        return '' unless @runtime.frame_realm_alive?(realm_id)
-        @runtime.realm_call(realm_id, '__csimDocumentReferrerPolicy').to_s
-      rescue StandardError
-        ''
+        @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy').to_s
       end
       def frame_document_origin_opaque?(realm_id)
-        @runtime.frame_realm_alive?(realm_id) && @runtime.realm_call(realm_id, '__csimDocumentOriginOpaque') == true
-      rescue StandardError
-        false
+        @runtime.realm_direct_call(realm_id, '__csimDocumentOriginOpaque') == true
       end
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
