@@ -36,7 +36,7 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15], client_origin: a[16], client_realm: a[17], navigation: a[18] == true) },
-        '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1]) },
+        '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1], a[2], a[3]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
         '__csimExternalAssetMeta'    => ->(b, *a) { b.external_asset_meta(a[0]) },
         '__csimExternalAssetBytes'   => ->(b, *a) { b.external_asset_bytes(a[0]) },
@@ -206,7 +206,7 @@ module Capybara
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing
         # entry; the face installed under a `local()` name; a FontFace's own bytes — nil where there is none.
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
-        '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0]) },
+        '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i) },
         '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },

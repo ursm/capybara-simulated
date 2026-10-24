@@ -3819,8 +3819,8 @@ module Capybara
       # ── Host-fn callbacks invoked by bridge.js ──────────────────
 
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
-      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil)
-        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin)
+      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -3944,8 +3944,10 @@ module Capybara
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
-      def durable_source(url)
-        body = rack_fetch_body(url)
+      def durable_source(url, realm = 0, element_policy = nil)
+        source, policy = realm_referrer_initiator(realm)
+        policy = element_policy unless element_policy.to_s.empty?
+        body = rack_fetch_body(url, client_url: source, referrer: source, referrer_policy: policy)
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
         fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
@@ -4024,7 +4026,10 @@ module Capybara
         @asset_document_seq
       end
 
-      def external_asset_source(url, document = nil)
+      # (…fetched, where no cache has it, as the document of realm `realm` (0 the page) requests it: its Referer that
+      # document's URL under its policy — or the one its element's `referrerpolicy` sets, `policy` — its cookies and
+      # Sec-Fetch-Site that document's: a frame's style sheet a frame's)
+      def external_asset_source(url, document = nil, realm = nil, policy = nil)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4060,7 +4065,7 @@ module Capybara
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key)
+        body, fresh_until = durable_source(key, realm.to_i, policy)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
@@ -8413,7 +8418,7 @@ module Capybara
       # the facts of the fetch that brought it (`resource_timing_meta`); a cross-visit cache hit
       # reports the same facts as served from the cache (Chrome files a cached font with
       # `transferSize` 0).
-      def font_file_and_meta_for(url)
+      def font_file_and_meta_for(url, realm = 0)
         key = resolve_against_current(url.to_s)
         return [nil, nil] unless key.is_a?(String)
         @@font_file_lock.synchronize do
@@ -8426,7 +8431,7 @@ module Capybara
           return [nil, failed]
         end
         Thread.current[:csim_font_meta] = nil
-        path = build_font_file(key)
+        path = build_font_file(key, realm)
         meta = Thread.current[:csim_font_meta]
         if path
           @@font_file_lock.synchronize { @@font_file_cache[key] = [path, meta] }
@@ -8436,8 +8441,8 @@ module Capybara
         [path, meta]
       end
 
-      private def build_font_file(key)
-        bytes = font_source_bytes(key)
+      private def build_font_file(key, realm = 0)
+        bytes = font_source_bytes(key, realm)
         return nil unless bytes && !bytes.empty?
         bytes = Native.font_sfnt(bytes)
         return nil unless bytes
@@ -8457,15 +8462,16 @@ module Capybara
 
       # Raw font bytes for a URL: `data:` inline, http(s) via a binary-safe Rack fetch
       # (`body_raw`: a text body would mangle the font's non-ASCII).
-      private def font_source_bytes(key)
+      private def font_source_bytes(key, realm = 0)
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
         elsif http_url?(key)
           # A font is a CORS fetch (CSS Fonts 4 §4.9.1): a cross-origin face without
           # `Access-Control-Allow-Origin` fails, as in Chrome.
+          source, policy = realm_referrer_initiator(realm)
           result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin',
-                              client_url: @current_url, referrer: @current_url, body_raw: true)
+                              client_url: source, referrer: source, referrer_policy: policy, body_raw: true)
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
@@ -8481,8 +8487,9 @@ module Capybara
       # file (nil when the bytes are no font the decoder reads — a 404, a broken file), with the fetch's facts for its
       # Resource Timing entry and `ok`, whether bytes arrived (a data: face has no fetch facts; an unreadable
       # container still loads, measured with the fallback family).
-      def web_font_fetch(url)
-        file, meta = font_file_and_meta_for(url)
+      # (…fetched, where no cache has it, as the document of realm `realm` requests it: `external_asset_source`)
+      def web_font_fetch(url, realm = 0)
+        file, meta = font_file_and_meta_for(url, realm)
         {'path' => file, 'meta' => meta, 'ok' => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
       end
 

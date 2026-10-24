@@ -1310,7 +1310,7 @@ module Capybara
         if src.nil?
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh.
-          src = @browser.external_asset_source(url_s, asset_document_of(target))
+          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target))
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
           content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
         end
