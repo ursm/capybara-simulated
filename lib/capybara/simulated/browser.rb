@@ -3472,7 +3472,7 @@ module Capybara
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy)
           elsif named_frame
-            navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id)
+            navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id.to_i)
           elsif frame_entry
             navigate_frame(url, entry: frame_entry, referrer: initiator)
           else
@@ -3486,7 +3486,7 @@ module Capybara
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
                                     post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
           elsif named_frame
-            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id)
+            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id.to_i)
           elsif frame_entry
             navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator)
           else
@@ -11302,8 +11302,19 @@ module Capybara
       # `location.replace`, a navigation of a document not completely loaded yet: `replace_frame_entry`).
       # (…`initiator` the realm whose document navigates it, where one is named: an opaque origin's cross-site, its Origin
       # `null` — `opaque_initiator` — and the initiator of an entered frame's, which navigates through `navigate_frame`)
-      def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, resulting_client_id: nil,
-                                  referrer: nil, initiator: nil)
+      def navigate_realm_self_get(
+        realm_id,
+        get_url,
+        depth: 0,
+        is_reload: false,
+        is_history: false,
+        record: true,
+        site_seed: nil,
+        origin_null: false,
+        resulting_client_id: nil,
+        referrer: nil,
+        initiator: nil
+      )
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
         site_seed, origin_null = 'cross-site', true if initiator && depth.zero? && document_origin_opaque?(initiator.to_i)
@@ -11403,8 +11414,20 @@ module Capybara
       # a frame reached via contentWindow has no stack entry, so rebuild it by
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
-      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false, site_seed: nil, origin_null: false, resulting_client_id: nil,
-                                   referrer: nil, initiator: nil)
+      def navigate_realm_self_post(
+        realm_id,
+        url,
+        body,
+        content_type,
+        depth: 0,
+        is_reload: false,
+        is_history: false,
+        site_seed: nil,
+        origin_null: false,
+        resulting_client_id: nil,
+        referrer: nil,
+        initiator: nil
+      )
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
         site_seed, origin_null = 'cross-site', true if initiator && depth.zero? && document_origin_opaque?(initiator.to_i)
@@ -11898,8 +11921,16 @@ module Capybara
       # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
       # (…its request the navigation one of the document of realm `initiator` — the entered frame's own, by default — its
       # Fetch Metadata that document's, `site` the Sec-Fetch-Site its redirect chain has widened to: `frame_request_headers`)
-      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, record: true, initiator: @current_realm_id.to_i,
-                         site: nil)
+      def navigate_frame(
+        url,
+        depth: 0,
+        entry: @frame_stack.last,
+        referrer: current_referrer_initiator,
+        reload: false,
+        record: true,
+        initiator: @current_realm_id.to_i,
+        site: nil
+      )
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
         return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
