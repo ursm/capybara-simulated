@@ -22,6 +22,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "javascriptUrlSource", javascript_url_source_op, context_id);
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
     register(scope, ns, "metaReferrerSteps", meta_referrer_steps_op, context_id);
+    register(scope, ns, "noteRequestPolicy", note_request_policy_op, context_id);
+    register(scope, ns, "requestPolicy", request_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
     register(scope, ns, "referrerPolicyAttribute", referrer_policy_attribute_op, context_id);
     register(scope, ns, "elementTarget", element_target_op, context_id);
@@ -234,6 +236,14 @@ impl crate::dom::RealmArena {
             self.referrer_policies.insert(root, policy);
         }
     }
+    // A request element `id` inserted: the policy its document has now, which the fetch its insertion begins is made
+    // under (HTML: a `<link>`'s fetch takes its client's policy as it starts — a `<meta>` the parser inserts after it is
+    // none of its).
+    pub(crate) fn note_request_policy(&mut self, id: crate::dom::NodeId) {
+        let root = self.root_of(id);
+        let policy = self.document_referrer_policy(root);
+        self.request_policies.insert(id, policy);
+    }
     // …the policy it has set for document `doc`, '' for none.
     pub(crate) fn document_referrer_policy(&self, doc: crate::dom::NodeId) -> &'static str {
         self.referrer_policies.get(&doc).copied().unwrap_or("")
@@ -252,6 +262,22 @@ fn meta_referrer_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     crate::dom::realm(scope, cid).meta_referrer_steps(id);
+}
+
+// __dom.noteRequestPolicy(nid): `note_request_policy`.
+fn note_request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    crate::dom::realm(scope, cid).note_request_policy(id);
+}
+// __dom.requestPolicy(nid) -> the policy the element was inserted under ('' for none), undefined where none was noted.
+fn request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(&policy) = crate::dom::realm(scope, cid).request_policies.get(&id) else { return };
+    if let Some(s) = v8::String::new(scope, policy) {
+        rv.set(s.into());
+    }
 }
 
 // HTML "document base URL": the frozen base URL of the document's first `<base>` with an `href` (element_state.rs

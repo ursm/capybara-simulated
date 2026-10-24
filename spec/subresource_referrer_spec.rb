@@ -22,6 +22,10 @@ RSpec.describe 'a subresource request' do
                             '<script>import("/fi.js")</script><style>@font-face{font-family:X;src:url(/ff.woff)}</style>'
              when '/m' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/m.css>'
              when '/top2' then '<iframe src="/mf"></iframe>'
+             when '/a1' then '<link rel=stylesheet href=/a1.css><meta name=referrer content=no-referrer><link rel=stylesheet href=/a1b.css>'
+             when '/top3' then '<iframe src="/a3"></iframe>'
+             when '/a3' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/a3.css><meta name=referrer content=unsafe-url>' \
+                             '<link rel=stylesheet href=/a3b.css><script>1</script>'
              when '/mf' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/mf.css><script src=/mf.js></script>'
              when '/e' then '<link rel=stylesheet referrerpolicy=no-referrer href=/e.css><script referrerpolicy=origin src=/e.js></script>'
              end
@@ -40,6 +44,14 @@ RSpec.describe 'a subresource request' do
   it "is referred under its document's policy" do
     session.visit '/m'
     expect(referers).to include('/m.css' => nil)
+  end
+
+  # …the policy its document had as the parser inserted it: a `<meta>` after it none of its (Chrome).
+  it 'is referred under the policy its document had as it was inserted' do
+    session.visit '/a1'
+    expect(referers.slice('/a1.css', '/a1b.css')).to eq('/a1.css' => 'http://www.example.com/a1', '/a1b.css' => nil)
+    session.visit '/top3'
+    expect(referers.slice('/a3.css', '/a3b.css')).to eq('/a3.css' => nil, '/a3b.css' => 'http://www.example.com/a3')
   end
 
   it "is referred under a frame's meta policy parsed before it" do

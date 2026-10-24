@@ -973,6 +973,10 @@ pub(crate) struct RealmArena {
     // …and its policy container's referrer policy, as its `<meta name="referrer">` elements set it (url_ops.rs
     // `meta_referrer_steps`), by the document's slot; none for one no meta has set.
     pub(crate) referrer_policies: std::collections::HashMap<NodeId, &'static str>,
+    // …and the policy each request element was inserted under — its document's then, '' for none — which the fetch its
+    // insertion begins is made under, whatever a `<meta>` after it sets before the fetch runs (url_ops.rs
+    // `note_request_policy`).
+    pub(crate) request_policies: std::collections::HashMap<NodeId, &'static str>,
     // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
     pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
     // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
@@ -1368,6 +1372,7 @@ impl RealmArena {
         self.close_watcher_order.retain(|id, _| live(slots, id));
         self.pointerdown_targets.retain(|doc, _| live(slots, doc));
         self.referrer_policies.retain(|doc, _| live(slots, doc));
+        self.request_policies.retain(|id, _| live(slots, id));
         self.popovers_changing.retain(|id| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
             list.retain(|(p, _)| live(slots, p));
