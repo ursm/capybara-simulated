@@ -37,6 +37,7 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
           addEventListener('ping', () => { throw {secret: 42} });
           addEventListener('ping', {handleEvent() { throw 'object listener' }});
           setTimeout(function () { throw 'bound' }.bind(null));
+          setTimeout(new Proxy(() => { throw 'proxied' }, {}));
           setTimeout(() => eval('null.secret'));
           Promise.reject(new Error('rejected'));
         JS
@@ -123,8 +124,8 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
   end
 
   # (…by where V8 says it was thrown, which a page's `Error.prepareStackTrace` does not rewrite; for a value thrown with
-  # no location or an evaluation's, by the callback that threw it — a bound one's, an object listener's; across realms;
-  # and a rejection it made reported nowhere)
+  # no location or an evaluation's, by the callback that threw it — a bound one's, a proxy's, an object listener's;
+  # across realms; and a rejection it made reported nowhere)
   it 'mutes them however they leave it' do
     session.visit '/'
     session.execute_script(<<~JS)
@@ -137,7 +138,7 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
     JS
     expect(poll_until { session.evaluate_script('typeof frames[0]?.thrower') == 'function' }).to be(true)
     session.execute_script("dispatchEvent(new Event('ping')); setTimeout(() => frames[0].thrower())")
-    expect(poll_until { session.evaluate_script('reports.length') == 7 && session.evaluate_script('reports') }).to eq([['Script error.', '', 0, 0, true]] * 7)
+    expect(poll_until { session.evaluate_script('reports.length') == 8 && session.evaluate_script('reports') }).to eq([['Script error.', '', 0, 0, true]] * 8)
   end
 
   it "hides an `<?xml-stylesheet?>` sheet of another origin's rules" do

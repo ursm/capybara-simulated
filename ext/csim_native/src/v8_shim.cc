@@ -6,6 +6,7 @@
 #include "v8-isolate.h"
 #include "v8-local-handle.h"
 #include "v8-object.h"
+#include "v8-proxy.h"
 #include "v8-traced-handle.h"
 
 // Reset `self` to `other` as a DROPPABLE traced reference: a young, unmodified API object it holds may be dropped by a
@@ -20,14 +21,17 @@ extern "C" void csim_traced_clear(v8::TracedReference<v8::Object>* self) {
   self->Reset();
 }
 
-// The function `f` calls: a bound function's target, through every bind (Function::GetBoundFunction), or `f` itself —
-// a handle of the current scope.
+// The function `f` calls: a bound function's target, a callable proxy's, through every bind and proxy
+// (Function::GetBoundFunction, Proxy::GetTarget), or `f` itself — a handle of the current scope. (Its `Local` an indirect
+// one, a slot's address, as V8 is built without V8_ENABLE_DIRECT_HANDLE — as `csim_traced_reset_droppable`'s.)
 extern "C" const v8::Function* csim_bound_target(const v8::Function* f) {
-  auto fn = *reinterpret_cast<const v8::Local<v8::Function>*>(&f);
-  for (auto target = fn->GetBoundFunction(); target->IsFunction(); target = fn->GetBoundFunction()) {
-    fn = target.As<v8::Function>();
+  v8::Local<v8::Value> fn = *reinterpret_cast<const v8::Local<v8::Function>*>(&f);
+  for (;;) {
+    v8::Local<v8::Value> target = fn->IsProxy() ? fn.As<v8::Proxy>()->GetTarget() : fn.As<v8::Function>()->GetBoundFunction();
+    if (!target->IsFunction()) break;
+    fn = target;
   }
-  return *fn;
+  return *fn.As<v8::Function>();
 }
 
 // What a dropped object's wrappable is told (node_handle.rs `csim_node_reset_root`).
