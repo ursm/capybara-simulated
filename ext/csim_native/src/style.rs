@@ -246,6 +246,30 @@ pub(crate) struct SheetFace {
     pub(crate) declared: Vec<(&'static str, String)>,
 }
 
+// The `@font-face` rules `rules` yields, in order, each with the style resource base URL of the sheet it is in (CSS
+// Values 4): `base`, that of the sheet they are the rules of — an `@import`ed sheet's rules its own location's.
+fn sheet_font_faces<'a>(
+    mut rules: style::stylesheets::EffectiveRulesIterator<'a, '_, &'a style::stylesheets::CustomMediaMap>,
+    base: &'a str,
+    device: &'a Device,
+    guard: &'a style::shared_lock::SharedRwLockReadGuard<'_>,
+    out: &mut Vec<(&'a style::servo_arc::Arc<style::shared_lock::Locked<style::stylesheets::FontFaceRule>>, &'a str)>,
+) {
+    use style::stylesheets::{CssRule, StylesheetInDocument};
+    while let Some(rule) = rules.next() {
+        match rule {
+            CssRule::FontFace(face) => out.push((face, base)),
+            CssRule::Import(import) => {
+                let Some(sheet) = import.read_with(guard).stylesheet.as_sheet() else { continue };
+                rules.skip_children();
+                let contents = sheet.contents(guard);
+                sheet_font_faces(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, guard), contents.url_data.as_str(), device, guard, out);
+            }
+            _ => {}
+        }
+    }
+}
+
 // The identities the page's `@font-face` rules have (`font_faces`): each rule's by the version of the sheet it is in
 // and the rule itself — its address, the rule kept so that no other one takes it — numbered by the realm
 // (`SheetStore::last_face`). A rule keeps its identity while its sheet's parse is the one it was — a rule inserted
@@ -733,10 +757,11 @@ impl StyleEngine {
 
     // The `@font-face` rules the document's sheets hold that apply — inside an `@media` / `@supports` that holds and an
     // `@import` that does — in the order of their sheets (a sheet adopted twice once, two of one text, one parse, twice):
-    // each its identity (`FaceIds`), the declarations it holds, its sources' URLs resolved, and the first of those URLs.
+    // each its identity (`FaceIds`), the declarations it holds, its sources' URLs resolved, and the first of those URLs —
+    // and the referrer its downloads are requested with: the location of the sheet it is in (`sheet_font_faces`).
     pub(crate) fn font_faces(&mut self, store: &crate::sheets::SheetStore) -> Vec<SheetFace> {
         use style::font_face::DescriptorId;
-        use style::stylesheets::{CssRule, StylesheetInDocument};
+        use style::stylesheets::StylesheetInDocument;
         const DESCRIPTORS: [DescriptorId; 13] = [
             DescriptorId::FontFamily, DescriptorId::FontStyle, DescriptorId::FontWeight, DescriptorId::FontStretch,
             DescriptorId::FontDisplay, DescriptorId::UnicodeRange, DescriptorId::FontFeatureSettings,
@@ -755,8 +780,10 @@ impl StyleEngine {
                 continue;
             }
             seen.push(a.version);
-            for rule in a.sheet.contents(&guard).effective_rules(device, &*NO_CUSTOM_MEDIA, &guard) {
-                let CssRule::FontFace(rule) = rule else { continue };
+            let contents = a.sheet.contents(&guard);
+            let mut rules = Vec::new();
+            sheet_font_faces(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), contents.url_data.as_str(), device, &guard, &mut rules);
+            for (rule, base) in rules {
                 let (_, id) = *ids.by_rule.entry((a.version, face_address(rule))).or_insert_with(|| {
                     store.last_face.set(store.last_face.get() + 1);
                     (rule.clone(), store.last_face.get())
@@ -773,7 +800,7 @@ impl StyleEngine {
                 if let Some(src) = &d.src {
                     declared.push(("src", font_face_src(src)));
                 }
-                faces.push(SheetFace { id, record: crate::font_faces::record(d), declared });
+                faces.push(SheetFace { id, record: crate::font_faces::record(d, Some(base)), declared });
             }
         }
         faces

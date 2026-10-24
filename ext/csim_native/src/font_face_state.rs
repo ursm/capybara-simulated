@@ -335,7 +335,7 @@ fn file_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         (f.file.clone(), f.sources.clone().unwrap_or_default(), bucket)
     };
     let cid = crate::dom::realm_id(scope, &args);
-    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, fetch);
+    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, None, fetch);
     crate::font_files::answer_file(scope, &mut rv, file);
 }
 

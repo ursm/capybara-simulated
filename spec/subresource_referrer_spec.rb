@@ -121,6 +121,79 @@ RSpec.describe 'a subresource request' do
     expect(session.evaluate_script('frames[0].location.href')).to eq('about:blank')
   end
 
+  # A font a sheet's `@font-face` names is a `cors` fetch referred by the rule's style resource base URL (CSS Values 4
+  # "fetch a style resource"): an external sheet's location, an `@import`ed one's own — another origin's stripped to its
+  # origin by the document's policy — while the `@import` (`no-cors`) is referred by its client, the document.
+  it "is referred by the sheet a font's rule is in" do
+    refs  = referers
+    sites = {}
+    session = simulated_session(lambda {|env|
+      path = env['PATH_INFO']
+      refs[path]  = env['HTTP_REFERER']
+      sites[path] = env['HTTP_SEC_FETCH_SITE']
+      next [200, {'content-type' => 'font/woff2'}, ['']] if path.end_with?('.woff2')
+
+      css = {
+        '/css/a.css' => '@import "/imp/i.css"; @font-face{font-family:A;src:url(/fa.woff2)}',
+        '/imp/i.css' => '@font-face{font-family:I;src:url(/fi.woff2)}',
+        '/o.css'     => '@font-face{font-family:O;src:url(http://www.example.com/fo.woff2)}'
+      }[path]
+      next [200, {'content-type' => 'text/css'}, [css]] if css
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><link rel=stylesheet href=/css/a.css>' \
+                                              '<link rel=stylesheet href=http://other.test/o.css>' \
+                                              '<style>@font-face{font-family:S;src:url(/fs.woff2)}</style>']]
+    })
+    session.visit '/p'
+    session.evaluate_script('Promise.all(["A", "I", "O", "S"].map((f) => document.fonts.load(`16px ${f}`)))')
+    session.evaluate_script('1')
+    expect(referers.slice('/imp/i.css', '/fa.woff2', '/fi.woff2', '/fo.woff2', '/fs.woff2')).to eq(
+      '/imp/i.css' => 'http://www.example.com/p',
+      '/fa.woff2'  => 'http://www.example.com/css/a.css',
+      '/fi.woff2'  => 'http://www.example.com/imp/i.css',
+      '/fo.woff2'  => 'http://other.test/',
+      '/fs.woff2'  => 'http://www.example.com/p'
+    )
+    expect(sites['/fo.woff2']).to eq('same-origin')
+  end
+
+  # A module a script imports is referred by that script's base URL (HTML "fetch the descendants of a module script",
+  # HostLoadImportedModule): a static import by its importer's URL, an `import()` by the URL of the script it is in — an
+  # inline one's its document's base URL — and a graph's every fetch under the referrer policy its element sets, an
+  # `import()` its module makes too (the descendant script fetch options keep it).
+  it "is referred by the script that imports it, under its graph's policy" do
+    refs = referers
+    session = simulated_session(lambda {|env|
+      path = env['PATH_INFO']
+      refs[path] = env['HTTP_REFERER']
+      js = {
+        '/m/entry.js'   => 'import "/n/child.js"; import("/n/dyn.js");',
+        '/n/child.js'   => 'import "/o/grand.js";',
+        '/c/classic.js' => 'import("/n/fromclassic.js");',
+        '/r/entry.js'   => 'import "/r/child.js"; import("/r/dyn.js");'
+      }[path]
+      next [200, {'content-type' => 'text/javascript'}, [js || '']] if path.end_with?('.js')
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><script type=module src=/m/entry.js></script>' \
+                                              '<script src=/c/classic.js></script><script>import("/n/frominline.js")</script>' \
+                                              '<script type=module referrerpolicy=origin src=/r/entry.js></script>']]
+    })
+    session.visit '/page/p'
+    session.evaluate_script('1')
+    expect(referers.except('/page/p')).to eq(
+      '/m/entry.js'       => 'http://www.example.com/page/p',
+      '/n/child.js'       => 'http://www.example.com/m/entry.js',
+      '/o/grand.js'       => 'http://www.example.com/n/child.js',
+      '/n/dyn.js'         => 'http://www.example.com/m/entry.js',
+      '/c/classic.js'     => 'http://www.example.com/page/p',
+      '/n/fromclassic.js' => 'http://www.example.com/c/classic.js',
+      '/n/frominline.js'  => 'http://www.example.com/page/p',
+      '/r/entry.js'       => 'http://www.example.com/',
+      '/r/child.js'       => 'http://www.example.com/',
+      '/r/dyn.js'         => 'http://www.example.com/'
+    )
+  end
+
   it "is referred under a frame's meta policy parsed before it" do
     session.visit '/top2'
     expect(referers.slice('/mf.css', '/mf.js')).to eq('/mf.css' => nil, '/mf.js' => nil)

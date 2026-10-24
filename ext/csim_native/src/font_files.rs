@@ -20,9 +20,17 @@ pub(crate) const LOCAL: u32 = 1;
 pub(crate) struct Terminated;
 
 // The file a source gives that native reads (`font::register_path`, which keeps what it parsed), or none: asked of the
-// page side's `fetch(kind, value, bucket)` — a download, or the font installed under a `local()` name at the weight /
-// style `bucket` — once per source per realm, which a relayout asks again of no one. A `fetch` that throws gave none.
-fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, bucket: &str, fetch: v8::Local<'_, v8::Function>) -> Result<Option<String>, Terminated> {
+// page side's `fetch(kind, value, bucket, referrer)` — a download, requested with the face's `referrer` where it has one
+// (a rule's: `FaceRecord::referrer`), or the font installed under a `local()` name at the weight / style `bucket` — once
+// per source per realm, which a relayout asks again of no one. A `fetch` that throws gave none.
+fn source_file(
+    scope: &mut v8::PinScope<'_, '_>,
+    cid: i32,
+    source: &FaceSource,
+    bucket: &str,
+    referrer: Option<&str>,
+    fetch: v8::Local<'_, v8::Function>,
+) -> Result<Option<String>, Terminated> {
     let (kind, value) = match source {
         FaceSource::Url(url) => (URL, url.as_str()),
         FaceSource::Local(name) => (LOCAL, name.as_str()),
@@ -33,7 +41,11 @@ fn source_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, source: &FaceSource, 
         Some(path) => path,
         None => {
             let (Some(v), Some(b)) = (v8::String::new(scope, value), v8::String::new(scope, bucket)) else { return Ok(None) };
-            let args = [v8::Integer::new_from_unsigned(scope, kind).into(), v.into(), b.into()];
+            let r = match referrer.and_then(|r| v8::String::new(scope, r)) {
+                Some(r) => r.into(),
+                None => v8::null(scope).into(),
+            };
+            let args = [v8::Integer::new_from_unsigned(scope, kind).into(), v.into(), b.into(), r];
             let undefined = v8::undefined(scope).into();
             v8::tc_scope!(let tc, scope);
             let got = fetch.call(tc, undefined, &args);
@@ -56,13 +68,14 @@ pub(crate) fn face_file(
     file: Option<&str>,
     sources: &[FaceSource],
     bucket: &str,
+    referrer: Option<&str>,
     fetch: v8::Local<'_, v8::Function>,
 ) -> Result<Option<String>, Terminated> {
     if let Some(file) = file {
         return Ok(Some(file.to_owned()).filter(|p| crate::font::register_path(p) >= 0));
     }
     for source in sources {
-        if let Some(path) = source_file(scope, cid, source, bucket, fetch)? {
+        if let Some(path) = source_file(scope, cid, source, bucket, referrer, fetch)? {
             return Ok(Some(path));
         }
     }

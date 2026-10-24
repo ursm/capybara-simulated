@@ -29,6 +29,10 @@ pub(crate) struct FaceRecord {
     pub(crate) overrides: [Option<f64>; 3],
     // A buffer face's file, its own bytes' (font_face_state.rs): what it is read from, sources or none.
     pub(crate) file: Option<String>,
+    // The referrer its downloads are requested with — a rule's, its style resource base URL (CSS Values 4 "fetch a style
+    // resource": a font is a `cors` fetch, referred by its sheet's location, or by the base URL of the document an inline
+    // sheet is in: style.rs `font_faces`); none for a script's face, which its client refers.
+    pub(crate) referrer: Option<String>,
 }
 
 // How far a face is from a style, each of §5.2's steps in turn: stretch, slant, weight — compared in that order.
@@ -61,7 +65,7 @@ impl Default for FaceRecord {
 impl FaceRecord {
     // A face of `family` with every descriptor at its initial value.
     fn of(family: String) -> FaceRecord {
-        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3], file: None }
+        FaceRecord { family, sources: Vec::new(), weight: (400.0, 400.0), stretch: (100.0, 100.0), slanted: false, ranges: None, size_adjust: 1.0, overrides: [None; 3], file: None, referrer: None }
     }
     // The weight / style its `local()` names are looked up under: the bucket of the low end of its weight and its slant.
     pub(crate) fn local_style(&self) -> &'static str {
@@ -87,11 +91,11 @@ pub(crate) fn parse(text: &str, base: &str) -> Option<FaceRecord> {
     let context = crate::cssom_decl::rule_context(&url, CssRuleType::FontFace, false);
     let mut input = cssparser::ParserInput::new(text);
     let mut parser = cssparser::Parser::new(&mut input);
-    record(&style::font_face::parse_font_face_block(&context, &mut parser, cssparser::SourceLocation { line: 0, column: 0 }).descriptors)
+    record(&style::font_face::parse_font_face_block(&context, &mut parser, cssparser::SourceLocation { line: 0, column: 0 }).descriptors, None)
 }
 // …and of the descriptors an `@font-face` rule of the page's declares, as the style engine parsed them (style.rs
-// `font_faces`).
-pub(crate) fn record(d: &style::properties::font_face::Descriptors) -> Option<FaceRecord> {
+// `font_faces`), its downloads requested with `referrer`.
+pub(crate) fn record(d: &style::properties::font_face::Descriptors, referrer: Option<&str>) -> Option<FaceRecord> {
     use style::font_face::FontStyleRange;
     let family = d.font_family.as_ref()?.name.to_string().to_ascii_lowercase();
     let sources = source_list(d.src.as_ref());
@@ -124,6 +128,7 @@ pub(crate) fn record(d: &style::properties::font_face::Descriptors) -> Option<Fa
         ranges,
         size_adjust,
         overrides: [over(&d.ascent_override), over(&d.descent_override), over(&d.line_gap_override)],
+        referrer: referrer.map(str::to_owned),
         ..FaceRecord::of(family)
     })
 }

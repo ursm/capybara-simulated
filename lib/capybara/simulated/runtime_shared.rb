@@ -207,7 +207,7 @@ module Capybara
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing
         # entry; the face installed under a `local()` name; a FontFace's own bytes — nil where there is none.
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
-        '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i) },
+        '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2]) },
         '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
         '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },

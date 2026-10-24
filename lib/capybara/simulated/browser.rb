@@ -3823,12 +3823,12 @@ module Capybara
       # `realm` — requests it, under the policy its `referrerpolicy` sets (`policy`): `rack_fetch`'s answer.
       def subresource_fetch(url, realm, policy)
         client = request_client(realm, policy)
-        rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:url], client_url: client[:url],
+        rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url],
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
-      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil)
+      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil, initiator: nil)
         result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy,
-                                                                     client_realm: client_realm)
+                                                                     client_realm: client_realm, initiator: initiator)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -3952,10 +3952,10 @@ module Capybara
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
-      def durable_source(url, realm = 0, element_policy = nil)
-        client = request_client(realm, element_policy)
-        body = rack_fetch_body(url, client_url: client[:url], referrer: client[:url], referrer_policy: client[:policy], client_origin: client[:origin],
-                                    client_realm: client[:realm])
+      def durable_source(url, realm = 0, element_policy = nil, referrer = nil)
+        client = request_client(realm, element_policy, referrer: referrer)
+        body = rack_fetch_body(url, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy], client_origin: client[:origin],
+                                    client_realm: client[:realm], initiator: client[:initiator])
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
         fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
@@ -4035,9 +4035,10 @@ module Capybara
       end
 
       # (…fetched, where no cache has it, as the document of realm `realm` (0 the page) requests it: its Referer that
-      # document's URL under its policy — or the one its element's `referrerpolicy` sets, `policy` — its cookies and
-      # Sec-Fetch-Site that document's: a frame's style sheet a frame's)
-      def external_asset_source(url, document = nil, realm = nil, policy = nil)
+      # document's URL under its policy — or the one its element's `referrerpolicy` sets, `policy` — or `referrer`, an
+      # imported module's referring script's base URL, under it; its cookies and Sec-Fetch-Site that document's: a frame's
+      # style sheet a frame's)
+      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer = nil)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4073,7 +4074,7 @@ module Capybara
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy)
+        body, fresh_until = durable_source(key, realm.to_i, policy, referrer)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
@@ -8433,12 +8434,13 @@ module Capybara
       # `[path, meta]`: the face's file on disk (nil when it could not be fetched or read) and
       # the facts of the fetch that brought it (`resource_timing_meta`); a cross-visit cache hit
       # reports the same facts as served from the cache (Chrome files a cached font with
-      # `transferSize` 0).
-      def font_file_and_meta_for(url, realm = 0)
+      # `transferSize` 0). `referrer` the URL the request is referred by where it is not its client's: a rule's face's, its
+      # style resource base URL (CSS Values 4 "fetch a style resource", a font a `cors` fetch) — its sheet's location.
+      def font_file_and_meta_for(url, realm = 0, referrer = nil)
         key = resolve_against_current(url.to_s)
         return [nil, nil] unless key.is_a?(String)
 
-        client = request_client(realm)
+        client = request_client(realm, referrer: referrer)
         # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
         # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
         cached = [client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url).to_s, key]
@@ -8490,8 +8492,9 @@ module Capybara
         elsif http_url?(key)
           # A font is a CORS fetch (CSS Fonts 4 §4.9.1): a cross-origin face without
           # `Access-Control-Allow-Origin` fails, as in Chrome.
-          result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin', client_url: client[:url], referrer: client[:url],
-                                                                 referrer_policy: client[:policy], client_origin: client[:origin], client_realm: client[:realm], body_raw: true)
+          result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin', client_url: client[:url], referrer: client[:referrer],
+                                                                 referrer_policy: client[:policy], client_origin: client[:origin], client_realm: client[:realm],
+                                                                 initiator: client[:initiator], body_raw: true)
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
@@ -8507,9 +8510,10 @@ module Capybara
       # file (nil when the bytes are no font the decoder reads — a 404, a broken file), with the fetch's facts for its
       # Resource Timing entry and `ok`, whether bytes arrived (a data: face has no fetch facts; an unreadable
       # container still loads, measured with the fallback family).
-      # (…fetched, where no cache has it, as the document of realm `realm` requests it: `external_asset_source`)
-      def web_font_fetch(url, realm = 0)
-        file, meta = font_file_and_meta_for(url, realm)
+      # (…fetched, where no cache has it, as the document of realm `realm` requests it — referred by `referrer` where its
+      # face has one: `font_file_and_meta_for`)
+      def web_font_fetch(url, realm = 0, referrer = nil)
+        file, meta = font_file_and_meta_for(url, realm, referrer)
         {'path' => file, 'meta' => meta, 'ok' => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
       end
 
@@ -9612,15 +9616,17 @@ module Capybara
         map ? Native.import_map_integrity(map, url.to_s) : ''
       end
 
-      # HTML "resolve a module specifier" against `base_url` (the referrer's) through `realm`'s import map: the URL, or
-      # the specifier itself where it resolves to none (a bare one nothing maps), which then fails to fetch.
+      # A module request of the script named `base_url` (the referrer): [HTML "resolve a module specifier" against its base
+      # URL through `realm`'s import map — the URL, or the specifier itself where it resolves to none (a bare one nothing
+      # maps), which then fails to fetch — and that base URL, which the request is referred by (HTML "fetch the
+      # descendants of a module script", HostLoadImportedModule: the referring script's base URL its referrer)].
       # (…an inline classic script's — no URL of its own — its base URL, its document's as it ran (`__csimInlineScriptBase`:
       # a frame's, not the page's, its `<base href>` heeded, one inserted after it not); a script the realm knows by no
       # name — a handler's, a string timer's — its document's base URL now)
-      def resolve_module_specifier(specifier, base_url, realm)
+      def resolve_module_request(specifier, base_url, realm)
         base = module_base_url(base_url) || realm_text(realm, '__csimInlineScriptBase', base_url.to_s) ||
                realm_text(realm, '__csimBaseURL') || effective_module_base(nil)
-        Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier
+        [Native.import_map_resolve(@importmaps&.[](realm.to_i) || '', specifier.to_s, base) || specifier, base]
       end
       # …a string realm `realm` (0 the page) answers `name` with, nil for none.
       private def realm_text(realm, name, *args)
@@ -11012,18 +11018,22 @@ module Capybara
       # site Sec-Fetch-Site compares — its referrer policy, or the one the request's element sets (`element_policy`), its
       # origin where that is opaque ('null': a sandboxed document's), and the realm itself, whose ancestors make it cross-site
       # for cookies — or, a negative `realm`, worker -`realm`'s: its script's URL under the default policy (a worker no
-      # document's realm the host may ask from its thread).
-      def request_client(realm, element_policy = nil)
+      # document's realm the host may ask from its thread). And the request's referrer: the client's URL ("client"), or
+      # `referrer` where the request names one of its own — a font's sheet's location, an imported module's referring
+      # script's base URL — its initiator (Sec-Fetch-Site, Origin) the client's origin all the same.
+      def request_client(realm, element_policy = nil, referrer: nil)
         realm = realm.to_i
         if realm.negative?
           url = @workers.dig(-realm, :script_url).to_s
-          return {url: http_url?(url) ? url : nil, policy: element_policy.to_s, origin: nil, realm: nil}
+          url = nil unless http_url?(url)
+          return {url: url, policy: element_policy.to_s, origin: nil, realm: nil, referrer: referrer || url, initiator: referrer && url_origin(url)}
         end
         url, policy = realm_referrer_initiator(realm)
         opaque = document_origin_opaque?(realm)
         # (…which no element lifts for an opaque origin's document: it refers as none, as its navigations do)
         policy = element_policy unless element_policy.to_s.empty? || opaque
-        {url: url, policy: policy, origin: opaque ? 'null' : nil, realm: realm.zero? ? nil : realm}
+        origin = opaque ? 'null' : nil
+        {url: url, policy: policy, origin: origin, realm: realm.zero? ? nil : realm, referrer: referrer || url, initiator: referrer && (origin || url_origin(url))}
       end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
       # and whose origin an Origin header carries — a local document's (about:blank, srcdoc) its creator's, the nearest

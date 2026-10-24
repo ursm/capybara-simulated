@@ -13,9 +13,9 @@ use crate::font_files::{face_file, Terminated};
 // system face's).
 pub(crate) type Resolved = (i32, [Option<f64>; 3]);
 
-// What the page side does for the engine: `fetch(kind, value, bucket)` a source's file (font_files.rs), `settle(index,
-// ok)` the document's face `index` once its file is known, `system(family, bucket)` the file fontconfig resolves a
-// family's system face to (null for none).
+// What the page side does for the engine: `fetch(kind, value, bucket, referrer)` a source's file (font_files.rs),
+// `settle(index, ok)` the document's face `index` once its file is known, `system(family, bucket)` the file fontconfig
+// resolves a family's system face to (null for none).
 struct Host<'s> {
     fetch: v8::Local<'s, v8::Function>,
     settle: v8::Local<'s, v8::Function>,
@@ -36,7 +36,7 @@ fn indexed_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, index: usize, host: 
         return Ok(known.clone());
     }
     let Some(face) = arena.font_faces.get(index).cloned() else { return Ok(None) };
-    let file = face_file(scope, cid, face.file.as_deref(), &face.sources, face.local_style(), host.fetch)?;
+    let file = face_file(scope, cid, face.file.as_deref(), &face.sources, face.local_style(), face.referrer.as_deref(), host.fetch)?;
     let files = &mut realm(scope, cid).face_files;
     if files.len() <= index {
         files.resize(index + 1, None);
