@@ -425,6 +425,26 @@ RSpec.describe "a form submission's request" do
     expect(seen['b.test/y'].last).to be_nil
   end
 
+  # …the initiating document taken as the navigation begins (HTML's source snapshot): one its own navigation discards
+  # before its other is sent — a frame navigating its parent away, then a sibling of the page — still cross-site.
+  it 'sends the Fetch metadata of the document that began a navigation, gone since' do
+    seen = {}
+    s = simulated_session(lambda {|env|
+      key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"
+      seen[key] = env['HTTP_SEC_FETCH_SITE']
+      case key
+      when 'a.test/' then html.('<iframe src="http://b.test/p"></iframe><iframe src="/s"></iframe>')
+      when 'b.test/p' then html.('<iframe src="http://c.test/c"></iframe>')
+      when 'c.test/c' then html.('<script>function go() { parent.location.href = "http://b.test/p2"; top.frames[1].location.href = "http://a.test/t"; }</script>')
+      else html.(env['PATH_INFO'])
+      end
+    })
+    s.visit 'http://a.test/'
+    s.within_frame(0) { s.within_frame(0) { s.execute_script('go()') } }
+    s.evaluate_script('1')
+    expect(seen['a.test/t']).to eq('cross-site')
+  end
+
   # …and a frame's own `noreferrer` form submitted to the frame by its script sends none either (Firefox: none).
   it "sends no Referer from a frame's own `noreferrer` form its script submits" do
     referers = []
