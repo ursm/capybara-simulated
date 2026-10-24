@@ -3929,7 +3929,10 @@ module Capybara
         result = rack_fetch('GET', key, '', {}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                             client_origin: client[:origin], client_realm: client[:realm], dest: dest)
-        result && resource_timing_meta(result)
+        # (…and a plugin's its body, which may be an image its element takes its natural size from)
+        meta = result && resource_timing_meta(result)
+        meta['body'] = document_payload(result['body']) if meta && %w[embed object].include?(dest.to_s)
+        meta
       end
 
       # The response facts a `PerformanceResourceTiming` entry is built from, without the body — and the headers a

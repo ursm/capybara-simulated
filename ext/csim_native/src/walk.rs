@@ -2507,10 +2507,11 @@ impl<'a> Walk<'a> {
         let node = self.node(id);
         let sized = |w: f64, h: f64| Intrinsic { w, h, ratio: false, ratio_only: false };
         Ok(Some(match node.rendering_tag() {
-            "iframe" | "frame" | "embed" | "video" => sized(300.0, 150.0),
-            // (…the default object size, as an `<iframe>`'s — unless it shows its fallback, and is no replaced element)
+            "iframe" | "frame" | "video" => sized(300.0, 150.0),
+            // (…the default object size, as an `<iframe>`'s — unless it shows its fallback, and is no replaced element;
+            // an image's, an SVG document's root's, where its resource is one: the bindings' `processPluginElement`)
             "object" if renders_object_fallback(self.arena, id, node) => return Ok(None),
-            "object" => sized(300.0, 150.0),
+            "object" | "embed" => node.natural_size.map_or(sized(300.0, 150.0), Intrinsic::of),
             "canvas" => {
                 let dim = |name: &str, default: f64| node.get_attr(name).and_then(crate::validity::parse_non_negative).map_or(default, |n| n as f64);
                 Intrinsic { ratio: true, ..sized(dim("width", 300.0), dim("height", 150.0)) }
