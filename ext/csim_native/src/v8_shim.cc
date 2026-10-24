@@ -1,6 +1,8 @@
-// V8 inline APIs rusty_v8 does not bind, for node_handle.rs (build.rs compiles this against the v8 crate's headers).
+// V8 APIs rusty_v8 does not bind, for node_handle.rs and script.rs (build.rs compiles this against the v8 crate's
+// headers).
 
 #include "v8-embedder-heap.h"
+#include "v8-function.h"
 #include "v8-isolate.h"
 #include "v8-local-handle.h"
 #include "v8-object.h"
@@ -16,6 +18,16 @@ extern "C" void csim_traced_reset_droppable(v8::TracedReference<v8::Object>* sel
 // Clear `self` — which needs no isolate, as a roots handler has none to give.
 extern "C" void csim_traced_clear(v8::TracedReference<v8::Object>* self) {
   self->Reset();
+}
+
+// The function `f` calls: a bound function's target, through every bind (Function::GetBoundFunction), or `f` itself —
+// a handle of the current scope.
+extern "C" const v8::Function* csim_bound_target(const v8::Function* f) {
+  auto fn = *reinterpret_cast<const v8::Local<v8::Function>*>(&f);
+  for (auto target = fn->GetBoundFunction(); target->IsFunction(); target = fn->GetBoundFunction()) {
+    fn = target.As<v8::Function>();
+  }
+  return *fn;
 }
 
 // What a dropped object's wrappable is told (node_handle.rs `csim_node_reset_root`).

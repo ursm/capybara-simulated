@@ -278,11 +278,18 @@ fn thrown_at_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         None => rv.set_null(),
     }
 }
-// __dom.functionScript(fn) -> the name of the script the function `fn` was compiled in, where it is a page script's of a
-// URL (`page_script`) — the script a callback that threw no location of its own came out of — or null.
+// src/v8_shim.cc: the function a bound function calls.
+unsafe extern "C" {
+    fn csim_bound_target(f: *const v8::Function) -> *const v8::Function;
+}
+// __dom.functionScript(fn) -> the name of the script the function `fn` was compiled in — a bound one's target's — where
+// it is a page script's of a URL (`page_script`): the script a callback that threw no location of its own came out of —
+// or null.
 fn function_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Ok(f) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation), never a null one.
+    let f: v8::Local<v8::Function> = unsafe { std::mem::transmute(csim_bound_target(&*f)) };
     let Some(name) = f.get_script_origin(scope).resource_name().filter(|n| n.is_string()) else { return };
     let url = name.to_rust_string_lossy(scope);
     if page_script(&url) == Some(false) {
@@ -290,17 +297,22 @@ fn function_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     }
 }
 
-// __dom.runningScript() -> the name of the script of the page's that is running — the top frame of the stack that is
-// a page script's (`page_script`), where that is one of a URL — or null: the script a promise it rejected was rejected by
-// (HTML HostPromiseRejectionTracker).
-fn running_script_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_null();
+// __dom.runningScriptMuted() -> whether the script of the page's that is running — the top frame of the stack that is a
+// page script's (`page_script`) — is a classic one whose errors are muted (`muted_scripts`): the script a promise it
+// rejected was rejected by (HTML HostPromiseRejectionTracker). At once false where no script is muted, as a page's
+// rejections are many and its muted scripts few.
+fn running_script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let cid = crate::dom::realm_id(scope, &args);
+    if crate::dom::realm(scope, cid).muted_scripts.is_empty() {
+        return;
+    }
     let Some(trace) = v8::StackTrace::current_stack_trace(scope, RUNNING_SCRIPT_FRAMES) else { return };
     for i in 0..trace.get_frame_count() {
         let Some(name) = trace.get_frame(scope, i).and_then(|f| f.get_script_name_or_source_url(scope)) else { continue };
         let url = name.to_rust_string_lossy(scope);
         match page_script(&url) {
-            Some(false) => return rv.set(name.into()),
+            Some(false) => return rv.set_bool(crate::dom::realm(scope, cid).muted_scripts.contains(&url)),
             Some(true) => return,
             None => {}
         }
@@ -330,7 +342,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
     crate::dom::register(scope, ns, "thrownAt", thrown_at_op, context_id);
     crate::dom::register(scope, ns, "functionScript", function_script_op, context_id);
-    crate::dom::register(scope, ns, "runningScript", running_script_op, context_id);
+    crate::dom::register(scope, ns, "runningScriptMuted", running_script_muted_op, context_id);
     crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
