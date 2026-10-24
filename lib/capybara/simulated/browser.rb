@@ -11914,7 +11914,8 @@ module Capybara
       # the initiator its Origin and Sec-Fetch-Site are made of.
       def current_referrer_initiator = realm_referrer_initiator(@current_realm_id.to_i)
       def realm_referrer_initiator(realm_id)
-        return [@current_url, main_document_referrer_policy] if realm_id.zero?
+        # (…a document of an opaque origin, a sandboxed one's — the page's a CSP `sandbox` makes one — refers as none)
+        return [@current_url, document_origin_opaque?(0) ? 'no-referrer' : main_document_referrer_policy] if realm_id.zero?
         url = frame_realm_url(realm_id)
         return [url, 'no-referrer'] if frame_document_origin_opaque?(realm_id)
         policy = frame_document_referrer_policy(realm_id)
