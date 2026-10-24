@@ -193,11 +193,22 @@ impl RealmArena {
     }
 }
 
+// Whether code compiled under the script name `url` is the page's — None for the driver's own: the snapshot's, the
+// host's `<eval>` its script runners are compiled under, none at all — and, where it is, whether it is code the page's
+// document compiled (an inline script, a handler content attribute, a string timer: `inline://…`, `csim-eval…`), whose
+// URL is the document's.
+fn page_script(url: &str) -> Option<bool> {
+    if url.is_empty() || url.contains(char::is_whitespace) || url == "<snapshot>" || url == "<eval>" {
+        return None;
+    }
+    Some(url.starts_with("inline://") || url.starts_with("csim-eval"))
+}
+
 // Where an exception was thrown, by its V8 `stack`: its top frame of the page's (`at f (url:line:col)` / `at
-// url:line:col`) — the driver's own snapshot's skipped, as a browser's bindings are no frame of a stack — as `(document,
-// url, line, column)`, `document` where the frame is code the page's document compiled (an inline script, a handler
-// content attribute, a string timer, `new Function`, `eval`: V8's `eval at …, <anonymous>:L:C`), whose URL is the
-// document's. None for a stack of no such frame.
+// url:line:col`) — the driver's own skipped (`page_script`), as a browser's bindings are no frame of a stack — as
+// `(document, url, line, column)`, `document` where the frame is code the page's document compiled, whose URL is the
+// document's: `new Function` and `eval` too (V8's `eval at f (url:L:C), <anonymous>:L:C`), its `url` that of the script
+// that evaluated it, where a script of the page's from a URL did ("" otherwise). None for a stack of no such frame.
 pub(crate) fn stack_location(stack: &str) -> Option<(bool, String, u32, u32)> {
     fn number(s: &str) -> Option<u32> {
         s.bytes().all(|b| b.is_ascii_digit()).then(|| s.parse().ok()).flatten()
@@ -207,58 +218,119 @@ pub(crate) fn stack_location(stack: &str) -> Option<(bool, String, u32, u32)> {
         let (rest, line) = rest.rsplit_once(':')?;
         Some((rest, number(line)?, number(col)?))
     }
+    // (…the place of a frame — after the function's name, which a page may make anything (`foo (bar)`): the last ` (`, as
+    // no script URL has a space)
+    fn place(frame: &str) -> Option<(&str, u32, u32)> {
+        let place = frame.rsplit_once(" (").map_or(frame, |(_, p)| p);
+        line_col(place.strip_suffix(')').unwrap_or(place))
+    }
     for line in stack.lines() {
         let Some(frame) = line.trim_start().strip_prefix("at ").filter(|_| line.starts_with(char::is_whitespace)) else { continue };
         let evaluated = frame.contains("(eval at ").then(|| frame.strip_suffix(')')?.rsplit_once(", <anonymous>:")).flatten();
-        if let Some((l, c)) = evaluated.and_then(|(_, lc)| lc.split_once(':')).and_then(|(l, c)| Some((number(l)?, number(c)?))) {
-            return Some((true, String::new(), l, c));
+        let at = evaluated.and_then(|(origin, lc)| Some((origin, lc.split_once(':')?))).and_then(|(origin, (l, c))| Some((origin, number(l)?, number(c)?)));
+        if let Some((origin, l, c)) = at {
+            // (…the innermost `eval at` of a chain of them: the script whose code the first evaluation was)
+            let outer = origin.rsplit_once("eval at ").map_or(origin, |(_, o)| o);
+            let outer = outer.split_once(", <anonymous>").map_or(outer, |(o, _)| o);
+            let url = place(outer).map(|(u, _, _)| u).filter(|u| page_script(u) == Some(false)).unwrap_or("");
+            return Some((true, url.to_owned(), l, c));
         }
-        // (…after the function's name, which a page may make anything — `foo (bar)` — the last ` (`: no script URL has a
-        // space)
-        let place = frame.rsplit_once(" (").map_or(frame, |(_, p)| p);
-        let place = place.strip_suffix(')').unwrap_or(place);
-        let Some((url, l, c)) = line_col(place) else { continue };
-        // (…the driver's own frames: the snapshot's, and the host's `<eval>` its script runners are compiled under)
-        if url.is_empty() || url.contains(char::is_whitespace) || url == "<snapshot>" || url == "<eval>" {
-            continue;
-        }
-        let document = url.starts_with("inline://") || url.starts_with("csim-eval");
+        let Some((url, l, c)) = place(frame) else { continue };
+        let Some(document) = page_script(url) else { continue };
         return Some((document, url.to_owned(), l, c));
     }
     None
 }
-// __dom.stackLocation(stack) -> `[document, url, line, column]` of `stack_location`, or null.
-fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let stack = args.get(0).to_rust_string_lossy(scope);
-    let Some((document, url, line, column)) = stack_location(&stack) else { return rv.set_null() };
+
+// Where V8 says the exception `e` was thrown — the location of the message it makes of it (an Error's, of where it was
+// made, from the frames it keeps of its own, which neither `Error.prepareStackTrace` nor a written `stack` reaches; a
+// SyntaxError's, of the place in its text that did not compile) — as `stack_location` says it, None where that is the
+// driver's code or none.
+fn thrown_at(scope: &mut v8::PinScope<'_, '_>, e: v8::Local<'_, v8::Value>) -> Option<(bool, String, u32, u32)> {
+    let message = v8::Exception::create_message(scope, e);
+    let url = message.get_script_resource_name(scope).filter(|n| n.is_string())?.to_rust_string_lossy(scope);
+    let document = page_script(&url)?;
+    let line = message.get_line_number(scope)? as u32;
+    Some((document, url, line, message.get_start_column() as u32 + 1))
+}
+
+fn location_array<'s>(scope: &mut v8::PinScope<'s, '_>, (document, url, line, column): (bool, String, u32, u32)) -> v8::Local<'s, v8::Value> {
     let items: [v8::Local<v8::Value>; 4] = [
         v8::Boolean::new(scope, document).into(),
         v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
         v8::Integer::new_from_unsigned(scope, line).into(),
         v8::Integer::new_from_unsigned(scope, column).into(),
     ];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    v8::Array::new_with_elements(scope, &items).into()
+}
+// __dom.stackLocation(stack) -> `[document, url, line, column]` of `stack_location`, or null.
+fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let stack = args.get(0).to_rust_string_lossy(scope);
+    match stack_location(&stack) {
+        Some(at) => rv.set(location_array(scope, at)),
+        None => rv.set_null(),
+    }
+}
+// __dom.thrownAt(e) -> `[document, url, line, column]` of `thrown_at`, or null.
+fn thrown_at_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    match thrown_at(scope, args.get(0)) {
+        Some(at) => rv.set(location_array(scope, at)),
+        None => rv.set_null(),
+    }
+}
+// __dom.functionScript(fn) -> the name of the script the function `fn` was compiled in, where it is a page script's of a
+// URL (`page_script`) — the script a callback that threw no location of its own came out of — or null.
+fn function_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Ok(f) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let Some(name) = f.get_script_origin(scope).resource_name().filter(|n| n.is_string()) else { return };
+    let url = name.to_rust_string_lossy(scope);
+    if page_script(&url) == Some(false) {
+        rv.set(name);
+    }
 }
 
-// __dom.scriptMuted(url[, muted]) -> whether the classic script fetched from `url` has its errors muted (`muted_scripts`);
-// with `muted`, that set for it, as its fetch found.
+// __dom.runningScript() -> the name of the script of the page's that is running — the top frame of the stack that is
+// a page script's (`page_script`), where that is one of a URL — or null: the script a promise it rejected was rejected by
+// (HTML HostPromiseRejectionTracker).
+fn running_script_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(trace) = v8::StackTrace::current_stack_trace(scope, RUNNING_SCRIPT_FRAMES) else { return };
+    for i in 0..trace.get_frame_count() {
+        let Some(name) = trace.get_frame(scope, i).and_then(|f| f.get_script_name_or_source_url(scope)) else { continue };
+        let url = name.to_rust_string_lossy(scope);
+        match page_script(&url) {
+            Some(false) => return rv.set(name.into()),
+            Some(true) => return,
+            None => {}
+        }
+    }
+}
+// (…as deep as the driver's own frames go beneath a promise rejected: the rejection tracker's call into the bindings)
+const RUNNING_SCRIPT_FRAMES: usize = 16;
+
+// __dom.scriptMuted(url[, muted]) -> whether the classic script fetched from `url` has its errors muted (`muted_scripts`,
+// the isolate's: a script of one realm calls another's); with `muted`, that set for it, as its fetch found.
 fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let muted = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
     let cid = crate::dom::realm_id(scope, &args);
-    let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) else { return rv.set_bool(false) };
+    let scripts = &mut crate::dom::realm(scope, cid).muted_scripts;
     if let Some(muted) = muted {
         if muted {
-            state.muted_scripts.insert(url.clone());
+            scripts.insert(url.clone());
         } else {
-            state.muted_scripts.remove(&url);
+            scripts.remove(&url);
         }
     }
-    rv.set_bool(state.muted_scripts.contains(&url));
+    rv.set_bool(scripts.contains(&url));
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
+    crate::dom::register(scope, ns, "thrownAt", thrown_at_op, context_id);
+    crate::dom::register(scope, ns, "functionScript", function_script_op, context_id);
+    crate::dom::register(scope, ns, "runningScript", running_script_op, context_id);
     crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
@@ -521,6 +593,10 @@ mod tests {
         assert_eq!(stack_location(stack), Some((false, "http://a/s.js".to_owned(), 10, 5)));
         assert_eq!(stack_location("E\n    at http://a/t.js:3:4"), Some((false, "http://a/t.js".to_owned(), 3, 4)));
         assert_eq!(stack_location("E\n    at h (eval at run (<snapshot>:1:1), <anonymous>:7:9)"), Some((true, String::new(), 7, 9)));
+        // (…an evaluation's code named by the script of a URL that evaluated it, the innermost of a chain)
+        assert_eq!(stack_location("E\n    at h (eval at f (http://a/s.js:1:2), <anonymous>:7:9)"), Some((true, "http://a/s.js".to_owned(), 7, 9)));
+        assert_eq!(stack_location("E\n    at eval (eval at g (eval at f (http://a/s.js:1:2), <anonymous>:3:4), <anonymous>:1:7)"), Some((true, "http://a/s.js".to_owned(), 1, 7)));
+        assert_eq!(stack_location("E\n    at eval (eval at http://a/s.js:1:5, <anonymous>:2:3)"), Some((true, "http://a/s.js".to_owned(), 2, 3)));
         assert_eq!(stack_location("E\n    at inline://3:2:1"), Some((true, "inline://3".to_owned(), 2, 1)));
         assert_eq!(stack_location("no frames"), None);
         // (…a function name of parentheses its own, the location after the last ` (`; a URL of them kept)

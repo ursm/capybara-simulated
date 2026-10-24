@@ -30,6 +30,15 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       case env['PATH_INFO']
       when '/s.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ['']]
       when '/bad.js' then [200, {'content-type' => 'text/javascript'}, ['let = = ;']]
+      when '/u.js'
+        body = <<~JS
+          window.thrower = () => { throw new Error('thrower') };
+          setTimeout(() => { throw 'string' });
+          addEventListener('ping', () => { throw {secret: 42} });
+          Promise.reject(new Error('rejected'));
+        JS
+        [200, {'content-type' => 'text/javascript'}, [body]]
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script src="https://other.example.com/u.js"></script>']]
       when '/t.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ["window.later = () => { throw new Error('later') }; throw new Error('now')"]]
       when '/c.css' then [200, {'content-type' => 'text/css'}.merge(allow), ['p{color:rgb(1,2,3)}']]
       when '/missing.css' then [404, {'content-type' => 'text/css'}, ['']]
@@ -108,6 +117,23 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       ['Error: later', 't.js', false]                        => 1,
       ["SyntaxError: Unexpected token '='", 'bad.js', false] => 1
     )
+  end
+
+  # (…by where V8 says it was thrown, which a page's `Error.prepareStackTrace` does not rewrite; for a value thrown with
+  # no location, by the callback that threw it; across realms; and a rejection it made reported nowhere)
+  it 'mutes them however they leave it' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.reports = [];
+      Error.prepareStackTrace = (e) => `${e}\n    at ${location.origin}/page.js:1:1`;
+      window.onerror = (message, filename, lineno, colno, error) => { reports.push([message, filename, lineno, colno, error === null]); };
+      window.onunhandledrejection = (event) => reports.push(['rejection', String(event.reason)]);
+      document.head.append(Object.assign(document.createElement('script'), {src: 'https://other.example.com/u.js', onload: () => setTimeout(thrower)}));
+      document.body.append(Object.assign(document.createElement('iframe'), {src: '/frame'}));
+    JS
+    expect(poll_until { session.evaluate_script('typeof frames[0]?.thrower') == 'function' }).to be(true)
+    session.execute_script("dispatchEvent(new Event('ping')); setTimeout(() => frames[0].thrower())")
+    expect(poll_until { session.evaluate_script('reports.length') == 4 && session.evaluate_script('reports') }).to eq([['Script error.', '', 0, 0, true]] * 4)
   end
 
   it "hides an `<?xml-stylesheet?>` sheet of another origin's rules" do
