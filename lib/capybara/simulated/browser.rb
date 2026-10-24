@@ -3920,11 +3920,12 @@ module Capybara
       # `<object>` / `<track>` source the driver does not otherwise decode or play. Returns the fetch
       # facts (`resource_timing_meta`), or nil when the URL can't resolve; a 4xx/5xx still returns
       # facts so the entry records, as a browser files one for a failed media load.
-      # (…an element's of the document of realm `realm`, its request of mode `mode` and destination `dest`)
-      def resource_timing_fetch(url, mode = 'no-cors', credentials = 'same-origin', realm = 0, dest = nil)
+      # (…an element's of the document of realm `realm`, its request of mode `mode` and destination `dest`, under the
+      # policy its `referrerpolicy` sets, `policy`)
+      def resource_timing_fetch(url, mode = 'no-cors', credentials = 'same-origin', realm = 0, dest = nil, policy = nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
-        client = request_client(realm)
+        client = request_client(realm, policy)
         result = rack_fetch('GET', key, '', {}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                             client_origin: client[:origin], client_realm: client[:realm], dest: dest)
@@ -10027,6 +10028,10 @@ module Capybara
                   worker_cross_site?(hop)
           cookie_site = widen_sec_fetch_site(cookie_site, cross ? 'cross-site' : sec_fetch_site(cookie_client, hop))
         }
+        # (…a `navigate`-mode request of a navigation's destination is a SW re-issuing the navigation it intercepted,
+        # whose cookies the chain's verdict judges: any other — a plugin's resource, of mode "navigate" too — its
+        # client)
+        reissued = cors_mode == 'navigate' && !nav_dest.to_s.empty?
         (MAX_FETCH_REDIRECTS + 1).times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
@@ -10060,7 +10065,7 @@ module Capybara
               end
               if (loc = redirect_location(cache_entry.status, cache_entry.headers))
                 trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
-                widen_cookie_site.(target) unless cors_mode == 'navigate'   # (…a hop the cache answered a hop all the same)
+                widen_cookie_site.(target) unless reissued   # (…a hop the cache answered a hop all the same)
                 redirected = true
                 next_url   = resolve_against(loc, target)
                 return nil unless http_url?(next_url)
@@ -10162,12 +10167,12 @@ module Capybara
             env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
           end
           # SameSite re-filter: cookies attached above (apply_default_request_env ran before this hop's site was known) —
-          # a cross-site hop sheds Strict/Lax cookies. The COOKIE site is not always the Sec-Fetch latch: a `navigate`-mode
-          # request is a SW re-issuing the navigation it intercepted, which keeps the CHAIN's verdict (and the top-level
-          # Lax exception for a GET) — any other is judged by its client (`widen_cookie_site`: an SW that builds a
-          # `new Request` fetches as ITSELF — same-site-cookies expects Strict cookies on the rewritten same-origin request
-          # even though the intercepted navigation was cross-site).
-          if cors_mode == 'navigate'
+          # a cross-site hop sheds Strict/Lax cookies. The COOKIE site is not always the Sec-Fetch latch: a SW re-issuing
+          # the navigation it intercepted (`reissued`) keeps the CHAIN's verdict (and the top-level Lax exception for a
+          # GET) — any other is judged by its client (`widen_cookie_site`: an SW that builds a `new Request` fetches as
+          # ITSELF — same-site-cookies expects Strict cookies on the rewritten same-origin request even though the
+          # intercepted navigation was cross-site).
+          if reissued
             cookie_site = sec_site
           else
             widen_cookie_site.(target)

@@ -316,6 +316,7 @@ const STEP_REMOVED: u32 = 1 << 19; // the attribute removed: its Attr node detac
 const STEP_POPOVER: u32 = 1 << 20; // a `popover` changed: a showing popover of another state now hidden
 const STEP_LINK_RESOURCE: u32 = 1 << 21; // a `<link>`'s resource may be another: fetched again, its `load` fired
 const STEP_PICTURE_SOURCE: u32 = 1 << 22; // …its candidates or what selects it: its images' data updated too
+const STEP_PLUGIN: u32 = 1 << 23; // an `<embed>`'s `src` / `type`, an `<object>`'s `data` / `type`: its processing runs
 
 // __dom.attrWrite(element, how, a, b, c, d) -> `[steps, key, oldValue, localName]` of the change made (`how`, above):
 // what the bindings do for it (`STEP_*`), the key of the attribute, the value it had (null for none) and its local
@@ -581,6 +582,7 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let renavigates = !set || changed || (local == "src" && n.plain_attr("srcdoc").is_none());
     steps |= flag(frame && matches!(local, "src" | "srcdoc") && renavigates, STEP_FRAME_SRC);
     steps |= flag(local == "src" && set, STEP_MEDIA_SRC);
+    steps |= flag(html && changed && matches!((tag, local), ("embed", "src" | "type") | ("object", "data" | "type")), STEP_PLUGIN);
     // (…a `<source>` a `<picture>` holds, set, changed or removed: HTML's relevant mutations of its images — its
     // candidates and what selects it, `srcset`, `sizes`, `media`, `type` — and the dimensions they take)
     let picture = html && tag == "source" && changed && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.is_html_named("picture"));

@@ -96,6 +96,36 @@ RSpec.describe 'a subresource request', :https do
     )
   end
 
+  # (…each time its processing runs: a second element of the same resource, one inserted again, a resource set after
+  # its insertion — and one no network answers loaded all the same)
+  it "fires a plugin's load each time its processing runs" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.events = [];
+      const make = (tag, label) => {
+        const el = document.createElement(tag);
+        el.addEventListener('load', () => events.push(`load ${label}`));
+        el.addEventListener('error', () => events.push(`error ${label}`));
+        return el;
+      };
+      for (const label of ['a', 'b']) { const e = make('embed', label); e.src = '/e.svg'; document.body.append(e); }
+      window.again = make('object', 'again');
+      again.data = '/o.svg';
+      document.body.append(again);
+      const late = make('object', 'late');
+      document.body.append(late);
+      late.data = '/o.svg';
+      const local = make('object', 'data');
+      local.data = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>';
+      document.body.append(local);
+    JS
+    expect(poll_until { session.evaluate_script('events.length') == 5 && session.evaluate_script('events.sort()') }).to eq(
+      ['load a', 'load again', 'load b', 'load data', 'load late']
+    )
+    session.execute_script('again.remove(); document.body.append(again)')
+    expect(poll_until { session.evaluate_script('events.length') == 6 && session.evaluate_script('events.at(-1)') }).to eq('load again')
+  end
+
   it 'refuses a beacon over the keepalive quota' do
     session.visit '/'
     expect(session.evaluate_script("['x'.repeat(70000), 'x'.repeat(40000)].map((d, i) => navigator.sendBeacon('/q' + i, d))")).to eq([false, true])

@@ -1,7 +1,8 @@
 // The resources connecting an element fetches that nothing here consumes — a media element's poster, media data and
-// shown tracks, a plugin's resource, an SVG `<use>`'s external document — which the bindings fetch for what a page
-// observes of them: their Resource Timing entries, and a controlling service worker's `fetch` events. Which ones, by
-// what URL and initiator, is decided here; each once for the page (`RealmState::timed_resources`).
+// shown tracks, an SVG `<use>`'s external document — which the bindings fetch for what a page observes of them: their
+// Resource Timing entries, and a controlling service worker's `fetch` events. Which ones, by what URL and initiator, is
+// decided here; each once for the page (`RealmState::timed_resources`). And a plugin's resource — an `<embed>`'s, an
+// `<object>`'s — fetched as each of its element's processing runs, whose `load` its page may wait on.
 
 use std::collections::HashSet;
 
@@ -17,12 +18,11 @@ pub(crate) type TimedResources = HashSet<(&'static str, String)>;
 const NO_CORS: u32 = 0;
 const CORS: u32 = 1;
 const CORS_CREDENTIALS: u32 = 2;
-// …and a plugin's resource's, which is a navigation request whatever its `crossorigin` (HTML: the `embed` and `object`
-// elements' requests of mode "navigate", their credentials included).
-const NAVIGATE: u32 = 3;
+
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
+    crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
     crate::dom::register(scope, ns, "useReference", use_reference_op, context_id);
 }
 
@@ -54,7 +54,6 @@ pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> 
 //     plays ('video' / 'audio', of their own destinations); and each `<track default src>` child ('track'). (Chrome
 //     picks the first PLAYABLE source and loads a track only when its mode shows: the first source and the `default`
 //     tracks stand in.)
-//   an `<embed src>` ('embed'), an `<object data>` ('object');
 //   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg), an image
 //     (whatwg/fetch#1012).
 fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, &'static str, String, u32)> {
@@ -91,16 +90,13 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
                     }
                 }
             }
-            "embed" => wanted.extend(attr("src").map(|src| ("embed", "embed", id, src))),
-            "object" => wanted.extend(attr("data").map(|data| ("object", "object", id, data))),
             _ => {}
         }
     }
     let mut out = Vec::new();
     for (initiator, destination, el, raw) in wanted {
         let Some(url) = arena.parse_document_url(doc, &raw) else { continue };
-        let mode = if matches!(destination, "embed" | "object") { NAVIGATE } else { cors_of(arena, el) };
-        out.push((initiator, destination, url.href().to_owned(), mode));
+        out.push((initiator, destination, url.href().to_owned(), cors_of(arena, el)));
     }
     if let Some(url) = use_reference(arena, id, doc) {
         out.push(("other", "image", url, NO_CORS));
@@ -119,8 +115,8 @@ fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
     }
 }
 
-// __dom.timedResources(el, docNid) -> `[initiator, destination, url, cors, …]`: the resources connecting `el` fetches for no consumer
-// (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS / NAVIGATE; undefined for none.
+// __dom.timedResources(el, docNid) -> `[initiator, destination, url, cors, …]`: the resources connecting `el` fetches
+// for no consumer (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS; undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let found = timed_resources(&mut crate::dom::dom(scope).arena, id, doc);
@@ -147,4 +143,41 @@ fn use_reference_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     if let Some(url) = v8::String::new(scope, &url) {
         rv.set(url.into());
     }
+}
+
+// The resource a connected `<embed>` or `<object>` element `id` (of document `doc`) is to fetch as its processing runs
+// — HTML's embed setup steps and object processing model, at its insertion and as its `src` / `data` / `type` change —
+// `(destination, url)`: an `<embed src>`'s ('embed'), an `<object data>`'s ('object'), each parsed against `doc`'s base
+// URL; none for one with none, in a document with no browsing context, or that is a descendant of an `<object>` with a
+// resource of its own, which shows that rather than the fallback content it is part of. (Whether it is being rendered,
+// which an `<embed>`'s being potentially active also asks, is not asked: the layout may not be made yet.)
+fn plugin_resource(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<(&'static str, String)> {
+    if !arena.document_states.has_browsing_context(doc) || !arena.is_connected(id) {
+        return None;
+    }
+    let n = arena.get(id).filter(|n| n.kind == NodeKind::Element && n.ns == ns!(html))?;
+    let (destination, raw) = match &*n.local_name {
+        "embed" => ("embed", n.plain_attr("src")?.to_owned()),
+        "object" => ("object", n.plain_attr("data")?.to_owned()),
+        _ => return None,
+    };
+    if raw.is_empty() {
+        return None;
+    }
+    let mut at = n.parent;
+    while let Some(p) = at.and_then(|p| arena.get(p)) {
+        if p.is_html_named("object") && p.plain_attr("data").is_some_and(|d| !d.is_empty()) {
+            return None;
+        }
+        at = p.parent;
+    }
+    Some((destination, arena.parse_document_url(doc, &raw)?.href().to_owned()))
+}
+
+// __dom.pluginResource(el, docNid) -> `[destination, url]` (`plugin_resource`), or undefined.
+fn plugin_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
+    let Some((destination, url)) = plugin_resource(&mut crate::dom::dom(scope).arena, id, doc) else { return };
+    let (Some(d), Some(u)) = (v8::String::new(scope, destination), v8::String::new(scope, &url)) else { return };
+    rv.set(v8::Array::new_with_elements(scope, &[d.into(), u.into()]).into());
 }
