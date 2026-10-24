@@ -4936,7 +4936,7 @@ module Capybara
           pending
         elsif !sw_script
           fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id),
-                              opaque: creator_key.to_s.start_with?('opaque:'))
+                              opaque: creator_key.to_s.start_with?('opaque:'), dest: shared ? 'sharedworker' : 'worker')
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -8522,7 +8522,7 @@ module Capybara
           # `Access-Control-Allow-Origin` fails, as in Chrome.
           result = rack_fetch('GET', key, '', {}, 'follow', 'cors', credentials: 'same-origin', client_url: client[:url], referrer: client[:referrer],
                                                                  referrer_policy: client[:policy], client_origin: client[:origin], client_realm: client[:realm],
-                                                                 initiator: client[:initiator], body_raw: true)
+                                                                 initiator: client[:initiator], body_raw: true, dest: 'font')
           # The fetch's facts for the font's Resource Timing entry (read back by the caller
           # on this thread), a 404 included.
           Thread.current[:csim_font_meta] = result && resource_timing_meta(result)
@@ -9591,8 +9591,8 @@ module Capybara
       # a cross-origin URL or redirect a network error, as for a classic and a module worker alike (HTML "fetch a classic
       # worker script", "fetch a single module script") — which fires the worker's `error`.
       # (…its client of an opaque origin — a sandboxed frame's — one no http(s) script is same-origin with: a network error,
-      # the worker's `error`)
-      private def fetch_worker_script(url, client_url, opaque: false)
+      # the worker's `error`) — its destination `dest`, 'worker' or 'sharedworker'.
+      private def fetch_worker_script(url, client_url, opaque: false, dest: 'worker')
         u = url.to_s
         if u.start_with?('blob:')
           # Resolve via the Driver's partition store so a SAME-partition blob created
@@ -9612,7 +9612,7 @@ module Capybara
         # from a data: URL — its origin is opaque, so its blob: URLs serialize
         # with a 'null' origin). Decode inline; Rack can't serve a data: URL.
         return decode_data_url_body(u) if u.start_with?('data:')
-        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url, client_origin: opaque ? 'null' : nil)
+        rack_fetch_body(u, cors_mode: 'same-origin', client_url: client_url, client_origin: opaque ? 'null' : nil, dest: dest)
       end
 
       # The decoded body of a `data:` URL, by Fetch's data: URL processor (the engine's, the page's too) — empty for one

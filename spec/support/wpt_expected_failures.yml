@@ -3150,30 +3150,8 @@ fetch/metadata/generated/window-location.https.sub.html:
 - sec-fetch-user - location.assign with user activation
 - sec-fetch-user - location.href with user activation
 - sec-fetch-user - location.replace with user activation
-fetch/metadata/generated/worker-dedicated-constructor.https.sub.html:
-- sec-fetch-dest - no options
-- 'sec-fetch-dest - options: type=module'
 fetch/metadata/generated/worker-dedicated-importscripts.https.sub.html:
-- sec-fetch-dest
-- sec-fetch-mode
-- sec-fetch-site - Cross-Site -> Cross-Site
-- sec-fetch-site - Cross-Site -> Same Origin
-- sec-fetch-site - Cross-Site -> Same-Site
-- sec-fetch-site - Cross-site
-- sec-fetch-site - Same origin
-- sec-fetch-site - Same site
-- sec-fetch-site - Same-Origin -> Cross-Site
-- sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Origin -> Same Origin
-- sec-fetch-site - Same-Origin -> Same-Site
-- sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Site -> Cross-Site
-- sec-fetch-site - Same-Site -> Same Origin
-- sec-fetch-site - Same-Site -> Same-Site
 - sec-fetch-storage-access - Cross-site
-fetch/metadata/generated/worker-dedicated-importscripts.sub.html:
-- sec-fetch-site - HTTPS downgrade-upgrade
-- sec-fetch-site - HTTPS upgrade
 fetch/metadata/object.https.sub.html:
 - Cross-Site object
 - Same-Origin object
@@ -3221,8 +3199,6 @@ fetch/metadata/redirect/redirect-https-downgrade.sub.html:
 fetch/metadata/report.https.sub.html:
 - "[harness] TIMEOUT"
 - "[harness] no subtests"
-fetch/metadata/sharedworker.https.sub.html:
-- 'undefined: sec-fetch-dest'
 fetch/metadata/style.https.sub.html:
 - 'Same-Origin, cors style: sec-fetch-mode'
 fetch/metadata/text.https.html:
@@ -3233,14 +3209,10 @@ fetch/metadata/track.https.sub.html:
 - Same-Origin, CORS track
 - Same-Site track
 - "[harness] TIMEOUT"
-fetch/metadata/unload.https.sub.html:
-- 'undefined: sec-fetch-mode'
 fetch/metadata/window-open.https.sub.html:
 - 'Cross-site window, user-activated: sec-fetch-user'
 - 'Same-origin window, user-activated: sec-fetch-user'
 - 'Same-site window, user-activated: sec-fetch-user'
-fetch/metadata/worker.https.sub.html:
-- 'undefined: sec-fetch-dest'
 hr-time/navigation-start-post-before-unload.html:
 - timeOrigin should be set after beforeunload
 hr-time/performance-tojson.html:

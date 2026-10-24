@@ -421,6 +421,7 @@ fn default_request_headers_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::Funct
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "badPort", bad_port_op, context_id);
+    crate::dom::register(scope, ns, "beaconCors", beacon_cors_op, context_id);
     crate::dom::register(scope, ns, "defaultRequestHeaders", default_request_headers_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
     crate::dom::register(scope, ns, "corsRequest", cors_request_op, context_id);
@@ -485,6 +486,16 @@ fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         }
         HopOutcome::Fail(message) => rv.set(v8::String::new(scope, &message).unwrap().into()),
     }
+}
+// Beacon "sendBeacon" step 6: whether a beacon whose body's Content-Type is `content_type` ('' none) is a CORS request —
+// mode "cors" for a type that is no CORS-safelisted one, "no-cors" for any other or none.
+pub(crate) fn beacon_cors(content_type: &[u8]) -> bool {
+    !content_type.is_empty() && !cors_safelisted_request_header(b"content-type", content_type)
+}
+// __dom.beaconCors(contentType) -> `beacon_cors`.
+fn beacon_cors_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let content_type = byte_string(scope, args.get(0));
+    rv.set_bool(beacon_cors(&content_type));
 }
 // __dom.requestBodyHeader(name) -> whether it is a request-body-header name.
 fn request_body_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -625,6 +636,16 @@ pub(crate) fn http_token_for_ruby(s: magnus::RString) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A beacon is a CORS request for a body of a type no CORS-safelisted Content-Type is, a no-cors one for any other.
+    #[test]
+    fn beacon_cors_by_content_type() {
+        assert!(!beacon_cors(b""));
+        assert!(!beacon_cors(b"text/plain;charset=UTF-8"));
+        assert!(!beacon_cors(b"application/x-www-form-urlencoded;charset=UTF-8"));
+        assert!(!beacon_cors(b"multipart/form-data; boundary=x"));
+        assert!(beacon_cors(b"application/json"));
+    }
 
     // Under `nosniff` (its first value, any case) a script-like destination takes a JavaScript MIME type alone, a style
     // one `text/css`; any other, and any response without it, is not blocked.
