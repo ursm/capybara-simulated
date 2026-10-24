@@ -75,6 +75,12 @@ pub(crate) struct Navigables {
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
     pub(crate) linked: crate::dom::SharedWord,
+    // The child navigables between two documents — the realm of the last one each had, the window a WindowProxy of it is
+    // over still, and its container: one whose next document no build is coming for (a frame built when it is next
+    // touched) is made as a WindowProxy of it is used, as its container's `contentWindow` read makes it. How many, the
+    // bindings read with no call (`parkedNavigables`): none, the common page's, keeps a proxy's trap a load of a word.
+    parked: HashMap<i32, NodeId>,
+    parked_count: crate::dom::SharedWord,
 }
 
 impl Navigables {
@@ -113,6 +119,20 @@ impl RealmArena {
         let frames = self.navigables.children.iter().filter(|&(&c, child)| self.stepped_realm(c, child).is_some()).count();
         let linked = frames + self.navigables.windows.len();
         self.navigables.linked.set(u32::try_from(linked).unwrap_or(u32::MAX));
+        // (…and the navigables between two documents, their containers in a live document)
+        let nav = &self.navigables;
+        let parked: HashMap<i32, NodeId> = nav
+            .children
+            .iter()
+            .filter(|&(&c, child)| child.realm.is_none() && self.get(c).is_some_and(|n| !nav.discarded.contains(&n.realm)))
+            .filter_map(|(&c, child)| child.last.map(|last| (last, c)))
+            .collect();
+        self.navigables.parked_count.set(u32::try_from(parked.len()).unwrap_or(u32::MAX));
+        self.navigables.parked = parked;
+    }
+    // The container of the navigable between two documents whose last one was realm `realm`'s (`parked`).
+    pub(crate) fn parked_navigable(&self, realm: i32) -> Option<NodeId> {
+        self.navigables.parked.get(&realm).copied()
     }
 }
 
@@ -675,6 +695,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "realmNavigable", realm_navigable, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
+    crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
+    crate::dom::register(scope, ns, "parkedNavigableRealm", parked_navigable_realm, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
@@ -699,6 +721,24 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::view_word(scope, ns, "childFrames", linked);
     let discarded = crate::dom::dom(scope).arena.navigables.discarded_count.store();
     crate::dom::view_word(scope, ns, "discardedRealms", discarded);
+    let parked = crate::dom::dom(scope).arena.navigables.parked_count.store();
+    crate::dom::view_word(scope, ns, "parkedNavigables", parked);
+}
+
+// __dom.parkedNavigableRealm(realm) -> the realm whose document holds the container of the navigable between two
+// documents whose last one was realm `realm`'s, or -1 (`parked_navigable`) — whose `parkedNavigable` it is to make.
+fn parked_navigable_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_int32(-1) };
+    let arena = &crate::dom::dom(scope).arena;
+    rv.set_int32(arena.parked_navigable(realm).and_then(|c| arena.get(c)).map_or(-1, |n| n.realm));
+}
+// __dom.parkedNavigable(realm) -> that container, of this realm's document, or null.
+fn parked_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_null() };
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let container = arena.parked_navigable(realm).filter(|&c| arena.get(c).is_some_and(|n| n.realm == cid));
+    rv.set(crate::dom::node_value(scope, container));
 }
 
 // __dom.windowName() -> this realm's navigable's target name (`window.name`).

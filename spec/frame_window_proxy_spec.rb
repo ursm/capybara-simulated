@@ -33,6 +33,27 @@ RSpec.describe "a frame's WindowProxy across its navigations" do
     expect(session.evaluate_script('[frames[1].held() === kept, kept.document.title]')).to eq([true, 'B'])
   end
 
+  it 'makes the next document, where no build is coming for it, as it is used' do
+    session.visit '/'
+    expect(poll_until { session.evaluate_script('frames[0].document.title') == 'A' }).to be(true)
+    session.execute_script('window.fw = frames[0]; window.kept = frames[1].held(); document.querySelector("iframe").src = "about:blank"')
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[kept.document.URL, fw.document.URL, fw === frames[0], kept === frames[1].held()]')).to eq(
+      ['about:blank', 'about:blank', true, true]
+    )
+  end
+
+  # (…a bounded gap: HTML's WindowProxy reports the next window without it, which no JS Proxy can — platform-globals.js)
+  it 'answers a property defined non-configurable over its last window as it was defined' do
+    session.visit '/'
+    expect(poll_until { session.evaluate_script('frames[0].document.title') == 'A' }).to be(true)
+    session.execute_script('window.fw = frames[0]; Object.defineProperty(fw, "x", {value: 1, configurable: false}); fw.location.href = "/b"')
+    expect(poll_until { session.evaluate_script('fw.document.title') == 'B' }).to be(true)
+    expect(session.evaluate_script('[fw.x, "x" in fw, Object.getOwnPropertyDescriptor(fw, "x").value, Reflect.ownKeys(fw).includes("x")]')).to eq(
+      [1, true, 1, true]
+    )
+  end
+
   it 'leaves a removed frame inert' do
     session.visit '/'
     expect(poll_until { session.evaluate_script('frames[0].document.title') == 'A' }).to be(true)

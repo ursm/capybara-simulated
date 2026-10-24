@@ -478,17 +478,18 @@ module Capybara
         # free (the old document's iframe elements go away → DOM-unregister disposes their realms);
         # the Ruby reload path (navigate_realm_self_get/_post) rebuilds without that DOM teardown, so
         # a descendant frame's realm would otherwise linger and its contentWindow stay live. (The old document the
-        # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.)
-        dispose_frame_realm_tree(old_id)
+        # Browser has unloaded already, as a navigation the page made unloads it: Browser#unload_frame_document.) The
+        # WindowProxies of the frame kept, over the new document's window next.
+        dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_frame_realm(ctx, url, body, content_type, parent_id, seed['container'], seed['docOrigin'], seed['locationOrigin'], nil, nil, seed['viewport'], client_id, seed['margins'], seed['sandbox'],
                            history_state: history_state, referrer: referrer, referrer_policy: referrer_policy)
       end
 
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
       # parent's child realms (the engine's) are consistent as each level is torn down.
-      def dispose_frame_realm_tree(id)
+      def dispose_frame_realm_tree(id, keep_proxies: false)
         frame_realm_parents.select {|_child, parent| parent == id }.each_key {|child| dispose_frame_realm_tree(child) }
-        dispose_frame_realm(id)
+        dispose_frame_realm(id, keep_proxies: keep_proxies)
       end
 
       # Navigate a window realm (`win.location = …`): a FRESH realm for the new
@@ -499,7 +500,7 @@ module Capybara
         meta = window_realm_meta[old_id] || {}
         # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
         # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
-        dispose_frame_realm_tree(old_id)
+        dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
           url, body, content_type,
           opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base], window_key: meta[:window_key], retarget_from: old_id,
@@ -519,8 +520,18 @@ module Capybara
       # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
       # new one's window — one object however its active document changes (HTML) — before the new document's scripts run.
       def retarget_window_proxies(from, to)
-        ([ctx] + frame_realms.values + loading_frame_realms.values).each {|r| r.call('__csimRetargetWindowProxy', from, to) rescue nil }
+        ctx.call('__csimRetargetWindowProxies', proxy_holders, from, to)
+      rescue StandardError
+        nil
       end
+      # …and, its window gone, dropped: they would pin the dead global and be handed back stale.
+      def evict_window_proxies(id)
+        ctx.call('__csimEvictWindowProxies', proxy_holders, id)
+      rescue StandardError
+        nil
+      end
+      # The realms that may hold a WindowProxy of another's window: every live one.
+      def proxy_holders = [0] + frame_realms.keys + loading_frame_realms.keys
       # Whether the window of window realm `id` is closed (navigables.rs `window_closed`, by its key).
       def window_realm_closed?(id)
         key = window_realm_meta.dig(id.to_i, :window_key) or return false
@@ -530,9 +541,12 @@ module Capybara
       end
 
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
-      # ancestor frame re-navigates). No-op for nil/0/unknown ids.
-      def dispose_frame_realm(id)
+      # ancestor frame re-navigates). No-op for nil/0/unknown ids. `keep_proxies`: its navigable goes on to another
+      # document, whose window the WindowProxies of it are to be over next (`retarget_window_proxies`).
+      def dispose_frame_realm(id, keep_proxies: false)
         return if id.nil? || id.zero?
+
+        evict_window_proxies(id) unless keep_proxies
 
         loading_frame_realms.delete(id)
         # The frame's browsing context is going away — revoke the blob URLs it
@@ -896,8 +910,14 @@ module Capybara
         # the bridge calls this to tear down the superseded one so it doesn't
         # linger in @frame_realms and get re-drained on every poll tick.
         # Disposing a non-executing child realm mid-callback is safe.
-        c.attach('__csim_disposeFrameRealm', ->(id) {
-          dispose_frame_realm(id)   # also revokes the realm's blob URLs
+        # (…its WindowProxies kept where its navigable goes on to another document: `retarget_window_proxies`)
+        c.attach('__csim_disposeFrameRealm', ->(id, kept) {
+          dispose_frame_realm(id, keep_proxies: kept == true)   # also revokes the realm's blob URLs
+          nil
+        })
+        # …and a navigable destroyed between two documents: the WindowProxies of it, over its last one's window, dropped.
+        c.attach('__csim_windowProxiesGone', ->(id) {
+          evict_window_proxies(id.to_i)
           nil
         })
         # …and a frame's container removed: its navigable destroyed, its session history with it (session_history.rs).
@@ -1037,7 +1057,7 @@ module Capybara
         # from the container's `name` and kept across its navigations) to identify itself sees it
         # (declarative-shadow declarative-child-frame).
         # …the realm of the document it had before, if any, what the WindowProxies of it are over until it loads.
-        retarget_from = realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, realm.id).to_i if container
+        retarget_from = container ? realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, realm.id).to_i : -1
         # (…and which navigable that is, and whether its document is the first that navigable has — its initial
         # about:blank where it is about:blank: `first_frame_realm?`; a container inserted again a new navigable's)
         navigable = realm.call('__csimRealmNavigable', realm.id).to_i
@@ -1095,7 +1115,7 @@ module Capybara
         end
         # The navigable's WindowProxy, held in any realm, its new document's window's from its first script on — as a
         # window's (`create_window_realm`).
-        retarget_window_proxies(retarget_from, realm.id) if retarget_from.to_i >= 0
+        retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s)
         # This document, loaded, refreshes the service-worker client record it made as it began loading
         # (bridge.entry.js __csimLoadDocument) — an UNCONTROLLED context is still a client of its origin

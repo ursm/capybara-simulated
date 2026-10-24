@@ -196,8 +196,11 @@ A bounded, documented conformance gap is acceptable **only** when it's
 the deliberate cost of a load-bearing design choice and the alternative
 costs more than it's worth — e.g. `HTMLCollection extends Array` (for
 framework array-iteration compat) forces `length` into
-`getOwnPropertyNames`. List and justify these explicitly; don't let them
-multiply.
+`getOwnPropertyNames`; and a WindowProxy is a JS Proxy, which cannot commit
+HTML's willful invariant violation (tc39/ecma262#672), so a property defined
+non-configurable through it outlives the navigation that replaces its window
+(`frameWindowProxyFor`, platform-globals.js). List and justify these
+explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox
