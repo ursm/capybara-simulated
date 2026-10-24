@@ -599,6 +599,10 @@ module Capybara
       private def browser_of_blob_window(window)
         ([@browser] + @aux_windows.map {|w| w[:browser] } + @sw_parked).find {|b| b&.blob_window == window }
       end
+      # Whether a window of this session other than `browser`'s is open (Browser#blob_shared?).
+      def other_windows?(browser)
+        ([@browser] + @aux_windows.map {|w| w[:browser] }).any? {|b| b && !b.equal?(browser) }
+      end
 
       # Is this blob: URL in a different storage partition than `accessor`'s top-level
       # site? Unknown blobs (no entry) are treated as same-partition (no extra gating
@@ -615,9 +619,9 @@ module Capybara
       # document into a TOP-LEVEL window (window.open / a window navigation): that new
       # context is the blob's own partition, so no partition gate applies here — the
       # cross-partition rule for windows is the noopener severing above. (A nested frame
-      # resolves a blob URL in its own window's registry alone, which no other window's
-      # URL is in.) Falls back to the accessor's own store for an unpartitioned URL
-      # (worker / legacy path).
+      # resolves another window's URL only in its own partition: Browser#partition_blob.)
+      # Falls back to the accessor's own store for an unpartitioned URL (worker / legacy
+      # path).
       def blob_bytes_for(url, accessor)
         maker = Native.blob_registry_partition(accessor.blob_window, url.to_s)&.first
         creator = (maker && browser_of_blob_window(maker)) || accessor

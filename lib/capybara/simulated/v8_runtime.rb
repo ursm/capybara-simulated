@@ -1328,7 +1328,7 @@ module Capybara
         url_s = url.to_s
         src   = inline_src
         # (…a `blob:` or `data:` one's its own, which no network nor service worker fetches)
-        local = inline_src.nil? && @browser.local_module_source(url_s)
+        local = inline_src.nil? && @browser.local_module_source(url_s, realm_key(target))
         if local
           src, content_type = local
         elsif src.nil? && (sw = module_sw_ctxs[realm_key(target)])

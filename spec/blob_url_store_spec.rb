@@ -297,4 +297,26 @@ RSpec.describe 'the blob URL store' do
     s.within_frame(0) { s.execute_script('location.reload()') }
     expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('BL')
   end
+  # A URL is resolved by a context of its storage key alone (File API "obtain a blob object": every fetch of it but a
+  # top-level navigation's) — a frame of another origin fetches and imports none of the page's (Chrome: each rejects), as
+  # it revokes none — while a frame of its own origin does.
+  it 'is resolved by a context of its origin alone' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><script>
+        window.url = URL.createObjectURL(new Blob(['export default 1'], {type: 'text/javascript'}));
+      </script>
+      <iframe src="http://other.test/f"></iframe><iframe src="/f"></iframe>
+    HTML
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/f' ? '<!DOCTYPE html>f' : page]] })
+    s.visit '/'
+    url = s.evaluate_script('url')
+    try = <<~JS
+      window.got = [];
+      fetch(#{url.to_json}).then(() => got.push('fetched'), () => got.push('fetch failed'));
+      import(#{url.to_json}).then(() => got.push('imported'), () => got.push('import failed'));
+    JS
+    [0, 1].map {|i| s.within_frame(i) { s.execute_script(try) } }
+    got = [0, 1].map {|i| s.within_frame(i) { poll_until { (g = s.evaluate_script('got')).size == 2 && g.sort } } }
+    expect(got).to eq([['fetch failed', 'import failed'], %w[fetched imported]])
+  end
 end

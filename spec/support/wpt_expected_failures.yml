@@ -13,11 +13,6 @@
 # Regenerate after a driver fix:  bundle exec ruby script/regen_wpt_expected_failures.rb
 #
 ---
-FileAPI/BlobURL/cross-partition.https.html:
-- Blob URL shouldn't be fetched from a cross-partition dedicated worker
-- Blob URL shouldn't be fetched from a cross-partition iframe
-- Blob URL shouldn't be fetched from a cross-partition service worker
-- Blob URL shouldn't be fetched from a cross-partition shared worker
 FileAPI/url/sandboxed-iframe.html:
 - Blob URL fragment is implemented.
 - Blob URLs can be used in iframes, and are treated same origin

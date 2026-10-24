@@ -85,12 +85,12 @@ pub(crate) fn forget_copies(window: u64) {
         entries.retain(|_, e| e.owner.is_some());
     }
 }
-// …what the URL resolves to, as the host reads it (a worker's script): its bytes — '' for an entry that holds none —
-// or nil for none.
-pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, window: u64, url: magnus::RString) -> Option<magnus::RString> {
+// …what the URL resolves to, as the host reads it (a worker's script, another window's blob): its bytes and its type —
+// or nil for none, or for an entry that holds no bytes (its maker's isolate alone has them).
+pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, window: u64, url: magnus::RString) -> Option<(magnus::RString, String)> {
     let url = entry_key(&url_text(url));
-    let found = lock().get(&window)?.get(&url).map(|e| e.bytes.clone())?;
-    Some(ruby.str_from_slice(found.as_deref().unwrap_or_default()))
+    let (bytes, ty) = lock().get(&window)?.get(&url).and_then(|e| Some((e.bytes.clone()?, e.ty.clone())))?;
+    Some((ruby.str_from_slice(&bytes), ty))
 }
 
 // …the storage partition of the URL `url` a context of window `window` made: `site`, its top-level site as it was made.

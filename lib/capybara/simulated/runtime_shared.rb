@@ -218,6 +218,8 @@ module Capybara
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0]); nil },
         '__csimBlobWindow'           => ->(b, *_a) { b.blob_window },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
+        '__csim_partitionBlob'       => ->(b, *a) { b.partition_blob(a[0]) },
+        '__csim_blobShared'          => ->(b, *_a) { b.blob_shared? },
         # Any non-timer async channel (worker / SSE / hijacked fetch / window
         # message / websocket) still in flight — the WPT runner's drain consults
         # this so it doesn't bail before an async message (e.g. a freshly-spawned

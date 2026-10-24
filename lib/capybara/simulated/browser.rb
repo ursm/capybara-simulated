@@ -8664,6 +8664,26 @@ module Capybara
       rescue StandardError
         nil
       end
+      # A blob URL another window of this session made, as a context of this window resolves it (`resolveBlobBytes`): its
+      # blob, `{'bytes' => …, 'type' => …}`, where the maker's storage partition is this window's — the same top-level
+      # site (File API "check for same-partition blob URL usage"; the origin the bindings checked) — nil otherwise: the
+      # maker window's registry's bytes (`blob_shared?` had them entered), else its isolate's — which a worker's thread
+      # cannot reach.
+      def partition_blob(url)
+        maker, site = Native.blob_registry_partition(@blob_window, url.to_s)
+        return nil unless maker && maker != @blob_window && site == blob_partition_site
+
+        if (entry = Native.blob_registry_get(maker, url.to_s))
+          return {'bytes' => entry[0], 'type' => entry[1]}
+        end
+        return nil if Thread.current[:csim_worker_handle] || !@driver.respond_to?(:blob_bytes_for)
+
+        blob = @driver.blob_bytes_for(url, self)
+        blob && {'bytes' => blob[:bytes], 'type' => blob[:type]}
+      end
+      # …and whether a blob URL this window makes may be resolved so — another window of the session open — its bytes
+      # then entered in the registry as it is made (blob.js `createObjectURL`), for a worker of that window to read.
+      def blob_shared? = @driver.respond_to?(:other_windows?) && @driver.other_windows?(self)
       # A blob the page hands the host, `{'bytes' => …, 'type' => …}`, as `{bytes:, type:}` — nil for none.
       def host_blob(blob) = blob.is_a?(Hash) && blob['bytes'] ? {bytes: blob['bytes'], type: blob['type'].to_s} : nil
 
@@ -9489,7 +9509,7 @@ module Capybara
         lambda do |abs|
           if abs.start_with?('blob:')
             maker = Native.blob_registry_partition(@blob_window, abs)&.first
-            bytes = maker && Native.blob_registry_get(maker, abs)
+            bytes, = maker && Native.blob_registry_get(maker, abs)
             raise ModuleScriptUnavailable, abs unless bytes
 
             next [bytes, abs]
@@ -9553,12 +9573,13 @@ module Capybara
       # it fails.
       private def decode_data_url_body(url) = Native.data_url(url)&.last || ''
 
-      # A window's module script's source no network fetches — a `blob:` URL's, its blob's bytes as the URL names it now
-      # (`blob_snapshot`), a `data:` one's its own — and its MIME type, the blob's type or the URL's: [bytes, type], [nil,
-      # nil] where it names none (a revoked blob), nil for a URL of another scheme.
-      def local_module_source(url)
+      # A window's module script's source no network fetches — a `blob:` URL's, its blob's bytes as realm `realm` resolves
+      # the URL now (`__csimResolveBlobForHost`: by a context of its storage key alone), a `data:` one's its own — and its
+      # MIME type, the blob's type or the URL's: [bytes, type], [nil, nil] where it names none (a revoked blob, another
+      # origin's), nil for a URL of another scheme.
+      def local_module_source(url, realm)
         if url.start_with?('blob:')
-          blob = blob_snapshot(url)
+          blob = host_blob(@runtime.realm_direct_call(realm, '__csimResolveBlobForHost', url))
           [blob&.[](:bytes), blob&.[](:type)]
         elsif url.start_with?('data:')
           Native.data_url(url)&.reverse || [nil, nil]
