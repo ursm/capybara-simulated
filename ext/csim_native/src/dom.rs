@@ -5100,8 +5100,9 @@ fn style_font_faces_unguarded(
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleImport(url, css, docNid) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url`
-// arrived (`css` null: it could not be fetched), for every realm sheet whose `@import` waits for it.
+// __dom.styleImport(url, css, docNid, clean) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url`
+// arrived (`css` null: it could not be fetched), for every realm sheet whose `@import` waits for it — its response a
+// CORS-same-origin one where `clean`.
 fn style_import(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -5118,11 +5119,12 @@ fn style_import_unguarded(
     let url = args.get(0).to_rust_string_lossy(scope);
     let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
     let quirks = quirks_arg(scope, &args, 2);
+    let clean = args.get(3).boolean_value(scope);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let arena = d.arena.enter(cid);
     let lock = arena.style_lock.0.clone();
-    let pending = arena.sheets.import(&lock, &url, css.as_deref(), quirks);
+    let pending = arena.sheets.import(&lock, &url, css.as_deref(), quirks, clean);
     if let Some(engine) = d.styles.get_mut(&cid) {
         engine.sheets_changed();
     }

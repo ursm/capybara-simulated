@@ -4082,7 +4082,8 @@ module Capybara
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
         # (…a CORS request's by its mode and credentials: one document's client is of its one origin, which the
-        # process-wide cache keys by too — a frame's its own — worked out only where that cache is asked)
+        # process-wide cache keys by too — a frame's its own, a no-cors one's as well, as whether its response is opaque
+        # to its client is the client's origin's — worked out only where that cache is asked)
         memo_key = mode ? "#{mode} #{credentials} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
@@ -4096,8 +4097,8 @@ module Capybara
           (@asset_bytes ||= {})[key] = e[2]
           return e[0]
         end
-        client     = mode && request_client(realm.to_i, policy, referrer: referrer)
-        shared_key = mode ? "#{memo_key} #{client_origin_of(client)}" : key
+        client     = request_client(realm.to_i, policy, referrer: referrer)
+        shared_key = "#{memo_key} #{client_origin_of(client)}"
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[shared_key])
             if e[1].nil? || Time.now < e[1]
@@ -4112,8 +4113,7 @@ module Capybara
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials,
-                                                                    client: client || request_client(realm.to_i, policy, referrer: referrer))
+        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, client: client)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
@@ -5350,7 +5350,7 @@ module Capybara
           headers = r['headers'] || {}
           return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers}
         end
-        {'body' => RuntimeShared.utf8_text(bytes), 'status' => status, 'contentType' => header_field(r['headers'] || {}, 'content-type').to_s}
+        {'body' => RuntimeShared.utf8_text(bytes), 'type' => type, 'status' => status, 'contentType' => header_field(r['headers'] || {}, 'content-type').to_s}
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)

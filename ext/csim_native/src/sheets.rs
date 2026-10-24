@@ -87,6 +87,9 @@ pub(crate) struct SheetStore {
     rules: std::collections::HashMap<u32, RuleRef>,
     next_rule: u32,
     pending: RefCell<Vec<PendingImport>>,
+    // The URLs of the `@import`ed sheets whose response was no CORS-same-origin one (`import`): a sheet made of one is
+    // origin-dirty (`imported_sheet`).
+    dirty_imports: std::collections::HashSet<String>,
     // Each parse made, by what it was made of — kept across the realm's pages (a suite loads its app's sheets on every
     // page) and SHARED by every sheet of the same text until CSSOM reaches one, which then takes a copy of its own
     // (`own`): an edit is its owner's alone. (Not one with an `@import`, whose imports are fetched for the parse that
@@ -258,11 +261,22 @@ impl SheetStore {
         self.sheets.clear();
         self.rules.clear();
         self.pending.get_mut().clear();
+        self.dirty_imports.clear();
     }
 
-    // The sheet at `url` arrived as `css` (None: it could not be fetched): every `@import` waiting for it takes it,
-    // and the URLs its own `@import`s wait for are returned.
-    pub(crate) fn import(&mut self, lock: &SharedRwLock, url: &str, css: Option<&str>, quirks: bool) -> Vec<String> {
+    // Whether the `@import`ed sheet at `url` was made of a response that is no CORS-same-origin one (`import`).
+    pub(crate) fn import_origin_dirty(&self, url: &str) -> bool {
+        self.dirty_imports.contains(url)
+    }
+
+    // The sheet at `url` arrived as `css` (None: it could not be fetched), of a CORS-same-origin response where `clean`:
+    // every `@import` waiting for it takes it, and the URLs its own `@import`s wait for are returned.
+    pub(crate) fn import(&mut self, lock: &SharedRwLock, url: &str, css: Option<&str>, quirks: bool, clean: bool) -> Vec<String> {
+        if clean {
+            self.dirty_imports.remove(url);
+        } else {
+            self.dirty_imports.insert(url.to_owned());
+        }
         let waiting: Vec<PendingImport> = {
             let mut pending = self.pending.borrow_mut();
             let (hit, rest) = std::mem::take(&mut *pending).into_iter().partition(|p| p.url == url);

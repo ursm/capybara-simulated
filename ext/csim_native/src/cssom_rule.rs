@@ -407,8 +407,16 @@ pub(crate) fn delete_keyframe(store: &SheetStore, lock: &SharedRwLock, handle: u
 // has not arrived).
 pub(crate) fn imported_sheet(store: &mut SheetStore, lock: &SharedRwLock, handle: u32) -> Option<u32> {
     let Rule::Css(CssRule::Import(i)) = &store.rule(handle)?.rule else { return None };
-    let sheet = i.read_with(&lock.read()).stylesheet.as_sheet()?.clone();
-    Some(store.adopt(DocumentStyleSheet(sheet)))
+    let (sheet, url) = {
+        let guard = lock.read();
+        let rule = i.read_with(&guard);
+        (rule.stylesheet.as_sheet()?.clone(), rule.url.url().map(|u| u.as_str().to_owned()))
+    };
+    // (…origin-dirty where the response it was made of is: sheets.rs `import_origin_dirty`)
+    let dirty = url.is_some_and(|url| store.import_origin_dirty(&url));
+    let id = store.adopt(DocumentStyleSheet(sheet));
+    store.stored_mut(id)?.origin_dirty = dirty;
+    Some(id)
 }
 
 // The declarations a rule holds — a style, page, keyframe, margin, nested-declarations or position-try rule's

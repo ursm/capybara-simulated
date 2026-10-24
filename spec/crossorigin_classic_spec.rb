@@ -29,6 +29,10 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       case env['PATH_INFO']
       when '/s.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ['']]
       when '/c.css' then [200, {'content-type' => 'text/css'}.merge(allow), ['p{color:rgb(1,2,3)}']]
+      when '/missing.css' then [404, {'content-type' => 'text/css'}, ['']]
+      when '/x.xhtml'
+        pi = ->(href) { %(<?xml-stylesheet href="#{href}"?>) }
+        [200, {'content-type' => 'application/xhtml+xml'}, [%(<?xml version="1.0"?>#{pi.('https://other.example.com/c.css')}#{pi.('/c.css')}<html xmlns="http://www.w3.org/1999/xhtml"/>)]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8>']]
       end
     })
@@ -60,14 +64,30 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
     session.visit '/'
     session.execute_script(<<~JS)
       for (const [id, href, cors] of [['plain', 'https://other.example.com/c.css', false], ['cors', 'https://other.example.com/c.css?allow', true],
-                                       ['data', 'data:text/css,p{}', false]]) {
+                                       ['data', 'data:text/css,p{}', false], ['missing', '/missing.css', false]]) {
         const l = Object.assign(document.createElement('link'), {id, rel: 'stylesheet', href});
         if (cors) l.crossOrigin = 'anonymous';
         document.head.append(l);
       }
+      // (…an `@import`ed one by its own response, whatever imports it)
+      const style = document.head.appendChild(document.createElement('style'));
+      style.textContent = '@import url(https://other.example.com/c.css); @import url(/c.css);';
+      window.imported = (i) => style.sheet.cssRules[i].styleSheet;
     JS
-    read = ->(id) { session.evaluate_script("(() => { try { return String(document.getElementById('#{id}').sheet.cssRules.length); } catch (e) { return e.name; } })()") }
-    expect(%w[plain cors data].map(&read)).to eq(%w[SecurityError 1 1])
+    read = ->(sheet) { session.evaluate_script("(() => { try { return String(#{sheet}.cssRules.length); } catch (e) { return e.name; } })()") }
+    links = %w[plain cors data missing].map { read.("document.getElementById('#{_1}').sheet") }
+    expect(links).to eq(%w[SecurityError 1 1 0])
+    expect([read.('imported(0)'), read.('imported(1)')]).to eq(%w[SecurityError 1])
+  end
+
+  it "hides an `<?xml-stylesheet?>` sheet of another origin's rules" do
+    session.visit '/x.xhtml'
+    sheets = session.evaluate_script(<<~JS)
+      [...document.childNodes].filter((n) => n.nodeType === Node.PROCESSING_INSTRUCTION_NODE).map((pi) => {
+        try { return String(pi.sheet.cssRules.length); } catch (e) { return e.name; }
+      })
+    JS
+    expect(sheets).to eq(%w[SecurityError 1])
   end
 
   it 'fetches a link again as its crossorigin changes, and keys a shadow tree link by its mode' do

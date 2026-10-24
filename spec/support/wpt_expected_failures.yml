@@ -5989,7 +5989,6 @@ service-workers/service-worker/fetch-request-css-base-url.https.html:
 service-workers/service-worker/fetch-request-css-cross-origin.https.html:
 - MIME checking of CSS resources fetched via service worker when Content-Type is not
   set.
-- Same-origin policy for access to CSS resources fetched via service worker
 service-workers/service-worker/fetch-request-css-images.https.html:
 - Verify FetchEvent for css image (backgroundImage).
 - Verify FetchEvent for css image (shapeOutside).
