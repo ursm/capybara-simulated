@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'tmpdir'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/https_app_host'
 
 # A document's sandboxing flag set (HTML §7.6.5): its container's `sandbox` attribute, its response's CSP `sandbox` and
 # its parent document's flags, which an about:blank popup it opens takes on unless it grants
@@ -232,7 +233,7 @@ RSpec.describe 'Sandboxing' do
   # sandboxing to navigate"): a SecurityError, the navigation not made — its top without `allow-top-navigation`, a
   # sibling's frame with no `allow-same-origin` of its own to share — while one with `allow-top-navigation` navigates it,
   # and any document its own child's, each request one of its opaque origin's.
-  it "refuses a sandboxed document another window's Location it may not navigate" do
+  it "refuses a sandboxed document another window's Location it may not navigate", :https do
     sites = {}
     s = simulated_session(lambda {|env|
       sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
@@ -248,7 +249,7 @@ RSpec.describe 'Sandboxing' do
     s.evaluate_script('1')
     expect(s.current_path).to eq('/')
     # (…its own child's it navigates, cross-site to it, as every request of an opaque origin's is)
-    expect(s.within_frame('a') { s.evaluate_script(try.(%(frames[0].location = "http://www.example.com/k2"))) }).to eq('navigated')
+    expect(s.within_frame('a') { s.evaluate_script(try.(%(frames[0].location = "https://www.example.com/k2"))) }).to eq('navigated')
     s.evaluate_script('1')
     expect(sites['/k2']).to eq('cross-site')
     expect(s.within_frame('b') { s.evaluate_script(try.(%(top.location.href = "/z"))) }).to eq('navigated')
@@ -259,7 +260,7 @@ RSpec.describe 'Sandboxing' do
 
   # …and a page a CSP `sandbox` makes of an opaque origin loading a frame and submitting a form to it (the driver's
   # submission of it): cross-site, its POST's Origin `null`, and no Referer (Chrome).
-  it "submits a sandboxed page's form to a named frame as its opaque origin" do
+  it "submits a sandboxed page's form to a named frame as its opaque origin", :https do
     seen = {}
     s = simulated_session(lambda {|env|
       seen[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_SITE'], env['HTTP_ORIGIN'], env['HTTP_REFERER']]

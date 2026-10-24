@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/https_app_host'
 
 # A document's subresources are requested by that document (Fetch "client"): their Referer its URL under its referrer
 # policy — or the one the element's `referrerpolicy` sets — a frame's style sheets, scripts, modules and fonts the
@@ -124,7 +125,7 @@ RSpec.describe 'a subresource request' do
   # A font a sheet's `@font-face` names is a `cors` fetch referred by the rule's style resource base URL (CSS Values 4
   # "fetch a style resource"): an external sheet's location, an `@import`ed one's own — another origin's stripped to its
   # origin by the document's policy — while the `@import` (`no-cors`) is referred by its client, the document.
-  it "is referred by the sheet a font's rule is in" do
+  it "is referred by the sheet a font's rule is in", :https do
     refs  = referers
     sites = {}
     session = simulated_session(lambda {|env|
@@ -136,12 +137,12 @@ RSpec.describe 'a subresource request' do
       css = {
         '/css/a.css' => '@import "/imp/i.css"; @font-face{font-family:A;src:url(/fa.woff2)} @font-face{font-family:C;src:url(/fc.woff2)}',
         '/imp/i.css' => '@font-face{font-family:I;src:url(/fi.woff2)}',
-        '/o.css'     => '@font-face{font-family:O;src:url(http://www.example.com/fo.woff2)}'
+        '/o.css'     => '@font-face{font-family:O;src:url(https://www.example.com/fo.woff2)}'
       }[path]
       next [200, {'content-type' => 'text/css'}, [css]] if css
 
       [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><link rel=stylesheet href=/css/a.css>' \
-                                              '<link rel=stylesheet href=http://other.test/o.css>' \
+                                              '<link rel=stylesheet href=https://other.test/o.css>' \
                                               '<style>@font-face{font-family:S;src:url(/fs.woff2)}</style>']]
     })
     session.visit '/p'
@@ -150,12 +151,12 @@ RSpec.describe 'a subresource request' do
     session.evaluate_script('[...document.fonts].find((f) => f.family === "C").load().then(() => 1, () => 1)')
     session.evaluate_script('1')
     expect(referers.slice('/imp/i.css', '/fa.woff2', '/fc.woff2', '/fi.woff2', '/fo.woff2', '/fs.woff2')).to eq(
-      '/imp/i.css' => 'http://www.example.com/p',
-      '/fa.woff2'  => 'http://www.example.com/css/a.css',
-      '/fc.woff2'  => 'http://www.example.com/css/a.css',
-      '/fi.woff2'  => 'http://www.example.com/imp/i.css',
-      '/fo.woff2'  => 'http://other.test/',
-      '/fs.woff2'  => 'http://www.example.com/p'
+      '/imp/i.css' => 'https://www.example.com/p',
+      '/fa.woff2'  => 'https://www.example.com/css/a.css',
+      '/fc.woff2'  => 'https://www.example.com/css/a.css',
+      '/fi.woff2'  => 'https://www.example.com/imp/i.css',
+      '/fo.woff2'  => 'https://other.test/',
+      '/fs.woff2'  => 'https://www.example.com/p'
     )
     expect(sites['/fo.woff2']).to eq('same-origin')
   end

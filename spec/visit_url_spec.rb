@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/https_app_host'
 
 # The URL a `visit` names is parsed as the page parses a URL (the URL Standard's parser, url_ops.rs): each position
 # percent-encodes what its own set says. An RFC 3986 escape had encoded a `|` in a query, which the URL Standard
@@ -45,7 +46,7 @@ RSpec.describe 'visit' do
 
   # (…and a page at such a URL is same-origin with its own requests: an origin read with Ruby's URI had been none,
   # so a same-origin fetch failed CORS, a link's Sec-Fetch-Site was `none`, and an action-less GET form raised)
-  context "at a URL Ruby's URI refuses" do
+  context "at a URL Ruby's URI refuses", :https do
     let(:requests) { [] }
     let(:session) {
       simulated_session(lambda {|env|
@@ -61,13 +62,13 @@ RSpec.describe 'visit' do
       session.execute_script("fetch('/data').then((r) => r.text()).then((t) => { window.got = t; })")
       expect(session).to have_css('body')
       expect(session.evaluate_async_script('const done = arguments[0]; (function poll() { window.got ? done(window.got) : setTimeout(poll, 10); })()')).to eq('DATA')
-      expect(requests.last).to eq(['/data', '', 'same-origin', 'http://www.example.com/a|b'])
+      expect(requests.last).to eq(['/data', '', 'same-origin', 'https://www.example.com/a|b'])
     end
 
     it 'follows a link and submits an action-less form as same-origin' do
       session.visit '/a|b#tab{1}'
       session.click_link 'next'
-      expect(requests.last).to eq(['/next', '', 'same-origin', 'http://www.example.com/a|b'])
+      expect(requests.last).to eq(['/next', '', 'same-origin', 'https://www.example.com/a|b'])
       session.visit '/a|b'
       session.click_button 'go'
       expect(requests.last.first(3)).to eq(['/a|b', 'q=v', 'same-origin'])

@@ -8277,7 +8277,7 @@ module Capybara
           # issued this request.
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
                               referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
-                              cookie_cross_site: client.cookie_cross_site)
+                              cookie_cross_site: client.cookie_cross_site, dest: 'image')
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
           # after; a 404 is a response too, the entry keeping its status.
@@ -9840,7 +9840,10 @@ module Capybara
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
       # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false)
+      # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
+      # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
+      # no-cors request but where it asks for CORS)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -10099,13 +10102,13 @@ module Capybara
           # that a `fetch(event.request)` re-fetch reports `sec-fetch-dest: empty`, not the
           # navigation's destination. The navigation's dest ('document'/'iframe', threaded as
           # `nav_dest`) still drives the SameSite Lax gate below, which is top-level-only.
-          if cors_mode
+          if cors_mode || dest
             # (…an opaque-origin client's request is of no site at all: cross-site, wherever it goes)
             sec_site = widen_sec_fetch_site(sec_site, client_origin == 'null' ? 'cross-site' : sec_fetch_site(sec_initiator, target))
             env['HTTP_SEC_FETCH_SITE'] = sec_site
-            env['HTTP_SEC_FETCH_MODE'] = cors_mode
+            env['HTTP_SEC_FETCH_MODE'] = cors_mode || 'no-cors'
             # (…a document's own navigation request its destination: a SW's passthrough re-fetch alone reports 'empty')
-            env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : 'empty'
+            env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : (dest || 'empty')
             # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
             # merge_set_cookie)
             env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
@@ -13151,6 +13154,9 @@ module Capybara
       # app host needs to come through @app again. Real-browser drivers
       # get this for free; we have to detect the boundary. nil for a network error (`framed_response`).
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
+        # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
+        # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
+        env = env.reject {|k, _| k.start_with?('HTTP_SEC_FETCH_') } unless secure_cookie_channel?(url)
         # External fetch: if the network is blocked (WebMock) or the
         # host is unreachable, fall back to @app — Rails will 404 or
         # otherwise handle it, matching the pre-cross-host behavior
@@ -13305,7 +13311,7 @@ module Capybara
 
       # Is this URL a secure cookie CHANNEL? One of a potentially trustworthy origin (Secure Contexts, the engine's:
       # url_ops.rs `potentially_trustworthy` — https, wss, a loopback host or `localhost`: Chrome sets and sends Secure
-      # cookies on http://localhost / 127.0.0.1, where app suites run).
+      # cookies on http://localhost / 127.0.0.1, where app suites run) — and the Fetch Metadata a request sends.
       def secure_cookie_channel?(url)
         Native.potentially_trustworthy_origin(parse_url(url.to_s)&.fetch(:origin).to_s)
       end

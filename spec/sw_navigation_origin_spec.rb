@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/https_app_host'
 
 # A navigation a controlling service worker passes through (`fetch(event.request)`) reaches the server with the request
 # metadata of the navigation's own initiating document — an about:blank frame's its creator's, whose origin its POST's
@@ -18,7 +19,7 @@ RSpec.describe 'a service worker passthrough navigation' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 
-  it "carries the Origin of an about:blank frame's creator" do
+  it "carries the Origin of an about:blank frame's creator", :https do
     seen = {}
     worker = "self.addEventListener('fetch', (e) => { if (e.request.mode === 'navigate') e.respondWith(fetch(e.request)); });"
     s = simulated_session(lambda {|env|
@@ -45,7 +46,7 @@ RSpec.describe 'a service worker passthrough navigation' do
       }
     JS
     expect(poll_until { seen['/scope/post'] && seen['/noscope/post'] && seen.slice('/scope/post', '/noscope/post') }).to eq(
-      '/scope/post' => ['same-origin', 'http://www.example.com'], '/noscope/post' => ['same-origin', 'http://www.example.com']
+      '/scope/post' => ['same-origin', 'https://www.example.com'], '/noscope/post' => ['same-origin', 'https://www.example.com']
     )
   end
 end

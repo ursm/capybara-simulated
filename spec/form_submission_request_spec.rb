@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/https_app_host'
 
 # HTML "submit" builds a form's request — its action, method, entries — before it plans the navigation: what the page
 # does to the form after `submit()` returns is no part of what it sends. And a form whose node document is no longer
@@ -325,7 +326,7 @@ RSpec.describe "a form submission's request" do
 
   # …and a submission to a named frame is that frame's navigation request: Sec-Fetch-Dest 'iframe', and a POST its
   # Origin (Fetch "create a navigation request"; Fetch Metadata).
-  it 'sends the Fetch metadata and Origin of a navigation for a form submitted to a named frame' do
+  it 'sends the Fetch metadata and Origin of a navigation for a form submitted to a named frame', :https do
     seen = []
     app = lambda {|env|
       seen << [env['REQUEST_METHOD'], env['HTTP_SEC_FETCH_DEST'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_ORIGIN']] if env['PATH_INFO'] == '/r'
@@ -337,7 +338,7 @@ RSpec.describe "a form submission's request" do
     session.visit '/'
     session.execute_script('g.submit(); p.submit()')
     poll_until { session.evaluate_script('1') && seen.size == 2 }
-    expect(seen.sort).to eq([%w[GET iframe navigate] + [nil], %w[POST iframe navigate http://www.example.com]])
+    expect(seen.sort).to eq([%w[GET iframe navigate] + [nil], %w[POST iframe navigate https://www.example.com]])
   end
 
   # A form whose link types include `noreferrer` sends no Referer, whatever it navigates (HTML "plan to navigate": the
@@ -359,18 +360,18 @@ RSpec.describe "a form submission's request" do
       session = simulated_session(app)
       session.visit '/'
       session.click_button 'go'
-      poll_until { referers.any? }
+      poll_until { !referers.empty? }
       expect(referers).to eq([nil])
     end
   end
 
   # …and an entered frame's own navigations — a link, a form, a Location set, each hop of a redirect — the navigation
   # request's Fetch metadata (dest `iframe`) of the frame's document, cross-site and `Origin: null` for a sandboxed one.
-  it "sends the Fetch metadata of an entered frame's own navigation" do
+  it "sends the Fetch metadata of an entered frame's own navigation", :https do
     seen = {}
     s = simulated_session(lambda {|env|
       seen[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_DEST'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_ORIGIN']]
-      next [302, {'location' => 'http://other.test/landed'}, ['']] if env['PATH_INFO'] == '/r'
+      next [302, {'location' => 'https://other.test/landed'}, ['']] if env['PATH_INFO'] == '/r'
 
       case env['PATH_INFO']
       when '/' then html.('<iframe src="/f"></iframe><iframe sandbox="allow-scripts allow-forms" src="/f"></iframe>')
@@ -398,33 +399,33 @@ RSpec.describe "a form submission's request" do
     s = simulated_session(lambda {|env|
       key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"
       seen[key] = [env['HTTP_ORIGIN'], env['HTTP_COOKIE'], env['HTTP_SEC_FETCH_SITE']]
-      next [307, {'location' => 'http://b.test/r2'}, ['']] if key == 'a.test/r1'
-      next [307, {'location' => 'http://c.test/end'}, ['']] if key == 'b.test/r2'
+      next [307, {'location' => 'https://b.test/r2'}, ['']] if key == 'a.test/r1'
+      next [307, {'location' => 'https://c.test/end'}, ['']] if key == 'b.test/r2'
       next [200, {'content-type' => 'text/html', 'set-cookie' => 's=1; SameSite=Strict'}, ['set']] if key == 'b.test/set'
 
       case key
-      when 'a.test/' then html.('<iframe src="/f"></iframe><iframe></iframe><iframe src="http://b.test/x"></iframe>')
+      when 'a.test/' then html.('<iframe src="/f"></iframe><iframe></iframe><iframe src="https://b.test/x"></iframe>')
       when 'a.test/f' then html.('<form method=post action="/r1"><button>go</button></form>')
       else html.(env['PATH_INFO'])
       end
     })
-    s.visit 'http://b.test/set'
-    s.visit 'http://a.test/'
+    s.visit 'https://b.test/set'
+    s.visit 'https://a.test/'
     s.within_frame(0) { s.click_button 'go' }
     s.within_frame(1) do
-      s.execute_script('document.write("<form method=post action=\"http://a.test/blank\"><button>go</button></form>"); document.close()')
+      s.execute_script('document.write("<form method=post action=\"https://a.test/blank\"><button>go</button></form>"); document.close()')
       s.click_button 'go'
     end
     s.within_frame(2) { s.execute_script('location.href = "/y"') }
     # (…and a frame's not entered alike, its script submitting it)
-    s.execute_script('const d = frames[1].document; d.write("<form method=post action=\\"http://a.test/blank2\\"></form>"); d.close(); d.forms[0].submit()')
+    s.execute_script('const d = frames[1].document; d.write("<form method=post action=\\"https://a.test/blank2\\"></form>"); d.close(); d.forms[0].submit()')
     s.evaluate_script('1')
     expect(seen.slice('a.test/r1', 'c.test/end', 'a.test/blank', 'a.test/blank2').transform_values(&:first)).to eq(
-      'a.test/r1' => 'http://a.test', 'c.test/end' => 'null', 'a.test/blank' => 'http://a.test', 'a.test/blank2' => 'http://a.test'
+      'a.test/r1' => 'https://a.test', 'c.test/end' => 'null', 'a.test/blank' => 'https://a.test', 'a.test/blank2' => 'https://a.test'
     )
     expect(seen['b.test/y'][1]).to be_nil
     # (…and a frame an about:blank document makes loading as its creator's: same-origin)
-    s.execute_script('frames[1].document.body.append(Object.assign(frames[1].document.createElement("iframe"), {src: "http://a.test/inner"}))')
+    s.execute_script('frames[1].document.body.append(Object.assign(frames[1].document.createElement("iframe"), {src: "https://a.test/inner"}))')
     s.evaluate_script('1')
     expect(seen['a.test/inner'].last).to eq('same-origin')
   end
@@ -437,16 +438,40 @@ RSpec.describe "a form submission's request" do
       key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"
       seen[key] = env['HTTP_SEC_FETCH_SITE']
       case key
-      when 'a.test/' then html.('<iframe src="http://b.test/p"></iframe><iframe src="/s"></iframe>')
-      when 'b.test/p' then html.('<iframe src="http://c.test/c"></iframe>')
-      when 'c.test/c' then html.('<script>function go() { parent.location.href = "http://b.test/p2"; top.frames[1].location.href = "http://a.test/t"; }</script>')
+      when 'a.test/' then html.('<iframe src="https://b.test/p"></iframe><iframe src="/s"></iframe>')
+      when 'b.test/p' then html.('<iframe src="https://c.test/c"></iframe>')
+      when 'c.test/c' then html.('<script>function go() { parent.location.href = "https://b.test/p2"; top.frames[1].location.href = "https://a.test/t"; }</script>')
       else html.(env['PATH_INFO'])
       end
     })
-    s.visit 'http://a.test/'
+    s.visit 'https://a.test/'
     s.within_frame(0) { s.within_frame(0) { s.execute_script('go()') } }
     s.evaluate_script('1')
     expect(seen['a.test/t']).to eq('cross-site')
+  end
+
+  # …and none at all to a URL that is not potentially trustworthy — a navigation's nor a subresource's — where the same
+  # requests to its https twin carry it (Fetch "append the Fetch metadata headers for a request"; Chrome).
+  it 'sends no Fetch metadata to a URL that is not potentially trustworthy' do
+    seen = {}
+    s = simulated_session(lambda {|env|
+      seen["#{env['rack.url_scheme']}:#{env['PATH_INFO']}"] = env.select {|k, _| k.start_with?('HTTP_SEC_FETCH_') }
+      next [200, {'content-type' => 'image/png'}, ['']] if env['PATH_INFO'] == '/i.png'
+
+      html.('<iframe src="/f"></iframe><img src="/i.png">')
+    })
+    s.visit 'http://a.test/'
+    s.visit 'https://a.test/'
+    s.evaluate_script('1')
+    expect(seen.slice('http:/', 'http:/f', 'http:/i.png')).to eq('http:/' => {}, 'http:/f' => {}, 'http:/i.png' => {})
+    metadata = seen.slice('https:/', 'https:/f', 'https:/i.png').transform_values {|h|
+      h.values_at('HTTP_SEC_FETCH_SITE', 'HTTP_SEC_FETCH_MODE', 'HTTP_SEC_FETCH_DEST')
+    }
+    expect(metadata).to eq(
+      'https:/'      => %w[none navigate document],
+      'https:/f'     => %w[same-origin navigate iframe],
+      'https:/i.png' => %w[same-origin no-cors image]
+    )
   end
 
   # …and a frame's own `noreferrer` form submitted to the frame by its script sends none either (Firefox: none).
@@ -462,7 +487,7 @@ RSpec.describe "a form submission's request" do
     session = simulated_session(app)
     session.visit '/'
     session.execute_script('frames[0].ff.submit()')
-    poll_until { referers.any? }
+    poll_until { !referers.empty? }
     expect(referers).to eq([nil])
   end
 
@@ -503,7 +528,7 @@ RSpec.describe "a form submission's request" do
       session = simulated_session(app)
       session.visit '/'
       session.within_frame(0) { session.click_button('go') }
-      poll_until { referers.any? }
+      poll_until { !referers.empty? }
       expect(referers).to eq([referer])
     end
   end
