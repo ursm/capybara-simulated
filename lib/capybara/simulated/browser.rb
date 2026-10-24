@@ -11864,15 +11864,16 @@ module Capybara
       # …by the document of realm `realm`, its Referer `initiator` ([url, policy]): a GET, or a POST of `post` ([body,
       # content type]).
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares and whose origin a POST's Origin carries, that
-      # document's: `realm_request_initiator`)
+      # document's: `realm_request_initiator` — one of an opaque origin, a sandboxed frame's, cross-site to every URL)
       def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil)
         source, policy    = initiator
         site, origin_null = realm_request_initiator(realm)
+        seed              = origin_null ? 'cross-site' : nil
         from_document(realm) do
           if post
-            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, origin_null: origin_null)
+            navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, origin_null: origin_null, site_seed: seed)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob, site_seed: seed)
           end
         end
       end

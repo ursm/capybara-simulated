@@ -228,6 +228,31 @@ RSpec.describe 'Sandboxing' do
     expect(s).to have_css('#at', text: '/landed')
   end
 
+  # A Location of another window navigated by a document its sandboxing does not allow to navigate it (HTML "allowed by
+  # sandboxing to navigate"): a SecurityError, the navigation not made — its top without `allow-top-navigation`, a
+  # sibling's frame with no `allow-same-origin` of its own to share — while one with `allow-top-navigation` navigates it,
+  # its request one of its opaque origin's.
+  it "refuses a sandboxed document another window's Location it may not navigate" do
+    sites = {}
+    s = simulated_session(lambda {|env|
+      sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
+      body = case env['PATH_INFO']
+             when '/' then '<iframe id=a sandbox="allow-scripts" srcdoc="x"></iframe><iframe id=b sandbox="allow-scripts allow-top-navigation" srcdoc="x"></iframe><iframe id=c></iframe>'
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    s.visit '/'
+    try = ->(code) { "try { #{code}; 'navigated' } catch (e) { e.name }" }
+    expect(s.within_frame('a') { [s.evaluate_script(try.(%(top.location.href = "/x"))), s.evaluate_script(try.(%(parent.frames[2].location = "/y")))] }).to eq(%w[SecurityError SecurityError])
+    s.evaluate_script('1')
+    expect(s.current_path).to eq('/')
+    expect(s.within_frame('b') { s.evaluate_script(try.(%(top.location.href = "/z"))) }).to eq('navigated')
+    expect(s).to have_current_path('/z')
+    # (…its request one of an opaque origin's, cross-site to every URL: Fetch Metadata)
+    expect(sites['/z']).to eq('cross-site')
+  end
+
   # …and a form a frame's document submits, which the host navigates: as the container said when it was submitted —
   # not as it said when a navigation that made no document (a download) began.
   let(:submitting) {

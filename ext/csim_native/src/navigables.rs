@@ -462,6 +462,20 @@ impl RealmArena {
         let flag = if self.transiently_activated(current) { TOP_LEVEL_NAVIGATION_BY_USER_ACTIVATION } else { TOP_LEVEL_NAVIGATION };
         !self.sandboxed(current, flag)
     }
+    // HTML "allowed by sandboxing to navigate": whether realm `source`'s document may navigate realm `target`'s navigable —
+    // its own or a descendant's always; its own top-level traversable as `top_navigation_allowed` lets it; any other one
+    // where its sandboxing has no sandboxed navigation browsing context flag — a top-level one it opened itself, whose one
+    // permitted sandboxed navigator it is, all the same.
+    pub(crate) fn navigation_allowed(&self, source: i32, target: i32) -> bool {
+        if source == target || self.ancestor_realms(target).contains(&source) {
+            return true;
+        }
+        let top_level = self.live_container(target).is_none();
+        if top_level && self.ancestor_realms(source).contains(&target) {
+            return self.top_navigation_allowed(source);
+        }
+        !self.sandboxed(source, crate::sandbox::NAVIGATION) || (top_level && self.navigables.openers.get(&self.window_key(target)) == Some(&source))
+    }
     // HTML "allowed to download": whether a navigation realm `source`'s document makes (none: the driver's) to a response
     // that is a download may save it — refused where its sandboxing, or the target's, has the sandboxed downloads flag:
     // the target a frame realm `target`'s navigable (none: a top-level one), whose flags are those its document would be
@@ -654,6 +668,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
     crate::dom::register(scope, ns, "keywordNavigable", keyword_navigable, context_id);
+    crate::dom::register(scope, ns, "navigationAllowed", navigation_allowed, context_id);
     crate::dom::register(scope, ns, "downloadAllowed", download_allowed, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
@@ -763,6 +778,13 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let keyword = args.get(0).uint32_value(scope).unwrap_or(TARGET_TOP);
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
+}
+// __dom.navigationAllowed(target) -> whether this realm's document may navigate realm `target`'s navigable
+// (`RealmArena::navigation_allowed`).
+fn navigation_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).navigation_allowed(cid, target));
 }
 // __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm, window]: the navigable the target name
 // chooses from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the
