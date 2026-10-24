@@ -17,6 +17,9 @@ pub(crate) type TimedResources = HashSet<(&'static str, String)>;
 const NO_CORS: u32 = 0;
 const CORS: u32 = 1;
 const CORS_CREDENTIALS: u32 = 2;
+// …and a plugin's resource's, which is a navigation request whatever its `crossorigin` (HTML: the `embed` and `object`
+// elements' requests of mode "navigate", their credentials included).
+const NAVIGATE: u32 = 3;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
@@ -42,27 +45,31 @@ pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> 
 }
 
 // The resources connecting element `id` (of document `doc`) fetches for no consumer, those the page has not fetched
-// yet, each `(initiator, url, cors)` — none in a document with no browsing context, which loads nothing:
-//   a `<video>`'s `poster` ('video');
+// yet, each `(initiator, destination, url, cors)` — its Resource Timing initiator type and its request's destination
+// (Fetch: what Fetch Metadata's `Sec-Fetch-Dest` reports) — none in a document with no browsing context, which loads
+// nothing:
+//   a `<video>`'s `poster` ('video', an image);
 //   a `<video>` / `<audio>`'s media data — its `src` attribute's where it has one (an empty one is a failure, no fetch),
 //     else its first `<source src>` — unless `preload` says `none` (ASCII case-insensitively) and opts it out until it
-//     plays ('video' / 'audio'); and each `<track default src>` child ('track'). (Chrome picks the first PLAYABLE
-//     source and loads a track only when its mode shows: the first source and the `default` tracks stand in.)
+//     plays ('video' / 'audio', of their own destinations); and each `<track default src>` child ('track'). (Chrome
+//     picks the first PLAYABLE source and loads a track only when its mode shows: the first source and the `default`
+//     tracks stand in.)
 //   an `<embed src>` ('embed'), an `<object data>` ('object');
-//   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg).
-fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, String, u32)> {
+//   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg), an image
+//     (whatwg/fetch#1012).
+fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, &'static str, String, u32)> {
     if !arena.document_states.has_browsing_context(doc) {
         return Vec::new();
     }
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return Vec::new() };
-    let mut wanted: Vec<(&'static str, NodeId, String)> = Vec::new();
+    let mut wanted: Vec<(&'static str, &'static str, NodeId, String)> = Vec::new();
     if n.ns == ns!(html) {
         let attr = |name: &str| n.plain_attr(name).filter(|v| !v.is_empty()).map(str::to_owned);
         match &*n.local_name {
             tag @ ("video" | "audio") => {
                 let initiator = if tag == "video" { "video" } else { "audio" };
                 if let Some(poster) = attr("poster").filter(|_| tag == "video") {
-                    wanted.push(("video", id, poster));
+                    wanted.push(("video", "image", id, poster));
                 }
                 let first_source = || {
                     n.children.iter().find_map(|&c| {
@@ -75,30 +82,31 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
                         Some(src) => Some(src.to_owned()).filter(|s| !s.is_empty()),
                         None => first_source(),
                     };
-                    wanted.extend(src.map(|src| (initiator, id, src)));
+                    wanted.extend(src.map(|src| (initiator, initiator, id, src)));
                 }
                 for &c in &n.children {
                     let Some(track) = arena.get(c).filter(|c| c.is_html_named("track") && c.plain_attr("default").is_some()) else { continue };
                     if let Some(src) = track.plain_attr("src").filter(|v| !v.is_empty()) {
-                        wanted.push(("track", c, src.to_owned()));
+                        wanted.push(("track", "track", c, src.to_owned()));
                     }
                 }
             }
-            "embed" => wanted.extend(attr("src").map(|src| ("embed", id, src))),
-            "object" => wanted.extend(attr("data").map(|data| ("object", id, data))),
+            "embed" => wanted.extend(attr("src").map(|src| ("embed", "embed", id, src))),
+            "object" => wanted.extend(attr("data").map(|data| ("object", "object", id, data))),
             _ => {}
         }
     }
     let mut out = Vec::new();
-    for (initiator, el, raw) in wanted {
+    for (initiator, destination, el, raw) in wanted {
         let Some(url) = arena.parse_document_url(doc, &raw) else { continue };
-        out.push((initiator, url.href().to_owned(), cors_of(arena, el)));
+        let mode = if matches!(destination, "embed" | "object") { NAVIGATE } else { cors_of(arena, el) };
+        out.push((initiator, destination, url.href().to_owned(), mode));
     }
     if let Some(url) = use_reference(arena, id, doc) {
-        out.push(("other", url, NO_CORS));
+        out.push(("other", "image", url, NO_CORS));
     }
     let seen = &mut arena.timed_resources;
-    out.retain(|(initiator, url, _)| seen.insert((initiator, url.clone())));
+    out.retain(|(initiator, _, url, _)| seen.insert((initiator, url.clone())));
     out
 }
 
@@ -111,18 +119,19 @@ fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
     }
 }
 
-// __dom.timedResources(el, docNid) -> `[initiator, url, cors, …]`: the resources connecting `el` fetches for no consumer
-// (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS; undefined for none.
+// __dom.timedResources(el, docNid) -> `[initiator, destination, url, cors, …]`: the resources connecting `el` fetches for no consumer
+// (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS / NAVIGATE; undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let found = timed_resources(&mut crate::dom::dom(scope).arena, id, doc);
     if found.is_empty() {
         return;
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 3);
-    for (initiator, url, cors) in &found {
-        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 4);
+    for (initiator, destination, url, cors) in &found {
+        let (Some(i), Some(d), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, destination), v8::String::new(scope, url)) else { continue };
         items.push(i.into());
+        items.push(d.into());
         items.push(u.into());
         items.push(v8::Integer::new_from_unsigned(scope, *cors).into());
     }

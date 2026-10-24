@@ -3920,11 +3920,14 @@ module Capybara
       # `<object>` / `<track>` source the driver does not otherwise decode or play. Returns the fetch
       # facts (`resource_timing_meta`), or nil when the URL can't resolve; a 4xx/5xx still returns
       # facts so the entry records, as a browser files one for a failed media load.
-      def resource_timing_fetch(url, cors = false, credentials = 'same-origin')
+      # (…an element's of the document of realm `realm`, its request of mode `mode` and destination `dest`)
+      def resource_timing_fetch(url, mode = 'no-cors', credentials = 'same-origin', realm = 0, dest = nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
-        result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : 'no-cors',
-                            credentials: credentials, client_url: @current_url, referrer: @current_url)
+        client = request_client(realm)
+        result = rack_fetch('GET', key, '', {}, 'follow', mode,
+                            credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
+                            client_origin: client[:origin], client_realm: client[:realm], dest: dest)
         result && resource_timing_meta(result)
       end
 

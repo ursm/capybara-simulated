@@ -2633,46 +2633,8 @@ fetch/metadata/generated/element-audio.sub.html:
 - sec-fetch-user - Not sent to non-trustworthy same-origin destination, no attributes
 - sec-fetch-user - Not sent to non-trustworthy same-site destination, no attributes
 fetch/metadata/generated/element-embed.https.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest
 - sec-fetch-mode
-- sec-fetch-site - Cross-Site -> Cross-Site
-- sec-fetch-site - Cross-Site -> Same Origin
-- sec-fetch-site - Cross-Site -> Same-Site
-- sec-fetch-site - Cross-site
-- sec-fetch-site - Same origin
-- sec-fetch-site - Same site
-- sec-fetch-site - Same-Origin -> Cross-Site
-- sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Origin -> Same Origin
-- sec-fetch-site - Same-Origin -> Same-Site
-- sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
-- sec-fetch-site - Same-Site -> Cross-Site
-- sec-fetch-site - Same-Site -> Same Origin
-- sec-fetch-site - Same-Site -> Same-Site
 - sec-fetch-storage-access - Cross-site
-- sec-fetch-storage-access - Same site
-- sec-fetch-user
-fetch/metadata/generated/element-embed.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest - Not sent to non-trustworthy cross-site destination
-- sec-fetch-dest - Not sent to non-trustworthy same-origin destination
-- sec-fetch-dest - Not sent to non-trustworthy same-site destination
-- sec-fetch-mode - Not sent to non-trustworthy cross-site destination
-- sec-fetch-mode - Not sent to non-trustworthy same-origin destination
-- sec-fetch-mode - Not sent to non-trustworthy same-site destination
-- sec-fetch-site - HTTPS downgrade (header not sent)
-- sec-fetch-site - HTTPS downgrade-upgrade
-- sec-fetch-site - HTTPS upgrade
-- sec-fetch-site - Not sent to non-trustworthy cross-site destination
-- sec-fetch-site - Not sent to non-trustworthy same-origin destination
-- sec-fetch-site - Not sent to non-trustworthy same-site destination
-- sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination
-- sec-fetch-storage-access - Not sent to non-trustworthy same-origin destination
-- sec-fetch-storage-access - Not sent to non-trustworthy same-site destination
-- sec-fetch-user - Not sent to non-trustworthy cross-site destination
-- sec-fetch-user - Not sent to non-trustworthy same-origin destination
-- sec-fetch-user - Not sent to non-trustworthy same-site destination
 fetch/metadata/generated/element-frame.https.sub.html:
 - sec-fetch-storage-access - Cross-site
 fetch/metadata/generated/element-iframe.https.sub.html:
@@ -3137,11 +3099,6 @@ fetch/metadata/generated/window-location.https.sub.html:
 - sec-fetch-user - location.replace with user activation
 fetch/metadata/generated/worker-dedicated-importscripts.https.sub.html:
 - sec-fetch-storage-access - Cross-site
-fetch/metadata/object.https.sub.html:
-- Cross-Site object
-- Same-Origin object
-- Same-Site object
-- "[harness] TIMEOUT"
 fetch/metadata/paint-worklet.https.html:
 - The fetch metadata for paint worklet
 fetch/metadata/preload.https.sub.html:
@@ -3164,21 +3121,12 @@ fetch/metadata/preload.https.sub.html:
 - 'preload track www.not-web-platform.test:8443: sec-fetch-mode'
 - 'preload track www.web-platform.test:8443: sec-fetch-mode'
 fetch/metadata/redirect/multiple-redirect-https-downgrade-upgrade.sub.html:
-- Https downgrade-upgrade embed
-- Https downgrade-upgrade object
-- Https downgrade-upgrade stylesheet
 - Https downgrade-upgrade track
 - "[harness] TIMEOUT"
 fetch/metadata/redirect/redirect-http-upgrade.sub.html:
-- Http upgrade embed
-- Http upgrade object
-- Http upgrade stylesheet
 - Http upgrade track
 - "[harness] TIMEOUT"
 fetch/metadata/redirect/redirect-https-downgrade.sub.html:
-- Https downgrade embed
-- Https downgrade object
-- Https downgrade stylesheet
 - Https downgrade track
 - "[harness] TIMEOUT"
 fetch/metadata/report.https.sub.html:
@@ -5884,24 +5832,12 @@ resource-timing/nested-context-navigations-object.html:
 resource-timing/nested-nav-fallback-timing.html:
 - Cross-origin TAO-fail IFrame entries should report window load time
 - Cross-origin TAO-fail object entries should report window load time
-resource-timing/nextHopProtocol-is-tao-protected.https.html:
-- Fetch TAO'd object from remote origin. Make sure nextHopProtocol is not the empty
-  string.
-- Fetch TAO-less object from remote origin. Make sure nextHopProtocol is the empty
-  string.
 resource-timing/no-entries-for-cross-origin-css-fetched-memory-cache.sub.html:
 - Make sure that resources fetched by cross origin CSS are not in the timeline.
 resource-timing/no-entries-for-cross-origin-css-fetched.sub.html:
 - Make sure that resources fetched by cross origin CSS are not in the timeline.
-resource-timing/object-not-found-adds-entry.html:
-- Verify that a 200 null-typed object emits an entry.
-- Verify that a 404 img-typed object emits an entry.
-- Verify that a 404 null-typed object emits an entry.
 resource-timing/object-not-found-after-TAO-cross-origin-redirect.html:
-- "[harness] TIMEOUT"
-resource-timing/object-not-found-after-cross-origin-redirect.html:
-- Verify that cross-origin object resources don't implicitly expose their redirect
-  timings
+- redirectEnd > redirectStart in timing allowed cross-origin redirect.
 resource-timing/ping-rt-entries.html:
 - Hyperlink auditing (<a ping>) should have a resource timing entry
 resource-timing/render-blocking-status-link.html:
@@ -5926,9 +5862,6 @@ resource-timing/resource_subframe_self_navigation.html:
 resource-timing/same-origin-from-cross-origin-redirect.html:
 - Verify that cross origin resources' timings are exposed when the final resource
   at the end of an HTTP redirect chain is same-origin.
-resource-timing/secure-iframe-in-insecure-context.html:
-- secureConnectionStart is reported for object documents loaded over https in http
-  context
 resource-timing/sizes-cache.any.js:
 - PerformanceResourceTiming sizes caching test
 - "[dedicatedworker] PerformanceResourceTiming sizes caching test"

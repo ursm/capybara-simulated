@@ -8,7 +8,9 @@ require_relative 'support/https_app_host'
 # The destination and mode a subresource's request reports in its Fetch Metadata (Fetch Metadata Request Headers): a
 # font's `font` (CSS Fonts 4 §4.9.1, a CORS request), a worker's script `worker` / `sharedworker` (HTML "fetch a classic
 # worker script"), a script it imports `script` ("fetch a classic worker-imported script"), and a beacon's mode
-# "no-cors" unless its body's Content-Type is no CORS-safelisted one (Beacon "sendBeacon").
+# "no-cors" unless its body's Content-Type is no CORS-safelisted one (Beacon "sendBeacon"); a plugin's resource a
+# navigation request of its element's destination (HTML `embed` / `object`), its element's `load` fired as it is in —
+# an `object`'s `error` for a response that is no ok one — and a media element's poster an image's, its data its own.
 RSpec.describe 'a subresource request', :https do
   include PollUntil
 
@@ -23,7 +25,8 @@ RSpec.describe 'a subresource request', :https do
       when '/i.js', '/m2.js', '/d3.js' then [200, {'content-type' => 'text/javascript'}, ['']]
       when '/mw.js' then [200, {'content-type' => 'text/javascript'}, ["import './m2.js'; import('./d2.js');"]]
       when '/d2.js' then [200, {'content-type' => 'text/javascript'}, ["import './d3.js';"]]
-      when '/f.woff' then [404, {}, ['']]
+      when '/f.woff', '/gone' then [404, {}, ['']]
+      when '/e.svg', '/o.svg', '/poster.png', '/a.mp3' then [200, {'content-type' => 'image/svg+xml'}, ['<svg xmlns="http://www.w3.org/2000/svg"/>']]
       else [200, {'content-type' => 'text/html'}, [<<~HTML]]
         <!DOCTYPE html><meta charset=utf-8>
         <style>@font-face { font-family: F; src: url(/f.woff); } p { font-family: F; }</style><p>x</p>
@@ -68,6 +71,28 @@ RSpec.describe 'a subresource request', :https do
       '/m2.js' => %w[worker cors],
       '/d2.js' => %w[script cors],
       '/d3.js' => %w[script cors]
+    )
+  end
+
+  it "fetches a plugin's resource as a navigation and a media element's as their destinations" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.events = [];
+      for (const [tag, attr, url] of [['embed', 'src', '/e.svg'], ['object', 'data', '/o.svg'], ['object', 'data', '/gone']]) {
+        const el = document.createElement(tag);
+        el.addEventListener('load', () => events.push(`load ${url}`));
+        el.addEventListener('error', () => events.push(`error ${url}`));
+        el.setAttribute(attr, url);
+        document.body.append(el);
+      }
+      document.body.insertAdjacentHTML('beforeend', '<video poster="/poster.png"></video><audio src="/a.mp3"></audio>');
+    JS
+    expect(poll_until { session.evaluate_script('events.length') == 3 && session.evaluate_script('events.sort()') }).to eq(['error /gone', 'load /e.svg', 'load /o.svg'])
+    expect(seen.slice('/e.svg', '/o.svg', '/poster.png', '/a.mp3')).to eq(
+      '/e.svg'      => %w[embed navigate],
+      '/o.svg'      => %w[object navigate],
+      '/poster.png' => %w[image no-cors],
+      '/a.mp3'      => %w[audio no-cors]
     )
   end
 

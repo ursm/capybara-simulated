@@ -209,7 +209,7 @@ module Capybara
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
         '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2]) },
         '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
-        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1] == true, a[2] || 'same-origin') },
+        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_s, a[2] || 'same-origin', a[3].to_i, a[4]) },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
         '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
