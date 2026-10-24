@@ -116,6 +116,10 @@ const TREES = [
                                        // requests by, so the objective bar for the engine behind both
   'fetch/h1-parsing',                  // HTTP/1 response-line / header parsing edge cases
   'fetch/content-length',              // a response's Content-Length: repeated values, a mismatch as a network error
+  'fetch/metadata',                    // Fetch Metadata request headers (Sec-Fetch-Site / -Mode / -Dest / -User) of every
+                                       // request kind — navigations, frames, forms, subresources, redirects, sandboxed and
+                                       // opaque initiators — the request metadata browser.rb's navigation paths and
+                                       // `rack_fetch` compute
   'cookies',                           // the cookie store (cookie_jar.rs): attributes, domain / path / prefix rules,
                                        // ordering, document.cookie, SameSite
   'html/webappapis/atob',              // base64 btoa/atob (binary-string round-trip)

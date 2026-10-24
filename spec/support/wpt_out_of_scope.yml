@@ -37754,322 +37754,362 @@ fetch/api/abort/general.any.js:
   reason: Server-side connection-close detection on abort; no persistent connection
     in the in-process Rack model (rule 1).
 fetch/api/basic/keepalive.any.js:
-- name: '[keepalive] simple GET request on ''pagehide'' [no payload]'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] simple GET request on ''unload'' [no payload]'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] simple POST request on ''pagehide'' [no payload]'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] simple POST request on ''unload'' [no payload]'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
+- name: "[keepalive] simple GET request on 'pagehide' [no payload]"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] simple GET request on 'unload' [no payload]"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] simple POST request on 'pagehide' [no payload]"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] simple POST request on 'unload' [no payload]"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
 fetch/api/cors/cors-keepalive.any.js:
-- name: '[harness] TIMEOUT'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage GET request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage GET request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage GET request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage GET request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage POST request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage POST request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage POST request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain basic usage POST request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port GET request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port GET request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port GET request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port GET request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port POST request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port POST request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port POST request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different port POST request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol GET request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol GET request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol GET request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol GET request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol POST request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol POST request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol POST request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Cross domain different protocol POST request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port GET request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port GET request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port GET request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port GET request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port POST request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port POST request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port POST request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different port POST request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port GET request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port GET request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port GET request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port GET request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port POST request in unload [cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port POST request in unload [cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port POST request in unload [no-cors mode, server forbid CORS]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
-- name: '[keepalive] Same domain different protocol different port POST request in unload [no-cors mode]; setting up'
-  reason: 'The test sends its beacon from the frame''s `unload` / `pagehide` handler after
-    `iframe.remove()`, assuming Chrome''s teardown on removal. HTML "destroy a child
-    navigable" runs "destroy a document and its descendants", which destroys each
-    document (its unloading cleanup steps) and never runs "unload a document" - no
-    pagehide, no unload fires. The spec over Blink (ursm 2026-10-23);
-    insertion-removing-steps-iframe pins it.'
+- name: "[harness] TIMEOUT"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage GET request in unload [cors mode, server
+    forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage GET request in unload [cors mode]; setting
+    up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage GET request in unload [no-cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage GET request in unload [no-cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage POST request in unload [cors mode, server
+    forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage POST request in unload [cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage POST request in unload [no-cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain basic usage POST request in unload [no-cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port GET request in unload [cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port GET request in unload [cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port GET request in unload [no-cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port GET request in unload [no-cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port POST request in unload [cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port POST request in unload [cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port POST request in unload [no-cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different port POST request in unload [no-cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol GET request in unload [cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol GET request in unload [cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol GET request in unload [no-cors
+    mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol GET request in unload [no-cors
+    mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol POST request in unload [cors
+    mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol POST request in unload [cors
+    mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol POST request in unload [no-cors
+    mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Cross domain different protocol POST request in unload [no-cors
+    mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port GET request in unload [cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port GET request in unload [cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port GET request in unload [no-cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port GET request in unload [no-cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port POST request in unload [cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port POST request in unload [cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port POST request in unload [no-cors mode,
+    server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different port POST request in unload [no-cors mode];
+    setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port GET request in
+    unload [cors mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port GET request in
+    unload [cors mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port GET request in
+    unload [no-cors mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port GET request in
+    unload [no-cors mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port POST request in
+    unload [cors mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port POST request in
+    unload [cors mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port POST request in
+    unload [no-cors mode, server forbid CORS]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
+- name: "[keepalive] Same domain different protocol different port POST request in
+    unload [no-cors mode]; setting up"
+  reason: The test sends its beacon from the frame's `unload` / `pagehide` handler
+    after `iframe.remove()`, assuming Chrome's teardown on removal. HTML "destroy
+    a child navigable" runs "destroy a document and its descendants", which destroys
+    each document (its unloading cleanup steps) and never runs "unload a document"
+    - no pagehide, no unload fires. The spec over Blink (ursm 2026-10-23); insertion-removing-steps-iframe
+    pins it.
 fetch/api/cors/cors-preflight-redirect.any.js:
 - name: Redirection 301 after preflight failed
   reason: 'Asserts a TypeError — the pre-2018 "no redirect after a CORS-preflight"
@@ -38191,6 +38231,153 @@ fetch/api/redirect/redirect-location-escape.tentative.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+fetch/api/request/destination/fetch-destination.https.html:
+- name: HTMLLinkElement with rel=preload and as=audio fetches with a "audio" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=document fetches with a "document"
+    Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=font fetches with a "font" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=image fetches with a "image" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=json fetches with a "json" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=manifest fetches with a "manifest"
+    Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=script fetches with a "script" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=sharedworker fetches with a "sharedworker"
+    Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=track fetches with a "track" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=video fetches with a "video" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=worker fetches with a "worker" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: HTMLLinkElement with rel=preload and as=xslt fetches with a "xslt" Request.destination
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
+- name: "[harness] TIMEOUT"
+  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json`
+    (the third, with no catch: it hangs, and the promise tests after it time out in
+    turn, the harness with them), `as=worker`, `as=sharedworker`. The current HTML:
+    "To translate a preload destination given a string destination: 1. If destination
+    is not a preload destination, then return null" — "A preload destination is "fetch",
+    "font", "image", "script", "style", or "track"" — and those three are keywords
+    of `as` (module preload destinations), so they reflect and are not fetched (Chrome
+    and Firefox make no request for them either; Chrome passes only by reflecting
+    them as ""). The test predates the preload/module-preload split. CLAUDE.md rule
+    1, case 3.'
 fetch/api/response/response-consume.html:
 - name: 'Consume response''s body: from FormData to blob'
   reason: 'Asserts the blob''s type is the raw Content-Type lowercased (`multipart/form-data;
@@ -38947,6 +39134,979 @@ fetch/h1-parsing/h1-parsing.tentative.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: SP at <leading> should result in Network Error frame
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+fetch/metadata/embed.https.sub.tentative.html:
+- name: 'Wrapper: Navigate to cross-site embed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Wrapper: Navigate to same-origin embed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Wrapper: Navigate to same-site embed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Wrapper: cross-site embed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Wrapper: same-origin embed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: 'Wrapper: same-site embed'
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+fetch/metadata/generated/css-font-face.https.sub.tentative.html:
+- name: sec-fetch-dest
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-mode
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Cross-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Cross-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Cross-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Origin -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Origin -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Origin -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Same-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-storage-access - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-storage-access - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-user
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+fetch/metadata/generated/css-font-face.sub.tentative.html:
+- name: sec-fetch-dest - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-dest - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-dest - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-mode - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-mode - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-mode - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - HTTPS downgrade (header not sent)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - HTTPS upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-site - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-storage-access - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-storage-access - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-user - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-user - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: sec-fetch-user - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+fetch/metadata/generated/css-images.https.sub.tentative.html:
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-dest
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-mode
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Cross-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Cross-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Cross-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Origin -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin
+    redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Origin -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Origin -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin
+    redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Same-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-storage-access - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-storage-access - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-user
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-dest
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-mode
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Cross-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Cross-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Cross-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Origin -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Origin -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Origin -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Same-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-storage-access - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-storage-access - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-user
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-dest
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-mode
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Cross-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Cross-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Cross-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Origin -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Origin -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Origin -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Same-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-storage-access - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-storage-access - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-user
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-dest
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-mode
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Cross-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Cross-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Cross-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Origin -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Origin -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Origin -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Same-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-storage-access - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-storage-access - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-user
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-dest
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-mode
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Cross-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Cross-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Cross-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Origin -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin
+    redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Origin -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Origin -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin
+    redirect
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Site -> Cross-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Site -> Same Origin
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Same-Site -> Same-Site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-storage-access - Cross-site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-storage-access - Same site
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-user
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+fetch/metadata/generated/css-images.sub.tentative.html:
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-dest - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-dest - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-dest - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-mode - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-mode - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-mode - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - HTTPS downgrade (header not sent)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - HTTPS upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-site - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-storage-access - Not sent to non-trustworthy cross-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-storage-access - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-storage-access - Not sent to non-trustworthy same-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-user - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-user - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: background-image sec-fetch-user - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-dest - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-dest - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-dest - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-mode - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-mode - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-mode - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - HTTPS downgrade (header not sent)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - HTTPS upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-site - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-storage-access - Not sent to non-trustworthy cross-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-storage-access - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-storage-access - Not sent to non-trustworthy same-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-user - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-user - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: border-image sec-fetch-user - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-dest - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-dest - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-dest - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-mode - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-mode - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-mode - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - HTTPS downgrade (header not sent)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - HTTPS upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-site - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-storage-access - Not sent to non-trustworthy cross-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-storage-access - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-storage-access - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-user - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-user - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: content sec-fetch-user - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-dest - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-dest - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-dest - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-mode - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-mode - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-mode - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - HTTPS downgrade (header not sent)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - HTTPS upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-site - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-storage-access - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-storage-access - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-user - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-user - Not sent to non-trustworthy same-origin destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: cursor sec-fetch-user - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-dest - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-dest - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-dest - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-mode - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-mode - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-mode - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - HTTPS downgrade (header not sent)
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - HTTPS downgrade-upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - HTTPS upgrade
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-site - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-storage-access - Not sent to non-trustworthy cross-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-storage-access - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-storage-access - Not sent to non-trustworthy same-site
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-user - Not sent to non-trustworthy cross-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-user - Not sent to non-trustworthy same-origin
+    destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: list-style-image sec-fetch-user - Not sent to non-trustworthy same-site destination
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+fetch/metadata/generated/header-link.https.sub.tentative.html:
+- name: sec-fetch-dest rel=stylesheet
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -39983,11 +41143,11 @@ html/canvas/element/manual/draw-element-image/privacy/subframe-cross-origin-back
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 html/canvas/element/manual/draw-element-image/privacy/subframe-cross-origin-frame.tentative.https.sub.html:
-- name: subframe loaded cross-origin that itself loads iframes
+- name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] TIMEOUT"
+- name: subframe loaded cross-origin that itself loads iframes
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
@@ -46850,6 +48010,327 @@ html/dom/partial-updates/tentative/template-for-title.html:
 - name: HTML partial updates - update title
   reason: Tentative WICG declarative partial updates (DOM Parts / template instantiation);
     unshipped feature, not modeled (rule 1).
+html/dom/reflection-metadata.html:
+- name: 'link.as: IDL set to "AUDIO"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "DOCUMENT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "EMBED"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "MANIFEST"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "OBJECT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "REPORT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "VIDEO"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "XSLT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "audio"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "document"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "embed"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "manifest"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "object"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "report"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "video"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: IDL set to "xslt"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "AUDIO"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "DOCUMENT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "EMBED"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "MANIFEST"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "OBJECT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "REPORT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "VIDEO"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "XSLT"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "audio"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "document"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "embed"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "manifest"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "object"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "report"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "video"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
+- name: 'link.as: setAttribute() to "xslt"'
+  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch", "audio",
+    "document", "embed", "font", "image", "manifest", "object", "report", "script",
+    "sharedworker", "style", "track", "video", "worker", "xslt"). The current HTML
+    says "Each of the union of preload destinations and module preload destinations
+    is a keyword for this attribute" — "A preload destination is "fetch", "font",
+    "image", "script", "style", or "track"", "A module preload destination is "json",
+    "style", "text", or a script-like destination" — so `audio`, `document`, `embed`,
+    `manifest`, `object`, `report`, `video`, `xslt` are no keywords (no state, read
+    as ""). CLAUDE.md rule 1, case 3.'
 html/dom/usvstring-reflection.https.html:
 - name: 'RTCDataChannel.send: unpaired surrogate codepoint should be replaced with
     U+FFFD.'
@@ -60771,366 +62252,3 @@ xhr/xmlhttprequest-sync-default-permissions-policy.tentative.sub.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-
-html/dom/reflection-metadata.html:
-- name: "link.as: IDL set to \"AUDIO\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"DOCUMENT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"EMBED\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"MANIFEST\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"OBJECT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"REPORT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"VIDEO\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"XSLT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"audio\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"document\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"embed\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"manifest\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"object\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"report\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"video\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: IDL set to \"xslt\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"AUDIO\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"DOCUMENT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"EMBED\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"MANIFEST\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"OBJECT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"REPORT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"VIDEO\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"XSLT\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"audio\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"document\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"embed\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"manifest\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"object\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"report\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"video\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-- name: "link.as: setAttribute() to \"xslt\""
-  reason: 'Holds the older keyword list of `as` (elements-metadata.js: "fetch",
-    "audio", "document", "embed", "font", "image", "manifest", "object", "report", "script", "sharedworker", "style",
-    "track", "video", "worker", "xslt"). The current HTML says "Each of the union of preload destinations and module
-    preload destinations is a keyword for this attribute" — "A preload destination is "fetch", "font", "image",
-    "script", "style", or "track"", "A module preload destination is "json", "style", "text", or a script-like
-    destination" — so `audio`, `document`, `embed`, `manifest`, `object`, `report`, `video`, `xslt` are no keywords
-    (no state, read as ""). CLAUDE.md rule 1, case 3.'
-fetch/api/request/destination/fetch-destination.https.html:
-- name: "HTMLLinkElement with rel=preload and as=audio fetches with a \"audio\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=document fetches with a \"document\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=font fetches with a \"font\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=image fetches with a \"image\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=json fetches with a \"json\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=manifest fetches with a \"manifest\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=script fetches with a \"script\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=sharedworker fetches with a \"sharedworker\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=track fetches with a \"track\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=video fetches with a \"video\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=worker fetches with a \"worker\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "HTMLLinkElement with rel=preload and as=xslt fetches with a \"xslt\" Request.destination"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'
-- name: "[harness] TIMEOUT"
-  reason: 'Its preload subtests take every `as` that reflects to be fetched — `as=json` (the third, with no catch: it hangs, and
-    the promise tests after it time out in turn, the harness with them), `as=worker`, `as=sharedworker`. The current
-    HTML: "To translate a preload destination given a string destination: 1. If destination is not a preload
-    destination, then return null" — "A preload destination is "fetch", "font", "image", "script", "style", or
-    "track"" — and those three are keywords of `as` (module preload destinations), so they reflect and are not
-    fetched (Chrome and Firefox make no request for them either; Chrome passes only by reflecting them as ""). The
-    test predates the preload/module-preload split. CLAUDE.md rule 1, case 3.'

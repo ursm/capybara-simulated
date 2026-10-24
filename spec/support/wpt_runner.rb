@@ -956,7 +956,7 @@ module WptRunner
   # interception against the real SW runtime) plus committed local `csim-*` fixtures
   # (vendor_wpt.mjs's cleanTree preserves the prefix). Keep this list in sync with the
   # vendor manifest in script/vendor_wpt.mjs.
-  TREES = '{dom,domparsing,domxpath,hr-time,resource-timing,css/css-font-loading,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,cookies,urlpattern,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,css/geometry,web-animations,service-workers,websockets,webstorage,WebCryptoAPI,selection,IndexedDB,web-locks,requestidlecallback,css/css-sizing/aspect-ratio}'
+  TREES = '{dom,domparsing,domxpath,hr-time,resource-timing,css/css-font-loading,url,encoding,shadow-dom,css/css-shadow/part,FileAPI,html/dom,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,xhr,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,cookies,urlpattern,css/cssom,css/css-logical,html/canvas/element,html/rendering,css/css-flexbox,css/css-animations,css/css-transitions,css/css-transforms,css/geometry,web-animations,service-workers,websockets,webstorage,WebCryptoAPI,selection,IndexedDB,web-locks,requestidlecallback,css/css-sizing/aspect-ratio}'
 
   # `.any.js` / `.window.js` trees safe to scan: url/ + encoding/ + the html/
   # event-loop oracle + xhr/ + html/dom/ + html/semantics/forms/ + atob/
@@ -969,7 +969,7 @@ module WptRunner
   # under a hard `timeout -s KILL` and found crasher-free — the earlier
   # infinite-loop concern was in dom/ HTML files, not this JS slice. (.tentative
   # files auto-route to out-of-scope, so a tentative window.js here self-excludes.)
-  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,cookies,urlpattern,service-workers,webstorage,websockets,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB,web-locks,requestidlecallback}'
+  JS_TREES = '{dom,hr-time,resource-timing,css/css-font-loading,url,encoding,FileAPI,html/webappapis/timers,html/webappapis/microtask-queuing,html/webappapis/dynamic-markup-insertion,html/webappapis/scripting/events,xhr,html/dom,html/semantics/interactive-elements,html/semantics/forms,custom-elements,html/rendering,html/webappapis/atob,html/webappapis/structured-clone,webmessaging,input-events,fetch/api,fetch/data-urls,fetch/h1-parsing,fetch/content-length,fetch/metadata,cookies,urlpattern,service-workers,webstorage,websockets,web-animations,WebCryptoAPI,css/geometry,selection,IndexedDB,web-locks,requestidlecallback}'
 
   def test_files
     @test_files ||= (harness_files + js_files + reftest_files).sort
@@ -1297,8 +1297,9 @@ module WptRunner
   # isolated behind a fresh session on each side. Cheap: a handful of files.
   def origin_for(rel, query = '')
     base = File.basename(rel)
-    return SUB_ORIGIN if base.include?('.sub.')
+    # (…a `.https.sub.` file at the HTTPS one: wptserve serves `.https.` over TLS alone, its substitution or not)
     return SUB_HTTPS_ORIGIN if base.include?('.https.') || query.include?('wpt_flags=https') || query.include?('wpt_flags=h2')
+    return SUB_ORIGIN if base.include?('.sub.')
     nil
   end
 
