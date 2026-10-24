@@ -3931,9 +3931,12 @@ module Capybara
                             client_origin: client[:origin], client_realm: client[:realm], dest: dest)
         # (…and a plugin's its body, which may be an image its element takes its natural size from)
         meta = result && resource_timing_meta(result)
-        meta['body'] = document_payload(result['body']) if meta && %w[embed object].include?(dest.to_s)
+        meta['body'] = document_payload(result['body']) if meta && %w[embed object].include?(dest.to_s) && image_response?(meta)
         meta
       end
+
+      # Whether a response's Content-Type is an image's — SVG's among them — whose bytes its element may be sized by.
+      private def image_response?(meta) = meta['headers']['content-type'].to_s.strip.downcase.start_with?('image/')
 
       # The response facts a `PerformanceResourceTiming` entry is built from, without the body — and the headers a
       # script's response is refused by (its MIME type, `X-Content-Type-Options`).

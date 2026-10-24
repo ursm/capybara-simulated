@@ -26,7 +26,7 @@ RSpec.describe 'a subresource request', :https do
       when '/mw.js' then [200, {'content-type' => 'text/javascript'}, ["import './m2.js'; import('./d2.js');"]]
       when '/d2.js' then [200, {'content-type' => 'text/javascript'}, ["import './d3.js';"]]
       when '/f.woff', '/gone' then [404, {}, ['']]
-      when '/e.svg', '/o.svg', '/poster.png', '/a.mp3' then [200, {'content-type' => 'image/svg+xml'}, ['<svg xmlns="http://www.w3.org/2000/svg"/>']]
+      when '/e.svg', '/o.svg', '/i.svg', '/poster.png', '/a.mp3' then [200, {'content-type' => 'image/svg+xml'}, ['<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"/>']]
       else [200, {'content-type' => 'text/html'}, [<<~HTML]]
         <!DOCTYPE html><meta charset=utf-8>
         <style>@font-face { font-family: F; src: url(/f.woff); } p { font-family: F; }</style><p>x</p>
@@ -124,6 +124,34 @@ RSpec.describe 'a subresource request', :https do
     )
     session.execute_script('again.remove(); document.body.append(again)')
     expect(poll_until { session.evaluate_script('events.length') == 6 && session.evaluate_script('events.at(-1)') }).to eq('load again')
+  end
+
+  # (…an `<object>` whose resource failed showing its fallback — whose plugins are processed then — sized by none it has
+  # no more, and one in a media element's children no content of its)
+  it "processes an object's fallback as it fails, and sizes a plugin by the resource it has" do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.events = [];
+      const on = (el, label) => ['load', 'error'].forEach((t) => el.addEventListener(t, () => events.push(`${t} ${label}`)));
+      document.body.insertAdjacentHTML('beforeend', '<object id=outer data="/gone"><object id=inner data="/i.svg"></object></object>');
+      window.sized = document.createElement('object');
+      on(sized, 'sized');
+      sized.data = '/o.svg';
+      document.body.append(sized);
+      const media = document.createElement('video');
+      const muted = document.createElement('embed');
+      on(muted, 'in-video');
+      muted.src = '/e.svg';
+      media.append(muted);
+      document.body.append(media);
+    JS
+    expect(poll_until { seen.key?('/i.svg') && session.evaluate_script('events.length') >= 1 && session.evaluate_script('events.sort()') }).to eq(['load sized'])
+    expect(session.evaluate_script('[sized.offsetWidth, sized.offsetHeight]')).to eq([100, 50])
+    session.execute_script("sized.removeAttribute('data')")
+    expect(session.evaluate_script('[sized.offsetWidth, sized.offsetHeight]')).to eq([300, 150])
+    # (…its resource set again to the value it had: processed again)
+    session.execute_script("sized.data = '/o.svg'; sized.data = '/o.svg'")
+    expect(poll_until { session.evaluate_script('events.length') == 3 && session.evaluate_script('events') }).to eq(['load sized', 'load sized', 'load sized'])
   end
 
   it 'refuses a beacon over the keepalive quota' do

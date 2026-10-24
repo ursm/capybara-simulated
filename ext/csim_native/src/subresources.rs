@@ -23,6 +23,7 @@ const CORS_CREDENTIALS: u32 = 2;
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
     crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
+    crate::dom::register(scope, ns, "setObjectFallback", set_object_fallback_op, context_id);
     crate::dom::register(scope, ns, "useReference", use_reference_op, context_id);
 }
 
@@ -148,9 +149,10 @@ fn use_reference_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 // The resource a connected `<embed>` or `<object>` element `id` (of document `doc`) is to fetch as its processing runs
 // — HTML's embed setup steps and object processing model, at its insertion and as its `src` / `data` / `type` change —
 // `(destination, url)`: an `<embed src>`'s ('embed'), an `<object data>`'s ('object'), each parsed against `doc`'s base
-// URL; none for one with none, in a document with no browsing context, or that is a descendant of an `<object>` with a
-// resource of its own, which shows that rather than the fallback content it is part of. (Whether it is being rendered,
-// which an `<embed>`'s being potentially active also asks, is not asked: the layout may not be made yet.)
+// URL; none for one with none, in a document with no browsing context, or that is a descendant of an `<object>` not
+// showing its fallback content (rendered.rs `object_shows_fallback`) — it shows its resource instead — or of a media
+// element, whose children are no content of its. (Whether it is being rendered, which an `<embed>`'s being potentially
+// active also asks, is not asked: the layout may not be made yet.)
 fn plugin_resource(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<(&'static str, String)> {
     if !arena.document_states.has_browsing_context(doc) || !arena.is_connected(id) {
         return None;
@@ -166,7 +168,7 @@ fn plugin_resource(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<(&
     }
     let mut at = n.parent;
     while let Some(p) = at.and_then(|p| arena.get(p)) {
-        if p.is_html_named("object") && p.plain_attr("data").is_some_and(|d| !d.is_empty()) {
+        if (p.is_html_named("object") && !crate::rendered::object_shows_fallback(p)) || p.is_html_named("video") || p.is_html_named("audio") {
             return None;
         }
         at = p.parent;
@@ -180,4 +182,18 @@ fn plugin_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let Some((destination, url)) = plugin_resource(&mut crate::dom::dom(scope).arena, id, doc) else { return };
     let (Some(d), Some(u)) = (v8::String::new(scope, destination), v8::String::new(scope, &url)) else { return };
     rv.set(v8::Array::new_with_elements(scope, &[d.into(), u.into()]).into());
+}
+
+// __dom.setObjectFallback(el, on) -> whether that changed it: the `<object>` shows its fallback content, its resource
+// failed to load — or no longer does, its processing run again (`STATE_OBJECT_FALLBACK`).
+fn set_object_fallback_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let on = args.get(1).is_true();
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(state) = arena.get(id).map(|n| n.state) else { return rv.set_bool(false) };
+    let was = state & crate::dom::STATE_OBJECT_FALLBACK != 0;
+    if was != on {
+        arena.set_state(id, state ^ crate::dom::STATE_OBJECT_FALLBACK);
+    }
+    rv.set_bool(was != on);
 }

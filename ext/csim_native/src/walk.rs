@@ -1590,7 +1590,7 @@ const OWN_CONTEXT_TAGS: &[&str] = &[
 // what makes a box replaced: by its tag, but an `<object>` showing its fallback content is no replaced element at all.
 pub(crate) fn replaced_or_control(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
     match node.rendering_tag() {
-        "object" => !renders_object_fallback(arena, id, node),
+        "object" => !crate::rendered::renders_object_fallback(arena, node),
         "img" => img_alt_text(arena, id, node).is_none(),
         tag => matches!(
             tag,
@@ -1633,14 +1633,6 @@ fn img_represents_nothing(node: &crate::dom::NodeData) -> bool {
         Some(alt) => alt.is_empty(),
         None => node.get_attr("src").is_none_or(str::is_empty),
     }
-}
-// An `<object>` that renders its FALLBACK content — its children, as the box its own style makes it — rather than a
-// resource (`rendersObjectFallback`): one with no `data` and some content, an element or text that is not white space.
-fn renders_object_fallback(arena: &RealmArena, id: NodeId, node: &crate::dom::NodeData) -> bool {
-    node.get_attr("data").is_none()
-        && arena.get(id).is_some_and(|n| {
-            n.children.iter().filter_map(|&c| arena.get(c)).any(|c| c.kind == NodeKind::Element || (c.kind == NodeKind::Text && has_content(&c.data)))
-        })
 }
 // …and HTML's WIDGETS, whose box the UA decides however the page spells a block-level `display` (a
 // `<button style="display: table">` is a flow-root block).
@@ -2510,7 +2502,7 @@ impl<'a> Walk<'a> {
             "iframe" | "frame" | "video" => sized(300.0, 150.0),
             // (…the default object size, as an `<iframe>`'s — unless it shows its fallback, and is no replaced element;
             // an image's, an SVG document's root's, where its resource is one: the bindings' `processPluginElement`)
-            "object" if renders_object_fallback(self.arena, id, node) => return Ok(None),
+            "object" if crate::rendered::renders_object_fallback(self.arena, node) => return Ok(None),
             "object" | "embed" => node.natural_size.map_or(sized(300.0, 150.0), Intrinsic::of),
             "canvas" => {
                 let dim = |name: &str, default: f64| node.get_attr(name).and_then(crate::validity::parse_non_negative).map_or(default, |n| n as f64);

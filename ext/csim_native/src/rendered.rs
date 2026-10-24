@@ -50,10 +50,15 @@ pub(crate) fn is_block_tag(t: &str) -> bool {
 fn has_fallback_only_content(arena: &RealmArena, n: &NodeData) -> bool {
     FALLBACK_ONLY_TAGS.contains(&tag(n)) || (tag(n) == "object" && !renders_object_fallback(arena, n))
 }
-// An `<object>` with no resource of its own renders its CHILDREN — any element, or text that is not CSS white space (an
-// NBSP or an em space is fallback content). A resource this driver never fetches is taken to have loaded.
+// Whether an `<object>` shows its fallback content (HTML's object processing model): it has no resource of its own —
+// no `data`, or an empty one — or its resource failed to load (`STATE_OBJECT_FALLBACK`).
+pub(crate) fn object_shows_fallback(n: &NodeData) -> bool {
+    n.plain_attr("data").is_none_or(str::is_empty) || n.state & crate::dom::STATE_OBJECT_FALLBACK != 0
+}
+// …and renders its CHILDREN — any element, or text that is not CSS white space (an NBSP or an em space is fallback
+// content): one with no fallback content to show is a replaced box still.
 pub(crate) fn renders_object_fallback(arena: &RealmArena, n: &NodeData) -> bool {
-    if n.plain_attr("data").is_some() {
+    if !object_shows_fallback(n) {
         return false;
     }
     n.children.iter().filter_map(|&c| arena.get(c)).any(|c| {

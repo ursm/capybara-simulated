@@ -582,7 +582,10 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let renavigates = !set || changed || (local == "src" && n.plain_attr("srcdoc").is_none());
     steps |= flag(frame && matches!(local, "src" | "srcdoc") && renavigates, STEP_FRAME_SRC);
     steps |= flag(local == "src" && set, STEP_MEDIA_SRC);
-    steps |= flag(html && changed && matches!((tag, local), ("embed", "src" | "type") | ("object", "data" | "type")), STEP_PLUGIN);
+    // (…its resource's attribute set — to the value it had, too — changed or removed, its `type` changed: HTML's embed
+    // setup steps and object processing model run for each)
+    let resource = matches!((tag, local), ("embed", "src") | ("object", "data"));
+    steps |= flag(html && (resource || (changed && local == "type" && matches!(tag, "embed" | "object"))), STEP_PLUGIN);
     // (…a `<source>` a `<picture>` holds, set, changed or removed: HTML's relevant mutations of its images — its
     // candidates and what selects it, `srcset`, `sizes`, `media`, `type` — and the dimensions they take)
     let picture = html && tag == "source" && changed && n.parent.and_then(|p| arena.get(p)).is_some_and(|p| p.is_html_named("picture"));
