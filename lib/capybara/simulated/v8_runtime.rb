@@ -506,6 +506,16 @@ module Capybara
           **made
         )
       end
+      # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
+      # (`event.resultingClientId` resolves to THIS client after commit). Seeded BEFORE the document loads so the realm's
+      # own client reports (sw-client.js clientId()) already carry it; the browser-side alias keeps message routing and
+      # record minting coherent (sw_adopt_client_id). A frame's and a window's alike.
+      def adopt_client_id(realm, client_id)
+        return if client_id.to_s.empty?
+
+        realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
+        @browser.sw_adopt_client_id(realm.id, client_id.to_s)
+      end
       # Whether the window of window realm `id` is closed (navigables.rs `window_closed`, by its key).
       def window_realm_closed?(id)
         key = window_realm_meta.dig(id.to_i, :window_key) or return false
@@ -1016,15 +1026,7 @@ module Capybara
         # or initial about:blank document, that of its container's document, whose policy container it clones: HTML)
         inherited = referrer_policy || (url.to_s.match?(/\Aabout:(?:srcdoc|blank)\b/i) ? @browser.inherited_referrer_policy(parent_id) : nil)
         realm.call('__csimSetPendingReferrer', referrer.to_s, inherited.to_s) unless referrer.to_s.empty? && inherited.to_s.empty?
-        # The navigation's reserved client id — this document's realm ADOPTS it as its
-        # service-worker Client identity (`event.resultingClientId` resolves to THIS
-        # client after commit). Seeded BEFORE the document loads so the realm's own
-        # client reports (sw-client.js clientId()) already carry it; the browser-side
-        # alias keeps message routing and record minting coherent (sw_adopt_client_id).
-        unless client_id.to_s.empty?
-          realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
-          @browser.sw_adopt_client_id(realm.id, client_id.to_s)
-        end
+        adopt_client_id(realm, client_id)
         # The realm's document is the active document of the container's navigable (its nid, in the parent realm) —
         # BEFORE the document loads, so a frame whose load handler reads window.name (its navigable's target name, made
         # from the container's `name` and kept across its navigations) to identify itself sees it
@@ -1199,8 +1201,8 @@ module Capybara
           # Document object"; its sandboxing a CSP `sandbox`'s)
           realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
           realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
-          realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};") if client_id
         end
+        adopt_client_id(realm, client_id)
         realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
         realm.call('__csimSetDocumentOrigin', doc_origin.to_s)         unless doc_origin.nil?
         realm.call('__csimSetLocationOrigin', location_origin.to_s)    unless location_origin.nil?
