@@ -3472,7 +3472,7 @@ module Capybara
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy)
           elsif named_frame
-            navigate_realm_self_get(named_frame, url, referrer: initiator, **opaque_initiator(@current_realm_id))
+            navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id)
           elsif frame_entry
             navigate_frame(url, entry: frame_entry, referrer: initiator)
           else
@@ -3486,7 +3486,7 @@ module Capybara
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
                                     post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
           elsif named_frame
-            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, **opaque_initiator(@current_realm_id))
+            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id)
           elsif frame_entry
             navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator)
           else
@@ -10723,7 +10723,7 @@ module Capybara
               # non-http(s) and relative URLs stay on the JS src-reassignment path via
               # navigate_realm_self_get. An entry of the frame's session history, or — a `location.replace`'s —
               # the current one replaced.
-              navigate_realm_self_get(realm_id, url, record: !replace, referrer: referrer, **opaque_initiator(initiator))
+              navigate_realm_self_get(realm_id, url, record: !replace, referrer: referrer, initiator: initiator)
             else
               replace ? replace_frame_entry(realm_id, url) : record_frame_nav(realm_id, url)
               frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, sandbox)
@@ -10837,9 +10837,9 @@ module Capybara
           url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
           cur   = current_frame_history_entry(realm_id)
           if entry && cur && cur[:method] == :post
-            navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true)
+            navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true, initiator: realm_id)
           elsif entry && !url.empty?
-            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true)
+            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true, initiator: realm_id)
           elsif cur && cur[:method] == :post
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
@@ -11247,9 +11247,9 @@ module Capybara
         case chosen
         when :self
           if method == 'GET'
-            navigate_realm_self_get(realm_id, url, referrer: initiator, **opaque_initiator(realm_id))
+            navigate_realm_self_get(realm_id, url, referrer: initiator, initiator: realm_id)
           else
-            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator, **opaque_initiator(realm_id))
+            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator, initiator: realm_id)
           end
         when :top
           # (…adding the page's entry, whether the frame's document is completely loaded or not: a form's replaces only its
@@ -11257,9 +11257,9 @@ module Capybara
           in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type]) }
         when Integer
           if method == 'GET'
-            navigate_realm_self_get(chosen, url, referrer: initiator, **opaque_initiator(realm_id))
+            navigate_realm_self_get(chosen, url, referrer: initiator, initiator: realm_id)
           else
-            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator, **opaque_initiator(realm_id))
+            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator, initiator: realm_id)
           end
         when :window
           log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
@@ -11300,14 +11300,21 @@ module Capybara
       # that frame to the action URL (query already mutated in).
       # `record: false` where it replaces the frame's current session history entry rather than adds one (a
       # `location.replace`, a navigation of a document not completely loaded yet: `replace_frame_entry`).
-      def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, resulting_client_id: nil, referrer: nil)
+      # (…`initiator` the realm whose document navigates it, where one is named: an opaque origin's cross-site, its Origin
+      # `null` — `opaque_initiator` — and the initiator of an entered frame's, which navigates through `navigate_frame`)
+      def navigate_realm_self_get(realm_id, get_url, depth: 0, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, resulting_client_id: nil,
+                                  referrer: nil, initiator: nil)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
+        site_seed, origin_null = 'cross-site', true if initiator && depth.zero? && document_origin_opaque?(initiator.to_i)
         # The navigation's reserved client id — threaded through the redirect re-entries
         # (re-minted on a cross-origin hop) and adopted by the rebuilt realm on commit.
         rid = resulting_client_id || mint_resulting_client_id
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, reload: is_reload || is_history, record: record) if entry
+        if entry
+          return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, reload: is_reload || is_history, record: record,
+                                                                  initiator: initiator || @current_realm_id.to_i, site: site_seed)
+        end
         if depth.zero? && !is_reload && !is_history
           record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
         end
@@ -11396,16 +11403,21 @@ module Capybara
       # a frame reached via contentWindow has no stack entry, so rebuild it by
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
-      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false, site_seed: nil, origin_null: false, resulting_client_id: nil, referrer: nil)
+      def navigate_realm_self_post(realm_id, url, body, content_type, depth: 0, is_reload: false, is_history: false, site_seed: nil, origin_null: false, resulting_client_id: nil,
+                                   referrer: nil, initiator: nil)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         referrer ||= realm_referrer_initiator(realm_id)
+        site_seed, origin_null = 'cross-site', true if initiator && depth.zero? && document_origin_opaque?(initiator.to_i)
         # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
         # a fresh submission records history. The POST method/body is tagged onto the entry AFTER a
         # DIRECT (non-redirect) response (tag_frame_entry_post below): a POST that redirects (the
         # Post/Redirect/Get pattern) resolves to a GET document, so its entry must NOT re-POST on a
         # later reload / back — only a directly-served POST does.
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
-        return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, reload: is_reload || is_history) if entry
+        if entry
+          return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, reload: is_reload || is_history, initiator: initiator || @current_realm_id.to_i,
+                                                              site: site_seed, taint: origin_null)
+        end
         record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
         return if depth.zero? && !prompt_to_unload_frame(realm_id)
 
@@ -11886,7 +11898,8 @@ module Capybara
       # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
       # (…its request the navigation one of the document of realm `initiator` — the entered frame's own, by default — its
       # Fetch Metadata that document's, `site` the Sec-Fetch-Site its redirect chain has widened to: `frame_request_headers`)
-      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, record: true, initiator: @current_realm_id.to_i, site: nil)
+      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, record: true, initiator: @current_realm_id.to_i,
+                         site: nil)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
         return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
@@ -11913,7 +11926,7 @@ module Capybara
         end
         env = rack_env_for(url, method: 'GET')
         # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
-        site = frame_request_headers(env, 'GET', url, referrer, initiator, site)
+        site, = frame_request_headers(env, 'GET', url, referrer: referrer, initiator: initiator, site: site, frame: entry[:realm_id])
         response = dispatch_rack_or_http(url, env, method: 'GET') or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
         status, headers, body = response
         merge_set_cookie(headers, url, env)
@@ -11934,15 +11947,29 @@ module Capybara
 
       # An entered frame's navigation request to `url` (`method`): Fetch Metadata (dest `iframe`), its Referer `referrer`'s
       # under its policy, a POST's Origin — the initiating document realm `initiator`'s, cross-site and `null` where its
-      # origin is opaque — `site` the Sec-Fetch-Site the hops before it widened to, which it answers widened by this one.
-      private def frame_request_headers(env, method, url, referrer, initiator, site)
+      # origin is opaque, `null` too where a redirect before it tainted it (`taint`) — `site` the Sec-Fetch-Site the hops
+      # before it widened to; its cookies by frame realm `frame`'s ancestors too (RFC 6265bis "site for cookies", as
+      # `navigate_realm_self_get`'s). [site widened by this hop, the initiating document's URL].
+      private def frame_request_headers(env, method, url, referrer:, initiator:, site:, frame:, taint: false)
         initiator_url, opaque = realm_request_initiator(initiator.to_i)
         site = widen_sec_fetch_site(site, opaque ? 'cross-site' : sec_fetch_site(initiator_url, url))
-        navigation_request_headers(env, method: method, initiator_url: referrer[0], target: url, dest: 'iframe', referrer_policy: referrer[1], site_override: site, origin_null: opaque)
-        site
+        env['csim.cookie_cross_site'] = true if frame_ancestor_cross_site?(frame, url)
+        navigation_request_headers(env, method: method, initiator_url: referrer[0], origin_url: initiator_url, target: url, dest: 'iframe', referrer_policy: referrer[1],
+                                        site_override: site, origin_null: opaque || taint)
+        [site, initiator_url]
       end
-      def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, initiator: @current_realm_id.to_i,
-                              site: nil)
+      def navigate_frame_post(
+        url,
+        body,
+        content_type,
+        depth: 0,
+        entry: @frame_stack.last,
+        referrer: current_referrer_initiator,
+        reload: false,
+        initiator: @current_realm_id.to_i,
+        site: nil,
+        taint: false
+      )
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
         return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
@@ -11953,7 +11980,7 @@ module Capybara
         env = rack_env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        site = frame_request_headers(env, 'POST', url, referrer, initiator, site)
+        site, initiator_url = frame_request_headers(env, 'POST', url, referrer: referrer, initiator: initiator, site: site, taint: taint, frame: entry[:realm_id])
         response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -11965,7 +11992,8 @@ module Capybara
           if Native.redirect_to_get(status.to_i, 'POST')
             return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site)
           else
-            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site)
+            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site,
+                                                                     taint: redirect_taints_origin?(taint, initiator_url, url, next_url))
           end
         end
         return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
@@ -12750,7 +12778,10 @@ module Capybara
       # thread it through each hop): Sec-Fetch-Site is the WIDEST initiator↔url relationship over the
       # whole chain (a same-site redirect keeps 'same-site' even when the final hop is same-origin),
       # and a form POST's Origin becomes the opaque 'null' once any hop has crossed origin.
-      def navigation_request_headers(env, method:, initiator_url:, target:, dest:, referrer_policy: nil, user_activated: false, site_override: nil, origin_null: false)
+      # (…`origin_url` the URL whose origin a POST's Origin is — the initiating document's — where it is not the referrer
+      # source's: an about:blank document's, which its creator's origin is)
+      def navigation_request_headers(env, method:, initiator_url:, target:, dest:, referrer_policy: nil, user_activated: false, site_override: nil, origin_null: false,
+                                     origin_url: initiator_url)
         # Fetch metadata FIRST: apply_default_request_env's SameSite cookie gate reads
         # the request's own Sec-Fetch-Site/Mode/Dest, so they must be on the env before
         # cookies attach.
@@ -12764,8 +12795,8 @@ module Capybara
         # the literal 'null' when that origin is opaque (an about:blank / data: frame) or has been
         # tainted by a cross-origin redirect — matching the fetch path's `effective_origin`
         # convention. Omitted only when the initiator is unknown (a disposed realm → nil url).
-        if initiator_url && !initiator_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
-          env['HTTP_ORIGIN'] = request_origin_header((!origin_null && url_origin(initiator_url)) || 'null', referrer_policy, target)
+        if origin_url && !origin_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
+          env['HTTP_ORIGIN'] = request_origin_header((!origin_null && url_origin(origin_url)) || 'null', referrer_policy, target)
         end
       end
 

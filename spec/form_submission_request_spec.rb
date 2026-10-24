@@ -364,7 +364,6 @@ RSpec.describe "a form submission's request" do
     end
   end
 
-  # …and a frame's own `noreferrer` form submitted to the frame by its script sends none either (Firefox: none).
   # …and an entered frame's own navigations — a link, a form, a Location set, each hop of a redirect — the navigation
   # request's Fetch metadata (dest `iframe`) of the frame's document, cross-site and `Origin: null` for a sandboxed one.
   it "sends the Fetch metadata of an entered frame's own navigation" do
@@ -392,6 +391,39 @@ RSpec.describe "a form submission's request" do
     )
   end
 
+  # …its POST's Origin its document's — an about:blank one's its creator's — `null` past a redirect to a third origin
+  # (Fetch "HTTP-redirect fetch"), and its cookies a frame's, by its ancestors (RFC 6265bis "site for cookies").
+  it "sends an entered frame's POST the Origin of its document, tainted by a redirect, and a frame's cookies" do
+    seen = {}
+    s = simulated_session(lambda {|env|
+      key = "#{env['SERVER_NAME']}#{env['PATH_INFO']}"
+      seen[key] = [env['HTTP_ORIGIN'], env['HTTP_COOKIE']]
+      next [307, {'location' => 'http://b.test/r2'}, ['']] if key == 'a.test/r1'
+      next [307, {'location' => 'http://c.test/end'}, ['']] if key == 'b.test/r2'
+      next [200, {'content-type' => 'text/html', 'set-cookie' => 's=1; SameSite=Strict'}, ['set']] if key == 'b.test/set'
+
+      case key
+      when 'a.test/' then html.('<iframe src="/f"></iframe><iframe></iframe><iframe src="http://b.test/x"></iframe>')
+      when 'a.test/f' then html.('<form method=post action="/r1"><button>go</button></form>')
+      else html.(env['PATH_INFO'])
+      end
+    })
+    s.visit 'http://b.test/set'
+    s.visit 'http://a.test/'
+    s.within_frame(0) { s.click_button 'go' }
+    s.within_frame(1) do
+      s.execute_script('document.write("<form method=post action=\"http://a.test/blank\"><button>go</button></form>"); document.close()')
+      s.click_button 'go'
+    end
+    s.within_frame(2) { s.execute_script('location.href = "/y"') }
+    s.evaluate_script('1')
+    expect(seen.slice('a.test/r1', 'c.test/end', 'a.test/blank').transform_values(&:first)).to eq(
+      'a.test/r1' => 'http://a.test', 'c.test/end' => 'null', 'a.test/blank' => 'http://a.test'
+    )
+    expect(seen['b.test/y'].last).to be_nil
+  end
+
+  # …and a frame's own `noreferrer` form submitted to the frame by its script sends none either (Firefox: none).
   it "sends no Referer from a frame's own `noreferrer` form its script submits" do
     referers = []
     app = lambda {|env|
