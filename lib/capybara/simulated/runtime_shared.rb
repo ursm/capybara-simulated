@@ -35,7 +35,7 @@ module Capybara
       # JS exception that crashes the whole script chain. Bodies take
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
-        '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15], client_origin: a[16], client_realm: a[17], navigation: a[18] == true, dest: a[19]) },
+        '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15], client_origin: a[16], client_realm: a[17], navigation: a[18] == true, dest: a[19], user_activated: a[20] == true) },
         '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1], a[2], a[3], dest: a[4]) },
         '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2], a[3]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
@@ -131,7 +131,7 @@ module Capybara
         '__csimWindowRefSet'         => ->(b, *a) { b.window_ref_set(a[0], a[1], a[2], a[3]); nil },
         '__csimWindowRefCall'        => ->(b, *a) { b.window_ref_call(a[0], a[1], a[2], a[3]) },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
-        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1]); nil },
+        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], user_activated: a[2] == true); nil },
         '__csimWindowJavascriptURL'  => ->(b, *a) { b.run_window_javascript_url(a[0], a[1], a[2]); nil },
         '__csimWindowHistoryGo'      => ->(b, *a) { b.window_history_go(a[0], a[1]) },
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
@@ -201,7 +201,7 @@ module Capybara
         '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2]); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
-        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body: a[5], content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe', container_realm: a[9], referrer_policy: a[10], initiator_realm: a[11], sandbox: [a[12]]) },
+        '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body: a[5], content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe', container_realm: a[9], referrer_policy: a[10], initiator_realm: a[11], sandbox: [a[12]], user_activated: a[13] == true) },
         '__csim_workerTerminate'     => ->(b, *a) { b.worker_terminate(a[0]); nil },
         # The font FILES native text metrics read (font.rs): a family's system face, as fontconfig resolves it;
         # an `@font-face` url's, fetched (WOFF-decoded, cached) with the fetch's facts for its Resource Timing

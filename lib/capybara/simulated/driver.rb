@@ -491,10 +491,14 @@ module Capybara
         # LINK, which is noopener) — resolve the opener handle from the source.
         opener_handle ||= handle_for(source) if opener && source
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
+          # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
+          # one is made)
+          activated = source && activation_realm ? source.source_activated?(activation_realm) : false
           if post
-            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, **post_initiator(post, source))
+            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, user_activated: activated,
+                                                                                  **post_initiator(post, source))
           else
-            navigate_window(existing[:browser], url, source: source, referrer: referrer, referrer_policy: referrer_policy)
+            navigate_window(existing[:browser], url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           end
           return existing[:handle]
         end
@@ -573,7 +577,8 @@ module Capybara
         # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
         # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
         if !name.to_s.empty? && (existing = @aux_windows.find {|w| w[:name] == name.to_s })
-          navigate_window(existing[:browser], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy)
+          navigate_window(existing[:browser], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy,
+                                                        user_activated: opener_browser.source_activated?(opener_realm_id))
           return existing[:handle]
         end
         # Same-origin window → a realm in the opener's isolate (shared heap); the
@@ -710,14 +715,14 @@ module Capybara
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
-      def window_set_location(handle, url)
+      def window_set_location(handle, url, user_activated: false)
         b = window_browser(handle) or return
         # Per HTML, `w.location = url` parses `url` relative to the ENTRY settings
         # object — the document of the script doing the assignment (the active
         # window) — NOT the target window's current document. So a cross-window
         # `w.location.href = 'resources/x.html'` resolves against the opener's
         # base, not the aux's (which would double a shared path segment).
-        navigate_window(b, current_browser.resolve_document_url(url), source: current_browser)
+        navigate_window(b, current_browser.resolve_document_url(url), source: current_browser, user_activated: user_activated)
       end
       # A cross-window `w.location = 'javascript:…'`: evaluated in the target window's document (Browser
       # `run_javascript_url_from`), by a document of origin `origin`, as HTML navigates to a javascript: URL.
@@ -757,7 +762,8 @@ module Capybara
       # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
       # V8 context mid-call and abort the running handler. A non-active window
       # can navigate immediately (its VM isn't on the stack).
-      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil)
+      # (…`user_activated` whether the navigating document's window had transient activation as it began)
+      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false)
         return if url.nil? || url.to_s.empty?
         # A blob: navigation loads directly from the opener's blob bytes (not
         # rack-navigable, cross-isolate). Only when the target isn't the active
@@ -768,11 +774,11 @@ module Capybara
           return
         end
         if browser.equal?(current_browser)
-          browser.location_assign(url)
+          browser.location_assign(url, user_activated: user_activated)
         else
           # A cross-window navigation's initiator is the SETTING window's document
           # (seeds Sec-Fetch-Site → the SameSite cookie gate); raw_ — no re-entrant tick.
-          browser.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url)
+          browser.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url, user_activated: user_activated)
         end
       end
 

@@ -2675,10 +2675,8 @@ fetch/metadata/generated/element-embed.sub.html:
 - sec-fetch-user - Not sent to non-trustworthy same-site destination
 fetch/metadata/generated/element-frame.https.sub.html:
 - sec-fetch-storage-access - Cross-site
-- sec-fetch-user with user activation
 fetch/metadata/generated/element-iframe.https.sub.html:
 - sec-fetch-storage-access - Cross-site
-- sec-fetch-user with user activation
 fetch/metadata/generated/element-img-environment-change.https.sub.html:
 - "[harness] TIMEOUT"
 - sec-fetch-dest - no attributes
@@ -2878,9 +2876,6 @@ fetch/metadata/generated/fetch-via-serviceworker.https.sub.html:
   - respondWith'
 fetch/metadata/generated/fetch.https.sub.html:
 - 'sec-fetch-storage-access - Cross-site, init: mode=no-cors, credentials=include'
-fetch/metadata/generated/form-submission.https.sub.html:
-- sec-fetch-user - GET with user activation
-- sec-fetch-user - POST with user activation
 fetch/metadata/generated/header-link.https.sub.html:
 - sec-fetch-dest rel=icon
 - sec-fetch-mode rel=icon

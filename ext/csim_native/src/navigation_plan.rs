@@ -15,6 +15,9 @@ pub(crate) struct Navigation {
     opener: bool,
     referrer_policy: String,
     blob: Option<v8::Global<v8::Value>>,
+    // Whether the realm's window had transient activation as it was planned: HTML's source snapshot params' "has
+    // transient activation", which the navigation's request carries (its user-activation: Fetch's `Sec-Fetch-User`).
+    activated: bool,
 }
 
 // (…its request the bindings' record of it — action, method, enctype, target, rel, encoding and entries — held as made)
@@ -64,14 +67,22 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let (url, target, referrer_policy) = (text(scope, 0), text(scope, 1), text(scope, 3));
     let opener = args.get(2).is_true();
     let blob = (!args.get(4).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(4)));
-    plan(scope, &args).navigation = Some(Navigation { url, target, opener, referrer_policy, blob });
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let activated = arena.transiently_activated(cid);
+    arena.navigation_plan.navigation = Some(Navigation { url, target, opener, referrer_policy, blob, activated });
 }
 
 // __dom.planSubmission(request): a form's submission planned, its request as the bindings made it as it was submitted
-// (form-fields.js `__csimFormSerialize`) — after `supersedePlanned` where it navigates the top-level document.
+// (form-fields.js `__csimFormSerialize`) — after `supersedePlanned` where it navigates the top-level document — told
+// whether the realm's window has transient activation now (its `userActivated`: `Navigation::activated`'s).
 fn plan_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if !args.get(0).is_object() {
-        return;
+    let Ok(object) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let activated = realm(scope, cid).transiently_activated(cid);
+    if let Some(key) = v8::String::new(scope, "userActivated") {
+        let value = v8::Boolean::new(scope, activated);
+        object.set(scope, key.into(), value.into());
     }
     let request = v8::Global::new(scope, args.get(0));
     plan(scope, &args).submission = Some(Submission(request));
@@ -97,7 +108,7 @@ fn navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(plan.navigation.is_some() || plan.submission.is_some());
 }
 
-// __dom.takeNavigation(newWindowOnly) -> [url, target, opener, referrerPolicy, blob] of the navigation planned, which the
+// __dom.takeNavigation(newWindowOnly) -> [url, target, opener, referrerPolicy, blob, activated] of the navigation planned, which the
 // realm plans no more — or, `newWindowOnly`, only where it opens a new window (its target `_blank` or a name: what a
 // script's `click()` with no user action behind it opens mid-task) — or null.
 fn take_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -118,7 +129,8 @@ fn take_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         return;
     };
     let opener = v8::Boolean::new(scope, n.opener).into();
-    rv.set(v8::Array::new_with_elements(scope, &[url.into(), target.into(), opener, policy.into(), blob]).into());
+    let activated = v8::Boolean::new(scope, n.activated).into();
+    rv.set(v8::Array::new_with_elements(scope, &[url.into(), target.into(), opener, policy.into(), blob, activated]).into());
 }
 
 // __dom.takeSubmission() -> the request of the submission planned, which the realm plans no more, or null.

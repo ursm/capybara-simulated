@@ -1407,7 +1407,8 @@ module Capybara
             # Link clicks honour `<base href>` (HTML spec); `visit`
             # does not — that's address-bar navigation. (…a `blob:` one's blob the one it was clicked with, a revoke by
             # a handler of the click no matter)
-            navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(action['blob']), policy: action['referrerPolicy'])
+            navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(action['blob']), policy: action['referrerPolicy'],
+                                                                                 user_activated: action['userActivated'] == true)
           end
         when 'submit'
           # Drain any work the click handler queued before the form
@@ -2096,7 +2097,8 @@ module Capybara
           update_current_hash(resolve_against_current(url, use_base: true))
         else
           tick_real_time
-          navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(pending['blob']), policy: pending['referrerPolicy'])
+          navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(pending['blob']), policy: pending['referrerPolicy'],
+                                                                               user_activated: pending['userActivated'] == true)
         end
       end
 
@@ -3456,6 +3458,8 @@ module Capybara
         # (…replacing the session history entry of the form's document where that is not completely loaded yet: the
         # page's, whose own navigable it navigates — `request.replace`)
         replace = spec['replace'] == true
+        # (…and whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
+        activated = spec['userActivated'] == true
         # (…and whatever it navigates — a new window too — is told its initiator, the form's document under its policy or
         # the one `noreferrer` sets: HTML "plan to navigate" sets the referrer policy "no-referrer" where the form's link
         # types include it)
@@ -3468,17 +3472,17 @@ module Capybara
           # (…an entered frame's form whose target names the page navigates it as the frame's `_top` does: its Referer and
           # site the frame document's)
           post = method == 'GET' ? nil : [body, content_type]
-          in_top_context { navigate_top_from(@current_realm_id.to_i, initiator, url, post: post) }
+          in_top_context { navigate_top_from(@current_realm_id.to_i, initiator, url, post: post, user_activated: activated) }
         elsif method == 'GET'
           if new_window
             @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy)
           elsif named_frame
-            navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id.to_i)
+            navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id.to_i, user_activated: activated)
           elsif frame_entry
-            navigate_frame(url, entry: frame_entry, referrer: initiator)
+            navigate_frame(url, entry: frame_entry, referrer: initiator, user_activated: activated)
           else
-            navigate(url, referrer_policy: policy, replace: replace)
+            navigate(url, referrer_policy: policy, replace: replace, user_activated: activated)
           end
         else
           # (…a POST's Origin the form document's: `realm_request_initiator`)
@@ -3488,11 +3492,11 @@ module Capybara
                                     opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy,
                                     post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
           elsif named_frame
-            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id.to_i)
+            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id.to_i, user_activated: activated)
           elsif frame_entry
-            navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator)
+            navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator, user_activated: activated)
           else
-            navigate_post(url, body, content_type, referrer_policy: policy, replace: replace, origin_null: origin_null)
+            navigate_post(url, body, content_type, referrer_policy: policy, replace: replace, origin_null: origin_null, user_activated: activated)
           end
         end
       end
@@ -6637,9 +6641,10 @@ module Capybara
         from.to_s.downcase.start_with?('https://') && to.to_s.downcase.start_with?('http://')
       end
 
-      # Re-navigate the browsing context behind a client id — the main window or a frame realm.
+      # Re-navigate the browsing context behind a client id — the main window or a frame realm — its request carrying
+      # the transient activation its document has (no driver `visit`'s: no address bar began it).
       private def navigate_client_realm(realm_id, url)
-        return visit(url) if realm_id.zero?
+        return navigate(url, referer: nil, initiator: nil, user_activated: source_activated?(0)) if realm_id.zero?
 
         navigate_realm_self_get(realm_id, url, record: false)
       end
@@ -7742,6 +7747,13 @@ module Capybara
 
       # HTML "rules for choosing a navigable": a new top-level traversable made consumes the user activation of the
       # window that chose it, realm `realm_id`'s — the engine's (user_activation.rs), in every window of its page.
+      # …whether that window has it now, unconsumed: the source snapshot of a navigation its document begins of another
+      # window (HTML's "has transient activation").
+      def source_activated?(realm_id)
+        @runtime.realm_call(realm_id.to_i, '__csimSourceActivation') == true
+      rescue StandardError
+        false
+      end
       # …whether that window had it.
       def consume_user_activation(realm_id)
         @runtime.realm_call(realm_id.to_i, '__csimConsumeTransientActivation') == true
@@ -7807,7 +7819,9 @@ module Capybara
       rescue StandardError
         nil
       end
-      def set_window_location(handle, url) = (@driver.window_set_location(handle.to_s, url.to_s) if @driver.respond_to?(:window_set_location))
+      def set_window_location(handle, url, user_activated: false)
+        @driver.window_set_location(handle.to_s, url.to_s, user_activated: user_activated) if @driver.respond_to?(:window_set_location)
+      end
       # …to a javascript: URL `href`, by a document of origin `origin`: evaluated in that window's document.
       def run_window_javascript_url(handle, href, origin) = (@driver.window_run_javascript_url(handle.to_s, href.to_s, origin.to_s) if @driver.respond_to?(:window_run_javascript_url))
       # The target side: a javascript: URL another window's document of origin `origin` navigates this one to, evaluated
@@ -9863,7 +9877,8 @@ module Capybara
       # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
       # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
       # no-cors request but where it asks for CORS)
-      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil)
+      def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
+                     user_activated: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -10130,6 +10145,8 @@ module Capybara
             env['HTTP_SEC_FETCH_MODE'] = cors_mode || 'no-cors'
             # (…a document's own navigation request its destination: a SW's passthrough re-fetch alone reports 'empty')
             env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : (dest.to_s.empty? ? 'empty' : dest)
+            # (…a navigation's whose source document had transient activation as it began, its user-activation)
+            env['HTTP_SEC_FETCH_USER'] = '?1' if navigation && user_activated
             # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
             # merge_set_cookie)
             env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
@@ -11312,22 +11329,24 @@ module Capybara
         return unless request
 
         method, url, body, content_type = request
+        # (…whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
+        activated = spec['userActivated'] == true
         case chosen
         when :self
           if method == 'GET'
-            navigate_realm_self_get(realm_id, url, referrer: initiator, initiator: realm_id)
+            navigate_realm_self_get(realm_id, url, referrer: initiator, initiator: realm_id, user_activated: activated)
           else
-            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator, initiator: realm_id)
+            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator, initiator: realm_id, user_activated: activated)
           end
         when :top
           # (…adding the page's entry, whether the frame's document is completely loaded or not: a form's replaces only its
           # own navigable's — HTML "plan to navigate", the form document the target's active document)
-          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type]) }
+          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type], user_activated: activated) }
         when Integer
           if method == 'GET'
-            navigate_realm_self_get(chosen, url, referrer: initiator, initiator: realm_id)
+            navigate_realm_self_get(chosen, url, referrer: initiator, initiator: realm_id, user_activated: activated)
           else
-            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator, initiator: realm_id)
+            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator, initiator: realm_id, user_activated: activated)
           end
         when :window
           log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
@@ -11976,10 +11995,11 @@ module Capybara
       # The top-level browsing context navigated by the page — a link followed in it or `target=_top` from a frame
       # within it — its Referer the browsing context it was followed in, under the policy the link sets (`policy`: its
       # `referrerpolicy`, `no-referrer` for `rel=noreferrer`), else that document's.
-      def navigate_top_from_page(url, blob: nil, policy: nil)
+      # (…`user_activated` whether that document's window had transient activation as the link was followed)
+      def navigate_top_from_page(url, blob: nil, policy: nil, user_activated: false)
         initiator = current_referrer_initiator
         initiator = [initiator[0], policy] unless policy.to_s.empty?
-        navigate_top_from(@current_realm_id.to_i, initiator, url, blob: blob)
+        navigate_top_from(@current_realm_id.to_i, initiator, url, blob: blob, user_activated: user_activated)
       end
       # …by the document of realm `realm`, its Referer `initiator` ([url, policy]): a GET, or a POST of `post` ([body,
       # content type]).
@@ -12666,12 +12686,12 @@ module Capybara
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
       # Hashes keyed by realm and the frame-reload slot is an Array.
       NAV_INTENT_SLOTS = %i[
-        @pending_location @pending_location_replace @pending_location_initiator @pending_reload @pending_history_traverse
+        @pending_location @pending_location_replace @pending_location_initiator @pending_location_activated @pending_reload @pending_history_traverse
         @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS
-      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator].freeze
+      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator @pending_location_activated].freeze
       private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init

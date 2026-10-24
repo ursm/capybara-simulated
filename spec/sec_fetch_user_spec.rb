@@ -21,6 +21,11 @@ RSpec.describe 'Sec-Fetch-User', :https do
         <button id=top onclick="location.href = '/clicked'">top</button>
         <button id=frame onclick="frames[0].location.href = '/frame-clicked'">frame</button>
         <button id=pop onclick="w.location = '/pop-clicked'">pop</button>
+        <a href="/linked">link</a>
+        <form action="/got"><button>get</button></form>
+        <form action="/posted" method=post><button>post</button></form>
+        <button id=src onclick="frames[0].frameElement.src = '/src-clicked'">src</button>
+        <button id=other onclick="o.location = '/other-clicked'">other</button>
         <iframe src="/blank"></iframe>
         <script>window.w = open('', 'pop')</script>
       HTML
@@ -43,5 +48,28 @@ RSpec.describe 'Sec-Fetch-User', :https do
     expect(poll_until { seen['/pop-clicked'] }).to eq('?1')
     session.click_button 'top'
     expect(poll_until { seen['/clicked'] }).to eq('?1')
+  end
+
+  it "is sent for a link followed, a form submitted and a frame's src a click set" do
+    session.visit '/'
+    session.click_button 'src'
+    expect(poll_until { seen['/src-clicked'] }).to eq('?1')
+    session.click_link 'link'
+    expect(poll_until { seen['/linked'] }).to eq('?1')
+    session.visit '/'
+    session.click_button 'get'
+    expect(poll_until { seen['/got'] }).to eq('?1')
+    session.visit '/'
+    session.click_button 'post'
+    expect(poll_until { seen['/posted'] }).to eq('?1')
+  end
+
+  # (…a window of a browser of its own, which its opener's click navigates)
+  it 'is sent for a window another window navigates as it is activated' do
+    session.visit '/'
+    session.execute_script("window.o = open('/other', 'other')")
+    expect(poll_until { seen.key?('/other') }).to be(true)
+    session.click_button 'other'
+    expect(poll_until { seen['/other-clicked'] }).to eq('?1')
   end
 end

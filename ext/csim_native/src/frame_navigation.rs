@@ -47,6 +47,9 @@ struct FrameNavigation {
     // sandboxed by (HTML "navigate": its sandboxing flags snapshot), whatever the attribute says by the time its response
     // is in; none where it had none — taken by the document it makes.
     sandbox: Option<Option<String>>,
+    // …and whether its container's document's window had transient activation then (`begin`): HTML's source snapshot
+    // params', the navigation's request's user-activation (Fetch's `Sec-Fetch-User`).
+    activated: bool,
     history: Option<Vec<u16>>,
     reload: Option<Vec<u16>>,
     // When the element's last `load` fired, on the virtual clock: a navigation begun at that same instant waits a
@@ -161,6 +164,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
     crate::dom::register(scope, ns, "takeFrameSandbox", take_frame_sandbox, context_id);
     crate::dom::register(scope, ns, "frameSandbox", frame_sandbox_op, context_id);
+    crate::dom::register(scope, ns, "frameNavigationActivated", frame_navigation_activated, context_id);
     crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
@@ -204,7 +208,10 @@ pub(crate) fn process_src(arena: &mut crate::dom::RealmArena, container: NodeId)
 // sandboxing flags snapshot), whatever it says by the time the response is in.
 fn begin(arena: &mut crate::dom::RealmArena, container: NodeId) {
     let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
-    arena.frame_navigation(container).sandbox = Some(sandbox);
+    let activated = arena.get(container).is_some_and(|n| arena.transiently_activated(n.realm));
+    let nav = arena.frame_navigation(container);
+    nav.sandbox = Some(sandbox);
+    nav.activated = activated;
 }
 impl crate::dom::RealmArena {
     // The `sandbox` attribute the document the container's navigation makes is sandboxed by: as the navigation under way
@@ -232,9 +239,20 @@ fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     match begun {
-        Some(sandbox) => arena.frame_navigation(container).sandbox = Some(sandbox),
+        Some(sandbox) => {
+            let nav = arena.frame_navigation(container);
+            nav.sandbox = Some(sandbox);
+            nav.activated = false;
+        }
         None => begin(arena, container),
     }
+}
+// __dom.frameNavigationActivated(containerNid) -> whether the navigation of the container under way began with its
+// document's window activated (`FrameNavigation::activated`).
+fn frame_navigation_activated(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).is_some_and(|nav| nav.activated));
 }
 // __dom.frameSandbox(containerNid) -> `RealmArena::frame_sandbox` (null: none), not taken: what the navigation under way
 // began with, which "allowed to download" asks of a response that makes no document.
