@@ -4080,9 +4080,9 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
-        # (…a CORS request's by its client's origin too: its document's, a frame's its own)
-        client   = mode && request_client(realm.to_i, policy, referrer: referrer)
-        memo_key = mode ? "#{mode} #{credentials} #{client_origin_of(client)} #{key}" : key
+        # (…a CORS request's by its mode and credentials: one document's client is of its one origin, which the
+        # process-wide cache keys by too — a frame's its own — worked out only where that cache is asked)
+        memo_key = mode ? "#{mode} #{credentials} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
         # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
@@ -4095,14 +4095,16 @@ module Capybara
           (@asset_bytes ||= {})[key] = e[2]
           return e[0]
         end
+        client     = mode && request_client(realm.to_i, policy, referrer: referrer)
+        shared_key = mode ? "#{memo_key} #{client_origin_of(client)}" : key
         @@asset_src_lock.synchronize do
-          if (e = @@asset_src[memo_key])
+          if (e = @@asset_src[shared_key])
             if e[1].nil? || Time.now < e[1]
               (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[2]
               (@asset_bytes ||= {})[key] = e[3]
               return e[0]
             end
-            @@asset_src.delete(memo_key)
+            @@asset_src.delete(shared_key)
           end
         end
         # `durable_source` already does the spec-compliant fetch + header-driven
@@ -4124,7 +4126,7 @@ module Capybara
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
-            @@asset_src[memo_key] = [text, fresh_until, meta, bytes]
+            @@asset_src[shared_key] = [text, fresh_until, meta, bytes]
           end
         end
         text

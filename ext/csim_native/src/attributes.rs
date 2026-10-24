@@ -502,11 +502,11 @@ fn change(
         arena.set_nonce(id, value.map(<[u16]>::to_vec).unwrap_or_default());
     }
     // (…a sheet owner's attribute that obtains it a new sheet, of those that select it (`steps_of`): a `<style>`'s `type`
-    // ("update a style block"); a `<link>`'s `type` or `disabled`, its `rel` or `href` — `disabled` removed making it
-    // explicitly enabled)
+    // ("update a style block"); a `<link>`'s `type` or `disabled`, its `rel`, `href` or `crossorigin` — `disabled` removed
+    // making it explicitly enabled)
     if steps & STEP_SHEET != 0 {
         let link = arena.get(id).is_some_and(|n| &*n.local_name == "link");
-        let renews = local == "type" || (link && matches!(local.as_str(), "disabled" | "rel" | "href"));
+        let renews = local == "type" || (link && matches!(local.as_str(), "disabled" | "rel" | "href" | "crossorigin"));
         if renews && arena.renew_sheet(id) && link && local == "disabled" && value.is_none() {
             arena.explicitly_enabled.insert(id);
         }
@@ -554,21 +554,22 @@ fn steps_of(arena: &RealmArena, id: NodeId, tag: &str, plain: bool, local: &str,
     let script = is_script(n);
     let flag = |on: bool, step: u32| if on { step } else { 0 };
     steps |= flag(script && local == "src" && old.is_none(), STEP_SCRIPT);
-    // (…a `<link>`'s `rel`, `href`, `type`, `media`, `title`, `disabled` or `as`, a `<style>`'s `media`, `title` or
-    // `type` — but an `href`, a `rel` or an `as` set to the value it had, which changes nothing: the same resource,
-    // Chrome 155 keeps the sheet and fetches no preload again — and of those a `<link>`'s that may name another resource:
-    // its `rel`, its `href`, its `disabled` removed)
+    // (…a `<link>`'s `rel`, `href`, `type`, `media`, `title`, `disabled`, `as` or `crossorigin` (its request's mode), a
+    // `<style>`'s `media`, `title` or `type` — but an `href`, a `rel`, an `as` or a `crossorigin` set to the value it had,
+    // which changes nothing: the same resource, Chrome 155 keeps the sheet and fetches no preload again — and of those a
+    // `<link>`'s that may name another resource or ask for it another way: its `rel`, its `href`, its `crossorigin`, its
+    // `disabled` removed)
     // (…a sheet owner's: an HTML or SVG `<style>`, an HTML `<link>`)
     let owner = crate::sheet_owners::is_sheet_owner(n);
     let link_sheet = owner
         && tag == "link"
         && match local {
-            "rel" | "href" | "as" => changed,
+            "rel" | "href" | "as" | "crossorigin" => changed,
             "type" | "media" | "title" | "disabled" => true,
             _ => false,
         };
     steps |= flag(link_sheet || (owner && tag == "style" && matches!(local, "media" | "title" | "type")), STEP_SHEET);
-    steps |= flag(link_sheet && (matches!(local, "rel" | "href") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
+    steps |= flag(link_sheet && (matches!(local, "rel" | "href" | "crossorigin") || (local == "disabled" && !set)), STEP_LINK_RESOURCE);
     steps |= flag(local == "disabled" && set, STEP_DISABLED);
     steps |= flag(matches!(local, "id" | "name") && value.is_some_and(|v| !v.is_empty()), STEP_NAMED);
     steps |= flag(html && tag == "canvas" && matches!(local, "width" | "height"), STEP_CANVAS);
