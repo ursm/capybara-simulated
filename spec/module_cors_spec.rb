@@ -33,6 +33,7 @@ RSpec.describe 'a module script', :https do
       when '/allowed.mjs', '/star.mjs' then js.({'access-control-allow-origin' => '*'})
       when '/cred.mjs' then js.({'access-control-allow-origin' => origin, 'access-control-allow-credentials' => 'true'})
       when '/cached.mjs' then js.({'access-control-allow-origin' => 'https://www.example.com', 'cache-control' => 'max-age=3600'})
+      when '/framed' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script type=module src="https://other.example.com/cached.mjs" onload="parent.postMessage(\'load\', \'*\')" onerror="parent.postMessage(\'error\', \'*\')"></script>']]
       when '/cookie' then [200, {'set-cookie' => 'k=v; SameSite=None; Secure; Path=/'}, ['']]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8>']]
       end
@@ -87,5 +88,12 @@ RSpec.describe 'a module script', :https do
       document.head.append(s);
     JS
     expect(poll_until { session.evaluate_script('events.length') == 1 && session.evaluate_script('events') }).to eq(['error'])
+    # (…nor to a frame of another origin in a page it is allowed for)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      addEventListener('message', (e) => { window.framed = e.data; });
+      document.body.append(Object.assign(document.createElement('iframe'), {src: 'https://frame.example.com/framed'}));
+    JS
+    expect(poll_until { session.evaluate_script('window.framed') }).to eq('error')
   end
 end

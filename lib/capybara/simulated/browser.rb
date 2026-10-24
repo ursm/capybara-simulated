@@ -3978,9 +3978,10 @@ module Capybara
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
-      # (…`mode` its request's: a module script's "cors", none a classic one's — with its `credentials` mode)
-      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
-        client = request_client(realm, element_policy, referrer: referrer)
+      # (…`mode` its request's: a module script's "cors", none a classic one's — with its `credentials` mode; `client`
+      # its request client where the caller has it already)
+      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin',
+                         client: request_client(realm, element_policy, referrer: referrer))
         body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                                     client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
@@ -4078,7 +4079,9 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
-        memo_key = mode ? "#{mode} #{credentials} #{request_client(realm.to_i, policy, referrer: referrer)[:origin] || url_origin(@current_url)} #{key}" : key
+        # (…a CORS request's by its client's origin too: its document's, a frame's its own)
+        client   = mode && request_client(realm.to_i, policy, referrer: referrer)
+        memo_key = mode ? "#{mode} #{credentials} #{client[:origin] || url_origin(client[:url])} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
         # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
@@ -4105,7 +4108,8 @@ module Capybara
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
+        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials,
+                                                                    client: client || request_client(realm.to_i, policy, referrer: referrer))
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body

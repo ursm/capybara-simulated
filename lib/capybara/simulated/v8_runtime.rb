@@ -1366,22 +1366,19 @@ module Capybara
         end
         true
       end
+      # A module script's fetch options (HTML "script fetch options") the driver keeps: its referrer policy (nil: its
+      # document's) and its credentials mode — its graph's element's `referrerpolicy` and `crossorigin` (a module
+      # script's "same-origin" by default).
+      ModuleFetchOptions = Data.define(:policy, :credentials) do
+        def self.of(policy, credentials) = new(policy: policy.to_s.empty? ? nil : policy.to_s, credentials: credentials.to_s.empty? ? 'same-origin' : credentials.to_s)
+      end
+      ModuleFetchOptions::NONE = ModuleFetchOptions.new(policy: nil, credentials: 'same-origin')
       # What a module of the graph came to where it is no module record (HTML "fetch a single module script"): it could
       # not be fetched — the graph's result null, the element's `error` — or it has an error to rethrow, the graph's
       # (`ModuleError`, kept as the URL's handle): it could not be parsed, or a specifier it imports resolves to none — the
       # element's `load`, the error reported at its window (HTML "run a module script"), by its kind, its message and where
       # V8 found it (none for a specifier: the document's), as the bridge makes it anew (`[name, message, filename,
       # lineno]`: the value V8 threw is its once, and only as it is thrown).
-      # A module script's fetch options (HTML "script fetch options") the driver keeps: its referrer policy (nil: its
-      # document's) and its credentials mode — its graph's element's `referrerpolicy` and `crossorigin` (a module
-      # script's "same-origin" by default).
-      ModuleFetchOptions = Data.define(:policy, :credentials) do
-        def self.of(policy, credentials)
-          options = new(policy: policy.to_s.empty? ? nil : policy.to_s, credentials: credentials.to_s.empty? ? 'same-origin' : credentials.to_s)
-          options == ModuleFetchOptions::NONE ? ModuleFetchOptions::NONE : options
-        end
-      end
-      ModuleFetchOptions::NONE = ModuleFetchOptions.new(policy: nil, credentials: 'same-origin')
       ModuleError = Data.define(:name, :message, :filename, :lineno) do
         def to_a = [name, message, filename, lineno]
       end
