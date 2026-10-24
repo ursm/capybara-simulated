@@ -1001,8 +1001,10 @@ module Capybara
         realm.call('__csimUpdateLocation', url.to_s) unless url.to_s.empty?
         # (…and its classic history API state, a traversal's to its entry: `reload_frame_realm`)
         realm.call('__csimSetHistoryState', history_state[0]) if history_state
-        # (…and its referrer, its navigation's request's)
-        realm.call('__csimSetPendingReferrer', referrer.to_s) unless referrer.to_s.empty?
+        # (…and its referrer, its navigation's request's — and, a srcdoc or initial about:blank document, the referrer
+        # policy of its container's document, whose policy container it clones: HTML)
+        inherited = url.to_s.match?(/\Aabout:(?:srcdoc|blank)\b/i) ? @browser.inherited_referrer_policy(parent_id) : nil
+        realm.call('__csimSetPendingReferrer', referrer.to_s, inherited.to_s) unless referrer.to_s.empty? && inherited.to_s.empty?
         # The navigation's reserved client id — this document's realm ADOPTS it as its
         # service-worker Client identity (`event.resultingClientId` resolves to THIS
         # client after commit). Seeded BEFORE the document loads so the realm's own

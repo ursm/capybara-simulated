@@ -23,6 +23,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "metaReferrerPolicy", meta_referrer_policy_op, context_id);
     register(scope, ns, "metaReferrerSteps", meta_referrer_steps_op, context_id);
     register(scope, ns, "noteRequestPolicy", note_request_policy_op, context_id);
+    register(scope, ns, "inheritReferrerPolicy", inherit_referrer_policy_op, context_id);
     register(scope, ns, "requestPolicy", request_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
     register(scope, ns, "referrerPolicyAttribute", referrer_policy_attribute_op, context_id);
@@ -264,6 +265,19 @@ fn meta_referrer_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     crate::dom::realm(scope, cid).meta_referrer_steps(id);
 }
 
+// __dom.inheritReferrerPolicy(docNid, policy): the document begins with the referrer policy of the policy container it
+// inherits — an about:srcdoc or initial about:blank document its creator's (HTML "clone a policy container") — or, '' and
+// any other, none: its `<meta>` elements set its own from there.
+fn inherit_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let policy = args.get(1).to_rust_string_lossy(scope);
+    let cid = crate::dom::realm_id(scope, &args);
+    let policies = &mut crate::dom::realm(scope, cid).referrer_policies;
+    match POLICIES.iter().find(|&&p| !p.is_empty() && p == policy) {
+        Some(&p) => policies.insert(doc, p),
+        None => policies.remove(&doc),
+    };
+}
 // __dom.noteRequestPolicy(nid): `note_request_policy`.
 fn note_request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };

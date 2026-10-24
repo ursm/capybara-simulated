@@ -10881,6 +10881,9 @@ module Capybara
         nav = @runtime.frame_realm_navigable(realm_id)
         @session_history.destroyed(nav) unless nav.zero?
       end
+      # The referrer policy a document realm `realm` (0 the page) creates inherits — a srcdoc or initial about:blank frame
+      # its container's document's, whose policy container it clones (HTML).
+      def inherited_referrer_policy(realm) = realm_referrer_initiator(realm.to_i)[1]
       # Frame realm `realm_id`'s document made, its referrer `referrer` (its navigation's request's Referer): kept in its
       # session history entry, where it has none yet — the document state's (HTML), which a reload or a traversal to the
       # entry makes its document with again rather than the Referer its own request sends.

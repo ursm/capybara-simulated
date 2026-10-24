@@ -24,6 +24,10 @@ RSpec.describe 'a subresource request' do
              when '/top2' then '<iframe src="/mf"></iframe>'
              when '/a1' then '<link rel=stylesheet href=/a1.css><meta name=referrer content=no-referrer><link rel=stylesheet href=/a1b.css>'
              when '/top3' then '<iframe src="/a3"></iframe>'
+             when '/he' then '<link rel=preload as=style href=/he1.css><meta name=referrer content=no-referrer><script>1</script>'
+             when '/sd' then '<meta name=referrer content=origin><iframe srcdoc="<link rel=stylesheet href=/sd.css>"></iframe>'
+             when '/hd' then '<meta name=referrer content=no-referrer><link id=l rel=stylesheet href=/hd1.css><meta name=referrer content=unsafe-url>' \
+                             '<script>l.href = "/hd2.css"</script>'
              when '/a3' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/a3.css><meta name=referrer content=unsafe-url>' \
                              '<link rel=stylesheet href=/a3b.css><script>1</script>'
              when '/mf' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/mf.css><script src=/mf.js></script>'
@@ -52,6 +56,18 @@ RSpec.describe 'a subresource request' do
     expect(referers.slice('/a1.css', '/a1b.css')).to eq('/a1.css' => 'http://www.example.com/a1', '/a1b.css' => nil)
     session.visit '/top3'
     expect(referers.slice('/a3.css', '/a3b.css')).to eq('/a3.css' => nil, '/a3b.css' => 'http://www.example.com/a3')
+  end
+
+  # …a link of another type alike (a preload); a srcdoc document's its container's, whose policy container it clones;
+  # and a fetch an `href` change begins the policy its document has then (Chrome).
+  it 'is referred under the policy at insertion for a preload, inherited by srcdoc, current for an href change' do
+    session.visit '/he'
+    session.visit '/sd'
+    session.visit '/hd'
+    session.evaluate_script('1')
+    expect(referers.slice('/he1.css', '/sd.css', '/hd1.css', '/hd2.css')).to eq(
+      '/he1.css' => 'http://www.example.com/he', '/sd.css' => 'http://www.example.com/', '/hd1.css' => nil, '/hd2.css' => 'http://www.example.com/hd'
+    )
   end
 
   it "is referred under a frame's meta policy parsed before it" do
