@@ -431,7 +431,7 @@ module Capybara
       def dispose_frame_realms
         @realm_module_handles&.clear
         @module_sw_ctxs&.clear
-        @module_policies&.clear
+        @module_fetch_options&.clear
         @frame_realm_depths&.clear
         @frame_realm_parents&.clear
         @navigable_builds&.clear
@@ -567,7 +567,7 @@ module Capybara
         @browser.note_realm_discarded(id) rescue nil
         @realm_module_handles&.delete(id)
         @module_sw_ctxs&.delete(id)
-        @module_policies&.delete(id)
+        @module_fetch_options&.delete(id)
         @browser.forget_importmap(id)
         @frame_realm_depths&.delete(id)
         @frame_realm_parents&.delete(id)
@@ -1331,10 +1331,10 @@ module Capybara
       # context-bound; sharing the main cache would link a frame's imports
       # against main-context modules). True where its graph was fetched and ran (a throw in it reported), false where it
       # could not be fetched — the element's `error` (HTML "execute the script element": a null result) — or its error to
-      # rethrow, `ModuleError#to_a`, which the bridge reports before the element's `load`. `policy` the
-      # referrer policy its element's `referrerpolicy` sets ('' for none), which its graph's every fetch is made under (HTML
-      # "fetch the descendants of a module script": the descendant script fetch options keep it).
-      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, policy: nil, sw: nil)
+      # rethrow, `ModuleError#to_a`, which the bridge reports before the element's `load`. `options` its element's
+      # fetch options (`ModuleFetchOptions`), which its graph's every fetch is made with (HTML "fetch the descendants of a
+      # module script": the descendant script fetch options keep them).
+      def eval_esm_module(url, inline_src = nil, target: nil, handles: nil, options: ModuleFetchOptions::NONE, sw: nil)
         target  ||= ctx
         handles ||= native_module_handles
         # A CONTROLLED document's module-graph source fetches dispatch SW fetch
@@ -1347,11 +1347,11 @@ module Capybara
         # earlier script picks up the later script's credentials/root. Spec wants
         # per-referring-script options; no vendored test observes the difference.
         module_sw_ctxs[realm_key(target)] = sw&.merge(root: inline_src ? nil : url.to_s)
-        m = native_module_for(url, inline_src, target, handles, policy: policy)
+        m = native_module_for(url, inline_src, target, handles, options: options)
         return false unless m
         return m.to_a if m.is_a?(ModuleError)
         begin
-          instantiate_native_module(m, url, target, handles, policy)
+          instantiate_native_module(m, url, target, handles, options)
           # (…its evaluation's rejection — a top-level throw, a top-level await's — reported at its window, `error`
           # event and all, as HTML "run a module script" reports it: the realm's own `__csimReportError`)
           m.evaluate(report: '__csimReportError')
@@ -1372,6 +1372,16 @@ module Capybara
       # element's `load`, the error reported at its window (HTML "run a module script"), by its kind, its message and where
       # V8 found it (none for a specifier: the document's), as the bridge makes it anew (`[name, message, filename,
       # lineno]`: the value V8 threw is its once, and only as it is thrown).
+      # A module script's fetch options (HTML "script fetch options") the driver keeps: its referrer policy (nil: its
+      # document's) and its credentials mode — its graph's element's `referrerpolicy` and `crossorigin` (a module
+      # script's "same-origin" by default).
+      ModuleFetchOptions = Data.define(:policy, :credentials) do
+        def self.of(policy, credentials)
+          options = new(policy: policy.to_s.empty? ? nil : policy.to_s, credentials: credentials.to_s.empty? ? 'same-origin' : credentials.to_s)
+          options == ModuleFetchOptions::NONE ? ModuleFetchOptions::NONE : options
+        end
+      end
+      ModuleFetchOptions::NONE = ModuleFetchOptions.new(policy: nil, credentials: 'same-origin')
       ModuleError = Data.define(:name, :message, :filename, :lineno) do
         def to_a = [name, message, filename, lineno]
       end
@@ -1436,8 +1446,9 @@ module Capybara
       # The module script of `url` — or, `inline_src` given, the inline one whose base URL `url` is: a script of its own
       # each time, in no module map (HTML "create a JavaScript module script"), its `import.meta.url` that base URL. An
       # imported one's request is referred by `referrer`, the base URL of the script importing it; a graph's entry by its
-      # document ("client") — each under `policy`, its graph's element's referrer policy where it sets one.
-      def native_module_for(url, inline_src, target, handles, referrer: nil, policy: nil)
+      # document ("client") — each with `options`, its graph's element's fetch options: its referrer policy and its
+      # credentials mode.
+      def native_module_for(url, inline_src, target, handles, referrer: nil, options: ModuleFetchOptions::NONE)
         return handles[url] if !inline_src && handles.key?(url)
         url_s = url.to_s
         src   = inline_src
@@ -1468,8 +1479,10 @@ module Capybara
         if src.nil? && !local
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
           # link fetched it too), none across visits while the response says it is fresh — a CORS request, as every
-          # module script's is (HTML "fetch a single module script"): one of another origin no response allows none.
-          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), policy, referrer: referrer, dest: 'script', mode: 'cors')
+          # module script's is (HTML "fetch a single module script"), with the graph's credentials mode: a module of
+          # another origin whose response does not allow it fails to load.
+          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), options.policy, referrer: referrer, dest: 'script', mode: 'cors',
+                                                                                                             credentials: options.credentials)
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
           content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
         end
@@ -1478,10 +1491,10 @@ module Capybara
         src = nil if src && !inline_src && !Native.module_content(Array(content_type).join(', '), json_module?(url_s))
         return handles[url] = nil unless src
         return compile_inline_module(src, url_s, target) if inline_src
-        # (…its fetch options' referrer policy, for an `import()` it makes — a fetched module's, which the map keys by its
-        # URL: an inline one's name is its document's base URL, every inline module's alike, so an `import()` it makes is
-        # fetched under its document's policy)
-        module_policies(realm_key(target))[url_s] = policy unless policy.to_s.empty?
+        # (…its fetch options, for an `import()` it makes — a fetched module's, which the map keys by its URL: an inline
+        # one's name is its document's base URL, every inline module's alike, so an `import()` it makes is fetched with
+        # its document's defaults)
+        module_fetch_options(realm_key(target))[url_s] = options unless options == ModuleFetchOptions::NONE
         @browser.note_module_source_map(url_s, src)
         body = module_body(url_s, src)
         # No-cd warm path: once this isolate has compiled a URL, its in-memory
@@ -1526,14 +1539,14 @@ module Capybara
         module_error(e.message, url)
       end
 
-      def instantiate_native_module(m, importer_url, target, handles, policy = nil)
+      def instantiate_native_module(m, importer_url, target, handles, options = ModuleFetchOptions::NONE)
         return unless m.status == :uninstantiated
         browser = @browser
         realm = realm_key(target)
         m.instantiate do |specifier, referrer|
           resolved, base = browser.resolve_module_request(specifier, referrer || importer_url, realm)
           raise ModuleParseFailed, unresolved_specifier(specifier) unless resolved
-          child = native_module_for(resolved, nil, target, handles, referrer: base, policy: policy)
+          child = native_module_for(resolved, nil, target, handles, referrer: base, options: options)
           raise ModuleFetchFailed, "module not found: #{resolved}" unless child
           raise ModuleParseFailed, child if child.is_a?(ModuleError)
           child
@@ -1550,8 +1563,9 @@ module Capybara
       # realm-correctness as static `<script type=module>` via
       # `attach_realm_esm_entry`.
       def attach_native_module_loader(c)
-        c.attach('__csim_evalEsmEntry', ->(url, inline, policy, *sw) {
-          esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, policy: policy, sw: esm_sw_ctx(sw)) })
+        c.attach('__csim_evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
+          options = ModuleFetchOptions.of(policy, credentials)
+          esm_entry_result(RuntimeShared.safe_call { eval_esm_module(url, inline, options: options, sw: esm_sw_ctx(sw)) })
         })
         c.dynamic_import_resolver = lambda do |specifier, referrer, initiating|
           target, handles =
@@ -1562,11 +1576,11 @@ module Capybara
             end
           resolved, base = @browser.resolve_module_request(specifier, referrer, realm_key(target))
           raise ModuleParseFailed, unresolved_specifier(specifier) unless resolved
-          policy = module_policies(realm_key(target))[referrer.to_s]
-          m = native_module_for(resolved, nil, target, handles, referrer: base, policy: policy)
+          options = module_fetch_options(realm_key(target))[referrer.to_s] || ModuleFetchOptions::NONE
+          m = native_module_for(resolved, nil, target, handles, referrer: base, options: options)
           raise "module not found: #{resolved}" unless m
           raise ModuleParseFailed, m if m.is_a?(ModuleError)
-          instantiate_native_module(m, resolved, target, handles, policy)
+          instantiate_native_module(m, resolved, target, handles, options)
           m
         rescue ModuleParseFailed => e
           # (…its graph's error to rethrow the console's alone: the `import()` rejects with the engine's Error, of no kind
@@ -1598,17 +1612,17 @@ module Capybara
         end
         @module_sw_ctxs
       end
-      # …and realm -> {module URL -> the referrer policy its fetch options carry}, where its graph's element set one
-      # (`referrerpolicy`): what an `import()` the module makes is fetched under (HTML HostLoadImportedModule: the
-      # referencing script's fetch options), kept as the module map keeps the module — its first fetch's (a fetched
-      # module's alone: `native_module_for`). Invalidated as the handles are.
-      def module_policies(realm)
+      # …and realm -> {module URL -> its fetch options}, where its graph's element set any (`referrerpolicy`,
+      # `crossorigin`): what an `import()` the module makes is fetched with (HTML HostLoadImportedModule: the referencing
+      # script's fetch options), kept as the module map keeps the module — its first fetch's (a fetched module's alone:
+      # `native_module_for`). Invalidated as the handles are.
+      def module_fetch_options(realm)
         key = [ctx.object_id, ctx.generation]
-        if @module_policies_key != key
-          @module_policies     = {}
-          @module_policies_key = key
+        if @module_fetch_options_key != key
+          @module_fetch_options     = {}
+          @module_fetch_options_key = key
         end
-        @module_policies[realm] ||= {}
+        @module_fetch_options[realm] ||= {}
       end
 
       def realm_key(target)
@@ -1634,9 +1648,9 @@ module Capybara
 
       # Frame-document `<script type=module>` entry, bound to the realm.
       def attach_realm_esm_entry(realm)
-        realm.attach('__csim_evalEsmEntry', ->(url, inline, policy, *sw) {
+        realm.attach('__csim_evalEsmEntry', ->(url, inline, policy, credentials, *sw) {
           esm_entry_result(RuntimeShared.safe_call {
-            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), policy: policy, sw: esm_sw_ctx(sw))
+            eval_esm_module(url, inline, target: realm, handles: realm_module_handles(realm.id), options: ModuleFetchOptions.of(policy, credentials), sw: esm_sw_ctx(sw))
           })
         })
       end

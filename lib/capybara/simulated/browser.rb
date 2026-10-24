@@ -3841,9 +3841,10 @@ module Capybara
         rack_fetch('GET', url, '', nil, 'follow', referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
-      def rack_fetch_body(url, cors_mode: nil, client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil, initiator: nil, dest: nil)
-        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, client_url: client_url, client_origin: client_origin, referrer: referrer, referrer_policy: referrer_policy,
-                                                                     client_realm: client_realm, initiator: initiator, dest: dest)
+      def rack_fetch_body(url, cors_mode: nil, credentials: 'same-origin', client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil,
+                          initiator: nil, dest: nil)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors_mode, credentials: credentials, client_url: client_url, client_origin: client_origin, referrer: referrer,
+                                                                     referrer_policy: referrer_policy, client_realm: client_realm, initiator: initiator, dest: dest)
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
@@ -3977,11 +3978,11 @@ module Capybara
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
-      # (…`mode` its request's: a module script's "cors", none a classic one's)
-      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil)
+      # (…`mode` its request's: a module script's "cors", none a classic one's — with its `credentials` mode)
+      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
         client = request_client(realm, element_policy, referrer: referrer)
-        body = rack_fetch_body(url, cors_mode: mode, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy], client_origin: client[:origin],
-                                    client_realm: client[:realm], initiator: client[:initiator], dest: dest)
+        body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
+                                    client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
         fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
@@ -4065,8 +4066,9 @@ module Capybara
       # imported module's referring script's base URL, under it; its cookies and Sec-Fetch-Site that document's: a frame's
       # style sheet a frame's)
       # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports, and `mode` its mode — a module
-      # script's "cors", which its response is checked by and no classic script's body answers from either memo)
-      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil)
+      # script's "cors", with its `credentials` mode, which its response is checked by: a body either memo keeps answers
+      # only a request of the same mode, credentials and client origin, which the CORS check it passed was of)
+      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4076,7 +4078,7 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
-        memo_key = mode ? "#{mode} #{key}" : key
+        memo_key = mode ? "#{mode} #{credentials} #{request_client(realm.to_i, policy, referrer: referrer)[:origin] || url_origin(@current_url)} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
         # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
@@ -4103,7 +4105,7 @@ module Capybara
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode)
+        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
