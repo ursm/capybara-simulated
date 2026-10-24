@@ -1467,8 +1467,9 @@ module Capybara
         end
         if src.nil? && !local
           # …through the asset cache, like a classic script's: one fetch per URL per document (a `modulepreload`
-          # link fetched it too), none across visits while the response says it is fresh.
-          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), policy, referrer: referrer, dest: 'script')
+          # link fetched it too), none across visits while the response says it is fresh — a CORS request, as every
+          # module script's is (HTML "fetch a single module script"): one of another origin no response allows none.
+          src = @browser.external_asset_source(url_s, asset_document_of(target), realm_key(target), policy, referrer: referrer, dest: 'script', mode: 'cors')
           @browser.note_module_fetch(url_s) if src   # its Resource Timing entry ('script')
           content_type = @browser.external_asset_meta(url_s)&.dig('headers', 'content-type')
         end

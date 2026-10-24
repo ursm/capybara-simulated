@@ -2763,7 +2763,6 @@ fetch/metadata/generated/element-script.https.sub.html:
 - 'sec-fetch-mode - attributes: crossorigin'
 - 'sec-fetch-mode - attributes: crossorigin=anonymous'
 - 'sec-fetch-mode - attributes: crossorigin=use-credentials'
-- 'sec-fetch-mode - attributes: type=module'
 - sec-fetch-storage-access - Cross-site, no attributes
 fetch/metadata/generated/element-video-poster.https.sub.html: HARNESS_ERROR
 fetch/metadata/generated/element-video-poster.sub.html: HARNESS_ERROR
@@ -2911,10 +2910,6 @@ fetch/metadata/generated/script-json-module-import-static.sub.html:
 - sec-fetch-user - Not sent to non-trustworthy cross-site destination
 - sec-fetch-user - Not sent to non-trustworthy same-origin destination
 - sec-fetch-user - Not sent to non-trustworthy same-site destination
-fetch/metadata/generated/script-module-import-dynamic.https.sub.html:
-- sec-fetch-mode
-fetch/metadata/generated/script-module-import-static.https.sub.html:
-- sec-fetch-mode
 fetch/metadata/generated/script-text-module-import-static.https.sub.html:
 - sec-fetch-dest
 - sec-fetch-mode

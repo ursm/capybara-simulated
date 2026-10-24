@@ -3977,9 +3977,10 @@ module Capybara
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
       # the external-asset cache (`external_asset_source`, scripts +
       # stylesheets); name is generic.
-      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil)
+      # (…`mode` its request's: a module script's "cors", none a classic one's)
+      def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil)
         client = request_client(realm, element_policy, referrer: referrer)
-        body = rack_fetch_body(url, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy], client_origin: client[:origin],
+        body = rack_fetch_body(url, cors_mode: mode, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy], client_origin: client[:origin],
                                     client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
         entry = @@asset_cache.lookup(url)
@@ -4063,8 +4064,9 @@ module Capybara
       # document's URL under its policy — or the one its element's `referrerpolicy` sets, `policy` — or `referrer`, an
       # imported module's referring script's base URL, under it; its cookies and Sec-Fetch-Site that document's: a frame's
       # style sheet a frame's)
-      # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports)
-      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil)
+      # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports, and `mode` its mode — a module
+      # script's "cors", which its response is checked by and no classic script's body answers from either memo)
+      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil)
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4074,6 +4076,7 @@ module Capybara
         needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
+        memo_key = mode ? "#{mode} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
         # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
@@ -4081,26 +4084,26 @@ module Capybara
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
         memo = document && @page_asset_src&.[](document.to_i)
-        if memo && (e = memo[key])
+        if memo && (e = memo[memo_key])
           (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[1]
           (@asset_bytes ||= {})[key] = e[2]
           return e[0]
         end
         @@asset_src_lock.synchronize do
-          if (e = @@asset_src[key])
+          if (e = @@asset_src[memo_key])
             if e[1].nil? || Time.now < e[1]
               (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[2]
               (@asset_bytes ||= {})[key] = e[3]
               return e[0]
             end
-            @@asset_src.delete(key)
+            @@asset_src.delete(memo_key)
           end
         end
         # `durable_source` already does the spec-compliant fetch + header-driven
         # freshness (RFC 9111 max-age → absolute deadline); reuse it instead of
         # re-deriving `fresh_until` here.
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
-        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest)
+        body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
         return nil unless body
@@ -4110,11 +4113,11 @@ module Capybara
         text  = RuntimeShared.utf8_text(body)
         bytes = Thread.current[:csim_asset_bytes] || (body.b if text.b != body.b)
         (@asset_bytes ||= {})[key] = bytes
-        memo[key] = [text, meta, bytes] if memo && !Thread.current[:csim_asset_no_store]
+        memo[memo_key] = [text, meta, bytes] if memo && !Thread.current[:csim_asset_no_store]
         if fresh_until
           @@asset_src_lock.synchronize do
             @@asset_src.clear if @@asset_src.size >= ASSET_SRC_MAX
-            @@asset_src[key] = [text, fresh_until, meta, bytes]
+            @@asset_src[memo_key] = [text, fresh_until, meta, bytes]
           end
         end
         text
