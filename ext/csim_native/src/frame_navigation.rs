@@ -30,8 +30,10 @@ struct Content {
     url: Vec<u16>,
     bytes: Vec<u8>,
     content_type: Vec<u16>,
-    // The Referer the request it answered sent — the referrer of the document it makes — empty for none.
+    // The Referer the request it answered sent — the referrer of the document it makes — and the referrer policy it
+    // makes it with (a javascript: URL's result its frame's active document's: HTML), each empty for none.
     referrer: Vec<u16>,
+    policy: Vec<u16>,
 }
 
 #[derive(Default)]
@@ -302,12 +304,13 @@ fn frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let bytes = crate::dom::u8_array(scope, content.bytes);
     let content_type = utf16_value(scope, &content.content_type);
     let referrer = utf16_value(scope, &content.referrer);
-    rv.set(v8::Array::new_with_elements(scope, &[url, bytes, content_type, referrer]).into());
+    let policy = utf16_value(scope, &content.policy);
+    rv.set(v8::Array::new_with_elements(scope, &[url, bytes, content_type, referrer, policy]).into());
 }
 
-// __dom.setFrameContent(containerNid, slot, url, bytes, contentType[, referrer]) — the document the navigation carries in
-// `slot`: `url`, `bytes` (a Uint8Array), `contentType` and the Referer its request sent; none where no bytes are given
-// (`setFrameContent(nid, slot)`).
+// __dom.setFrameContent(containerNid, slot, url, bytes, contentType[, referrer[, policy]]) — the document the navigation
+// carries in `slot`: `url`, `bytes` (a Uint8Array), `contentType`, the Referer its request sent and the referrer policy it
+// is made with; none where no bytes are given (`setFrameContent(nid, slot)`).
 fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let slot = args.get(1).uint32_value(scope).unwrap_or(u32::MAX) as usize;
@@ -319,8 +322,9 @@ fn set_frame_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         view.copy_contents(&mut bytes);
         let url = utf16_arg(scope, args.get(2));
         let content_type = utf16_arg(scope, args.get(4));
-        let referrer = if args.get(5).is_null_or_undefined() { Vec::new() } else { utf16_arg(scope, args.get(5)) };
-        Content { url, bytes, content_type, referrer }
+        let text = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| if v.is_null_or_undefined() { Vec::new() } else { utf16_arg(scope, v) };
+        let (referrer, policy) = (text(scope, args.get(5)), text(scope, args.get(6)));
+        Content { url, bytes, content_type, referrer, policy }
     });
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
@@ -559,8 +563,9 @@ fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         let bytes = crate::dom::u8_array(scope, content.bytes);
         let content_type = utf16_value(scope, &content.content_type);
         let referrer = utf16_value(scope, &content.referrer);
+        let policy = utf16_value(scope, &content.policy);
         let (kind, reload) = (v8::Integer::new(scope, SOURCE_NAVIGATION).into(), v8::Boolean::new(scope, reload).into());
-        return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url, bytes, content_type, referrer]).into());
+        return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url, bytes, content_type, referrer, policy]).into());
     }
     let started = nav.src.clone();
     let refused = nav.flags & SRC_REFUSED != 0;

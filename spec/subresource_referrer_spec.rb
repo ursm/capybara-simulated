@@ -92,6 +92,35 @@ RSpec.describe 'a subresource request' do
     expect(referers.slice('/ph.css', '/hf.css', '/hfnext')).to eq('/ph.css' => nil, '/hf.css' => 'http://www.example.com/', '/hfnext' => 'http://www.example.com/')
   end
 
+  # …a javascript: URL's result document the policy of the document it was evaluated in, which it keeps (HTML "evaluate a
+  # javascript: URL").
+  it "is referred under the policy a javascript: URL's document keeps" do
+    refs = referers
+    session = simulated_session(lambda {|env|
+      path = env['PATH_INFO']
+      refs[path] = env['HTTP_REFERER']
+      next [200, {'content-type' => 'text/css'}, ['p{}']] if path.end_with?('.css')
+
+      body = path == '/jt' ? '<iframe src="/ja"></iframe>' : path
+      [200, {'content-type' => 'text/html', 'referrer-policy' => 'origin'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    session.visit '/jt'
+    session.execute_script(%q{frames[0].location = 'javascript:"<link rel=stylesheet href=/js.css>"'})
+    session.evaluate_script('1')
+    expect(referers['/js.css']).to eq('http://www.example.com/')
+  end
+
+  # A frame's navigation whose response downloads makes no document: the frame stays at the one it is at (HTML).
+  it "makes no frame document of a download" do
+    session = simulated_session(lambda {|env|
+      next [200, {'content-disposition' => 'attachment; filename=x.txt', 'content-type' => 'text/plain'}, ['x']] if env['PATH_INFO'] == '/dl'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><iframe src="/dl"></iframe>']]
+    })
+    session.visit '/'
+    expect(session.evaluate_script('frames[0].location.href')).to eq('about:blank')
+  end
+
   it "is referred under a frame's meta policy parsed before it" do
     session.visit '/top2'
     expect(referers.slice('/mf.css', '/mf.js')).to eq('/mf.css' => nil, '/mf.js' => nil)

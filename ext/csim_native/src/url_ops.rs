@@ -265,9 +265,10 @@ fn meta_referrer_steps_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     crate::dom::realm(scope, cid).meta_referrer_steps(id);
 }
 
-// __dom.inheritReferrerPolicy(docNid, policy): the document begins with the referrer policy of the policy container it
-// inherits — an about:srcdoc or initial about:blank document its creator's (HTML "clone a policy container") — or, '' and
-// any other, none: its `<meta>` elements set its own from there.
+// __dom.inheritReferrerPolicy(docNid, policy): the document begins with the referrer policy its policy container has as
+// it is made — its response's `Referrer-Policy` header's, or the one it clones (an about:srcdoc or initial about:blank
+// document its creator's, HTML "clone a policy container") — none for '' or any other: its `<meta>` elements set its own
+// from there.
 fn inherit_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let policy = args.get(1).to_rust_string_lossy(scope);

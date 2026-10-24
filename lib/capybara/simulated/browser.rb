@@ -7004,6 +7004,11 @@ module Capybara
             resp_body.close if resp_body.respond_to?(:close)
             return {'no_document' => true}
           end
+          # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate")
+          if download_response?(headers)
+            from_document(container_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s]) }
+            return {'no_document' => true}
+          end
           body ||= read_rack_body(resp_body)
           out = response_hash(status, headers, body, target, redirected)
           # The final reserved client id — the JS frame builder hands it to the new realm
@@ -7679,14 +7684,15 @@ module Capybara
       # works (dom/nodes/remove-and-adopt-thcrash). Returns nil to fall back to the
       # separate-VM aux-window path. First stage: about:blank only (a non-blank
       # same-origin URL still takes the aux path until realm URL-loading lands).
-      # (…its about:blank document's referrer its creator's URL, `creator_url`: HTML "create a new browsing context and
-      # document")
+      # (…its about:blank document's referrer its creator's URL, `creator_url`, and its policy container its creator's
+      # clone: HTML "create a new browsing context and document")
       def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil, creator_url: nil)
         return nil unless url.nil?
         consume_user_activation(opener_realm_id)
         @runtime.create_window_realm(
           '', '', 'text/html',
-          window_name: name, opener_id: opener_realm_id, about_base: about_base, referrer: creator_url
+          window_name: name, opener_id: opener_realm_id, about_base: about_base, referrer: creator_url,
+          referrer_policy: inherited_referrer_policy(opener_realm_id)
         )
       end
 
@@ -10997,7 +11003,8 @@ module Capybara
       # policy container (HTML "create and initialize a Document object"), which its `<meta>` elements may set anew.
       def referrer_policy_header(headers)
         rp = header_field(headers || {}, 'referrer-policy') or return nil
-        Array(rp).join(',').split(',').map(&:strip).reverse.find {|t| !t.empty? && REFERRER_POLICIES.include?(t) }
+        # (…its tokens matched as they are, case and all: an unknown one — `No-Referrer` — none, as the spec's parse has it)
+        Array(rp).join(',').split(',').map(&:strip).reverse.find {|t| REFERRER_POLICIES.include?(t) }
       end
       # The client a subresource request of realm `realm` is made as (Fetch "client"): its URL — the referrer source, whose
       # site Sec-Fetch-Site compares — its referrer policy, or the one the request's element sets (`element_policy`), its
