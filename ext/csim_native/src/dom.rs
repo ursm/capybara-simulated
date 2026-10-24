@@ -325,8 +325,9 @@ pub(crate) const STATE_DESIGN_MODE: u32 = 1 << 20;
 // …and, on a `<link>`, that it obtained nothing because its `media` did not match (link_resource.rs `link_plan`) — the
 // engine's alone: no binding reads it (`linkMediaSkipped` answers it).
 pub(crate) const STATE_LINK_MEDIA_SKIPPED: u32 = 1 << 21;
-// …and, on an `<object>`, that its resource failed to load and it shows its fallback content instead (HTML's object
-// processing model: "fallback"), the bindings' to note as its processing ends (`setObjectFallback`).
+// …and, on an `<object>`, that it shows its fallback content as its processing last ended (HTML's object processing
+// model: "fallback"): its resource failed to load, or it has none to process — the bindings' to note
+// (`setObjectFallback`).
 pub(crate) const STATE_OBJECT_FALLBACK: u32 = 1 << 22;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its

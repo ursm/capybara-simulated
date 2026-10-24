@@ -184,8 +184,8 @@ fn plugin_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set(v8::Array::new_with_elements(scope, &[d.into(), u.into()]).into());
 }
 
-// __dom.setObjectFallback(el, on) -> whether that changed it: the `<object>` shows its fallback content, its resource
-// failed to load — or no longer does, its processing run again (`STATE_OBJECT_FALLBACK`).
+// __dom.setObjectFallback(el, on) -> whether that changed it: the `<object>` shows its fallback content as its
+// processing ends — its resource failed to load, or it has none — or no longer does (`STATE_OBJECT_FALLBACK`).
 fn set_object_fallback_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let on = args.get(1).is_true();

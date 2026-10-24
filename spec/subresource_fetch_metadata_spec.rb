@@ -149,6 +149,16 @@ RSpec.describe 'a subresource request', :https do
     expect(session.evaluate_script('[sized.offsetWidth, sized.offsetHeight]')).to eq([100, 50])
     session.execute_script("sized.removeAttribute('data')")
     expect(session.evaluate_script('[sized.offsetWidth, sized.offsetHeight]')).to eq([300, 150])
+    # (…a fallback's plugin processed once as the object it is in fails again, no more)
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<object id=o1 data="/gone"><object id=o2><embed id=leaf src="/e.svg"></object></object>');
+      leaf.addEventListener('load', () => events.push('load leaf'));
+    JS
+    session.execute_script("o1.data = '/gone'")
+    expect(poll_until { session.evaluate_script('events.length') == 2 && session.evaluate_script('events') }).to eq(['load sized', 'load leaf'])
+    session.evaluate_script('1')
+    expect(session.evaluate_script('events.length')).to eq(2)
+    session.execute_script('events.pop()')
     # (…its resource set again to the value it had: processed again)
     session.execute_script("sized.data = '/o.svg'; sized.data = '/o.svg'")
     expect(poll_until { session.evaluate_script('events.length') == 3 && session.evaluate_script('events') }).to eq(['load sized', 'load sized', 'load sized'])
