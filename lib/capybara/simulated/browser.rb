@@ -4087,8 +4087,9 @@ module Capybara
         memo_key = mode ? "#{mode} #{credentials} #{key}" : key
         # One fetch per URL per DOCUMENT (`document`, the asking realm's token), whatever the response's freshness says —
         # a browser's memory cache: the cascade fetches a `<link>`'s sheet and its load task asks again, and a response
-        # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. `no-store` alone is
-        # fetched every time, and a document that loads again — a frame reloaded — has a memo of its own.
+        # with no cache headers (every asset of a Rails app in test) crossed Rack twice per page. A failed one too (a 404,
+        # a network error), which each of those asked for again. `no-store` alone is fetched every time, and a document
+        # that loads again — a frame reloaded — has a memo of its own.
         # (A body served from memory carries the facts of the response it came from, for whoever files its Resource
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
         memo = document && @page_asset_src&.[](document.to_i)
@@ -4116,7 +4117,10 @@ module Capybara
         body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, client: client)
         meta = Thread.current[:csim_asset_meta]
         (@asset_meta ||= {})[key] = meta
-        return nil unless body
+        unless body
+          memo[memo_key] = [nil, meta, nil] if memo && !Thread.current[:csim_asset_no_store]
+          return nil
+        end
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them:
         # `rack_fetch_body`)

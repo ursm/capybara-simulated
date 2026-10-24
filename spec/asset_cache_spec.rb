@@ -98,8 +98,8 @@ end
 
 # One fetch per URL per DOCUMENT, as a browser's memory cache gives: the cascade fetches a `<link>`'s sheet and its load
 # task asks for it again, a module graph fetches what a `modulepreload` link fetched — and a response with no cache
-# headers (every asset of a Rails app in test) crossed Rack twice per page. A `no-store` one is fetched every time, and a
-# new document fetches afresh.
+# headers (every asset of a Rails app in test) crossed Rack twice per page, a failed one three times. A `no-store` one is
+# fetched every time, and a new document fetches afresh.
 RSpec.describe 'one fetch per asset per document' do
   def app(hits, extra_headers = {})
     ->(env) {
@@ -108,10 +108,11 @@ RSpec.describe 'one fetch per asset per document' do
       case path
       when '/s.css' then [200, {'content-type' => 'text/css'}.merge(extra_headers), ['p { color: rgb(0, 128, 0) }']]
       when '/m.js'  then [200, {'content-type' => 'text/javascript'}.merge(extra_headers), ['document.title = "m";']]
+      when '/404.css' then [404, {'content-type' => 'text/css'}, ['']]
       else
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><html><head>
-            <link rel="stylesheet" href="/s.css"><link rel="modulepreload" href="/m.js">
+            <link rel="stylesheet" href="/s.css"><link rel="stylesheet" href="/404.css"><link rel="modulepreload" href="/m.js">
             <script type="module" src="/m.js"></script>
           </head><body><p id="p">p</p></body></html>
         HTML
@@ -127,10 +128,35 @@ RSpec.describe 'one fetch per asset per document' do
     end
   end
 
+  # (…a sheet that failed to load as well: the cascade, its `.sheet` and its `error` event asked for it again)
   it 'fetches a stylesheet and a module once per document' do
     hits = Hash.new(0)
     visit_twice(hits)
-    expect(hits.values_at('/s.css', '/m.js')).to eq([2, 2])
+    expect(hits.values_at('/s.css', '/404.css', '/m.js')).to eq([2, 2, 2])
+  end
+
+  # …and a preload of a sheet or a classic script is the fetch its consumer of the same mode takes (HTML's map of
+  # preloaded resources) — one of another mode none it matches.
+  it 'takes a preloaded sheet and script' do
+    hits = Hash.new(0)
+    preload_app = ->(env) {
+      hits[env['PATH_INFO']] += 1
+      case env['PATH_INFO']
+      when '/p.css' then [200, {'content-type' => 'text/css'}, ['p { color: rgb(0, 128, 0) }']]
+      when '/p.js', '/q.js' then [200, {'content-type' => 'text/javascript'}, ['window.ran = (window.ran || 0) + 1']]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html>
+          <link rel="preload" as="style" href="/p.css"><link rel="preload" as="script" href="/p.js">
+          <link rel="preload" as="script" href="/q.js" crossorigin>
+          <link rel="stylesheet" href="/p.css"><script src="/p.js"></script><script src="/q.js"></script><p id="p">p</p>
+        HTML
+      end
+    }
+    s = simulated_session(preload_app)
+    s.visit '/'
+    expect(s.evaluate_script("[getComputedStyle(document.getElementById('p')).color, window.ran]")).to eq(['rgb(0, 128, 0)', 2])
+    expect(hits.values_at('/p.css', '/p.js', '/q.js')).to eq([1, 1, 2])
   end
 
   # …and a frame's document is a document of its own: navigated again, it fetches its sheet again (Chrome: a reloaded
