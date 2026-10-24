@@ -10716,7 +10716,7 @@ module Capybara
           from_document(initiator) do
             entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
             if entry
-              navigate_frame(url, entry: entry, referrer: referrer, record: !replace)
+              navigate_frame(url, entry: entry, referrer: referrer, record: !replace, initiator: initiator)
             elsif http_url?(url)
               # An absolute http(s) self-nav (`self.location = …` / link click) is fetched Ruby-side so
               # it carries correct navigation request headers (Referer under policy / Sec-Fetch);
@@ -11884,7 +11884,9 @@ module Capybara
       # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
       # shape) under that document's policy, determined anew at each redirect hop.
       # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
-      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, record: true)
+      # (…its request the navigation one of the document of realm `initiator` — the entered frame's own, by default — its
+      # Fetch Metadata that document's, `site` the Sec-Fetch-Site its redirect chain has widened to: `frame_request_headers`)
+      def navigate_frame(url, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, record: true, initiator: @current_realm_id.to_i, site: nil)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
         return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
@@ -11911,7 +11913,7 @@ module Capybara
         end
         env = rack_env_for(url, method: 'GET')
         # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
-        apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
+        site = frame_request_headers(env, 'GET', url, referrer, initiator, site)
         response = dispatch_rack_or_http(url, env, method: 'GET') or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
         status, headers, body = response
         merge_set_cookie(headers, url, env)
@@ -11919,7 +11921,7 @@ module Capybara
           next_url = carry_fragment(url, resolve_location(loc, url))
           body.close if body.respond_to?(:close)
           return unless frame_redirect_followed?(next_url, depth, entry[:realm_id]) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
-          return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
+          return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site)
         end
         return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
         if download_response?(headers)
@@ -11930,7 +11932,17 @@ module Capybara
                                    referrer_policy: referrer_policy_header(headers))
       end
 
-      def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false)
+      # An entered frame's navigation request to `url` (`method`): Fetch Metadata (dest `iframe`), its Referer `referrer`'s
+      # under its policy, a POST's Origin — the initiating document realm `initiator`'s, cross-site and `null` where its
+      # origin is opaque — `site` the Sec-Fetch-Site the hops before it widened to, which it answers widened by this one.
+      private def frame_request_headers(env, method, url, referrer, initiator, site)
+        initiator_url, opaque = realm_request_initiator(initiator.to_i)
+        site = widen_sec_fetch_site(site, opaque ? 'cross-site' : sec_fetch_site(initiator_url, url))
+        navigation_request_headers(env, method: method, initiator_url: referrer[0], target: url, dest: 'iframe', referrer_policy: referrer[1], site_override: site, origin_null: opaque)
+        site
+      end
+      def navigate_frame_post(url, body, content_type, depth: 0, entry: @frame_stack.last, referrer: current_referrer_initiator, reload: false, initiator: @current_realm_id.to_i,
+                              site: nil)
         raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
         # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
         return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
@@ -11941,7 +11953,7 @@ module Capybara
         env = rack_env_for(url, method: 'POST', input: body)
         env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
         env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: compute_referrer(referrer[1], referrer[0], url))
+        site = frame_request_headers(env, 'POST', url, referrer, initiator, site)
         response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -11951,9 +11963,9 @@ module Capybara
           return unless frame_redirect_followed?(next_url, depth, entry[:realm_id]) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
           # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
           if Native.redirect_to_get(status.to_i, 'POST')
-            return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer)
+            return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site)
           else
-            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer)
+            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site)
           end
         end
         return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)

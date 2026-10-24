@@ -365,6 +365,33 @@ RSpec.describe "a form submission's request" do
   end
 
   # …and a frame's own `noreferrer` form submitted to the frame by its script sends none either (Firefox: none).
+  # …and an entered frame's own navigations — a link, a form, a Location set, each hop of a redirect — the navigation
+  # request's Fetch metadata (dest `iframe`) of the frame's document, cross-site and `Origin: null` for a sandboxed one.
+  it "sends the Fetch metadata of an entered frame's own navigation" do
+    seen = {}
+    s = simulated_session(lambda {|env|
+      seen[env['PATH_INFO']] = [env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_DEST'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_ORIGIN']]
+      next [302, {'location' => 'http://other.test/landed'}, ['']] if env['PATH_INFO'] == '/r'
+
+      case env['PATH_INFO']
+      when '/' then html.('<iframe src="/f"></iframe><iframe sandbox="allow-scripts allow-forms" src="/f"></iframe>')
+      when '/f' then html.('<a href="/clicked">c</a><form method=post action="/posted"><button>go</button></form>')
+      else html.(env['PATH_INFO'])
+      end
+    })
+    s.visit '/'
+    s.within_frame(0) { s.click_link 'c' }
+    s.within_frame(1) { s.click_button 'go' }
+    s.within_frame(0) { s.execute_script('location.href = "/r"') }
+    s.evaluate_script('1')
+    expect(seen.slice('/clicked', '/posted', '/r', '/landed')).to eq(
+      '/clicked' => ['same-origin', 'iframe', 'navigate', nil],
+      '/posted'  => ['cross-site', 'iframe', 'navigate', 'null'],
+      '/r'       => ['same-origin', 'iframe', 'navigate', nil],
+      '/landed'  => ['cross-site', 'iframe', 'navigate', nil]
+    )
+  end
+
   it "sends no Referer from a frame's own `noreferrer` form its script submits" do
     referers = []
     app = lambda {|env|
