@@ -142,7 +142,7 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       Error.prepareStackTrace = (e) => `${e}\n    at ${location.origin}/page.js:1:1`;
       window.onerror = (message, filename, lineno, colno, error) => { reports.push([message, filename, lineno, colno, error === null]); };
       window.onunhandledrejection = (event) => reports.push(['rejection', String(event.reason)]);
-      document.head.append(Object.assign(document.createElement('script'), {src: 'https://other.example.com/u.js', onload: () => setTimeout(thrower)}));
+      document.head.append(Object.assign(document.createElement('script'), {src: 'https://other.example.com/u.js', onload: () => setTimeout(() => thrower())}));
       document.body.append(Object.assign(document.createElement('iframe'), {src: '/frame'}));
     JS
     expect(poll_until { session.evaluate_script('typeof frames[0]?.thrower') == 'function' }).to be(true)

@@ -254,47 +254,64 @@ fn thrown_at(scope: &mut v8::PinScope<'_, '_>, e: v8::Local<'_, v8::Value>) -> O
     Some((document, url, line, message.get_start_column() as u32 + 1))
 }
 
-fn location_array<'s>(scope: &mut v8::PinScope<'s, '_>, (document, url, line, column): (bool, String, u32, u32)) -> v8::Local<'s, v8::Value> {
-    let items: [v8::Local<v8::Value>; 4] = [
-        v8::Boolean::new(scope, document).into(),
-        v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
-        v8::Integer::new_from_unsigned(scope, line).into(),
-        v8::Integer::new_from_unsigned(scope, column).into(),
-    ];
-    v8::Array::new_with_elements(scope, &items).into()
-}
-// __dom.stackLocation(stack) -> `[document, url, line, column]` of `stack_location`, or null.
-fn stack_location_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let stack = args.get(0).to_rust_string_lossy(scope);
-    match stack_location(&stack) {
-        Some(at) => rv.set(location_array(scope, at)),
-        None => rv.set_null(),
-    }
-}
-// __dom.thrownAt(e) -> `[document, url, line, column]` of `thrown_at`, or null.
-fn thrown_at_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    match thrown_at(scope, args.get(0)) {
-        Some(at) => rv.set(location_array(scope, at)),
-        None => rv.set_null(),
-    }
-}
 // src/v8_shim.cc: the function a bound function calls.
 unsafe extern "C" {
     fn csim_bound_target(f: *const v8::Function) -> *const v8::Function;
 }
-// __dom.functionScript(fn) -> the name of the script the function `fn` was compiled in — a bound one's target's — where
-// it is a page script's of a URL (`page_script`): the script a callback that threw no location of its own came out of —
-// or null.
-fn function_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_null();
-    let Ok(f) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+// The name of the script the function `f` was compiled in — a bound one's or a callable proxy's target's — where it is a
+// page script's of a URL (`page_script`).
+fn function_script(scope: &mut v8::PinScope<'_, '_>, f: v8::Local<'_, v8::Value>) -> Option<String> {
+    let f = v8::Local::<v8::Function>::try_from(f).ok()?;
     // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation), never a null one.
     let f: v8::Local<v8::Function> = unsafe { std::mem::transmute(csim_bound_target(&*f)) };
-    let Some(name) = f.get_script_origin(scope).resource_name().filter(|n| n.is_string()) else { return };
-    let url = name.to_rust_string_lossy(scope);
-    if page_script(&url) == Some(false) {
-        rv.set(name);
+    let url = f.get_script_origin(scope).resource_name().filter(|n| n.is_string())?.to_rust_string_lossy(scope);
+    (page_script(&url) == Some(false)).then_some(url)
+}
+
+// __dom.exceptionSite(e, error, where, callback) -> `[muted, document, url, line, column]` — HTML "report an exception"'s
+// location of the exception `e` and whether its errors are muted — or `[muted]` where it says nowhere. Its location where
+// V8 says it was thrown (`thrown_at`, which no page's `Error.prepareStackTrace` or written `stack` rewrites), else its
+// `stack`'s top frame of the page's (`stack_location`: an Error the driver's own code made, a binding's DOMException) —
+// read too where V8's place is the document's code, as an evaluation's names the script that made it; and only after V8
+// was asked, as an Error's `stack` once made leaves it no frames of its own to make a message of — and only of an
+// `error` (an Error or a DOMException of any realm, the bindings' brand checks), whose getter's throw is the caller's. Muted where a
+// script it came out of is a classic one whose errors are (`muted_scripts`), and, where V8 says nowhere (a thrown string,
+// an evaluation's code, whose stack a page may have rewritten), where the script it was run as (`where`, its URL) or the
+// callback that threw it is.
+// KNOWN GAPS: an Error is judged by where it was MADE, as its report has only it to go by — one a muted script made and
+// the page threw is muted, where Chrome reports it at the page's throw; and a script's verdict is its URL's, as last
+// fetched (a no-cors and a CORS fetch of one URL share it).
+fn exception_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let e = args.get(0);
+    let thrown = thrown_at(scope, e);
+    let mut stack = None;
+    if thrown.as_ref().is_none_or(|t| t.0) && args.get(1).is_true() {
+        let key = v8::String::new(scope, "stack").unwrap();
+        let Some(text) = e.to_object(scope).and_then(|o| o.get(scope, key.into())) else { return };
+        if text.is_string() {
+            stack = stack_location(&text.to_rust_string_lossy(scope));
+        }
     }
+    let cid = crate::dom::realm_id(scope, &args);
+    let mut scripts: Vec<String> = [&thrown, &stack].into_iter().flatten().map(|at| at.1.clone()).collect();
+    if thrown.is_none() {
+        scripts.push(args.get(2).to_rust_string_lossy(scope));
+        scripts.extend(function_script(scope, args.get(3)));
+    }
+    let muted_scripts = &crate::dom::realm(scope, cid).muted_scripts;
+    let muted = !muted_scripts.is_empty() && scripts.iter().any(|url| !url.is_empty() && muted_scripts.contains(url));
+    let muted = v8::Boolean::new(scope, muted).into();
+    let items = match thrown.or(stack) {
+        Some((document, url, line, column)) => vec![
+            muted,
+            v8::Boolean::new(scope, document).into(),
+            v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
+            v8::Integer::new_from_unsigned(scope, line).into(),
+            v8::Integer::new_from_unsigned(scope, column).into(),
+        ],
+        None => vec![muted],
+    };
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.runningScriptMuted() -> whether the script of the page's that is running — the top frame of the stack that is a
@@ -339,9 +356,7 @@ fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "stackLocation", stack_location_op, context_id);
-    crate::dom::register(scope, ns, "thrownAt", thrown_at_op, context_id);
-    crate::dom::register(scope, ns, "functionScript", function_script_op, context_id);
+    crate::dom::register(scope, ns, "exceptionSite", exception_site_op, context_id);
     crate::dom::register(scope, ns, "runningScriptMuted", running_script_muted_op, context_id);
     crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
