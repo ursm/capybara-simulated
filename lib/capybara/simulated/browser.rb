@@ -5362,7 +5362,9 @@ module Capybara
           url:         url.to_s,
           headers:     {},
           body_b64:    '',
-          mode:        'same-origin',
+          # (…a no-cors request, as HTML "fetch a classic worker-imported script" leaves it: an opaque answer runs, its
+          # errors muted — its type handed on for that, its real bytes riding the private render channel)
+          mode:        'no-cors',
           destination: 'script',
           credentials: 'same-origin',
           # A SUBRESOURCE from the worker: the worker itself is the client.
@@ -5370,12 +5372,17 @@ module Capybara
         )
         r = sw_direct_fetch(sw_handle, req, client_handle) or return nil
         return nil if r['fallthrough']
-        return {'blocked' => true} if r['networkError'] || !sw_response_allowed?(r, 'same-origin')
+        return {'blocked' => true} if r['networkError'] || !sw_response_allowed?(r, 'no-cors')
 
+        # (…an opaque one's status, headers and bytes those it hides, which the import is made of — the private render
+        # channel's)
+        opaque   = r['type'].to_s == 'opaque'
+        body_b64 = opaque && r['render_b64'] ? r['render_b64'].to_s : r['body_b64'].to_s
         {
-          'status'  => (r['status'] || 200).to_i,
-          'headers' => r['headers'] || {},
-          'body'    => RuntimeShared.utf8_text(Base64.decode64(r['body_b64'].to_s))
+          'status'  => opaque ? 200 : (r['status'] || 200).to_i,
+          'type'    => r['type'].to_s,
+          'headers' => opaque ? {'content-type' => r['render_ct'].to_s} : r['headers'] || {},
+          'body'    => RuntimeShared.utf8_text(Base64.decode64(body_b64))
         }
       end
 
@@ -6361,7 +6368,12 @@ module Capybara
             # The body crosses into the isolate via JSON.generate — a rack body is
             # BINARY-tagged and a non-UTF-8 one would raise there, failing the update
             # a real browser runs with replacement characters.
-            probed[u] = ok ? {'status' => r2['status'], 'headers' => r2['headers'], 'body' => RuntimeShared.utf8_text(r2['body'].to_s.dup)} : {'status' => 404, 'headers' => {}, 'body' => ''}
+            # (…its tainting kept, for the new version's import to mute an opaque one's errors as the first did)
+            probed[u] = if ok
+              {'status' => r2['status'], 'type' => r2['type'], 'tainted' => r2['tainted'], 'headers' => r2['headers'], 'body' => RuntimeShared.utf8_text(r2['body'].to_s.dup)}
+            else
+              {'status' => 404, 'headers' => {}, 'body' => ''}
+            end
             nb = ok ? r2['body'].to_s : nil
             # A FAILING import re-fetch is "no change" for that import (update-import-
             # scripts "treat 404 on imported scripts as no change") — the update must
@@ -10397,7 +10409,10 @@ module Capybara
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
           # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
           # for a cross-origin (CORS-allowed) response, else 'basic'.
-          return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size) if no_cors_mode && crossed
+          if no_cors_mode && crossed
+            return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size,
+                                                                                    opaque_render_type: header_text(header_field(resp_headers, 'content-type')))
+          end
           out = marked.(response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers))
           # (…a document's navigation request's the method its last hop went with, which its session history entry
           # keeps: a POST's through a 307 / 308 still one, a 303's a GET)
@@ -10512,7 +10527,7 @@ module Capybara
       # that decodes the bytes here and never shows them to script): the bytes ride
       # `body_raw` untouched and the text decode is skipped — it would be pure waste on
       # a path that runs for EVERY image load.
-      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, body_cut_short: false, opaque_render: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, body_cut_short: false, opaque_render: nil, opaque_render_type: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
         raw     = body.to_s
         hdrs    = stringify(headers)
         # Resource Timing's sizes: the decoded body, the body on the wire (before a
@@ -10596,6 +10611,8 @@ module Capybara
         # destination (a SW's own no-cors `fetch()` doesn't know its eventual consumer is an <img>),
         # so the choice is made client-side. The bytes are already in memory (`body_str`).
         out['opaque_render'] = opaque_render.b if opaque_render && !opaque_render.empty?
+        # (…and the MIME type it hides, for a consumer that checks it — a worker-imported script's)
+        out['render_ct'] = opaque_render_type if opaque_render_type
         out
       end
 
