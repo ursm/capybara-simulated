@@ -41,6 +41,7 @@ const OP_FORM: i32 = 15; // element, form
 const OP_SELECTED_CONTENT: i32 = 16; // option
 const OP_SCRIPT_STARTED: i32 = 17; // script
 const OP_SHADOW_ROOT: i32 = 18; // host, template, root, parent
+const OP_SCRIPT_LINE: i32 = 19; // script, the line its start tag ends on
 
 // A namespace by number: the ones the parser ever gives an element or an attribute.
 fn ns_code(ns: &Namespace) -> i32 {
@@ -97,6 +98,8 @@ pub(crate) struct Sink {
     // Whether the parse's document allows declarative shadow roots (HTML's "allow declarative shadow roots"): a
     // navigated-to document's parse and `setHTMLUnsafe`'s, not `innerHTML`'s or DOMParser's.
     declarative: bool,
+    // The line of its input the tokenizer is at, as the tree builder last told it (`set_current_line`).
+    line: std::cell::Cell<u64>,
 }
 
 impl Sink {
@@ -105,7 +108,7 @@ impl Sink {
         let mut nodes = vec![Node::default(), Node::default(), Node::default()];
         nodes[1].name = context.map(Box::new);
         nodes[2].name = Some(Box::new(QualName::new(None, html5ever::ns!(html), html5ever::local_name!("form"))));
-        Sink { nodes: RefCell::new(nodes), ops: RefCell::new(Vec::new()), declarative }
+        Sink { nodes: RefCell::new(nodes), ops: RefCell::new(Vec::new()), declarative, line: std::cell::Cell::new(1) }
     }
     fn push(&self, items: impl IntoIterator<Item = Operand>) {
         self.ops.borrow_mut().extend(items);
@@ -157,6 +160,9 @@ impl TreeSink for Sink {
 
     fn finish(self) {}
     fn parse_error(&self, _msg: Cow<'static, str>) {}
+    fn set_current_line(&self, line_number: u64) {
+        self.line.set(line_number);
+    }
     fn get_document(&self) -> u32 {
         0
     }
@@ -179,6 +185,10 @@ impl TreeSink for Sink {
         self.str(&name.local);
         self.attrs(&attrs);
         self.int(contents as i32);
+        // (…a script's the line its text begins on, which its errors are counted from: its start tag's last)
+        if &*name.local == "script" && (name.ns == html5ever::ns!(html) || name.ns == html5ever::ns!(svg)) {
+            self.push([Operand::Int(OP_SCRIPT_LINE), Operand::Int(handle as i32), Operand::Int(i32::try_from(self.line.get()).unwrap_or(i32::MAX))]);
+        }
         handle
     }
     fn create_comment(&self, text: StrTendril) -> u32 {
@@ -1343,6 +1353,10 @@ impl<'s> Build<'s> {
                 }
                 OP_SELECTED_CONTENT => {
                     int(ops.next())?;
+                }
+                OP_SCRIPT_LINE => {
+                    let (id, line) = (self.node(int(ops.next())?)?, int(ops.next())?);
+                    crate::dom::realm(scope, self.cid).script_lines.insert(id, line as u32);
                 }
                 OP_SCRIPT_STARTED => {
                     let id = self.node(int(ops.next())?)?;

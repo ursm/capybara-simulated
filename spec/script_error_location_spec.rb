@@ -56,7 +56,26 @@ RSpec.describe 'script error locations' do
     # (…a parse error at the place in its text that did not compile: the engine's message, not a stack frame)
     expect(syntax[0, 3]).to eq(['http://www.example.com/js/big-syntax.js', 3, 'SyntaxError'])
     # …and one that opens with a lexical declaration, which runs by the realm's top-level eval
-    expect(lexical).to eq(['http://www.example.com/big', 1, 'TypeError', true])
+    expect(lexical).to eq(['http://www.example.com/big', 10, 'TypeError', true])
+  end
+
+  # …and an inline script's at the line of its document, counted from where the parser began its text (Chrome: 6 and 3
+  # below) — one a script inserted, from its own first line. (The column on its first line is its own, not past its
+  # start tag: the tokenizer counts no columns.)
+  it 'reports an inline script’s exception at its document’s line' do
+    page = <<~HTML
+      <!DOCTYPE html>
+      <script>window.seen = []; onerror = (m, f, l, c) => { seen.push([l, c]); };</script>
+      <p>a</p>
+
+      <script>
+        null.x;
+      </script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script("const s = document.createElement('script'); s.text = '\\n\\nnull.z'; document.body.append(s)")
+    expect(s.evaluate_script('seen')).to eq([[6, 8], [3, 6]])
   end
 
   # …and an Error whose `stack` getter throws is reported all the same, at where it was thrown: a browser's report
@@ -68,7 +87,7 @@ RSpec.describe 'script error locations' do
     HTML
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
     s.visit '/'
-    expect(s.evaluate_script('seen')).to eq([['Error: x', 1, 11, true]])
+    expect(s.evaluate_script('seen')).to eq([['Error: x', 2, 11, true]])
   end
 
   it 'raises a script timeout where an asynchronous script never calls back' do

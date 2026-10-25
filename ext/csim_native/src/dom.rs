@@ -928,6 +928,9 @@ pub(crate) struct RealmArena {
     pub(crate) frame_navigations: crate::frame_navigation::FrameNavigations,
     // Each document's mode, readiness and flags (document_state.rs).
     pub(crate) document_states: crate::document_state::DocumentStates,
+    // The line of its document each script the parser made begins on (html_parse.rs `OP_SCRIPT_LINE`), until it runs
+    // (script.rs `takeScriptLine`).
+    pub(crate) script_lines: std::collections::HashMap<NodeId, u32>,
     // The URLs of the classic scripts its realms fetched whose errors are muted (HTML "muted errors": a response of
     // another origin), as each was last fetched (script.rs `scriptMuted`).
     pub(crate) muted_scripts: std::collections::HashSet<String>,
@@ -1568,6 +1571,9 @@ impl RealmArena {
         }
         if !self.nonces.is_empty() {
             self.nonces.remove(&id);
+        }
+        if !self.script_lines.is_empty() {
+            self.script_lines.remove(&id);
         }
         if !self.explicitly_enabled.is_empty() {
             self.explicitly_enabled.remove(&id);

@@ -254,6 +254,21 @@ fn thrown_at(scope: &mut v8::PinScope<'_, '_>, e: v8::Local<'_, v8::Value>) -> O
     Some((document, url, line, message.get_start_column() as u32 + 1))
 }
 
+// The line of its document a `line` of the code named `url` is: an inline script's counted from the line its text begins
+// on (`inline://…@N`: bridge.entry.js `executeClassicScript`, where the parser made it), any other's its own.
+fn document_line(url: &str, line: u32) -> u32 {
+    let start = url.strip_prefix("inline://").and_then(|r| r.split_once('@')).and_then(|(_, n)| n.split('~').next()?.parse::<u32>().ok());
+    start.map_or(line, |s| line + s.saturating_sub(1))
+}
+
+// __dom.takeScriptLine(nid) -> the line of its document the script the parser made begins on (`script_lines`), 0 for a
+// script it did not make — taken, as it runs once.
+fn take_script_line_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_uint32(crate::dom::realm(scope, cid).script_lines.remove(&id).unwrap_or(0));
+}
+
 // src/v8_shim.cc: the function a bound function calls.
 unsafe extern "C" {
     fn csim_bound_target(f: *const v8::Function) -> *const v8::Function;
@@ -310,7 +325,7 @@ fn exception_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
             muted,
             v8::Boolean::new(scope, document).into(),
             v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
-            v8::Integer::new_from_unsigned(scope, line).into(),
+            v8::Integer::new_from_unsigned(scope, document_line(&url, line)).into(),
             v8::Integer::new_from_unsigned(scope, column).into(),
         ],
         None => vec![muted],
@@ -361,6 +376,7 @@ fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "exceptionSite", exception_site_op, context_id);
+    crate::dom::register(scope, ns, "takeScriptLine", take_script_line_op, context_id);
     crate::dom::register(scope, ns, "runningScriptMuted", running_script_muted_op, context_id);
     crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
@@ -629,6 +645,8 @@ mod tests {
         assert_eq!(stack_location("E\n    at eval (eval at g (eval at f (http://a/s.js:1:2), <anonymous>:3:4), <anonymous>:1:7)"), Some((true, "http://a/s.js".to_owned(), 1, 7)));
         assert_eq!(stack_location("E\n    at eval (eval at http://a/s.js:1:5, <anonymous>:2:3)"), Some((true, "http://a/s.js".to_owned(), 2, 3)));
         assert_eq!(stack_location("E\n    at inline://3:2:1"), Some((true, "inline://3".to_owned(), 2, 1)));
+        assert_eq!(stack_location("E\n    at inline://3@12~1:2:1"), Some((true, "inline://3@12~1".to_owned(), 2, 1)));
+        assert_eq!((super::document_line("inline://3@12~1", 2), super::document_line("inline://3", 2), super::document_line("http://a/s.js", 2)), (13, 2, 2));
         assert_eq!(stack_location("no frames"), None);
         // (…a function name of parentheses its own, the location after the last ` (`; a URL of them kept)
         assert_eq!(stack_location("E\n    at foo (bar) (http://a/s.js:3:22)"), Some((false, "http://a/s.js".to_owned(), 3, 22)));
