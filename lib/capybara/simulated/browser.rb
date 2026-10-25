@@ -3940,12 +3940,14 @@ module Capybara
       # Whether a response's Content-Type is an image's — SVG's among them — whose bytes its element may be sized by.
       private def image_response?(meta) = meta['headers']['content-type'].to_s.strip.downcase.start_with?('image/')
 
-      # The response facts a `PerformanceResourceTiming` entry is built from, without the body — and the headers a
-      # script's response is refused by (its MIME type, `X-Content-Type-Options`).
+      # The response facts a `PerformanceResourceTiming` entry is built from, without the body — and those a
+      # subresource's response is judged by (subresource_judge.rs `judge`: its MIME type, `X-Content-Type-Options`, a
+      # body the wire cut short).
       def resource_timing_meta(result)
         {
           'url'             => result['url'],
           'status'          => result['status'].to_i,
+          'body_error'      => result['body_error'] == true,
           'headers'         => %w[content-type x-content-type-options].to_h {|name|
             [name, result['headers']&.find {|k, _| k.to_s.casecmp?(name) }&.last]
           },

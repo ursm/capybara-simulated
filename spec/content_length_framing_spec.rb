@@ -82,7 +82,7 @@ RSpec.describe 'a response framed by its Content-Length' do
     ])
   end
 
-  it 'fails a script, a style sheet and an image whose body is cut short' do
+  it 'fails a script, a style sheet, an image and an object whose body is cut short' do
     s = simulated_session(framing_app)
     s.visit '/'
     s.execute_script(<<~JS)
@@ -91,9 +91,10 @@ RSpec.describe 'a response framed by its Content-Length' do
       const script = document.createElement('script'); script.src = '/s.js'; load(script, 'script'); document.head.append(script);
       const link = document.createElement('link'); link.rel = 'stylesheet'; link.href = '/s.css'; load(link, 'css'); document.head.append(link);
       const img = new Image(); load(img, 'img'); img.src = '/i.svg';
+      const object = document.createElement('object'); load(object, 'object'); object.data = '/i.svg'; document.body.append(object);
     JS
-    got = poll_until { v = s.evaluate_script('window.got'); v.size == 3 ? v : nil }
-    expect(got).to eq('script' => 'error', 'css' => 'error', 'img' => 'error')
+    got = poll_until { v = s.evaluate_script('window.got'); v.size == 4 ? v : nil }
+    expect(got).to eq('script' => 'error', 'css' => 'error', 'img' => 'error', 'object' => 'error')
     expect(s.evaluate_script('window.ran')).to be_nil
   end
 
