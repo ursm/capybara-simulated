@@ -36,13 +36,13 @@ fn lock() -> MutexGuard<'static, Windows> {
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-// A new window's registry, the process's, never one a window before had — of the session `session`.
 // What the blob URL `key` (its `entry_key`) resolves to in window `window`'s registry: its bytes (none where the entry holds
 // none) and its type — none for no entry (revoked, here or in another context, or never made).
 pub(crate) fn lookup(window: u64, key: &str) -> Option<(Option<Arc<[u8]>>, String)> {
     lock().get(&window).and_then(|e| e.get(key)).map(|e| (e.bytes.clone(), e.ty.clone()))
 }
 
+// A new window's registry, the process's, never one a window before had — of the session `session`.
 pub(crate) fn window_new(session: u64) -> u64 {
     static LAST: AtomicU64 = AtomicU64::new(0);
     let window = LAST.fetch_add(1, Ordering::Relaxed) + 1;
