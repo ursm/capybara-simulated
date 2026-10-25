@@ -90,17 +90,23 @@ fn all_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Objec
 fn named<'s>(scope: &mut v8::PinScope<'s, '_>, key: v8::Local<'_, v8::Name>, args: &v8::PropertyCallbackArguments<'_>) -> Option<v8::Local<'s, v8::Value>> {
     let name = v8::Local::<v8::String>::try_from(key).ok()?;
     let holder = args.holder();
-    if holder.has_real_named_property(scope, name.into())? {
+    if !visible(scope, holder, name)? {
         return None;
-    }
-    if let Some(prototype) = holder.get_prototype(scope).filter(|p| p.is_object()).and_then(|p| p.to_object(scope)) {
-        if prototype.has(scope, name.into())? {
-            return None;
-        }
     }
     let f = holder.get_internal_field(scope, 2).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok())?;
     let undefined = v8::undefined(scope).into();
     f.call(scope, undefined, &[name.into()]).filter(|v| !v.is_null_or_undefined())
+}
+// …whether a supported name `name` is visible as a property of `holder` (Web IDL's named property visibility): none the
+// object has an own property of, nor its prototype chain has (a null one none).
+fn visible(scope: &mut v8::PinScope<'_, '_>, holder: v8::Local<'_, v8::Object>, name: v8::Local<'_, v8::String>) -> Option<bool> {
+    if holder.has_real_named_property(scope, name.into())? {
+        return Some(false);
+    }
+    match holder.get_prototype(scope).filter(|p| p.is_object()).and_then(|p| p.to_object(scope)) {
+        Some(prototype) => prototype.has(scope, name.into()).map(|has| !has),
+        None => Some(true),
+    }
 }
 fn named_get(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>, args: v8::PropertyCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) -> v8::Intercepted {
     match named(scope, key, &args) {
@@ -141,13 +147,21 @@ fn named_define(
     rv.set_bool(false);
     v8::Intercepted::kYes
 }
-// (…its supported names, the implementation's `names()`, which [[OwnPropertyKeys]] lists — unenumerable as they are)
+// (…its visible supported names, of the implementation's `names()`, which [[OwnPropertyKeys]] lists — unenumerable as
+// they are)
 fn named_enumerate(scope: &mut v8::PinScope<'_, '_>, args: v8::PropertyCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Array>) {
-    let Some(f) = args.holder().get_internal_field(scope, 3).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) else { return };
+    let holder = args.holder();
+    let Some(f) = holder.get_internal_field(scope, 3).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) else { return };
     let undefined = v8::undefined(scope).into();
-    if let Some(names) = f.call(scope, undefined, &[]).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) {
-        rv.set(names);
+    let Some(names) = f.call(scope, undefined, &[]).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) else { return };
+    let mut shown = Vec::new();
+    for i in 0..names.length() {
+        let Some(name) = names.get_index(scope, i).and_then(|n| v8::Local::<v8::String>::try_from(n).ok()) else { continue };
+        if visible(scope, holder, name) == Some(true) {
+            shown.push(name.into());
+        }
     }
+    rv.set(v8::Array::new_with_elements(scope, &shown));
 }
 
 // The implementation's answer for index `i` of the object the interceptor runs on: its item, or None where it does not

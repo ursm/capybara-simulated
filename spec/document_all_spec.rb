@@ -53,4 +53,21 @@ RSpec.describe 'document.all' do
     expect(got).to eq([2, 1, %w[a b expando f zz], true, false, false, 5, 'TypeError'])
     expect(session.evaluate_script('document.all').map(&:tag_name).first(3)).to eq(%w[html head body])
   end
+
+  # …and a frame's live collections — its `all`'s names among them — follow an id or a class written through another
+  # realm's wrapper of its node, as through its own.
+  it 'follows a write another realm makes to a frame’s node' do
+    frame = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/f' ? '<!DOCTYPE html>f' : '<!DOCTYPE html><iframe src="/f"></iframe>']] })
+    frame.visit '/'
+    got = frame.evaluate_script(<<~JS)
+      (() => {
+        const d = frames[0].document, b = Object.assign(document.createElement('b'), {className: 'k', id: 'x'});
+        d.body.append(b);
+        const byClass = d.getElementsByClassName('k'), before = [byClass.length, d.all.x === b];
+        Object.assign(b, {className: '', id: ''});
+        return [before, byClass.length, d.all.x ?? null];
+      })()
+    JS
+    expect(got).to eq([[1, true], 0, nil])
+  end
 end
