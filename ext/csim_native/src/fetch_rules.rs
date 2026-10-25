@@ -548,35 +548,30 @@ fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let method = byte_string(scope, args.get(0));
     rv.set_bool(forbidden_method(&method));
 }
-// __dom.responseHeader(headers, name) -> the value of the header `name` (lowercase) among a response's headers as the
-// host gives them — an object keyed by name, in any case, a list of values joined with ", " — or null for none.
+// The value of the header `name` (lowercase) among a response's headers as the host gives them — an object keyed by
+// name, in any case, a list of values joined with ", " — or None for none.
+pub(crate) fn response_header(scope: &mut v8::PinScope<'_, '_>, headers: v8::Local<'_, v8::Object>, name: &str) -> Option<String> {
+    let keys = headers.get_own_property_names(scope, Default::default())?;
+    for i in 0..keys.length() {
+        let Some(key) = keys.get_index(scope, i) else { continue };
+        if !key.to_rust_string_lossy(scope).eq_ignore_ascii_case(name) {
+            continue;
+        }
+        let value = headers.get(scope, key).filter(|v| !v.is_null_or_undefined())?;
+        return Some(match v8::Local::<v8::Array>::try_from(value) {
+            Ok(list) => (0..list.length()).filter_map(|j| list.get_index(scope, j)).map(|v| v.to_rust_string_lossy(scope)).collect::<Vec<_>>().join(", "),
+            Err(_) => value.to_rust_string_lossy(scope),
+        });
+    }
+    None
+}
+// __dom.responseHeader(headers, name) -> `response_header`, null for none.
 fn response_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Ok(headers) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
     let name = args.get(1).to_rust_string_lossy(scope);
-    let Some(keys) = headers.get_own_property_names(scope, Default::default()) else { return };
-    for i in 0..keys.length() {
-        let Some(key) = keys.get_index(scope, i) else { continue };
-        if !key.to_rust_string_lossy(scope).eq_ignore_ascii_case(&name) {
-            continue;
-        }
-        let Some(value) = headers.get(scope, key).filter(|v| !v.is_null_or_undefined()) else { return };
-        let text = match v8::Local::<v8::Array>::try_from(value) {
-            Ok(list) => {
-                let mut values = Vec::new();
-                for j in 0..list.length() {
-                    if let Some(v) = list.get_index(scope, j) {
-                        values.push(v.to_rust_string_lossy(scope));
-                    }
-                }
-                values.join(", ")
-            }
-            Err(_) => value.to_rust_string_lossy(scope),
-        };
-        if let Some(text) = v8::String::new(scope, &text) {
-            rv.set(text.into());
-        }
-        return;
+    if let Some(text) = response_header(scope, headers, &name).and_then(|t| v8::String::new(scope, &t)) {
+        rv.set(text.into());
     }
 }
 // (…these take a ByteString the bindings converted already: `byte_string` reads a unit past U+00FF as 0xFF, which is
