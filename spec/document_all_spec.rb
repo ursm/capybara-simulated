@@ -89,6 +89,21 @@ RSpec.describe 'document.all' do
     expect(got).to eq(['p,c', true, true, 'number', true])
   end
 
+  # …and a callable one wherever a callback is called: a listener, a timer's handler, an iterable's forEach (Chrome)
+  it 'is called as a callback' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.errors = [];
+      onerror = (m) => { errors.push(m); };
+      document.body.addEventListener('zz', document.all);
+      document.body.dispatchEvent(new Event('zz'));
+      setTimeout(document.all);
+      new Headers([['a', 'b']]).forEach(document.all);
+      new URLSearchParams('a=b').forEach(document.all);
+    JS
+    expect(session.evaluate_script('errors')).to eq([])
+  end
+
   # …and a frame's live collections — its `all`'s names among them — follow an id or a class written through another
   # realm's wrapper of its node, as through its own.
   it 'follows a write another realm makes to a frame’s node' do
