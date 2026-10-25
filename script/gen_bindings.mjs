@@ -335,6 +335,7 @@ const INTERFACES = [
     indexedProperties: 'the same Proxy'
   }],
   ['html', 'CanvasGradient'],
+  ['html', 'TextMetrics'],
   ['html', 'CanvasPattern'],
   ['html', 'Path2D', { install: true }],
   ['html', 'CanvasRenderingContext2D', { install: true }],
