@@ -111,6 +111,21 @@ struct DocumentLines {
     at: std::cell::Cell<u64>,
     written: std::cell::Cell<u64>,
     in_written: std::cell::Cell<bool>,
+    // (…whether the text last written ended in a CR, which an LF the next begins with is one break with)
+    written_cr: std::cell::Cell<bool>,
+}
+
+impl DocumentLines {
+    // `text` written: its breaks as html5ever counts them — an LF, a CR, a CR LF one — added up.
+    fn write(&self, text: &str) {
+        let (mut breaks, mut cr) = (0, self.written_cr.get());
+        for b in text.bytes() {
+            breaks += u64::from(b == b'\r' || b == b'\n' && !cr);
+            cr = b == b'\r';
+        }
+        self.written.set(self.written.get() + breaks);
+        self.written_cr.set(cr);
+    }
 }
 
 impl Sink {
@@ -695,10 +710,9 @@ fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let html = parser_text(scope, args.get(1), well_formed, &mut standins);
         if let Some(p) = parses(scope).live.get_mut(&id) {
             p.standins = standins;
-            // (…its lines none of the document's: html5ever's count of them, a CR LF one, a lone CR one)
+            // (…its lines none of the document's)
             if let Some(lines) = &p.tokenizer.sink.sink.lines {
-                let breaks = html.bytes().filter(|&b| b == b'\n').count() + html.matches('\r').count() - html.matches("\r\n").count();
-                lines.written.set(lines.written.get() + breaks as u64);
+                lines.write(&html);
             }
             p.input.push_back(StrTendril::from(html));
         }
@@ -1611,5 +1625,22 @@ impl<'s> Build<'s> {
             out.push(v8::Integer::new_from_unsigned(scope, *flags).into());
         }
         Some(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DocumentLines;
+
+    // The breaks of written text as html5ever counts them: an LF, a CR and a CR LF one each — a CR LF split between two
+    // writes one too.
+    #[test]
+    fn counts_written_breaks_as_the_tokenizer_does() {
+        let lines = DocumentLines::default();
+        lines.write("a\nb\r\nc\rd");
+        assert_eq!(lines.written.get(), 3);
+        lines.write("<p>\r");
+        lines.write("\n</p>");
+        assert_eq!(lines.written.get(), 4);
     }
 }
