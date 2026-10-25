@@ -435,7 +435,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "scriptBlocksParser", script_blocks_parser_op, context_id);
     crate::dom::register(scope, ns, "scriptType", script_type_op, context_id);
     crate::dom::register(scope, ns, "scriptSupports", script_supports_op, context_id);
-    crate::dom::register(scope, ns, "javaScriptContent", javascript_content_op, context_id);
     crate::dom::register(scope, ns, "moduleContent", module_content_op, context_id);
     crate::dom::register(scope, ns, "modulepreloadDestination", modulepreload_destination_op, context_id);
     crate::dom::register(scope, ns, "preloadDestination", preload_destination_op, context_id);
@@ -471,12 +470,6 @@ fn module_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let header = args.get(0).to_rust_string_lossy(scope);
     let kind = args.get(1).to_rust_string_lossy(scope);
     rv.set_bool(module_content(&header, &kind));
-}
-// __dom.javaScriptContent(contentType) -> whether a response's `Content-Type` (Fetch "extract a MIME type") is a
-// JavaScript MIME type: what a classic worker-imported script must be served as.
-fn javascript_content_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let header = args.get(0).to_rust_string_lossy(scope);
-    rv.set_bool(crate::mime::extract(&header).is_some_and(|m| is_javascript_mime(&m.essence)));
 }
 
 // The keywords of a `<link>`'s `as` (HTML): the preload destinations — what a `rel=preload` fetches — and the module

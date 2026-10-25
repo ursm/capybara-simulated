@@ -188,7 +188,6 @@ pub(crate) fn style_is_css(n: &NodeData) -> bool {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "associatesSheet", associates_sheet_op, context_id);
     crate::dom::register(scope, ns, "styleIsCss", style_is_css_op, context_id);
-    crate::dom::register(scope, ns, "sheetResponseAccepted", sheet_response_accepted_op, context_id);
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
     crate::dom::register(scope, ns, "ownerSheetShown", owner_sheet_shown_op, context_id);
@@ -487,16 +486,6 @@ fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let owners = crate::dom::nodes_value(scope, cid, &set.taking_part);
     let items = [key, selected, owners];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.sheetResponseAccepted(contentType, nosniff, url, quirks) -> `sheet_response_accepted` of a response from `url` — of the
-// calling realm's document's origin where it is same origin.
-fn sheet_response_accepted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [content_type, nosniff, url] = [0, 1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
-    let quirks = args.get(3).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    let origin = crate::dom::realm(scope, cid).location.origin().to_owned();
-    let accepted = sheet_response_accepted(&content_type, &nosniff, quirks, || ada_url::Url::parse(&url, None).is_ok_and(|u| u.origin() == origin));
-    rv.set_bool(accepted);
 }
 
 #[cfg(test)]
