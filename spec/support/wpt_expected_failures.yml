@@ -2753,27 +2753,7 @@ fetch/metadata/generated/element-script.https.sub.html:
 fetch/metadata/generated/element-video-poster.https.sub.html: HARNESS_ERROR
 fetch/metadata/generated/element-video-poster.sub.html: HARNESS_ERROR
 fetch/metadata/generated/element-video.https.sub.html:
-- sec-fetch-dest - no attributes
-- sec-fetch-mode - no attributes
-- sec-fetch-site - Cross-Site -> Cross-Site, no attributes
-- sec-fetch-site - Cross-Site -> Same Origin, no attributes
-- sec-fetch-site - Cross-Site -> Same-Site, no attributes
-- sec-fetch-site - Cross-site, no attributes
-- sec-fetch-site - HTTPS downgrade-upgrade, no attributes
-- sec-fetch-site - Same origin, no attributes
-- sec-fetch-site - Same site, no attributes
-- sec-fetch-site - Same-Origin -> Cross-Site -> Same-Origin redirect, no attributes
-- sec-fetch-site - Same-Origin -> Cross-Site, no attributes
-- sec-fetch-site - Same-Origin -> Same Origin, no attributes
-- sec-fetch-site - Same-Origin -> Same-Site -> Same-Origin redirect, no attributes
-- sec-fetch-site - Same-Origin -> Same-Site, no attributes
-- sec-fetch-site - Same-Site -> Cross-Site, no attributes
-- sec-fetch-site - Same-Site -> Same Origin, no attributes
-- sec-fetch-site - Same-Site -> Same-Site, no attributes
 - sec-fetch-storage-access - Cross-site, no attributes
-fetch/metadata/generated/element-video.sub.html:
-- sec-fetch-site - HTTPS downgrade-upgrade, no attributes
-- sec-fetch-site - HTTPS upgrade, no attributes
 fetch/metadata/generated/fetch-via-serviceworker.https.sub.html:
 - 'sec-fetch-storage-access - Cross-site, init: mode=no-cors, credentials=include
   - fallback'

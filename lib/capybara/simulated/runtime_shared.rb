@@ -234,7 +234,7 @@ module Capybara
         # so an ordinary app leaves cross-origin frames lazy (= baseline) and never
         # eager-@app.calls a foreign URL (side effects: extra visit / log row).
         '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
-        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], !!a[1], a[2] || 'same-origin', a[3]) },
+        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], !!a[1], a[2] || 'same-origin', realm: a[3], referrer_policy: a[4], opaque: a[5] == true) },
         # WebAuthn create / get raise `WebauthnState::Error` carrying
         # the DOMException name (`InvalidStateError`, …); rescue here
         # so the JS shim sees `{error:, name:}` instead of the

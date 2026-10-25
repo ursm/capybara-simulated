@@ -8909,12 +8909,16 @@ module Capybara
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
       # src>` pointing at a served file decodes the same way a blob: / data: source does.
       # Returns {'bytes', 'tainted'}, or nil when the fetch fails.
-      def video_bytes(url, cors = false, credentials = 'same-origin', client_url = nil)
+      def video_bytes(url, cors = false, credentials = 'same-origin', realm: nil, referrer_policy: nil, opaque: false)
         # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
         # load); a plain one is a no-cors fetch whose bytes TAINT a canvas they're
         # drawn into where a hop left the fetching CLIENT's origin (a frame's own
-        # document, not the top window's) — the <img> model (image_source_bytes).
-        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client_url, body_raw: true)
+        # document, not the top window's) — the <img> model, for the client an
+        # image's is (image_source_bytes).
+        client = load_client(realm, url.to_s, referrer_policy: referrer_policy, opaque: opaque)
+        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
+                            referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
+                            cookie_cross_site: client.cookie_cross_site, client_origin: client.origin, dest: 'video')
         return nil unless resource_loaded?(result) && result['status'].to_i < 400
         bytes = result['body_raw'].to_s
         return nil if bytes.empty?
@@ -13064,7 +13068,8 @@ module Capybara
           referrer, container_policy = realm_referrer_initiator(@runtime.frame_realm_parent(rid).to_i)
           policy = container_policy if policy.empty?
         end
-        url = referrer unless http_url?(url)
+        # (…an about:blank or srcdoc document's origin its creator's, however deep: `realm_request_initiator`)
+        url = realm_request_initiator(rid).first unless http_url?(url)
         LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy, origin)
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor

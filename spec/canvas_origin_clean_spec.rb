@@ -77,4 +77,64 @@ RSpec.describe 'canvas origin-clean flag' do
     JS
     expect(got).to eq(%w[clean SecurityError clean SecurityError])
   end
+  # …and the origin it is judged by is the drawing document's: an about:blank one's its creator's however deep — a frame
+  # of another origin's, so that origin's image draws clean there — and a sandboxed one's opaque, so even its own host's
+  # video taints.
+  it 'is judged by the origin the document has' do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin's frame served in-process
+    video = File.binread(File.expand_path('wpt/media/2x2-green.webm', __dir__))
+    probe = <<~JS
+      const report = (what, c) => { try { c.toDataURL(); parent.postMessage([what, 'clean'], '*'); } catch (e) { parent.postMessage([what, e.name], '*'); } };
+    JS
+    blank = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><body><script>
+        #{probe}
+        const f = document.createElement('iframe');
+        document.body.append(f);
+        const w = f.contentWindow, img = new w.Image();
+        img.onload = () => {
+          const c = w.document.createElement('canvas');
+          c.getContext('2d').drawImage(img, 0, 0);
+          report('blank', c);
+        };
+        img.src = 'http://other.test/a.png';
+      </script>
+    HTML
+    sandboxed = <<~HTML
+      <!DOCTYPE html><meta charset="utf-8"><body><script>
+        #{probe}
+        const v = document.createElement('video');
+        v.onloadeddata = () => { const c = document.createElement('canvas'); c.getContext('2d').drawImage(v, 0, 0); report('sandboxed', c); };
+        v.onerror = () => parent.postMessage(['sandboxed', 'error'], '*');
+        v.src = '/v.webm';
+        document.body.append(v);
+      </script>
+    HTML
+    app = ->(env) {
+      case env['PATH_INFO']
+      when '/a.png' then [200, {'content-type' => 'image/png'}, [png]]
+      when '/v.webm' then [200, {'content-type' => 'video/webm'}, [video]]
+      when '/blank.html' then [200, {'content-type' => 'text/html'}, [blank]]
+      when '/sandboxed.html' then [200, {'content-type' => 'text/html'}, [sandboxed]]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], got = {};
+      addEventListener('message', (e) => { got[e.data[0]] = e.data[1]; if (Object.keys(got).length === 2) done(got); });
+      const a = document.createElement('iframe');
+      a.src = 'http://other.test/blank.html';
+      const b = document.createElement('iframe');
+      b.sandbox = 'allow-scripts';
+      b.src = '/sandboxed.html';
+      document.body.append(a, b);
+    JS
+    expect(got).to eq('blank' => 'clean', 'sandboxed' => 'SecurityError')
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
 end
+
