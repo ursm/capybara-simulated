@@ -422,7 +422,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "beaconCors", beacon_cors_op, context_id);
     crate::dom::register(scope, ns, "defaultRequestHeaders", default_request_headers_op, context_id);
     crate::dom::register(scope, ns, "blobResponse", blob_response_op, context_id);
-    crate::dom::register(scope, ns, "corsRequest", cors_request_op, context_id);
     crate::dom::register(scope, ns, "corsSafelistedMethod", cors_safelisted_method_op, context_id);
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
@@ -503,16 +502,6 @@ fn fetch_route_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
     let flags = args.get(1).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(fetch_route(&url, flags, &here));
-}
-// __dom.corsRequest(el, module) -> [mode, credentials] of the request element `el` makes (`cors_request`, by its
-// `crossorigin` attribute) — one of no element (a module graph's root nobody's) as one of no attribute.
-fn cors_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = crate::node_handle::nid_of(scope, args.get(0));
-    let module = args.get(1).is_true();
-    let attr = id.and_then(|id| crate::dom::dom(scope).arena.get(id).and_then(|n| n.plain_attr("crossorigin").map(str::to_owned)));
-    let (mode, credentials) = cors_request(attr.as_deref(), module);
-    let (Some(mode), Some(credentials)) = (v8::String::new(scope, mode), v8::String::new(scope, credentials)) else { return };
-    rv.set(v8::Array::new_with_elements(scope, &[mode.into(), credentials.into()]).into());
 }
 // __dom.blobResponse(method, range, type, size) -> [status, content type, first byte, end, content range] of
 // `blob_response` (`range` null for none; the content range null for a whole blob), or null for a network error.

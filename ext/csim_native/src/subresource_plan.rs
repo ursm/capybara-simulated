@@ -2,7 +2,7 @@
 // credentials mode, the referrer policy it is made under, and whether its client's origin is opaque — packed in one
 // small integer the bindings hand the host, which decodes it (`fields`) rather than be told each by hand.
 
-use crate::subresource_judge::{J_CLASSIC_SCRIPT, J_CSS_MODULE, J_IMAGE, J_LINK, J_OBJECT, J_PREFETCH, J_SHEET, J_VIDEO};
+use crate::subresource_judge::{J_AUDIO, J_CLASSIC_SCRIPT, J_CSS_MODULE, J_FONT, J_IMAGE, J_LINK, J_OBJECT, J_PREFETCH, J_SHEET, J_VIDEO};
 
 // The consumer (`kind`, low byte; a link's what it obtains, a timed resource's its CORS code, in the high bits): those of
 // the judge (subresource_judge.rs `J_*`), a CSS image (a `background-image` `url()` …), an `<embed>`'s resource, and a
@@ -20,10 +20,11 @@ const CREDENTIALS: [&str; 3] = ["same-origin", "include", "omit"];
 const OPAQUE: u32 = 1 << 8;
 
 // The plan of a `kind` consumer's request:
-// - its mode and credentials mode: an image's, a video's, a classic script's, a style sheet's and a link's a
+// - its mode and credentials mode: an image's, a video's, an audio's, a classic script's, a style sheet's and a link's a
 //   potential-CORS request by the element's `crossorigin` (HTML "create a potential-CORS request": fetch_rules.rs
 //   `cors_request`), a module script's, a module preload's and a CSS module script's a module script's (a CORS one
-//   whatever); a CSS image's no-cors with its credentials included (CSS Values 4 "fetch a style resource"), a
+//   whatever — a same-origin one for a module preload of a worker: "fetch a single module script" of a top-level
+//   one); a font's a CORS one of credentials same-origin (CSS Fonts 4 §4.9.1); a CSS image's no-cors with its credentials included (CSS Values 4 "fetch a style resource"), a
 //   prefetch's so too (as it has been: HTML's "create a link request" would honour its `crossorigin`); a plugin's a
 //   navigation's; a timed resource's as `timed_resources` found it;
 // - the referrer policy it is made under: the element's `referrerpolicy` (`attr`), else the one its document had as
@@ -31,11 +32,16 @@ const OPAQUE: u32 = 1 << 8;
 //   video or a CSS image, its document's (`document`, its `<meta name="referrer">`'s) — none for any other, whose
 //   fetch takes its policy container's as it is made (Fetch "main fetch"): a module script's options keep its own;
 // - its client's origin opaque or not.
-pub(crate) fn plan(kind: u32, crossorigin: Option<&str>, attr: &str, noted: Option<&str>, document: &str, opaque: bool) -> u32 {
+// (`worker` whether a module preload's `as` names a worker's destination)
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn plan(kind: u32, crossorigin: Option<&str>, worker: bool, attr: &str, noted: Option<&str>, document: &str, opaque: bool) -> u32 {
     let (kind, high) = (kind & 0xff, kind >> 8);
+    let modulepreload = kind == J_LINK && high & crate::link_resource::OBTAINS_MODULEPRELOAD != 0;
     let (mode, credentials) = match kind {
-        J_IMAGE | J_VIDEO | J_CLASSIC_SCRIPT | J_SHEET => crate::fetch_rules::cors_request(crossorigin, false),
-        J_LINK => crate::fetch_rules::cors_request(crossorigin, high & crate::link_resource::OBTAINS_MODULEPRELOAD != 0),
+        J_IMAGE | J_VIDEO | J_AUDIO | J_CLASSIC_SCRIPT | J_SHEET => crate::fetch_rules::cors_request(crossorigin, false),
+        J_LINK if modulepreload && worker => ("same-origin", crate::fetch_rules::cors_request(crossorigin, true).1),
+        J_LINK => crate::fetch_rules::cors_request(crossorigin, modulepreload),
+        J_FONT => ("cors", "same-origin"),
         J_CSS_MODULE => crate::fetch_rules::cors_request(None, true),
         J_MODULE_SCRIPT => crate::fetch_rules::cors_request(crossorigin, true),
         J_OBJECT | J_EMBED => ("navigate", "include"),
@@ -88,10 +94,13 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let node = el.and_then(|id| realm.get(id));
     let crossorigin = node.and_then(|n| n.plain_attr("crossorigin"));
     let attr = node.map_or("", crate::url_ops::referrer_policy_attribute);
+    let worker = node
+        .and_then(|n| crate::script::modulepreload_destination(n.plain_attr("as").unwrap_or("")))
+        .is_some_and(|d| matches!(d, "worker" | "sharedworker" | "serviceworker"));
     let noted = el.and_then(|id| realm.request_policies.get(&id).copied());
     let document = doc.map_or("", |d| realm.document_referrer_policy(d));
     let opaque = realm.location.origin() == "null";
-    rv.set_uint32(plan(kind, crossorigin, attr, noted, document, opaque));
+    rv.set_uint32(plan(kind, crossorigin, worker, attr, noted, document, opaque));
 }
 
 #[cfg(test)]
@@ -100,23 +109,26 @@ mod tests {
 
     #[test]
     fn a_plan_is_what_its_fields_say() {
-        assert_eq!(fields(plan(J_IMAGE, None, "", None, "", false)), ("no-cors", "include", "", false));
-        assert_eq!(fields(plan(J_IMAGE, Some(""), "", None, "origin", false)), ("cors", "same-origin", "origin", false));
-        assert_eq!(fields(plan(J_VIDEO, Some("use-credentials"), "no-referrer", None, "origin", true)), ("cors", "include", "no-referrer", true));
+        assert_eq!(fields(plan(J_IMAGE, None, false, "", None, "", false)), ("no-cors", "include", "", false));
+        assert_eq!(fields(plan(J_IMAGE, Some(""), false, "", None, "origin", false)), ("cors", "same-origin", "origin", false));
+        assert_eq!(fields(plan(J_VIDEO, Some("use-credentials"), false, "no-referrer", None, "origin", true)), ("cors", "include", "no-referrer", true));
         // (…a CSS image's no-cors whatever, its policy its document's)
-        assert_eq!(fields(plan(J_CSS_IMAGE, Some(""), "", None, "unsafe-url", false)), ("no-cors", "include", "unsafe-url", false));
+        assert_eq!(fields(plan(J_CSS_IMAGE, Some(""), false, "", None, "unsafe-url", false)), ("no-cors", "include", "unsafe-url", false));
         // (…a request element's policy the one noted as it was inserted — its default for none — over its document's now)
-        assert_eq!(fields(plan(J_CLASSIC_SCRIPT, None, "", Some(""), "origin", false)).2, "strict-origin-when-cross-origin");
-        assert_eq!(fields(plan(J_SHEET, None, "", Some("same-origin"), "origin", false)).2, "same-origin");
-        assert_eq!(fields(plan(J_SHEET, None, "unsafe-url", Some("same-origin"), "origin", false)).2, "unsafe-url");
+        assert_eq!(fields(plan(J_CLASSIC_SCRIPT, None, false, "", Some(""), "origin", false)).2, "strict-origin-when-cross-origin");
+        assert_eq!(fields(plan(J_SHEET, None, false, "", Some("same-origin"), "origin", false)).2, "same-origin");
+        assert_eq!(fields(plan(J_SHEET, None, false, "unsafe-url", Some("same-origin"), "origin", false)).2, "unsafe-url");
         // (…and none of its document's now but a load's: a module script's fetch reads its container's as it is made)
-        assert_eq!(fields(plan(J_MODULE_SCRIPT, None, "", None, "origin", false)).2, "");
+        assert_eq!(fields(plan(J_MODULE_SCRIPT, None, false, "", None, "origin", false)).2, "");
         assert_eq!(fields(0), ("no-cors", "same-origin", "", false));
         // (…a module preload's a CORS request, a plugin's a navigation, a prefetch's no-cors)
         let modulepreload = J_LINK | crate::link_resource::OBTAINS_MODULEPRELOAD << 8;
-        assert_eq!(fields(plan(modulepreload, None, "", None, "", false)).0, "cors");
-        assert_eq!(fields(plan(J_LINK, None, "", None, "", false)).0, "no-cors");
-        assert_eq!(fields(plan(J_OBJECT, None, "", None, "", false)).0, "navigate");
-        assert_eq!(fields(plan(J_PREFETCH, Some(""), "", None, "", false)).0, "no-cors");
+        assert_eq!(fields(plan(modulepreload, None, false, "", None, "", false)).0, "cors");
+        assert_eq!(fields(plan(J_LINK, None, false, "", None, "", false)).0, "no-cors");
+        assert_eq!(fields(plan(J_OBJECT, None, false, "", None, "", false)).0, "navigate");
+        assert_eq!(fields(plan(J_PREFETCH, Some(""), false, "", None, "", false)).0, "no-cors");
+        // (…a worker's module preload a same-origin one, its credentials its `crossorigin`'s; a font's a CORS one)
+        assert_eq!(fields(plan(modulepreload, Some("use-credentials"), true, "", None, "", false)), ("same-origin", "include", "", false));
+        assert_eq!(fields(plan(J_FONT, None, false, "", None, "", false)), ("cors", "same-origin", "", false));
     }
 }
