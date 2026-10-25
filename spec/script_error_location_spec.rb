@@ -162,19 +162,22 @@ null.d</script>
     expect(s.evaluate_script('seen')).to eq([3, 3])
   end
 
-  # …and what a script threw reported as thrown, nothing of it asked — a revoked proxy, the page's own `SyntaxError`
-  # replaced (Chrome: null, 2)
-  it 'asks nothing of what a script threw' do
+  # …and what a script threw reported as thrown, asked for no more than its text — a revoked proxy, an Error whose
+  # `name` throws, the page's own `SyntaxError` replaced, a `toString` called once (Chrome: null, x, 2, side)
+  it 'asks nothing of what a script threw but its text' do
     page = <<~HTML
       <!DOCTYPE html>
-      <script>window.seen = []; onerror = (m, f, l, c, e) => { seen.push(e === null ? null : e); };</script>
+      <script>window.seen = []; window.calls = 0; onerror = (m, f, l, c, e) => { seen.push([m, e]); };</script>
       <script>var r = Proxy.revocable({}, {}); r.revoke(); window.revoked = r.proxy; throw revoked;</script>
+      <script>var e = new Error('x'); Object.defineProperty(e, 'name', {get() { throw 2; }}); throw e;</script>
       <script>SyntaxError = 1;</script>
       <script>throw 2;</script>
+      <script>throw {toString() { calls++; return 'side'; }};</script>
     HTML
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
     s.visit '/'
-    expect(s.evaluate_script('[seen[0] === revoked, seen[1]]')).to eq([true, 2])
+    got = s.evaluate_script('[seen[0][1] === revoked, seen.map(([m]) => m), calls]')
+    expect(got).to eq([true, %w[null x 2 side], 1])
   end
 
   # …and an Error whose `stack` getter throws is reported all the same, at where it was thrown: a browser's report
