@@ -37,6 +37,12 @@ fn lock() -> MutexGuard<'static, Windows> {
 }
 
 // A new window's registry, the process's, never one a window before had — of the session `session`.
+// What the blob URL `key` (its `entry_key`) resolves to in window `window`'s registry: its bytes (none where the entry holds
+// none) and its type — none for no entry (revoked, here or in another context, or never made).
+pub(crate) fn lookup(window: u64, key: &str) -> Option<(Option<Arc<[u8]>>, String)> {
+    lock().get(&window).and_then(|e| e.get(key)).map(|e| (e.bytes.clone(), e.ty.clone()))
+}
+
 pub(crate) fn window_new(session: u64) -> u64 {
     static LAST: AtomicU64 = AtomicU64::new(0);
     let window = LAST.fetch_add(1, Ordering::Relaxed) + 1;
@@ -115,8 +121,6 @@ fn url_text(s: magnus::RString) -> String {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "blobRegistrySet", set_op, context_id);
-    register(scope, ns, "blobRegistryHas", has_op, context_id);
-    register(scope, ns, "blobRegistryGet", get_op, context_id);
     register(scope, ns, "blobRegistryMarkers", markers_op, context_id);
     register(scope, ns, "blobRegistryFill", fill_op, context_id);
 }
@@ -135,30 +139,6 @@ fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     let ty = args.get(3).to_rust_string_lossy(scope);
     let owner = Some(args.get(4).to_rust_string_lossy(scope));
     lock().entry(window).or_default().insert(url, Entry { bytes, ty, owner, site: None });
-}
-
-// __dom.blobRegistryHas(window, url) -> whether `url` (`entry_key`: its fragment excluded) resolves in window
-// `window`'s registry — not revoked, here or in another context.
-fn has_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(window) = window_arg(scope, &args) else { return rv.set_bool(false) };
-    let url = entry_key(&args.get(1).to_rust_string_lossy(scope));
-    rv.set_bool(lock().get(&window).is_some_and(|e| e.contains_key(&url)));
-}
-
-// __dom.blobRegistryGet(window, url) -> what `url` resolves to there: `[bytes, type]` — bytes null where the entry holds
-// none — or null for none (revoked, here or in another context, or never made).
-fn get_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(window) = window_arg(scope, &args) else { return rv.set_null() };
-    let url = entry_key(&args.get(1).to_rust_string_lossy(scope));
-    let Some((bytes, ty)) = lock().get(&window).and_then(|e| e.get(&url)).map(|e| (e.bytes.clone(), e.ty.clone())) else {
-        return rv.set_null();
-    };
-    let bytes = match bytes {
-        Some(bytes) => crate::blob_data::byte_array(scope, bytes.to_vec()),
-        None => v8::null(scope).into(),
-    };
-    let ty = v8::String::new(scope, &ty).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    rv.set(v8::Array::new_with_elements(scope, &[bytes, ty]).into());
 }
 
 // __dom.blobRegistryMarkers(window) -> the URLs of window `window`'s registry whose entries hold no bytes: made before

@@ -42,6 +42,40 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "blobUrlSet", blob_url_set, context_id);
     register(scope, ns, "blobUrlGet", blob_url_get, context_id);
     register(scope, ns, "blobUrlDelete", blob_url_delete, context_id);
+    register(scope, ns, "blobResolve", blob_resolve, context_id);
+}
+
+// __dom.blobResolve(window, url, resolving) -> the blob the `blob:` URL `url` names (File API §8.3.4, its fragment no part
+// of it: `entry_key`) as window `window` knows it: a blob of this isolate's store — while the window's registry, the
+// cross-context authority on whether a revoke anywhere reached it, still has it — or `[bytes, type]` of the registry's
+// (another of the window's contexts made it); null for none; undefined where neither knows it — which the host may,
+// another window of the session having made it (`partition_blob`). `resolving`: as the calling realm resolves it to
+// fetch it ("obtain a blob object"), by a context of its storage key alone — a realm of another origin none, as it
+// revokes none (blob_rules.rs `usable`); not the host's read of it for a window it opens, a download, a worker's script.
+fn blob_resolve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(window) = args.get(0).integer_value(scope).and_then(|w| u64::try_from(w).ok()) else { return rv.set_null() };
+    let key = entry_key(&args.get(1).to_rust_string_lossy(scope));
+    let cid = realm_id(scope, &args);
+    if args.get(2).is_true() && !crate::blob_rules::usable(&key, crate::dom::realm(scope, cid).location.origin()) {
+        return rv.set_null();
+    }
+    let entry = crate::blob_registry::lookup(window, &key);
+    if let Some((_, blob)) = dom(scope).arena.blob_urls.0.get(&key) {
+        let blob = blob.clone();
+        return match entry {
+            Some(_) => rv.set(v8::Local::new(scope, blob).into()),
+            None => rv.set_null(),
+        };
+    }
+    match entry {
+        Some((Some(bytes), ty)) => {
+            let bytes = crate::blob_data::byte_array(scope, bytes.to_vec());
+            let ty = v8::String::new(scope, &ty).map_or_else(|| v8::undefined(scope).into(), Into::into);
+            rv.set(v8::Array::new_with_elements(scope, &[bytes, ty]).into());
+        }
+        Some((None, _)) => rv.set_null(),
+        None => {}
+    }
 }
 
 // __dom.blobUrlKey(url, revoking) -> `entry_key` — or, `revoking`, `revoked_key` — what the host's registry knows the
