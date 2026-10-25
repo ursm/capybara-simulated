@@ -38,6 +38,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         when '/scope/parsed.html' then [200, {'content-type' => 'text/html'}, ['<html><body><script src="/scope/swerr.js"></script></body></html>']]
         when '/scope/refused.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
         when '/ran.js' then [200, {'content-type' => 'text/javascript'}, ['parent.__ran.push("ran")']]
+        when '/sheet.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
         when '/a.mp3' then [200, {'content-type' => 'audio/mpeg'}, [File.binread(File.expand_path('wpt/media/sound_5.mp3', __dir__))]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
@@ -173,8 +174,9 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(hits).not_to include('/scope/refused.css')
   end
   # A classic script a worker answers with an opaque response runs where the response it hides is an ok one — HTML
-  # "fetch a classic script" takes the response's unsafe response — and fails where that is a 404.
-  it 'runs an opaque script by the status it hides' do
+  # "fetch a classic script" takes the response's unsafe response — and fails where that is a 404; a style sheet alike,
+  # as the network's of another origin is judged by its real status.
+  it 'runs an opaque script by the status it hides, and applies a sheet so' do
     session = simulated_session(app)
     session.visit '/'
     session.execute_script(<<~JS)
@@ -187,18 +189,19 @@ RSpec.describe 'Service Worker subresource verdict' do
         f.src = '/scope/page.html';
         f.onload = () => {
           const d = f.contentDocument, seen = {};
-          for (const name of ['ran.js', 'gone.js']) {
-            const s = d.createElement('script');
-            s.onload = () => { seen[name] = 'load'; if (Object.keys(seen).length === 2) globalThis.__seen = seen; };
-            s.onerror = () => { seen[name] = 'error'; if (Object.keys(seen).length === 2) globalThis.__seen = seen; };
-            s.src = '/scope/away-' + name;
+          for (const name of ['ran.js', 'gone.js', 'sheet.css', 'gone.css']) {
+            const css = name.endsWith('.css');
+            const s = d.createElement(css ? 'link' : 'script');
+            s.onload = () => { seen[name] = 'load'; if (Object.keys(seen).length === 4) globalThis.__seen = seen; };
+            s.onerror = () => { seen[name] = 'error'; if (Object.keys(seen).length === 4) globalThis.__seen = seen; };
+            if (css) { s.rel = 'stylesheet'; s.href = '/scope/away-' + name; } else { s.src = '/scope/away-' + name; }
             d.head.appendChild(s);
           }
         };
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('ran.js' => 'load', 'gone.js' => 'error')
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('ran.js' => 'load', 'gone.js' => 'error', 'sheet.css' => 'load', 'gone.css' => 'error')
     expect(session.evaluate_script('__ran')).to eq(%w[ran])
   end
 end

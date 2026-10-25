@@ -86,17 +86,19 @@ pub(crate) fn service_worker_response_allowed(mode: &str, redirect: &str, respon
 
 // …and whether a subresource the page fetches may use it (a `destination` request, `mode` its element's, redirect mode
 // follow): one Fetch allows (`service_worker_response_allowed`), and by what its consumer makes of a status — an image
-// decodes what it is given; a classic script wants an ok status of the response it is made of, an opaque one's the one
-// it hides ("fetch a classic script" takes the response's unsafe response: `status` that one); a media resource's fetch
-// errs on an HTTP 4xx or 5xx (HTML's media data processing list), and a style sheet's or a font's wants an ok status
-// ("obtain a stylesheet") — an opaque answer, whose status a no-cors consumer cannot read, any of them.
+// decodes what it is given; a classic script and a style sheet want an ok status of the response they are made of, an
+// opaque one's the one it hides ("fetch a classic script" takes the response's unsafe response — `status` that one —
+// and a sheet's "process the linked resource", read of an opaque filtered response's 0, would refuse every no-cors
+// sheet of another origin, which the network's is judged by its real status as); a media resource's fetch errs on an
+// HTTP 4xx or 5xx (HTML's media data processing list), and a font's wants an ok status — an opaque answer, whose status
+// a no-cors consumer cannot read, any of those.
 pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type: &str, redirected: bool, status: u32) -> bool {
     if !service_worker_response_allowed(mode, "follow", response_type, redirected) {
         return false;
     }
     match destination {
         "image" => true,
-        "script" => (200..=299).contains(&status),
+        "script" | "style" => (200..=299).contains(&status),
         _ if response_type == "opaque" => true,
         "audio" | "video" | "track" => status < 400,
         _ => (200..=299).contains(&status),
@@ -660,7 +662,8 @@ mod tests {
         // (…a classic script's opaque answer by the status it hides)
         assert!(sw_subresource_usable("script", "no-cors", "opaque", false, 200));
         assert!(!sw_subresource_usable("script", "no-cors", "opaque", false, 404));
-        assert!(sw_subresource_usable("style", "no-cors", "opaque", false, 0));
+        assert!(sw_subresource_usable("style", "no-cors", "opaque", false, 200) && !sw_subresource_usable("style", "no-cors", "opaque", false, 404));
+        assert!(sw_subresource_usable("font", "no-cors", "opaque", false, 0));
     }
 
     #[test]
