@@ -169,23 +169,29 @@ RSpec.describe 'a subresource request', :https do
     expect(session.evaluate_script("['x'.repeat(70000), 'x'.repeat(40000)].map((d, i) => navigator.sendBeacon('/q' + i, d))")).to eq([false, true])
   end
   # (…an about:blank document's request its creator's — its origin, which Sec-Fetch-Site compares, however deep — and not
-  # the top-level one's: no referrer of its own to say otherwise)
-  it "judges an about:blank document's image by its creator's origin" do
+  # the top-level one's: no referrer of its own to say otherwise; an image's and a style sheet's alike)
+  it "judges an about:blank document's image and sheet by its creator's origin" do
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']
     ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin's frame served in-process
-    load = ->(src) { "const f = document.createElement('iframe'); document.body.append(f); new f.contentWindow.Image().src = '#{src}';" }
+    load = lambda {|src|
+      "const f = document.createElement('iframe'); document.body.append(f); new f.contentWindow.Image().src = '#{src}'; " \
+        "const l = f.contentDocument.createElement('link'); l.rel = 'stylesheet'; l.href = '#{src.sub('.png', '.css')}'; f.contentDocument.head.append(l);"
+    }
     sites = {}
     s = simulated_session(lambda {|env|
       sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
       case env['PATH_INFO']
       when '/top.png', '/framed.png' then [200, {'content-type' => 'image/svg+xml'}, ['<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>']]
+      when '/top.css', '/framed.css' then [200, {'content-type' => 'text/css'}, ['p {}']]
       when '/frame.html' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body><script>#{load.call('https://www.example.com/framed.png')}</script>"]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><iframe src="https://other.test/frame.html"></iframe>']]
       end
     })
     s.visit '/'
     s.execute_script(load.call('/top.png'))
-    expect(poll_until { sites.slice('/top.png', '/framed.png').then {|got| got.size == 2 && got } }).to eq('/top.png' => 'same-origin', '/framed.png' => 'cross-site')
+    expect(poll_until { s.evaluate_script('1') && sites.slice('/top.png', '/framed.png', '/top.css', '/framed.css').then {|got| got.size == 4 && got } }).to eq(
+      '/top.png' => 'same-origin', '/framed.png' => 'cross-site', '/top.css' => 'same-origin', '/framed.css' => 'cross-site'
+    )
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end

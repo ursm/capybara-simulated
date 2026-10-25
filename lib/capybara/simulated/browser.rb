@@ -3839,7 +3839,7 @@ module Capybara
       # request where its `crossorigin` makes it one.
       def subresource_fetch(url, realm, plan, dest = nil)
         mode, credentials, policy = request_of_plan(plan)
-        client = request_client(realm, policy)
+        client = client_for(realm, policy)
         rack_fetch('GET', url, '', nil, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
@@ -3929,7 +3929,7 @@ module Capybara
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         mode, credentials, policy = Native.subresource_plan_fields(plan.to_i)
-        client = request_client(realm, policy)
+        client = client_for(realm, policy)
         result = rack_fetch('GET', key, '', {}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                             client_origin: client[:origin], client_realm: client[:realm], dest: dest)
@@ -3987,7 +3987,7 @@ module Capybara
       # (…`mode` its request's: a module script's "cors", none a classic one's — with its `credentials` mode; `client`
       # its request client where the caller has it already)
       def durable_source(url, realm = 0, element_policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin',
-                         client: request_client(realm, element_policy, referrer: referrer))
+                         client: client_for(realm, element_policy, referrer: referrer))
         body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                                     client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
@@ -4109,7 +4109,7 @@ module Capybara
           (@asset_bytes ||= {})[key] = e[2]
           return e[0]
         end
-        client     = request_client(realm.to_i, policy, referrer: referrer)
+        client     = client_for(realm.to_i, policy, referrer: referrer)
         shared_key = "#{memo_key} #{client_origin_of(client)}"
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[shared_key])
@@ -8300,7 +8300,7 @@ module Capybara
       # CORS load's success is origin-dependent (a response's ACAO may allow one origin and
       # not another) — fetching per load is what keeps the verdict the requesting document's
       # own; only the origin-free decode result is shared.
-      private def cached_image(key, cors = false, credentials = 'same-origin', client: load_client(nil, key))
+      private def cached_image(key, cors = false, credentials = 'same-origin', client: pinned_client(client_for(0), key))
         bytes = image_source_bytes(key, cors, credentials, client: client)
         return bytes if bytes == :unsupported
         return nil unless bytes
@@ -8330,7 +8330,7 @@ module Capybara
       # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
       # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
       # nil for a missing / failed / CORS-rejected / empty resource.
-      private def image_source_bytes(key, cors = false, credentials = 'same-origin', client: load_client(nil, key))
+      private def image_source_bytes(key, cors = false, credentials = 'same-origin', client: pinned_client(client_for(0), key))
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
@@ -8339,9 +8339,9 @@ module Capybara
           # on the async path this runs on a background thread, and a concurrent navigation
           # must not swing the CORS / SameSite / Referer verdicts to a document that never
           # issued this request.
-          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
-                              referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
-                              cookie_cross_site: client.cookie_cross_site, client_origin: client.origin, dest: 'image')
+          result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
+                              referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true,
+                              cookie_cross_site: client[:cookie_cross_site], client_origin: client[:origin], dest: 'image')
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
           # after; a 404 is a response too, the entry keeping its status. And whether it taints a canvas it is drawn
@@ -8532,7 +8532,7 @@ module Capybara
         key = resolve_against_current(url.to_s)
         return [nil, nil] unless key.is_a?(String)
 
-        client = request_client(realm, referrer: referrer)
+        client = client_for(realm, referrer: referrer)
         # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
         # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
         cached = [client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url).to_s, key]
@@ -8928,9 +8928,9 @@ module Capybara
         # document, not the top window's) — the <img> model, for the client an
         # image's is (image_source_bytes).
         cors, credentials, client = planned_request(plan, realm, url.to_s)
-        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
-                            referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
-                            cookie_cross_site: client.cookie_cross_site, client_origin: client.origin, dest: 'video')
+        result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
+                            referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true,
+                            cookie_cross_site: client[:cookie_cross_site], client_origin: client[:origin], dest: 'video')
         return nil unless resource_loaded?(result) && result['status'].to_i < 400
         bytes = result['body_raw'].to_s
         return nil if bytes.empty?
@@ -11218,41 +11218,65 @@ module Capybara
       # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
       # object"), none for none — one given more than once combined as Fetch's "get a header" does.
       def refresh_header(headers) = (value = header_field(headers || {}, 'refresh')) && Array(value).join(', ')
-      # The client a subresource request of realm `realm` is made as (Fetch "client"): its URL — the referrer source, whose
-      # site Sec-Fetch-Site compares — its referrer policy, or the one the request's element sets (`element_policy`), its
-      # origin where that is opaque ('null': a sandboxed document's), and the realm itself, whose ancestors make it cross-site
-      # for cookies — or, a negative `realm`, worker -`realm`'s: its script's URL under the default policy (a worker no
-      # document's realm the host may ask from its thread). And the request's referrer: the client's URL ("client"), or
-      # `referrer` where the request names one of its own — a font's sheet's location, an imported module's referring
-      # script's base URL — its initiator (Sec-Fetch-Site, Origin) the client's origin all the same.
-      # The origin a request of request client `client` is made as — its own where it is opaque, else its URL's, the page's
-      # for a client of no http(s) URL (an about:blank frame, a blob: document) — as `rack_fetch` judges its request.
-      def client_origin_of(client) = client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url)
-      def request_client(realm, element_policy = nil, referrer: nil)
+      # The client a subresource request of realm `realm`'s document is made as (Fetch "client"), read on the main thread,
+      # which a realm's URL is asked on — a frame gone, the page's:
+      # - its URL, whose origin it is of and whose site its cookies and Sec-Fetch-Site are judged by: a local document's
+      #   (about:blank, srcdoc, blob:) its creator's, the nearest ancestor's of a fetchable URL (`realm_request_initiator`);
+      # - its origin where that is opaque ('null': a sandboxed document's) — `opaque` where the bindings tell it, as the
+      #   host cannot ask a frame still parsing (a load the host makes for an image), else the realm's;
+      # - the realm itself, whose ancestors make it cross-site for cookies;
+      # - the referrer and policy it refers by: its document's URL (a srcdoc one's container's) — or `referrer` where the
+      #   request names one of its own: a font's sheet's location, an imported module's referring script's base URL, its
+      #   initiator (Sec-Fetch-Site, Origin) the client's origin all the same — under the policy the request's element
+      #   sets (`element_policy`), else its document's; an opaque one none (Referrer Policy "determine request's
+      #   referrer").
+      # Or, a negative `realm`, worker -`realm`'s: its script's URL under the default policy (a worker no document's realm
+      # the host may ask from its thread).
+      def client_for(realm, element_policy = nil, referrer: nil, opaque: nil)
         realm = realm.to_i
         if realm.negative?
           url = @workers.dig(-realm, :script_url).to_s
           url = nil unless http_url?(url)
           return {url: url, policy: element_policy.to_s, origin: nil, realm: nil, referrer: referrer || url, initiator: referrer && url_origin(url)}
         end
-        url, policy = realm_referrer_initiator(realm)
-        opaque = document_origin_opaque?(realm)
+        own = realm.zero? ? @current_url : frame_realm_url(realm)
+        realm, own = 0, @current_url if own.nil?
+        if opaque.nil?
+          source, policy = realm_referrer_initiator(realm)
+          url, opaque = realm_request_initiator(realm)
+        else
+          # (…told by the bindings, its document is not asked — every image of a page asks this: its URLs alone, and a
+          # srcdoc one's policy its container's where the element and its document name none)
+          source, policy = own.match?(/\Aabout:srcdoc\z/i) ? realm_referrer_initiator(@runtime.frame_realm_parent(realm).to_i) : [own, '']
+          url = http_url?(own) ? own : realm_creator_url(realm)
+        end
         # (…which no element lifts for an opaque origin's document: it refers as none, as its navigations do)
-        policy = element_policy unless element_policy.to_s.empty? || opaque
+        policy = opaque ? 'no-referrer' : (element_policy.to_s.empty? ? policy : element_policy)
         origin = opaque ? 'null' : nil
-        {url: url, policy: policy, origin: origin, realm: realm.zero? ? nil : realm, referrer: referrer || url, initiator: referrer && (origin || url_origin(url))}
+        {url: url, policy: policy, origin: origin, realm: realm.zero? ? nil : realm, referrer: referrer || source, initiator: referrer && (origin || url_origin(url))}
+      end
+      # The origin a request of client `client` is made as — its own where it is opaque, else its URL's, the page's for a
+      # client of no http(s) URL — as `rack_fetch` judges its request.
+      def client_origin_of(client) = client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url)
+      # …and `client` pinned for a fetch of `target_url` made off the main thread (an image's): whether it is cross-site
+      # for cookies worked out here — its document's, or an ancestor's, site another's; an opaque one's always
+      # (`container_cross_site?`) — as no realm is asked from a host thread.
+      def pinned_client(client, target_url)
+        cross = !client[:origin].nil? || container_cross_site?(client[:realm].to_i, target_url)
+        client.merge(cookie_cross_site: cross, realm: nil)
       end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
       # and whose origin an Origin header carries — a local document's (about:blank, srcdoc) its creator's, the nearest
       # ancestor's of a fetchable URL — and whether that document's own origin is opaque (a sandbox's)].
-      def realm_request_initiator(realm)
-        opaque = document_origin_opaque?(realm)
-        url    = realm.zero? ? @current_url : frame_realm_url(realm)
+      def realm_request_initiator(realm) = [realm_creator_url(realm), document_origin_opaque?(realm)]
+      # …its URL alone.
+      def realm_creator_url(realm)
+        url = realm.zero? ? @current_url : frame_realm_url(realm)
         until realm.zero? || http_url?(url)
           realm = @runtime.frame_realm_parent(realm).to_i
           url   = realm.zero? ? @current_url : frame_realm_url(realm)
         end
-        [url, opaque]
+        url
       end
       # …the page's own document as one of an opaque origin too: a `Content-Security-Policy: sandbox` response's.
       def document_origin_opaque?(realm)
@@ -13061,14 +13085,6 @@ module Capybara
       # initiator-based Sec-Fetch-Site latch).
       # …and a navigation of a frame in realm `realm_id`'s document: cross-site where that document is, or an ancestor of
       # it.
-      # The document a load the host makes is for — realm `realm`'s, the top-level one's for none — as a request to
-      # `target_url` takes it: its URL (an about:blank / srcdoc one's its creator's, whose origin it has), whether the
-      # request is cross-site for cookies (where it, or an ancestor, is: `container_cross_site?`; one of an opaque origin
-      # always), and the referrer and policy it refers by — its document's `referrer_policy` and opacity the bindings
-      # tell (a frame still parsing has none the host could ask), a srcdoc document its container's referrer and, with
-      # none of its own, policy; an opaque one none (Referrer Policy "determine request's referrer"). Read on the main
-      # thread, which a realm's URL is asked on; a frame gone, the top-level one's.
-      LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy, :origin)
       # The mode, credentials mode and referrer policy of the request a subresource's `plan` (subresource_plan.rs) is, as a
       # request the asset cache and `subresource_fetch` make takes them: a no-cors one none — the mode-less request an
       # element's load always was, of no response tainting of its own — but a CORS one's, a plugin's navigation.
@@ -13076,27 +13092,12 @@ module Capybara
         mode, credentials, policy = Native.subresource_plan_fields(plan.to_i)
         mode == 'no-cors' ? [nil, 'same-origin', policy] : [mode, credentials, policy]
       end
-      # …and the request a subresource's `plan` (subresource_plan.rs) makes for it, to `target_url`: whether it is a CORS
-      # one, its credentials mode, its client.
+      # …and the request a load the host makes for a subresource's `plan` (subresource_plan.rs) is, to `target_url`: whether
+      # it is a CORS one, its credentials mode, its client — pinned, as it is fetched off the main thread, its opacity the
+      # bindings' (`client_for`).
       private def planned_request(plan, realm, target_url)
         mode, credentials, policy, opaque = Native.subresource_plan_fields(plan.to_i)
-        [mode == 'cors', credentials, load_client(realm, target_url, referrer_policy: policy, opaque: opaque)]
-      end
-      def load_client(realm, target_url, referrer_policy: nil, opaque: false)
-        rid    = realm.to_i
-        policy = opaque ? 'no-referrer' : referrer_policy.to_s
-        # (…its origin `null` where it is opaque — a sandboxed document's, a data: one's — every request of it cross-site)
-        origin = opaque ? 'null' : nil
-        return LoadClient.new(@current_url, opaque, @current_url, policy, origin) unless rid.positive? && (url = frame_realm_url(rid))
-
-        referrer = url
-        if url.match?(/\Aabout:srcdoc\z/i)
-          referrer, container_policy = realm_referrer_initiator(@runtime.frame_realm_parent(rid).to_i)
-          policy = container_policy if policy.empty?
-        end
-        # (…an about:blank or srcdoc document's origin its creator's, however deep: `realm_request_initiator`)
-        url = realm_request_initiator(rid).first unless http_url?(url)
-        LoadClient.new(url, opaque || container_cross_site?(rid, target_url), referrer, policy, origin)
+        [mode == 'cors', credentials, pinned_client(client_for(realm, policy, opaque: opaque), target_url)]
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
       # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's.
