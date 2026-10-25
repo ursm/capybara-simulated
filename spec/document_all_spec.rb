@@ -31,4 +31,26 @@ RSpec.describe 'document.all' do
     JS
     expect(got).to eq(['a', '[object HTMLCollection]', 2, 'form', 'a', nil, nil, nil, 'head'])
   end
+
+  # …as a legacy platform object's (Web IDL §3.9): its names its own keys though unenumerable, neither deleted nor
+  # defined, none masking an own property; a name's collection live as names are written, one per name (Chrome,
+  # Firefox); a Symbol no name its call takes; and a script's answer its elements, as WebDriver's clone has it.
+  it 'is a legacy platform object of named properties' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const all = document.all, b = all.b, before = b.length;
+        document.images[0].name = 'zz';
+        Reflect.defineProperty(all, 'expando', {value: 5});
+        document.body.append(Object.assign(document.createElement('i'), {id: 'expando'}));
+        let symbol;
+        try { all(Symbol()); } catch (e) { symbol = e.name; }
+        const index = (n) => /^\\d+$/.test(n), names = Object.getOwnPropertyNames(all).filter((n) => !index(n)).sort();
+        return [before, b.length, names, Object.keys(all).every(index), Reflect.deleteProperty(all, 'a'),
+                Reflect.defineProperty(all, 'a', {value: 1}), all.expando, symbol];
+      })()
+    JS
+    expect(got).to eq([2, 1, %w[a b expando f zz], true, false, false, 5, 'TypeError'])
+    expect(session.evaluate_script('document.all').map(&:tag_name).first(3)).to eq(%w[html head body])
+  end
 end

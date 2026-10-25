@@ -14,9 +14,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "allCollectionObject", all_collection_object, context_id);
 }
 
-// src/v8_shim.cc: a template's objects made HTML's [[IsHTMLDDA]] ones, and callable.
+// src/v8_shim.cc: a template's objects made HTML's [[IsHTMLDDA]] ones, and callable — a call of one the function its
+// last internal field holds.
 unsafe extern "C" {
-    fn csim_template_undetectable_callable(t: *mut v8::ObjectTemplate, call: *const v8::Function);
+    fn csim_template_undetectable_callable(t: *mut v8::ObjectTemplate);
 }
 
 // The indexed properties of such an object, its implementation's (`get`, `query`, … below).
@@ -46,35 +47,56 @@ fn indexed_object(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(object.into());
 }
 
-// __dom.allCollectionObject(prototype, item, length, named, call) -> an HTMLAllCollection (HTML §2.6.2), `document.all`:
-// such an object that is also HTML's [[IsHTMLDDA]] one — typeof "undefined", falsy, == null — and callable, a call of it
-// `call`'s; its named properties `named(name)`'s (null for none: a template of its own each, as its call is), each
-// read-only and unenumerable ([LegacyUnenumerableNamedProperties]), none a name its prototype chain has (Web IDL's
-// named property visibility).
+// __dom.allCollectionObject(prototype, item, length, named, names, call) -> an HTMLAllCollection (HTML §2.6.2),
+// `document.all`: such an object that is also HTML's [[IsHTMLDDA]] one — typeof "undefined", falsy, == null — and
+// callable, a call of it `call`'s; its named properties `named(name)`'s (null for none) and `names()`'s, the supported
+// names in order — each read-only and unenumerable ([LegacyUnenumerableNamedProperties]), neither defined nor deleted,
+// and none a name the object has an own property of or its prototype chain has (Web IDL's named property visibility).
 fn all_collection_object(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(call) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
-    let t = v8::ObjectTemplate::new(scope);
-    t.set_internal_field_count(3);
-    t.set_indexed_property_handler(indexed_handler());
-    t.set_named_property_handler(v8::NamedPropertyHandlerConfiguration::new().getter(named_get).query(named_query));
-    // SAFETY: the shim takes the template's and the function's handles of this callback's scope, and keeps neither.
-    unsafe { csim_template_undetectable_callable(&*t as *const v8::ObjectTemplate as *mut v8::ObjectTemplate, &*call) };
-    let Some(object) = t.new_instance(scope) else { return };
-    for i in 0..3 {
+    let template = all_template(scope);
+    let Some(object) = template.new_instance(scope) else { return };
+    for i in 0..ALL_FIELDS {
         object.set_internal_field(i, args.get(i as i32 + 1).into());
     }
     object.set_prototype(scope, args.get(0));
     rv.set(object.into());
 }
+// (…its fields: item, length, named, names, call — the last the shim's to read, v8_shim.cc `ALL_CALL_FIELD`)
+const ALL_FIELDS: usize = 5;
+fn all_template<'s>(scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::ObjectTemplate> {
+    if let Some(t) = dom(scope).all_template.clone() {
+        return v8::Local::new(scope, t);
+    }
+    let t = v8::ObjectTemplate::new(scope);
+    t.set_internal_field_count(ALL_FIELDS);
+    t.set_indexed_property_handler(indexed_handler());
+    t.set_named_property_handler(
+        v8::NamedPropertyHandlerConfiguration::new()
+            .getter(named_get)
+            .query(named_query)
+            .deleter(named_delete)
+            .definer(named_define)
+            .enumerator(named_enumerate),
+    );
+    // SAFETY: the shim takes the template's handle of this callback's scope, and keeps none.
+    unsafe { csim_template_undetectable_callable(&*t as *const v8::ObjectTemplate as *mut v8::ObjectTemplate) };
+    dom(scope).all_template = Some(v8::Global::new(scope, t));
+    t
+}
 
-// The implementation's named property `key` of the object the interceptor runs on: none for a symbol, a name its
-// prototype chain has, or one the implementation does not support (null).
+// The implementation's named property `key` of the object the interceptor runs on: none for a symbol, a name the object
+// has an own property of or its prototype chain has (none for a null one), or one the implementation does not support
+// (null).
 fn named<'s>(scope: &mut v8::PinScope<'s, '_>, key: v8::Local<'_, v8::Name>, args: &v8::PropertyCallbackArguments<'_>) -> Option<v8::Local<'s, v8::Value>> {
     let name = v8::Local::<v8::String>::try_from(key).ok()?;
     let holder = args.holder();
-    let prototype = holder.get_prototype(scope).and_then(|p| p.to_object(scope))?;
-    if prototype.has(scope, name.into())? {
+    if holder.has_real_named_property(scope, name.into())? {
         return None;
+    }
+    if let Some(prototype) = holder.get_prototype(scope).filter(|p| p.is_object()).and_then(|p| p.to_object(scope)) {
+        if prototype.has(scope, name.into())? {
+            return None;
+        }
     }
     let f = holder.get_internal_field(scope, 2).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok())?;
     let undefined = v8::undefined(scope).into();
@@ -96,6 +118,36 @@ fn named_query(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>, a
     let attributes = v8::PropertyAttribute::READ_ONLY | v8::PropertyAttribute::DONT_ENUM;
     rv.set(v8::Integer::new(scope, attributes.as_u32() as i32));
     v8::Intercepted::kYes
+}
+// (…a visible one neither deleted nor defined: refused, as Web IDL's [[Delete]] and [[DefineOwnProperty]] of a legacy
+// platform object refuse it — any other name the ordinary steps)
+fn named_delete(scope: &mut v8::PinScope<'_, '_>, key: v8::Local<'_, v8::Name>, args: v8::PropertyCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Boolean>) -> v8::Intercepted {
+    if named(scope, key, &args).is_none() {
+        return v8::Intercepted::kNo;
+    }
+    rv.set_bool(false);
+    v8::Intercepted::kYes
+}
+fn named_define(
+    scope: &mut v8::PinScope<'_, '_>,
+    key: v8::Local<'_, v8::Name>,
+    _descriptor: &v8::PropertyDescriptor,
+    args: v8::PropertyCallbackArguments<'_>,
+    mut rv: v8::ReturnValue<'_, ()>,
+) -> v8::Intercepted {
+    if named(scope, key, &args).is_none() {
+        return v8::Intercepted::kNo;
+    }
+    rv.set_bool(false);
+    v8::Intercepted::kYes
+}
+// (…its supported names, the implementation's `names()`, which [[OwnPropertyKeys]] lists — unenumerable as they are)
+fn named_enumerate(scope: &mut v8::PinScope<'_, '_>, args: v8::PropertyCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Array>) {
+    let Some(f) = args.holder().get_internal_field(scope, 3).and_then(|f| v8::Local::<v8::Function>::try_from(f).ok()) else { return };
+    let undefined = v8::undefined(scope).into();
+    if let Some(names) = f.call(scope, undefined, &[]).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok()) {
+        rv.set(names);
+    }
 }
 
 // The implementation's answer for index `i` of the object the interceptor runs on: its item, or None where it does not

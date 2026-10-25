@@ -36,23 +36,26 @@ extern "C" const v8::Function* csim_bound_target(const v8::Function* f) {
 }
 
 // …an object of the template `t` HTML's [[IsHTMLDDA]] one (V8's undetectable: typeof "undefined", falsy, == null) and
-// callable, a call of it the function `call`'s of its first argument, the one HTMLAllCollection's [[Call]] reads, and of
-// no receiver (legacy.rs `allCollectionObject`).
+// callable, a call of it the function its internal field `ALL_CALL_FIELD` holds, of its first argument — the one
+// HTMLAllCollection's [[Call]] reads — and of no receiver (legacy.rs `allCollectionObject`: the object called is the
+// callback's `This`).
 namespace {
-void call_data(const v8::FunctionCallbackInfo<v8::Value>& info) {
+constexpr int ALL_CALL_FIELD = 4;
+void call_field(const v8::FunctionCallbackInfo<v8::Value>& info) {
   v8::Isolate* isolate = info.GetIsolate();
+  v8::Local<v8::Data> field = info.This()->GetInternalField(ALL_CALL_FIELD);
+  if (!field->IsValue() || !field.As<v8::Value>()->IsFunction()) return;
   v8::Local<v8::Value> argv[1] = {info[0]};
   v8::Local<v8::Value> result;
-  if (info.Data().As<v8::Function>()->Call(isolate->GetCurrentContext(), v8::Undefined(isolate), info.Length() > 0 ? 1 : 0, argv).ToLocal(&result)) {
+  if (field.As<v8::Function>()->Call(isolate->GetCurrentContext(), v8::Undefined(isolate), info.Length() > 0 ? 1 : 0, argv).ToLocal(&result)) {
     info.GetReturnValue().Set(result);
   }
 }
 }  // namespace
-extern "C" void csim_template_undetectable_callable(v8::ObjectTemplate* t, const v8::Function* call) {
+extern "C" void csim_template_undetectable_callable(v8::ObjectTemplate* t) {
   auto tpl = *reinterpret_cast<v8::Local<v8::ObjectTemplate>*>(&t);
-  auto fn = *reinterpret_cast<const v8::Local<v8::Function>*>(&call);
   tpl->MarkAsUndetectable();
-  tpl->SetCallAsFunctionHandler(call_data, fn);
+  tpl->SetCallAsFunctionHandler(call_field);
 }
 
 // What a dropped object's wrappable is told (node_handle.rs `csim_node_reset_root`).
