@@ -115,22 +115,21 @@ impl RealmArena {
         if n.script_flags & if by == BY_SCRIPT { SCRIPT_ALREADY_STARTED } else { SCRIPT_RUN } != 0 {
             return PREPARE_NONE;
         }
-        let src = n.plain_attr("src").map(str::is_empty);
-        // (…one out of the lists its text as its end tag found it: HTML takes the source text there)
-        let listed = if by == BY_PARSER_LIST { self.realm_state(n.realm).and_then(|s| s.parser_sources.get(&id)) } else { None };
-        let has_text = match listed {
-            Some(text) => !text.is_empty(),
-            None => n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty())),
-        };
-        if (src.is_none() && !has_text) || (by != BY_PARSER_LIST && !self.is_connected(id)) {
+        // (…and one no parser is preparing runs no text of the parser's: the line of its document the parser made it on
+        // is no line of what it runs, which is counted from its own first, as an inserted script's — Chrome)
+        if by == BY_SCRIPT && !self.script_lines.is_empty() {
+            self.script_lines.remove(&id);
+        }
+        if !self.ready_to_start(id, by) {
+            if by == BY_PARSER {
+                self.leave_preparable(id);
+            }
             return PREPARE_NONE;
         }
         let Some(n) = self.get(id) else { return PREPARE_NONE };
         let ty = script_type(n);
-        if ty != CLASSIC && ty != MODULE && ty != IMPORT_MAP {
-            return PREPARE_NONE;
-        }
         let nomodule = ty == CLASSIC && n.plain_attr("nomodule").is_some();
+        let src = n.plain_attr("src").map(str::is_empty);
         let scripting = scripting && !self.scripts_sandboxed(n.realm);
         if let Some(n) = self.get_mut_quietly(id) {
             n.script_flags |= SCRIPT_ALREADY_STARTED | SCRIPT_RUN;
@@ -143,6 +142,31 @@ impl RealmArena {
             _ => PREPARE_CLASSIC,
         }
     }
+    // The parser's script at its end tag that preparing returns from before it is "already started" — no text yet, not
+    // connected, a type that runs nothing: the flag its creation set, in place of HTML's parser document, taken back, so
+    // a later change prepares it, as one no parser made.
+    fn leave_preparable(&mut self, id: NodeId) {
+        if let Some(n) = self.get_mut_quietly(id) {
+            n.script_flags &= !SCRIPT_ALREADY_STARTED;
+        }
+    }
+    // Whether preparing the script element `id` goes on to set it "already started": it has a `src` or child text (one
+    // out of the lists its text as its end tag found it), is connected — where it is not out of the lists — and its type
+    // runs as something here.
+    fn ready_to_start(&self, id: NodeId, by: u32) -> bool {
+        let Some(n) = self.get(id) else { return false };
+        let src = n.plain_attr("src").map(str::is_empty);
+        // (…one out of the lists its text as its end tag found it: HTML takes the source text there)
+        let listed = if by == BY_PARSER_LIST { self.realm_state(n.realm).and_then(|s| s.parser_sources.get(&id)) } else { None };
+        let has_text = match listed {
+            Some(text) => !text.is_empty(),
+            None => n.children.iter().any(|&c| self.get(c).is_some_and(|t| t.kind == NodeKind::Text && !t.data.is_empty())),
+        };
+        if (src.is_none() && !has_text) || (by != BY_PARSER_LIST && !self.is_connected(id)) {
+            return false;
+        }
+        matches!(script_type(n), CLASSIC | MODULE | IMPORT_MAP)
+    }
 }
 
 // Whether a script element blocks the parser (HTML "prepare the script element" step 31): a classic script, inline or
@@ -154,18 +178,25 @@ fn blocks_parser(n: &crate::dom::NodeData) -> bool {
 }
 
 impl RealmArena {
-    // The parser at a deferred, async or module script's end tag (`listParserScript`): one connected then goes on the
-    // list of scripts to execute after parsing — where "the end" finds it, whatever an earlier script did to it since
-    // (HTML §13.2.7: the lists are kept, not the tree walked again), an inline one with the source text it has now —
-    // and one in a subtree a script removed does not.
+    // The parser at the end tag of a script it does not run there — a deferred, async or module one, or one whose type
+    // runs nothing (`listParserScript`): one connected then goes on the list of scripts to execute after parsing — where
+    // "the end" finds it, whatever an earlier script did to it since (HTML §13.2.7: the lists are kept, not the tree
+    // walked again), an inline one with the source text it has now — and one in a subtree a script removed does not;
+    // one preparing returns from before it is "already started" is left preparable (`leave_preparable`).
     pub(crate) fn list_parser_script(&mut self, cid: i32, id: NodeId) {
         let Some(n) = self.get_mut_quietly(id) else { return };
         n.script_flags |= SCRIPT_END_TAG;
-        let runs = n.script_flags & SCRIPT_RUN == 0 && matches!(script_type(n), CLASSIC | MODULE);
-        let inline = n.plain_attr("src").is_none();
-        if !runs || !self.is_connected(id) {
+        if n.script_flags & SCRIPT_RUN != 0 {
             return;
         }
+        if !self.ready_to_start(id, BY_PARSER) {
+            return self.leave_preparable(id);
+        }
+        let Some(n) = self.get(id) else { return };
+        if !matches!(script_type(n), CLASSIC | MODULE) {
+            return;
+        }
+        let inline = n.plain_attr("src").is_none();
         let text = inline.then(|| self.child_text(id));
         if let Some(state) = self.realm_state_mut(cid) {
             state.parser_list.push(id);
@@ -333,6 +364,22 @@ fn exception_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
+// __dom.isNativeError(v) -> whether `v` is an Error of any realm: its [[ErrorData]] — asked of no getter, trap or
+// `Symbol.toStringTag` of the page's, as a thrown value's report runs none (a revoked proxy's would throw).
+fn is_native_error_op(_: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(args.get(0).is_native_error());
+}
+
+// __dom.thrownText(v) -> the text V8 makes of the thrown value `v` for its message, running no code of the page's: what
+// a report says of one whose own string conversion throws (a revoked proxy's).
+fn thrown_text_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = v8::Exception::create_message(scope, args.get(0)).get(scope).to_rust_string_lossy(scope);
+    let text = text.strip_prefix("Uncaught ").unwrap_or(&text);
+    if let Some(text) = v8::String::new(scope, text) {
+        rv.set(text.into());
+    }
+}
+
 // __dom.runningScriptMuted() -> whether the script of the page's that is running — the top frame of the stack that is a
 // page script's (`page_script`) — is a classic one whose errors are muted (`muted_scripts`): the script a promise it
 // rejected was rejected by (HTML HostPromiseRejectionTracker). At once false where no script is muted, as a page's
@@ -376,6 +423,8 @@ fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "exceptionSite", exception_site_op, context_id);
+    crate::dom::register(scope, ns, "isNativeError", is_native_error_op, context_id);
+    crate::dom::register(scope, ns, "thrownText", thrown_text_op, context_id);
     crate::dom::register(scope, ns, "takeScriptLine", take_script_line_op, context_id);
     crate::dom::register(scope, ns, "runningScriptMuted", running_script_muted_op, context_id);
     crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);

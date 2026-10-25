@@ -29,7 +29,8 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       allow = env['QUERY_STRING'] == 'allow' ? {'access-control-allow-origin' => '*'} : {}
       case env['PATH_INFO']
       when '/s.js' then [200, {'content-type' => 'text/javascript'}.merge(allow), ['']]
-      when '/bad.js' then [200, {'content-type' => 'text/javascript'}, ['let = = ;']]
+      # (…by the small script's `(0, eval)`, whose SyntaxError is located by compiling it again, under its own URL)
+      when '/bad.js' then [200, {'content-type' => 'text/javascript'}, ["x = 1;\n  var = ;"]]
       when '/u.js'
         body = <<~JS
           window.thrower = () => { throw new Error('thrower') };

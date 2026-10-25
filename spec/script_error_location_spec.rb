@@ -134,6 +134,49 @@ RSpec.describe 'script error locations' do
     expect(s.evaluate_script('seen')).to eq([3])
   end
 
+  # …and so to one the parser made inert — a template's, inserted from its content — or of a type that runs nothing,
+  # which then runs as its type is taken away and it is inserted again: neither ran by the parser, each counted from its
+  # own first line (Chrome: 3, 3)
+  it 'counts a parser script run by its insertion from its own first line' do
+    page = <<~HTML
+      <!DOCTYPE html>
+      <script>window.seen = []; onerror = (m, f, l) => { seen.push(l); };</script>
+      <p>x</p>
+
+      <template id="t"><script>
+
+null.c</script></template>
+      <script id="u" type="text/x-foo">
+
+null.d</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      document.body.append(document.getElementById('t').content);
+      const u = document.getElementById('u');
+      u.removeAttribute('type');
+      u.remove();
+      document.body.append(u);
+    JS
+    expect(s.evaluate_script('seen')).to eq([3, 3])
+  end
+
+  # …and what a script threw reported as thrown, nothing of it asked — a revoked proxy, the page's own `SyntaxError`
+  # replaced (Chrome: null, 2)
+  it 'asks nothing of what a script threw' do
+    page = <<~HTML
+      <!DOCTYPE html>
+      <script>window.seen = []; onerror = (m, f, l, c, e) => { seen.push(e === null ? null : e); };</script>
+      <script>var r = Proxy.revocable({}, {}); r.revoke(); window.revoked = r.proxy; throw revoked;</script>
+      <script>SyntaxError = 1;</script>
+      <script>throw 2;</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    expect(s.evaluate_script('[seen[0] === revoked, seen[1]]')).to eq([true, 2])
+  end
+
   # …and an Error whose `stack` getter throws is reported all the same, at where it was thrown: a browser's report
   # consults no page getter.
   it 'reports an exception whose stack getter throws' do

@@ -1851,8 +1851,9 @@ module Capybara
               } catch (e) {
                 // (…its text that did not compile reported where it stopped (Chrome): the eval's SyntaxError names no
                 // script, as V8 never reached the `sourceURL` after it — compiled again on this, the error path alone,
-                // which throws the one that does; one the script threw as it ran compiles, and is rethrown)
-                if (e instanceof SyntaxError) compile(label || 'csim-eval', body);
+                // which throws the one that does; what the script threw as it ran compiles, and is rethrown untouched.
+                // Nothing of `e` is asked: an `instanceof` would run the page's `SyntaxError` or a thrown proxy's trap)
+                compile(label || 'csim-eval', body);
                 throw e;
               }
             };
