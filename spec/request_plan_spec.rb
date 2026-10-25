@@ -4,10 +4,11 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
-# A subresource's request is the engine's plan of it (subresource_plan.rs `plan`), made as its fetch begins: a module
-# script's options carry its own `referrerpolicy` alone, so a later `import()` takes its document's policy as it is then
-# (Fetch "main fetch"), and a link's request takes its `crossorigin` as its load task runs — one set right after the
-# link is inserted is the one its one fetch is made with.
+# A subresource's request is the engine's plan of it (subresource_plan.rs `plan`): a module script's options carry its
+# own `referrerpolicy` alone, so a later `import()` takes its document's policy as it is then (Fetch "main fetch"); and a
+# link's request takes its `crossorigin` as its load task runs — one set right after the link is inserted is the one
+# its one fetch is made with. That is the driver's model of a link's fetch (a task after insertion), not the platform's:
+# HTML begins a sheet's fetch as the link is inserted, and a `crossorigin` change fetches it again — a backlog item.
 RSpec.describe 'a subresource request plan' do
   include PollUntil
 
