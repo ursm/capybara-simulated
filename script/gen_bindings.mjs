@@ -674,7 +674,7 @@ const REFLECTION = [
 const RUNTIME = [
   'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
-  'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
+  'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
   'defineLength', 'defineUnscopables', 'unforgeableMembers', 'defaultJSONOf', 'defineSetlike', 'defineMaplike',
   'ceEnter', 'ceLeave'
@@ -1165,12 +1165,12 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
     steps.push([`isIterable(${expr}, ${failure(where)})`, convert(u)]);
   }
   // (…any other object the record type's — Web IDL's union step after the sequence's)
-  if (record) steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function'))`, convert(record)]);
+  if (record) steps.push([`isObject(${expr})`, convert(record)]);
   // (…a callable one the callback function type's, before a dictionary would take it)
-  if (callbacks.length) steps.push([`typeof ${expr} === 'function'`, expr]);
-  if (dict) steps.push([`(typeof ${expr} === 'object' || typeof ${expr} === 'function')`, convert(dict)]);
+  if (callbacks.length) steps.push([`isCallable(${expr})`, expr]);
+  if (dict) steps.push([`isObject(${expr})`, convert(dict)]);
   // (…any other object the `object` type's, as it is — Web IDL's union step after a dictionary's: AlgorithmIdentifier)
-  if (objects.length) steps.push([`(${expr} !== null && (typeof ${expr} === 'object' || typeof ${expr} === 'function'))`, expr]);
+  if (objects.length) steps.push([`isObject(${expr})`, expr]);
   if (boolean && boolean !== last) steps.push([`typeof ${expr} === 'boolean'`, expr]);
   if (numeric && numeric !== last) steps.push([`typeof ${expr} === 'number'`, convert(numeric)]);
   const otherwise = last ? convert(last) : `(() => { throw new TypeError(${failure(where, `The provided value is not of type '${name}'.`)}); })()`;
@@ -1211,7 +1211,7 @@ function dictionaryConverter(name, after = null) {
   const lines = [];
   let defaults = false;
   lines.push(`export function ${fn}(v, prefix) {`);
-  lines.push(`  if (v !== undefined && v !== null && typeof v !== 'object' && typeof v !== 'function') throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
+  lines.push(`  if (!${nullish('v')} && !isObject(v)) throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
   const head = lines.length;
   lines.push(`  const dict = {};`);
   for (const d of chain) {
@@ -1410,7 +1410,7 @@ function generateInterface(def, options = {}) {
         // (…the object no object — a document's `location` with no window — a TypeError)
         const target = forwards.rhs.value;
         const notObject = JSON.parse(failure({ iface: name, member: m.name }, 'The attribute value is not an object'));
-        out.push(`    set ${key}(v) { const object = ${getImpl}(${self}); if (object === null || (typeof object !== 'object' && typeof object !== 'function')) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
+        out.push(`    set ${key}(v) { const object = ${getImpl}(${self}); if (!isObject(object)) throw new TypeError(${JSON.stringify(notObject)}); object.${target} = v; }`);
       } else if ((m.extAttrs || []).some((e) => e.name === 'Replaceable')) {
         // [Replaceable] (Web IDL §3.7.6): a write to the read-only attribute replaces it with a data property of the
         // object — a page's `innerWidth = 1024` keeps its own value, and the attribute is gone for it
@@ -1783,7 +1783,7 @@ function overloadSwitch(iface, name, { cases, most, required }, source, checks, 
     const v = `${source}[${m.index}]`;
     if (m.dictionary) {
       // (…two of the count told apart by the distinguishing argument: undefined, null or an object the dictionary's)
-      lines.push(`  case ${n}: if (${nullish(v)} || typeof ${v} === 'object' || typeof ${v} === 'function') ${call(m.dictionary)}`);
+      lines.push(`  case ${n}: if (${nullish(v)} || isObject(${v})) ${call(m.dictionary)}`);
       lines.push(`    ${call(m.other)}`);
       return;
     }

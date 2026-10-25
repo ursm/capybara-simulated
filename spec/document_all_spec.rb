@@ -67,6 +67,28 @@ RSpec.describe 'document.all' do
     expect(got).to eq('TypeError')
   end
 
+  # …and an object to every binding that asks for one (Web IDL's "Type(V) is Object", which its typeof "undefined" does
+  # not tell): a dictionary's members read off it, a dictionary-or-boolean union's dictionary, a sequence of its
+  # elements, a callback function as callable, an event handler kept (Chrome)
+  it 'is an object to a dictionary, a sequence, a callback and an event handler' do
+    page = '<!DOCTYPE html><div id="capture"></div><div id="bubbles"></div><p id="p"><i id="c">x</i></p>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const order = [], p = document.getElementById('p'), c = document.getElementById('c');
+        p.addEventListener('zz', () => order.push('p'), document.all);
+        c.addEventListener('zz', () => order.push('c'));
+        c.dispatchEvent(new Event('zz', {bubbles: true}));
+        const el = document.createElement('b');
+        el.onclick = document.all;
+        return [order.join(), new Event('x', document.all).bubbles, new Blob(document.all).size > 0,
+                typeof requestAnimationFrame(document.all), el.onclick === document.all];
+      })()
+    JS
+    expect(got).to eq(['p,c', true, true, 'number', true])
+  end
+
   # …and a frame's live collections — its `all`'s names among them — follow an id or a class written through another
   # realm's wrapper of its node, as through its own.
   it 'follows a write another realm makes to a frame’s node' do
