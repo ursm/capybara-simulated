@@ -219,7 +219,7 @@ fn multipart_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         });
         items.push(string(scope, &p.content_type));
         items.push(if p.filename.is_some() {
-            crate::blob_data::byte_array(scope, p.value.clone())
+            crate::blob_data::byte_array(scope, p.value)
         } else {
             string(scope, &String::from_utf8_lossy(&p.value))
         });
