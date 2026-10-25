@@ -757,6 +757,14 @@ pub(crate) struct CssImages {
     next_recent: usize,
 }
 
+impl CssImages {
+    // Whether images a restyle gave a rendered element are owed their fetch at the next rendering update: work the
+    // realm's event loop is to run (timers.rs `realmPending`), on a page with nothing else to step it for.
+    pub(crate) fn owed(&self) -> bool {
+        !self.owed.is_empty()
+    }
+}
+
 // A restyle gave element `id` the values `style` — its own, or (`pseudo`) a `::before` / `::after` box's: the images
 // they use, which a browser fetches at the rendering update that renders them — every `url()` image of the computed
 // `background-image`, `cursor`, `list-style-image` and `content` (a `cross-fade()`'s inputs, an `image-set()`'s
