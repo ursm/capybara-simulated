@@ -74,7 +74,8 @@ pub(crate) struct Facts {
 //   a media resource's fetch errs on an HTTP 4xx or 5xx (HTML's media data processing list), a classic
 //   worker-imported script and an `<object>`'s resource want an ok status ("fetch a classic worker-imported script",
 //   the object element's processing model) as a link's does ("fetch and process the linked resource") but a
-//   prefetch's answered by a service worker, which is no network error whatever its status — none the bindings judge of
+//   prefetch's, which loads where it is no network error whatever its status (HTML's prefetch "process the linked
+//   resource"; Chrome errs on a 404, the spec says otherwise) — none the bindings judge of
 //   an answer the host judged already, nor of an opaque answer to a fetch event, whose status a no-cors consumer cannot
 //   read, nor of a scheme's;
 // - a body cut short is none to use, nor one with no body or (for a decoded one) an empty one;
@@ -106,7 +107,8 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
         let status = facts.status.unwrap_or(if from == SRC_SW_EVENT { 200 } else { 0 });
         let ok = match kind {
             J_IMAGE | J_FONT => true,
-            J_PREFETCH => from == SRC_SW_EVENT || (200..=299).contains(&status),
+            J_PREFETCH => true,
+            J_LINK if consumer.obtains == crate::link_resource::OBTAINS_PREFETCH => true,
             J_AUDIO | J_VIDEO => status < 400,
             J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK | J_OBJECT => (200..=299).contains(&status),
             _ => false,
@@ -310,8 +312,14 @@ mod tests {
     }
 
     #[test]
-    fn a_prefetch_answered_by_a_service_worker_is_one_whatever_its_status() {
+    fn a_prefetch_is_one_whatever_its_status() {
+        use crate::link_resource::{OBTAINS_PREFETCH, OBTAINS_STYLESHEET};
         assert_eq!(judge(&Consumer::of(J_PREFETCH), SRC_SW_EVENT, &resp("basic", Some(404))), OK);
+        assert_eq!(judge(&Consumer::of(J_PREFETCH), SRC_NETWORK, &resp("basic", Some(500))), OK);
+        assert_eq!(judge(&Consumer { obtains: OBTAINS_PREFETCH, ..Consumer::of(J_LINK) }, SRC_NETWORK, &resp("basic", Some(404))), OK);
+        // (…but a link that is a style sheet too wants an ok status for it)
+        let both = Consumer { obtains: OBTAINS_PREFETCH | OBTAINS_STYLESHEET, ..Consumer::of(J_LINK) };
+        assert_eq!(judge(&both, SRC_NETWORK, &Facts { content_type: "text/css".to_owned(), ..resp("basic", Some(404)) }), 0);
         assert_eq!(judge(&Consumer::of(J_PREFETCH), SRC_SW_EVENT, &resp("error", None)), 0);
     }
 }

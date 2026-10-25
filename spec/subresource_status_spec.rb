@@ -35,4 +35,23 @@ RSpec.describe 'a subresource status' do
   it 'loads a 299' do
     expect(outcome(session_for(299))).to eq([['css load', 'script load true'], 'rgb(1, 2, 3)'])
   end
+  # (…but a prefetch: HTML's "process the linked resource" for one fires `error` for a network error alone, so a 404
+  # loads — Chrome errs, the spec says otherwise)
+  it 'loads a prefetch whatever its status' do
+    s = simulated_session(->(env) {
+      case env['PATH_INFO']
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']]
+      else [404, {'content-type' => 'text/plain'}, ['nope']]
+      end
+    }).tap {|session| session.visit '/' }
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0], link = document.createElement('link');
+      link.rel = 'prefetch';
+      link.onload = () => done('load');
+      link.onerror = () => done('error');
+      link.href = '/missing';
+      document.head.append(link);
+    JS
+    expect(got).to eq('load')
+  end
 end

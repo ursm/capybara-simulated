@@ -6,9 +6,9 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
 # A subresource a controlling service worker answers uses the answer where Fetch allows it and its consumer takes its
-# status — the engine's one verdict (fetch_rules.rs `sw_subresource_usable`): a `<link rel=prefetch>` loads whatever
-# the status (HTML: a success where it is no network error — Chrome errs on a 404), an `<audio>` errs on a 404 and on
-# an answer of no media data (a 304), and plays a 200.
+# status — the engine's one verdict (subresource_judge.rs `judge`): a `<link rel=prefetch>` loads whatever the status,
+# the worker's or the network's it lets the request through to (HTML: a success where it is no network error — Chrome
+# errs on a 404), an `<audio>` errs on a 404 and on an answer of no media data (a 304), and plays a 200.
 RSpec.describe 'Service Worker subresource verdict' do
   include PollUntil
 
@@ -57,8 +57,13 @@ RSpec.describe 'Service Worker subresource verdict' do
         f.onload = () => {
           const d = f.contentDocument, seen = {};
           const watch = (el, key, events) => {
-            for (const type of events) el.addEventListener(type, () => { seen[key] ??= type; if (Object.keys(seen).length === 5) globalThis.__seen = seen; });
+            for (const type of events) el.addEventListener(type, () => { seen[key] ??= type; if (Object.keys(seen).length === 6) globalThis.__seen = seen; });
           };
+          const through = d.createElement('link');
+          through.rel = 'prefetch';
+          watch(through, 'prefetch-through', ['load', 'error']);
+          through.href = '/scope/absent';
+          d.head.appendChild(through);
           for (const path of ['missing', 'found']) {
             const link = d.createElement('link');
             link.rel = 'prefetch';
@@ -82,6 +87,7 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(seen).to eq(
       'prefetch-missing' => 'load',
       'prefetch-found'   => 'load',
+      'prefetch-through' => 'load',
       'audio-missing'    => 'error',
       'audio-found'      => 'canplaythrough',
       'audio-unmodified' => 'error'
