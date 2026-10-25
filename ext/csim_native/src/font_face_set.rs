@@ -17,57 +17,105 @@ const TAG: u16 = 20;
 // What marks an object as a set's (its internal field 0).
 static BRAND: u8 = 0;
 
-// A face it holds: its FontFace's object and its state's. Boxed, as a traced reference keeps its place.
-struct Member {
-    face: UnsafeCell<v8::TracedReference<v8::Object>>,
-    state: UnsafeCell<v8::TracedReference<v8::Object>>,
+// A list of objects a handle holds: a JS array behind one traced reference, replaced whole as the list changes. The
+// collector marks concurrently with the main thread (node_handle.rs), so what it reads is V8's own array, written
+// through V8's barriers, and the one reference the handle keeps, reset through TracedReference's — never a Rust
+// vector the main thread grows or empties as it marks.
+pub(crate) struct List(UnsafeCell<v8::TracedReference<v8::Object>>);
+
+impl List {
+    pub(crate) fn new() -> List {
+        List(UnsafeCell::new(v8::TracedReference::empty()))
+    }
+    pub(crate) fn trace(&self, visitor: &mut Visitor) {
+        // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
+        visitor.trace(unsafe { &*self.0.get() });
+    }
+    // Its objects, in order.
+    pub(crate) fn get<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Vec<v8::Local<'s, v8::Object>> {
+        // SAFETY: the main thread; the reference is read, not written.
+        let array = unsafe { (*self.0.get()).get(scope) }.and_then(|a| v8::Local::<v8::Array>::try_from(a).ok());
+        let Some(array) = array else { return Vec::new() };
+        (0..array.length()).filter_map(|k| array.get_index(scope, k).and_then(|v| v8::Local::<v8::Object>::try_from(v).ok())).collect()
+    }
+    // …made `items`.
+    pub(crate) fn set(&self, scope: &mut v8::PinScope<'_, '_>, items: &[v8::Local<'_, v8::Object>]) {
+        let values: Vec<v8::Local<v8::Value>> = items.iter().map(|&o| o.into()).collect();
+        let array: v8::Local<v8::Object> = v8::Array::new_with_elements(scope, &values).into();
+        // SAFETY: the main thread, which alone writes the reference; the assignment runs TracedReference's barrier.
+        unsafe { (*self.0.get()).reset(scope, Some(array)) };
+    }
 }
 
-impl Member {
-    fn new(scope: &mut v8::PinScope<'_, '_>, face: v8::Local<'_, v8::Object>, state: v8::Local<'_, v8::Object>) -> Box<Member> {
-        let member = Box::new(Member { face: UnsafeCell::new(v8::TracedReference::empty()), state: UnsafeCell::new(v8::TracedReference::empty()) });
-        // SAFETY: the main thread, which alone writes the references; the assignment runs TracedReference's barrier, the
-        // member at the place it keeps.
-        unsafe {
-            (*member.face.get()).reset(scope, Some(face));
-            (*member.state.get()).reset(scope, Some(state));
+// A map a handle holds — a FontFace to its state, in the order they were entered — as a JS Map behind one traced
+// reference, made when first written: V8's own table, entered and deleted through its barriers (`List`'s reasoning),
+// each in constant time, as a set of thousands of added faces needs.
+struct Pairs(UnsafeCell<v8::TracedReference<v8::Object>>);
+
+impl Pairs {
+    fn new() -> Pairs {
+        Pairs(UnsafeCell::new(v8::TracedReference::empty()))
+    }
+    fn trace(&self, visitor: &mut Visitor) {
+        // SAFETY: the collector reads the reference as TracedReference's barriers allow; nothing here hands one out.
+        visitor.trace(unsafe { &*self.0.get() });
+    }
+    fn map<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Map> {
+        // SAFETY: the main thread; the reference is read here, and written below by the main thread alone, through
+        // TracedReference's barrier.
+        if let Some(map) = unsafe { (*self.0.get()).get(scope) }.and_then(|m| v8::Local::<v8::Map>::try_from(m).ok()) {
+            return map;
         }
-        member
+        let map = v8::Map::new(scope);
+        unsafe { (*self.0.get()).reset(scope, Some(map.into())) };
+        map
     }
-    // SAFETY (both): the main thread; the reference is read, not written.
-    fn face<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
-        unsafe { (*self.face.get()).get(scope) }
+    fn len(&self, scope: &mut v8::PinScope<'_, '_>) -> usize {
+        // SAFETY: as `map`'s read.
+        unsafe { (*self.0.get()).get(scope) }.and_then(|m| v8::Local::<v8::Map>::try_from(m).ok()).map_or(0, |m| m.size())
     }
-    fn state<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Object>> {
-        unsafe { (*self.state.get()).get(scope) }
+    // Its entries' keys (`values` false) or values (true), in order.
+    fn column<'s>(&self, scope: &mut v8::PinScope<'s, '_>, values: bool) -> Vec<v8::Local<'s, v8::Object>> {
+        let flat = self.map(scope).as_array(scope);
+        (u32::from(values)..flat.length()).step_by(2).filter_map(|k| flat.get_index(scope, k).and_then(|v| v8::Local::<v8::Object>::try_from(v).ok())).collect()
     }
+}
+
+// The faces of a list of pairs `[face, state, face, state, …]`.
+fn faces_of<'s>(pairs: &[v8::Local<'s, v8::Object>]) -> Vec<v8::Local<'s, v8::Object>> {
+    pairs.chunks_exact(2).map(|p| p[0]).collect()
+}
+fn values<'s>(objects: Vec<v8::Local<'s, v8::Object>>) -> Vec<v8::Local<'s, v8::Value>> {
+    objects.into_iter().map(Into::into).collect()
 }
 
 pub(crate) struct SetHandle {
     // The FontFaceSet it is the state of, which a face it holds names (`ffSets`).
-    owner: UnsafeCell<v8::TracedReference<v8::Object>>,
-    css: RefCell<Vec<(u32, Box<Member>)>>,
+    owner: List,
+    // Its CSS-connected faces as `[face, state, …]` pairs, and each one's rule's identity, by place.
+    css: List,
+    css_rules: RefCell<Vec<u32>>,
     // What its CSS-connected faces were last connected for: the generation of its realm's rule list
-    // (`RealmArena::rule_rows_gen`), or `NO_RULES` for a document no engine styles; none before.
+    // (`RealmArena::rule_rows_gen`), or `NO_RULES` for a document no engine styles; none before. And whether they are
+    // being connected now: the bindings make a face mid-connect.
     css_at: Cell<Option<u64>>,
-    members: RefCell<Vec<Box<Member>>>,
+    connecting: Cell<bool>,
+    // The faces script added.
+    added: Pairs,
     generation: Cell<u32>,
-    pending: RefCell<Vec<(Box<Member>, bool)>>,
+    // Its loading cycle's faces, and whether each gave a file, by place.
+    pending: Pairs,
+    pending_ok: RefCell<Vec<bool>>,
     cycle_queued: Cell<bool>,
 }
 const NO_RULES: u64 = u64::MAX;
 
 unsafe impl GarbageCollected for SetHandle {
     fn trace(&self, visitor: &mut Visitor) {
-        // SAFETY: the collector traces on the main thread between ops, none of which holds the list borrowed then; it
-        // reads each reference as TracedReference's barriers allow, and nothing here hands one out.
-        visitor.trace(unsafe { &*self.owner.get() });
-        let css = unsafe { &*self.css.as_ptr() }.iter().map(|(_, m)| m);
-        let pending = unsafe { &*self.pending.as_ptr() }.iter().map(|(m, _)| m);
-        for m in css.chain(unsafe { &*self.members.as_ptr() }).chain(pending) {
-            visitor.trace(unsafe { &*m.face.get() });
-            visitor.trace(unsafe { &*m.state.get() });
-        }
+        self.owner.trace(visitor);
+        self.css.trace(visitor);
+        self.added.trace(visitor);
+        self.pending.trace(visitor);
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"FontFaceSetHandle"
@@ -77,22 +125,6 @@ unsafe impl GarbageCollected for SetHandle {
 impl SetHandle {
     fn touch(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
-    }
-    // The face script added whose FontFace is `face`, by its place.
-    fn position(&self, scope: &mut v8::PinScope<'_, '_>, face: v8::Local<'_, v8::Object>) -> Option<usize> {
-        self.members.borrow().iter().position(|m| m.face(scope).is_some_and(|f| f.strict_equals(face.into())))
-    }
-    // Each face script added's FontFace (`state` false) or state (true), in order.
-    fn objects<'s>(&self, scope: &mut v8::PinScope<'s, '_>, state: bool) -> v8::Local<'s, v8::Array> {
-        let items: Vec<v8::Local<v8::Value>> = self.members.borrow().iter().filter_map(|m| {
-            if state { m.state(scope) } else { m.face(scope) }.map(Into::into)
-        }).collect();
-        v8::Array::new_with_elements(scope, &items)
-    }
-    // Its CSS-connected faces' FontFaces, in their rules' order.
-    fn css_faces<'s>(&self, scope: &mut v8::PinScope<'s, '_>) -> v8::Local<'s, v8::Array> {
-        let items: Vec<v8::Local<v8::Value>> = self.css.borrow().iter().filter_map(|(_, m)| m.face(scope).map(Into::into)).collect();
-        v8::Array::new_with_elements(scope, &items)
     }
 }
 
@@ -105,17 +137,19 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
     let handle = SetHandle {
-        owner: UnsafeCell::new(v8::TracedReference::empty()),
-        css: RefCell::new(Vec::new()),
+        owner: List::new(),
+        css: List::new(),
+        css_rules: RefCell::new(Vec::new()),
         css_at: Cell::new(None),
-        members: RefCell::new(Vec::new()),
+        connecting: Cell::new(false),
+        added: Pairs::new(),
         generation: Cell::new(0),
-        pending: RefCell::new(Vec::new()),
+        pending: Pairs::new(),
+        pending_ok: RefCell::new(Vec::new()),
         cycle_queued: Cell::new(false),
     };
     if let Ok(owner) = v8::Local::<v8::Object>::try_from(args.get(0)) {
-        // SAFETY: the main thread, which alone writes the reference; the assignment runs TracedReference's barrier.
-        unsafe { (*handle.owner.get()).reset(scope, Some(owner)) };
+        handle.owner.set(scope, &[owner]);
     }
     let heap = scope.get_cpp_heap().expect("FontFaceSetStateBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
@@ -144,143 +178,127 @@ pub(crate) fn set<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8:
 // — none for no set.
 pub(crate) fn added_records(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Vec<crate::font_faces::FaceRecord> {
     let Some(s) = set(scope, value) else { return Vec::new() };
-    let states = s.objects(scope, true);
-    crate::font_face_state::listed(scope, states.into())
+    let states = s.added.column(scope, true);
+    states.into_iter().map(|state| crate::font_face_state::listed_one(scope, state.into())).collect()
 }
 
 // __dom.fsAdd(set, face, state) -> whether the face of FontFace `face`, its state `state`, was added: script's own (a
 // CSS-connected face is in the set already, font_face_state.rs `connected`), and once.
 fn add_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(false);
-    let (Some(s), Ok(face), Ok(state)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1)), v8::Local::<v8::Object>::try_from(args.get(2))) else { return };
-    if crate::font_face_state::connected(scope, state.into()) || s.position(scope, face).is_some() {
+    let (Some(s), Ok(me), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
+    let Ok(state) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
+    let added = s.added.map(scope);
+    if crate::font_face_state::connected(scope, state.into()) || added.has(scope, face.into()) == Some(true) {
         return;
     }
-    let member = Member::new(scope, face, state);
-    s.members.borrow_mut().push(member);
+    added.set(scope, face.into(), state.into());
     s.touch();
-    if let Ok(me) = v8::Local::<v8::Object>::try_from(args.get(0)) {
-        crate::font_face_state::link(scope, state.into(), me, true);
-    }
+    crate::font_face_state::link(scope, state.into(), me, true);
     rv.set_bool(true);
 }
 
 // __dom.fsDelete(set, face) -> whether FontFace `face` was one script added, and is no more.
 fn delete_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_bool(false);
-    let (Some(s), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
-    let Some(k) = s.position(scope, face) else { return };
-    let member = s.members.borrow_mut().remove(k);
+    let (Some(s), Ok(me), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
+    let added = s.added.map(scope);
+    let Some(state) = added.get(scope, face.into()).filter(|v| v.is_object()) else { return };
+    added.delete(scope, face.into());
     s.touch();
-    unlink(scope, &args, &member);
+    crate::font_face_state::link(scope, state, me, false);
     rv.set_bool(true);
-}
-
-// The face of `member` no longer held by the set `args[0]`: its link dropped.
-fn unlink(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, member: &Member) {
-    if let (Ok(me), Some(state)) = (v8::Local::<v8::Object>::try_from(args.get(0)), member.state(scope)) {
-        crate::font_face_state::link(scope, state.into(), me, false);
-    }
 }
 
 // __dom.fsClear(set) -> the FontFaces script added, now none.
 fn clear_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = set(scope, args.get(0)) else { return };
-    let faces = s.objects(scope, false);
-    let members = s.members.take();
-    if !members.is_empty() {
+    let Ok(me) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let (faces, states) = (s.added.column(scope, false), s.added.column(scope, true));
+    if !faces.is_empty() {
+        s.added.map(scope).clear();
         s.touch();
     }
-    for member in &members {
-        unlink(scope, &args, member);
+    for state in states {
+        crate::font_face_state::link(scope, state.into(), me, false);
     }
-    rv.set(faces.into());
+    rv.set(v8::Array::new_with_elements(scope, &values(faces)).into());
 }
 
 // __dom.fsAdded(set) -> the FontFaces script added, in the order they were.
 fn added_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = set(scope, args.get(0)) else { return };
-    rv.set(s.objects(scope, false).into());
+    let faces = s.added.column(scope, false);
+    rv.set(v8::Array::new_with_elements(scope, &values(faces)).into());
 }
 
-// __dom.fsConnect(set, styled, make) -> [faces, made, dropped]: its CSS-connected faces, in their rules' order (CSS Font
-// Loading §2.2) — once per list of its realm's `@font-face` rules (`RealmArena::rule_rows`: the style engine's, where
-// `styled`, its document the one its realm's engine styles; else none) — and those made and dropped by this call: a
-// face per rule that is a face at all (`RuleFace::is_face`), the one it had while its rule names the font it was made of
-// (its identity: a rule whose family or sources CSSOM rewrote is a face of its own), its attributes reflecting the rule's
-// descriptors as they are now (font_face_state.rs `connect`); a new one made by `make(family, src, descriptors)` ->
-// `[face, state]`, the bindings' FontFace.
+// __dom.fsConnect(set, styled, make) -> [faces, made]: its CSS-connected faces, in their rules' order (CSS Font Loading
+// §2.2) — once per list of its realm's `@font-face` rules (`RealmArena::rule_rows`: the style engine's, where `styled`,
+// its document the one its realm's engine styles; else none) — and those this call made: a face per rule that is a face
+// at all (`RuleFace::is_face`), the one it had while its rule names the font it was made of (its identity: a rule whose
+// family or sources CSSOM rewrote is a face of its own), its attributes reflecting the rule's descriptors as they are
+// now (font_face_state.rs `connect`); a new one made by `make(family, src, descriptors)` -> `[face, state]`, the
+// bindings' FontFace. Asked again while one is made, it answers the faces it had: it is connecting them.
 fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = set(scope, args.get(0)) else { return };
+    let Ok(me) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     let styled = args.get(1).is_true();
     let arena = crate::dom::realm(scope, cid);
     let at = if styled { u64::from(arena.rule_rows_gen) } else { NO_RULES };
-    if s.css_at.get() == Some(at) {
-        let (faces, empty) = (s.css_faces(scope), v8::Array::new(scope, 0));
-        return rv.set(v8::Array::new_with_elements(scope, &[faces.into(), empty.into(), empty.into()]).into());
+    let mut pairs = s.css.get(scope);
+    if s.css_at.get() == Some(at) || s.connecting.get() {
+        let made = v8::Array::new(scope, 0);
+        let faces = v8::Array::new_with_elements(scope, &values(faces_of(&pairs)));
+        return rv.set(v8::Array::new_with_elements(scope, &[faces.into(), made.into()]).into());
     }
     let arena = crate::dom::realm(scope, cid);
     let rows: Vec<_> = if styled { arena.rule_rows.iter().filter(|(_, rule, _)| rule.is_face).cloned().collect() } else { Vec::new() };
+    let rules = s.css_rules.borrow().clone();
     let make = v8::Local::<v8::Function>::try_from(args.get(2)).ok();
-    // Each rule's face kept (its place in the list) or made — made first, the list left as it is while the bindings run:
-    // what it holds stays traced.
-    let kept: Vec<Option<usize>> = rows.iter().map(|(id, rule, _)| {
-        let css = s.css.borrow();
-        let k = css.iter().position(|(key, _)| key == id)?;
-        let state = css[k].1.state(scope)?;
-        (crate::font_face_state::identity(scope, state.into()).as_deref() == Some(rule.identity.as_str())).then_some(k)
-    }).collect();
-    let mut made: Vec<Option<(v8::Local<v8::Object>, v8::Local<v8::Object>)>> = Vec::with_capacity(rows.len());
-    for ((_, rule, _), kept) in rows.iter().zip(&kept) {
-        made.push(match (kept, make) {
-            (None, Some(make)) => {
-                let attributes: Vec<v8::Local<v8::Value>> = rule.attributes.iter().map(|a| v8::String::new(scope, a).map_or_else(|| v8::undefined(scope).into(), Into::into)).collect();
-                let call = [
-                    v8::String::new(scope, &rule.family).map_or_else(|| v8::undefined(scope).into(), Into::into),
-                    v8::String::new(scope, &rule.src).map_or_else(|| v8::undefined(scope).into(), Into::into),
-                    v8::Array::new_with_elements(scope, &attributes).into(),
-                ];
-                let recv = v8::undefined(scope).into();
-                let pair = make.call(scope, recv, &call).and_then(|v| v8::Local::<v8::Array>::try_from(v).ok());
-                let objects = pair.and_then(|p| Some((p.get_index(scope, 0)?, p.get_index(scope, 1)?)));
-                objects.and_then(|(f, st)| Some((v8::Local::<v8::Object>::try_from(f).ok()?, v8::Local::<v8::Object>::try_from(st).ok()?)))
-            }
-            _ => None,
-        });
-    }
-    let mut old: Vec<Option<(u32, Box<Member>)>> = s.css.take().into_iter().map(Some).collect();
-    let mut css = Vec::with_capacity(rows.len());
-    let mut fresh: Vec<v8::Local<v8::Value>> = Vec::new();
-    for (((id, rule, referrer), kept), made) in rows.into_iter().zip(kept).zip(made) {
+    s.connecting.set(true);
+    let mut connected: Vec<v8::Local<v8::Object>> = Vec::with_capacity(2 * rows.len());
+    let mut connected_rules = Vec::with_capacity(rows.len());
+    let mut made: Vec<v8::Local<v8::Value>> = Vec::new();
+    for (id, rule, referrer) in rows {
         let referrer = Some(referrer).filter(|r| !r.is_empty());
-        let (member, identity) = match (kept.and_then(|k| old[k].take()), made) {
-            (Some((_, member)), _) => (member, None),
-            (None, Some((face, state))) => {
-                fresh.push(face.into());
-                if let Ok(me) = v8::Local::<v8::Object>::try_from(args.get(0)) {
-                    crate::font_face_state::link(scope, state.into(), me, true);
-                }
-                (Member::new(scope, face, state), Some(rule.identity.clone()))
+        // (…the face it had for the rule, where it still names the font it was made of)
+        let had = rules.iter().position(|r| *r == id).map(|k| (pairs[2 * k], pairs[2 * k + 1]));
+        let had = had.filter(|(_, state)| crate::font_face_state::identity(scope, (*state).into()).as_deref() == Some(rule.identity.as_str()));
+        let (face, state, identity) = match had {
+            Some((face, state)) => (face, state, None),
+            None => {
+                let Some((face, state)) = make.and_then(|make| make_face(scope, make, &rule)) else { continue };
+                made.push(face.into());
+                crate::font_face_state::link(scope, state.into(), me, true);
+                (face, state, Some(rule.identity.clone()))
             }
-            (None, None) => continue,
         };
-        if let Some(state) = member.state(scope) {
-            crate::font_face_state::connect(scope, state.into(), id, identity, rule.attributes, rule.family, referrer);
-        }
-        css.push((id, member));
+        crate::font_face_state::connect(scope, state.into(), id, identity, rule.attributes, rule.family, referrer);
+        connected.extend([face, state]);
+        connected_rules.push(id);
     }
-    let old: Vec<(u32, Box<Member>)> = old.into_iter().flatten().collect();
-    for (_, member) in &old {
-        unlink(scope, &args, member);
+    s.connecting.set(false);
+    // (…and the faces it no longer has unlinked)
+    pairs.retain(|o| !connected.iter().any(|c| c.strict_equals((*o).into())));
+    for p in pairs.chunks_exact(2) {
+        crate::font_face_state::link(scope, p[1].into(), me, false);
     }
-    let dropped: Vec<v8::Local<v8::Value>> = old.iter().filter_map(|(_, m)| m.face(scope).map(Into::into)).collect();
-    *s.css.borrow_mut() = css;
+    s.css.set(scope, &connected);
+    *s.css_rules.borrow_mut() = connected_rules;
     s.css_at.set(Some(at));
-    let faces = s.css_faces(scope);
-    let fresh = v8::Array::new_with_elements(scope, &fresh);
-    let dropped = v8::Array::new_with_elements(scope, &dropped);
-    rv.set(v8::Array::new_with_elements(scope, &[faces.into(), fresh.into(), dropped.into()]).into());
+    let faces = v8::Array::new_with_elements(scope, &values(faces_of(&connected)));
+    let made = v8::Array::new_with_elements(scope, &made);
+    rv.set(v8::Array::new_with_elements(scope, &[faces.into(), made.into()]).into());
+}
+// …a face made for `rule` by the bindings' `make`, as `[face, state]`.
+fn make_face<'s>(scope: &mut v8::PinScope<'s, '_>, make: v8::Local<'_, v8::Function>, rule: &crate::font_faces::RuleFace) -> Option<(v8::Local<'s, v8::Object>, v8::Local<'s, v8::Object>)> {
+    let attributes: Vec<v8::Local<v8::Value>> = rule.attributes.iter().filter_map(|a| v8::String::new(scope, a).map(Into::into)).collect();
+    let call = [v8::String::new(scope, &rule.family)?.into(), v8::String::new(scope, &rule.src)?.into(), v8::Array::new_with_elements(scope, &attributes).into()];
+    let recv = v8::undefined(scope).into();
+    let pair = v8::Local::<v8::Array>::try_from(make.call(scope, recv, &call)?).ok()?;
+    let (face, state) = (pair.get_index(scope, 0)?, pair.get_index(scope, 1)?);
+    Some((v8::Local::<v8::Object>::try_from(face).ok()?, v8::Local::<v8::Object>::try_from(state).ok()?))
 }
 
 // __dom.fsCssFace(set, rule) -> its CSS-connected face of the rule `rule` (its identity), as last connected — undefined
@@ -288,9 +306,9 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn css_face_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = set(scope, args.get(0)) else { return };
     let Some(rule) = args.get(1).uint32_value(scope) else { return };
-    let face = s.css.borrow().iter().find(|(key, _)| *key == rule).and_then(|(_, m)| m.face(scope));
-    if let Some(face) = face {
-        rv.set(face.into());
+    let Some(k) = s.css_rules.borrow().iter().position(|r| *r == rule) else { return };
+    if let Some(face) = s.css.get(scope).get(2 * k) {
+        rv.set((*face).into());
     }
 }
 
@@ -300,18 +318,19 @@ fn css_face_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 // per cycle (the document's face list handed over anew asks for its file again).
 fn fetched_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_uint32(0);
-    let (Some(s), Ok(face), Ok(state)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1)), v8::Local::<v8::Object>::try_from(args.get(2))) else { return };
+    let (Some(s), Ok(face)) = (set(scope, args.get(0)), v8::Local::<v8::Object>::try_from(args.get(1))) else { return };
+    let Ok(state) = v8::Local::<v8::Object>::try_from(args.get(2)) else { return };
     if crate::font_face_state::status(scope, state.into()).is_none_or(crate::font_face_state::settled) {
         return;
     }
-    let begins = s.pending.borrow().is_empty() && !s.cycle_queued.get();
+    let pending = s.pending.map(scope);
+    let begins = pending.size() == 0 && !s.cycle_queued.get();
     if begins {
         s.cycle_queued.set(true);
     }
-    let waited = s.pending.borrow().iter().any(|(m, _)| m.face(scope).is_some_and(|f| f.strict_equals(face.into())));
-    if !waited {
-        let member = Member::new(scope, face, state);
-        s.pending.borrow_mut().push((member, args.get(3).is_true()));
+    if pending.has(scope, face.into()) != Some(true) {
+        pending.set(scope, face.into(), state.into());
+        s.pending_ok.borrow_mut().push(args.get(3).is_true());
     }
     rv.set_uint32(if begins { 2 } else { 1 });
 }
@@ -325,19 +344,21 @@ fn cycle_begun_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 }
 fn cycle_take_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(s) = set(scope, args.get(0)) else { return };
+    let faces = s.pending.column(scope, false);
+    s.pending.map(scope).clear();
+    let oks = s.pending_ok.take();
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
-    for (member, ok) in s.pending.take() {
-        if let Some(face) = member.face(scope) {
-            items.push(face.into());
-            items.push(v8::Boolean::new(scope, ok).into());
-        }
+    for (face, ok) in faces.into_iter().zip(oks) {
+        items.push(face.into());
+        items.push(v8::Boolean::new(scope, ok).into());
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.fsLoading(set) -> whether it is `loading`: a cycle queued, or faces it waits on.
 fn loading_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(set(scope, args.get(0)).is_some_and(|s| s.cycle_queued.get() || !s.pending.borrow().is_empty()));
+    let Some(s) = set(scope, args.get(0)) else { return rv.set_bool(false) };
+    rv.set_bool(s.cycle_queued.get() || s.pending.len(scope) > 0);
 }
 
 // __dom.ffSets(state) -> the FontFaceSets that hold the face of state `state`, of whichever realm.
@@ -345,8 +366,7 @@ fn face_sets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let states = crate::font_face_state::sets(scope, args.get(0));
     let mut owners: Vec<v8::Local<v8::Value>> = Vec::new();
     for state in states {
-        // SAFETY: the main thread; the reference is read, not written.
-        if let Some(owner) = set(scope, state.into()).and_then(|s| unsafe { (*s.owner.get()).get(scope) }) {
+        if let Some(owner) = set(scope, state.into()).and_then(|s| s.owner.get(scope).first().copied()) {
             owners.push(owner.into());
         }
     }

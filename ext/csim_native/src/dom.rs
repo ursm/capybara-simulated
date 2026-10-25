@@ -5112,8 +5112,6 @@ fn style_font_faces_unguarded(
         let referrer = face.record.as_ref().and_then(|r| r.referrer.clone()).unwrap_or_default();
         (face.id, crate::font_faces::rule_face(&face.declared), referrer)
     }).collect();
-    arena.rule_rows = rows.clone();
-    arena.rule_rows_gen = arena.rule_rows_gen.wrapping_add(1);
     for (id, rule, referrer) in &rows {
         items.push(v8::Integer::new_from_unsigned(scope, *id).into());
         items.push(v8::Boolean::new(scope, rule.is_face).into());
@@ -5121,6 +5119,9 @@ fn style_font_faces_unguarded(
             items.push(v8::String::new(scope, value).map_or_else(|| v8::undefined(scope).into(), Into::into));
         }
     }
+    let arena = dom(scope).arena.enter(cid);
+    arena.rule_rows = rows;
+    arena.rule_rows_gen = arena.rule_rows_gen.wrapping_add(1);
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

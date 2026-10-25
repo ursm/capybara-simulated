@@ -4,7 +4,7 @@
 // object wraps (`__dom.FontFaceStateBase`). What font matching reads of it (`record`) is kept until a descriptor moves;
 // the face's promise, the loading cycle's tasks and its events are the bindings'.
 
-use std::cell::{RefCell, UnsafeCell};
+use std::cell::RefCell;
 
 use v8::cppgc::{GarbageCollected, Visitor};
 
@@ -41,9 +41,6 @@ struct Face {
     referrer: Option<String>,
     // What font matching reads of it, while its family and descriptors hold.
     record: Option<FaceRecord>,
-    // The FontFaceSets that hold it, of whichever realm — their states' objects (font_face_set.rs), which keep the link
-    // as they add and drop it. Boxed, as a traced reference keeps its place.
-    sets: Vec<Box<UnsafeCell<v8::TracedReference<v8::Object>>>>,
 }
 
 impl Face {
@@ -89,15 +86,14 @@ impl Face {
 
 pub(crate) struct FaceHandle {
     face: RefCell<Face>,
+    // The FontFaceSets that hold it, of whichever realm — their states' objects (font_face_set.rs), which keep the link
+    // as they add and drop it.
+    sets: crate::font_face_set::List,
 }
 
 unsafe impl GarbageCollected for FaceHandle {
     fn trace(&self, visitor: &mut Visitor) {
-        // SAFETY: the collector traces on the main thread between ops, none of which holds the face borrowed then; it
-        // reads each reference as TracedReference's barriers allow, and nothing here hands one out.
-        for set in &unsafe { &*self.face.as_ptr() }.sets {
-            visitor.trace(unsafe { &*set.get() });
-        }
+        self.sets.trace(visitor);
     }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"FaceHandle"
@@ -142,11 +138,11 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
     let sources = sources.map(Option::unwrap_or_default);
     let status = if error.is_some() { ERROR } else { UNLOADED };
-    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, referrer: None, record: None, sets: Vec::new() };
+    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, referrer: None, record: None };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
-    let handle = FaceHandle { face: RefCell::new(face) };
+    let handle = FaceHandle { face: RefCell::new(face), sets: crate::font_face_set::List::new() };
     let heap = scope.get_cpp_heap().expect("FontFaceStateBase is installed only on an isolate with a C++ heap");
     // SAFETY: the handle is moved onto the cppgc heap and its pointer straight into the wrapper, which traces it.
     unsafe {
@@ -157,7 +153,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 
 // The face `value` wraps, or None for anything that is no face's object (the brand first: `unwrap` reads garbage from an
 // object it never wrapped).
-fn face<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h RefCell<Face>> {
+fn handle<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h FaceHandle> {
     let obj = v8::Local::<v8::Object>::try_from(value).ok().filter(|o| o.internal_field_count() == 1)?;
     let field = obj.get_internal_field(scope, 0)?;
     let brand = v8::Local::<v8::Value>::try_from(field).ok().and_then(|v| v8::Local::<v8::External>::try_from(v).ok())?;
@@ -167,32 +163,28 @@ fn face<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -
     // SAFETY: a branded object was made by `construct`, which wrapped a FaceHandle under TAG; the handle lives while its
     // object, the argument, does — through this op.
     let handle = unsafe { v8::Object::unwrap::<TAG, FaceHandle>(scope, obj)? };
-    Some(unsafe { &(*(handle.as_ref() as *const FaceHandle)).face })
+    Some(unsafe { &*(handle.as_ref() as *const FaceHandle) })
+}
+fn face<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<&'h RefCell<Face>> {
+    handle(scope, value).map(|h| &h.face)
 }
 
 // The sets that hold the face of state `value`, by their states' objects: `set` linked to it (once), or unlinked.
 pub(crate) fn link(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, set: v8::Local<'_, v8::Object>, on: bool) {
-    let Some(face) = face(scope, value) else { return };
-    let held = sets(scope, value).iter().position(|s| s.strict_equals(set.into()));
-    let mut f = face.borrow_mut();
+    let Some(h) = handle(scope, value) else { return };
+    let mut sets = h.sets.get(scope);
+    let held = sets.iter().position(|s| s.strict_equals(set.into()));
     match (held, on) {
-        (None, true) => {
-            let link = Box::new(UnsafeCell::new(v8::TracedReference::empty()));
-            // SAFETY: the main thread, which alone writes the references; the assignment runs TracedReference's barrier,
-            // the link at the place it keeps.
-            unsafe { (*link.get()).reset(scope, Some(set)) };
-            f.sets.push(link);
-        }
+        (None, true) => sets.push(set),
         (Some(k), false) => {
-            f.sets.remove(k);
+            sets.remove(k);
         }
-        _ => {}
+        _ => return,
     }
+    h.sets.set(scope, &sets);
 }
 pub(crate) fn sets<'s>(scope: &mut v8::PinScope<'s, '_>, value: v8::Local<'_, v8::Value>) -> Vec<v8::Local<'s, v8::Object>> {
-    let Some(face) = face(scope, value) else { return Vec::new() };
-    // SAFETY: the main thread; the references are read, not written.
-    face.borrow().sets.iter().filter_map(|s| unsafe { (*s.get()).get(scope) }).collect()
+    handle(scope, value).map_or_else(Vec::new, |h| h.sets.get(scope))
 }
 // …and its status (`UNLOADED`, …), none for no face's state.
 pub(crate) fn status(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
@@ -216,9 +208,10 @@ fn faces_in<'h>(scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Value>
     let Ok(list) = v8::Local::<v8::Array>::try_from(list) else { return Vec::new() };
     (0..list.length()).map(|k| list.get_index(scope, k).and_then(|v| face(scope, v))).collect()
 }
-// …what a document's face list holds of each (`Face::listed`), and what font matching reads of each.
-pub(crate) fn listed(scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Value>) -> Vec<FaceRecord> {
-    faces_in(scope, list).into_iter().map(|f| f.map_or_else(FaceRecord::default, |f| f.borrow_mut().listed())).collect()
+// What a document's face list holds of the face of state `value` (`Face::listed`), and what font matching reads of each
+// of a list.
+pub(crate) fn listed_one(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> FaceRecord {
+    face(scope, value).map_or_else(FaceRecord::default, |f| f.borrow_mut().listed())
 }
 pub(crate) fn records(scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Value>) -> Vec<FaceRecord> {
     faces_in(scope, list).into_iter().map(|f| f.map_or_else(FaceRecord::default, |f| f.borrow_mut().record().clone())).collect()
@@ -342,11 +335,7 @@ fn settle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // location: CSS Values 4 "fetch a style resource"); with no `identity`, the rule it is of already, declaring `declared`
 // now — reflected where they changed since (`Face::reflect`).
 pub(crate) fn connect(scope: &mut v8::PinScope<'_, '_>, state: v8::Local<'_, v8::Value>, rule: u32, identity: Option<String>, declared: [String; 11], family: String, referrer: Option<String>) {
-    if let Some(face) = face(scope, state) {
-        connect_face(face, Some(rule), identity, declared, family, referrer);
-    }
-}
-fn connect_face(face: &RefCell<Face>, rule: Option<u32>, identity: Option<String>, values: [String; 11], family: String, referrer: Option<String>) {
+    let Some(face) = face(scope, state) else { return };
     let mut f = face.borrow_mut();
     if f.referrer != referrer {
         f.referrer = referrer;
@@ -357,11 +346,11 @@ fn connect_face(face: &RefCell<Face>, rule: Option<u32>, identity: Option<String
         Some(identity) => {
             f.family = family;
             f.record = None;
-            f.rule = rule;
+            f.rule = Some(rule);
             f.identity = Some(identity);
-            f.reflected = Some(values);
+            f.reflected = Some(declared);
         }
-        None => f.reflect(values),
+        None => f.reflect(declared),
     }
 }
 

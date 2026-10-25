@@ -672,7 +672,7 @@ const REFLECTION = [
 ];
 // What the generated code imports from the runtime (webidl.js).
 const RUNTIME = [
-  'PLATFORM', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
+  'PLATFORM', 'Dictionary', 'EMPTY_DICTIONARY', 'rejectedPromise', 'promiseResolvedWith', 'brandKey', 'makeSlots', 'slotsOf', 'thisOf', 'thisIs', 'required', 'constructedBy', 'registerInterface', 'interfaceCheck',
   'isBufferOf', 'toBuffer', 'checkBuffer', 'toDOMString', 'toUSVString', 'toByteString', 'toEnum', 'enumValue', 'toBoolean', 'toUnsignedShort', 'toUnsignedLong', 'toShort', 'toLong', 'toUnsignedLongLong', 'toLongLong', 'toEnforcedInteger', 'toClampedInteger', 'toDouble', 'toFloat', 'toUnrestrictedFloat',
   'toUnrestrictedDouble', 'toSequence', 'toRecord', 'isIterable', 'isObject', 'isCallable', 'toObject', 'toInterface', 'toCallbackInterface', 'toCallbackFunction', 'restOf', 'callUserObjectOperation', 'legacyCallbackInterfaceObject',
   'defineConstants', 'withIndexedGetter', 'nativeIndexedObject', 'defineValueIterator', 'defineIndexedIterator', 'definePairIterator', 'defineClassString', 'enumerable', 'installMembers',
@@ -1198,6 +1198,7 @@ for (const key of Object.keys(OMITTED_DICTIONARY_MEMBERS)) {
 // undefined (a required one missing a TypeError). Its messages follow `prefix`, what converts the dictionary's.
 // (`after`: a dictionary it inherits whose members — and its own inherited ones' — the caller has converted already, the
 // function `to<name>MembersAfter<after>` converting the rest)
+// (…the dictionary a `Dictionary`, webidl.js: no object of `Object.prototype`'s, whose page properties a member meets)
 const dictionaryConverters = new Map();
 function dictionaryConverter(name, after = null) {
   const fn = after ? `to${name}MembersAfter${after}` : `to${name}`;
@@ -1213,7 +1214,7 @@ function dictionaryConverter(name, after = null) {
   lines.push(`export function ${fn}(v, prefix) {`);
   lines.push(`  if (!${nullish('v')} && !isObject(v)) throw new TypeError(prefix + ${JSON.stringify(`The provided value is not of type '${name}'.`)});`);
   const head = lines.length;
-  lines.push(`  const dict = {};`);
+  lines.push(`  const dict = new Dictionary();`);
   for (const d of chain) {
     // (…its partials' members among its own — but one whose type is of an API no implementation here answers, every one
     // of a union's, which is no member here: `{trigger: x}` ignored, as in a browser without Animation Triggers;

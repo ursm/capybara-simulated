@@ -125,6 +125,31 @@ RSpec.describe 'FontFace bindings' do
     expect(got).to eq([true, 1, true])
   end
 
+  # A CSS-connected face's attributes are its rule's descriptors alone (CSS Font Loading §2.2), none of them read off
+  # `Object.prototype` (Chrome: P1/normal, Q/normal) — nor a page's getter there run as its faces are connected, which
+  # once indexed the faces a re-entered read had replaced.
+  it "makes a CSS-connected face of its rule's descriptors alone" do
+    page = '<!doctype html><meta charset="utf-8"><style>@font-face{font-family:P1;src:url(/p.ttf)}' \
+           '@font-face{font-family:B;src:url(/b.ttf)}@font-face{font-family:C;src:url(/c.ttf)}</style><body>x'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const sheet = document.styleSheets[0];
+        const before = [...document.fonts].map((f) => f.family);
+        sheet.deleteRule(1);
+        sheet.deleteRule(1);
+        sheet.insertRule('@font-face{font-family:Q;src:url(/q.ttf)}', 1);
+        let reads = 0;
+        Object.defineProperty(Object.prototype, 'weight', {configurable: true, get() { reads++; document.fonts.size; return '900'; }});
+        let after;
+        try { after = [...document.fonts].map((f) => f.family + '/' + f.weight); } finally { delete Object.prototype.weight; }
+        return [before, after, reads];
+      })()
+    JS
+    expect(got).to eq([%w[P1 B C], %w[P1/normal Q/normal], 0])
+  end
+
   # …and a face held by two sets, of two realms, runs each set's loading cycle as it loads (CSS Font Loading §2.3: every
   # set it is in) — and none of a set it was deleted from.
   it 'runs the loading cycle of every set that holds a face' do
