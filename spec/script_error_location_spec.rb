@@ -78,6 +78,27 @@ RSpec.describe 'script error locations' do
     expect(s.evaluate_script('seen')).to eq([[6, 8], [3, 6]])
   end
 
+  # …the lines `document.write` put in none of the document's (Chrome, Firefox: 6 below), and a script of a fragment
+  # counted from its own first line, whatever the markup before it (Chrome, Firefox: 3)
+  it 'counts no written line, nor a fragment’s, as the document’s' do
+    page = <<~HTML
+      <!DOCTYPE html>
+      <script>window.seen = []; onerror = (m, f, l) => { seen.push(l); };</script>
+      <script>document.write('<p>\\n\\n\\n</p>')</script>
+      <p>x</p>
+      <p>y</p>
+      <script>null.a</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const r = document.createRange();
+      r.selectNodeContents(document.body);
+      document.body.append(r.createContextualFragment('<p>\\n\\n</p><script>\\n\\nnull.b</script>'));
+    JS
+    expect(s.evaluate_script('seen')).to eq([6, 3])
+  end
+
   # …and an Error whose `stack` getter throws is reported all the same, at where it was thrown: a browser's report
   # consults no page getter.
   it 'reports an exception whose stack getter throws' do

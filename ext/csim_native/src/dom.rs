@@ -1365,6 +1365,7 @@ impl RealmArena {
         });
         self.custom_states.retain(|id, _| live(slots, id));
         self.custom_validity.retain(|id, _| live(slots, id));
+        self.script_lines.retain(|id, _| live(slots, id));
         self.adopted_sheets.retain(|id, _| live(slots, id));
         self.text_selections.retain(|id, _| live(slots, id));
         self.change_baselines.retain(|id, _| live(slots, id));

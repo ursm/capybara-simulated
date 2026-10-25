@@ -98,17 +98,28 @@ pub(crate) struct Sink {
     // Whether the parse's document allows declarative shadow roots (HTML's "allow declarative shadow roots"): a
     // navigated-to document's parse and `setHTMLUnsafe`'s, not `innerHTML`'s or DOMParser's.
     declarative: bool,
-    // The line of its input the tokenizer is at, as the tree builder last told it (`set_current_line`).
-    line: std::cell::Cell<u64>,
+    // A page's parse (`htmlParse`)'s count of the lines of its document, for the scripts it makes (`OP_SCRIPT_LINE`) —
+    // none for a fragment's or a scriptless document's, whose scripts no line is asked of: the line of its input the
+    // tokenizer is at, as the tree builder last told it (`set_current_line`); how many of those the text `document.write`
+    // put in had, which are no lines of the document (Chrome, Firefox); and whether the input it takes now is such text
+    // (`Parse::run`), whose scripts are counted from their own first line.
+    lines: Option<DocumentLines>,
+}
+
+#[derive(Default)]
+struct DocumentLines {
+    at: std::cell::Cell<u64>,
+    written: std::cell::Cell<u64>,
+    in_written: std::cell::Cell<bool>,
 }
 
 impl Sink {
-    fn new(context: Option<QualName>, declarative: bool) -> Sink {
+    fn new(context: Option<QualName>, declarative: bool, lines: bool) -> Sink {
         // (handle 0, the document; 1 and 2 a fragment's context element and form element pointer)
         let mut nodes = vec![Node::default(), Node::default(), Node::default()];
         nodes[1].name = context.map(Box::new);
         nodes[2].name = Some(Box::new(QualName::new(None, html5ever::ns!(html), html5ever::local_name!("form"))));
-        Sink { nodes: RefCell::new(nodes), ops: RefCell::new(Vec::new()), declarative, line: std::cell::Cell::new(1) }
+        Sink { nodes: RefCell::new(nodes), ops: RefCell::new(Vec::new()), declarative, lines: lines.then(DocumentLines::default) }
     }
     fn push(&self, items: impl IntoIterator<Item = Operand>) {
         self.ops.borrow_mut().extend(items);
@@ -161,7 +172,9 @@ impl TreeSink for Sink {
     fn finish(self) {}
     fn parse_error(&self, _msg: Cow<'static, str>) {}
     fn set_current_line(&self, line_number: u64) {
-        self.line.set(line_number);
+        if let Some(lines) = &self.lines {
+            lines.at.set(line_number);
+        }
     }
     fn get_document(&self) -> u32 {
         0
@@ -185,9 +198,12 @@ impl TreeSink for Sink {
         self.str(&name.local);
         self.attrs(&attrs);
         self.int(contents as i32);
-        // (…a script's the line its text begins on, which its errors are counted from: its start tag's last)
-        if &*name.local == "script" && (name.ns == html5ever::ns!(html) || name.ns == html5ever::ns!(svg)) {
-            self.push([Operand::Int(OP_SCRIPT_LINE), Operand::Int(handle as i32), Operand::Int(i32::try_from(self.line.get()).unwrap_or(i32::MAX))]);
+        // (…a script's the line of its document its text begins on, which its errors are counted from: its start tag's
+        // last)
+        let script = &*name.local == "script" && (name.ns == html5ever::ns!(html) || name.ns == html5ever::ns!(svg));
+        if let Some(lines) = self.lines.as_ref().filter(|l| script && !l.in_written.get()) {
+            let line = lines.at.get().saturating_sub(lines.written.get());
+            self.push([Operand::Int(OP_SCRIPT_LINE), Operand::Int(handle as i32), Operand::Int(i32::try_from(line).unwrap_or(i32::MAX))]);
         }
         handle
     }
@@ -391,6 +407,11 @@ impl Parse {
         if self.ended {
             return -1;
         }
+        // (…the input it takes all `document.write`'s while the document's own is set aside, a script-created parse's
+        // all of it)
+        if let Some(lines) = &self.tokenizer.sink.sink.lines {
+            lines.in_written.set(self.script_created || !self.set_aside.is_empty());
+        }
         loop {
             match self.tokenizer.feed(&self.input) {
                 TokenizerResult::Done => break,
@@ -472,7 +493,7 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let declarative = args.get(4).boolean_value(scope);
         let opts = TreeBuilderOpts { scripting_enabled: scripting, iframe_srcdoc, ..Default::default() };
         // (…the text is decoded already, its byte order mark gone with the decoding: a U+FEFF left is text)
-        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
+        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative, true), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
         let input = BufferQueue::default();
         input.push_back(StrTendril::from(html));
         let all = parses(scope);
@@ -674,6 +695,11 @@ fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let html = parser_text(scope, args.get(1), well_formed, &mut standins);
         if let Some(p) = parses(scope).live.get_mut(&id) {
             p.standins = standins;
+            // (…its lines none of the document's: html5ever's count of them, a CR LF one, a lone CR one)
+            if let Some(lines) = &p.tokenizer.sink.sink.lines {
+                let breaks = html.bytes().filter(|&b| b == b'\n').count() + html.matches('\r').count() - html.matches("\r\n").count();
+                lines.written.set(lines.written.get() + breaks as u64);
+            }
             p.input.push_back(StrTendril::from(html));
         }
         rv.set_bool(true);
@@ -1434,7 +1460,7 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         });
         let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode: quirks_mode(i32::try_from(mode).ok()), ..Default::default() };
         let declarative = args.get(5).boolean_value(scope);
-        let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative), 1, form.is_some().then_some(2), opts);
+        let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative, false), 1, form.is_some().then_some(2), opts);
         let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
         let tokenizer = Tokenizer::new(builder, TokenizerOpts { initial_state, discard_bom: false, ..Default::default() });
         // (…re-rooted in this scope, as the build's other handles are)
@@ -1479,7 +1505,7 @@ fn html_parse_document(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let Some(document) = crate::node_handle::nid_of(scope, args.get(2)) else { return };
         let opts = TreeBuilderOpts { scripting_enabled: false, ..Default::default() };
         let declarative = args.get(4).boolean_value(scope);
-        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
+        let tokenizer = Tokenizer::new(TreeBuilder::new(Sink::new(None, declarative, false), opts), TokenizerOpts { discard_bom: false, ..Default::default() });
         let cid = crate::dom::realm_id(scope, &args);
         let doc = v8::Local::<v8::Object>::try_from(args.get(2)).ok().map(|d| v8::Local::new(scope, d));
         let template_doc = v8::Local::<v8::Object>::try_from(args.get(3)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
