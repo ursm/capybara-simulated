@@ -161,6 +161,11 @@ fn face<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -
     Some(unsafe { &(*(handle.as_ref() as *const FaceHandle)).face })
 }
 
+// Whether `value` is the state of a CSS-connected face (a rule's).
+pub(crate) fn connected(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> bool {
+    face(scope, value).is_some_and(|f| f.borrow().rule.is_some())
+}
+
 // The faces of an array of states, in order (none for an entry that is no face's).
 fn faces_in<'h>(scope: &mut v8::PinScope<'_, '_>, list: v8::Local<'_, v8::Value>) -> Vec<Option<&'h RefCell<Face>>> {
     let Ok(list) = v8::Local::<v8::Array>::try_from(list) else { return Vec::new() };

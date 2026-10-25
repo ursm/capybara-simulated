@@ -463,15 +463,15 @@ pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
     })
 }
 
-// __dom.fontFacesSet(rules, states): a document's faces, in order — the realm's from now on, what it read of them before
+// __dom.fontFacesSet(rules, set): a document's faces, in order — the realm's from now on, what it read of them before
 // forgotten (font_resolve.rs). First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine
-// last listed them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its set, by
-// their states (font_face_state.rs `listed`). A face with nothing to read holds a place all the same — and so does each
+// last listed them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its
+// FontFaceSet `set`, the state of its set (font_face_set.rs `added_records`) — none for a document none was made for. A face with nothing to read holds a place all the same — and so does each
 // of a list of rules the engine no longer holds (an index listed before the rules last moved): where the page side's
 // list and this one disagree, nothing is picked rather than another rule's face.
 fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let rules = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
-    let added = crate::font_face_state::listed(scope, args.get(1));
+    let added = crate::font_face_set::added_records(scope, args.get(1));
     let cid = crate::dom::realm_id(scope, &args);
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
     let ruled = if arena.rule_faces.len() == rules { arena.rule_faces.clone() } else { vec![FaceRecord::default(); rules] };
