@@ -19,25 +19,25 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "bytesBase64", bytes_base64_op, context_id);
     crate::dom::register(scope, ns, "base64Bytes", base64_bytes_op, context_id);
 }
-// __dom.dataUrl(url) -> [mime type, body as a byte string (each byte a code unit)], or null for a failure.
+// __dom.dataUrl(url) -> [mime type, body, a Uint8Array of its bytes], or null for a failure.
 fn data_url_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let input = args.get(0).to_rust_string_lossy(scope);
     let Some((mime, body)) = process(&input) else { return rv.set_null() };
     let mime = v8::String::new(scope, &mime).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    let body = v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let body = crate::blob_data::byte_array(scope, body);
     rv.set(v8::Array::new_with_elements(scope, &[mime, body]).into());
 }
 
-// __dom.dataUrlResponse(url, method) -> [content type, body as a byte string]: Fetch's "scheme fetch" of a `data:` URL
+// __dom.dataUrlResponse(url, method) -> [content type, body, a Uint8Array of its bytes]: Fetch's "scheme fetch" of a `data:` URL
 // (§4.2) — a 200 of the processor's MIME type and body, a HEAD's with no body (fetch's and XHR's, one answer) — or null
 // where it is no data: URL the processor reads (a network error).
 fn data_url_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let input = args.get(0).to_rust_string_lossy(scope);
     let head = args.get(1).to_rust_string_lossy(scope).eq_ignore_ascii_case("HEAD");
     let Some((mime, body)) = process(&input) else { return rv.set_null() };
-    let body = if head { &[][..] } else { &body[..] };
+    let body = if head { Vec::new() } else { body };
     let mime = v8::String::new(scope, &mime).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    let body = v8::String::new_from_one_byte(scope, body, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let body = crate::blob_data::byte_array(scope, body);
     rv.set(v8::Array::new_with_elements(scope, &[mime, body]).into());
 }
 

@@ -518,7 +518,7 @@ pub(crate) fn form_request_for_ruby(
 // __dom.formRequest(action, method, enctype, encoding, list, bytesOf) -> `[method, url, body, contentType]` of a form
 // submitted (`form_request`), or null where it submits nothing: `list` flat `[name, value, …]`, a file entry's value
 // `[filename, type]`, its bytes asked of `bytesOf(k)` (`k` the entry's place) only where the body carries them; the
-// body a byte string (a character per byte), it and its type null for a GET.
+// body a Uint8Array of its bytes, it and its type null for a GET.
 fn form_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [action, method, enctype] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
     let encoding = encoding_arg(scope, args.get(3));
@@ -554,7 +554,7 @@ fn form_request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     ];
     match request.body {
         Some((body, content_type)) => {
-            items.push(v8::String::new_from_one_byte(scope, &body, v8::NewStringType::Normal).map_or_else(|| v8::null(scope).into(), Into::into));
+            items.push(crate::blob_data::byte_array(scope, body));
             items.push(v8::String::new(scope, &content_type).map_or_else(|| v8::null(scope).into(), Into::into));
         }
         None => {

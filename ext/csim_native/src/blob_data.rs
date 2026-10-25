@@ -123,7 +123,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "blobSlice", slice_op, context_id);
     crate::dom::register(scope, ns, "blobSize", size_op, context_id);
     crate::dom::register(scope, ns, "blobBytes", bytes_op, context_id);
-    crate::dom::register(scope, ns, "blobLatin1", latin1_op, context_id);
 }
 
 // __dom.blobMake(parts, native) -> a blob's bytes, its parts' (§3.1 "process blob parts") in order: a string's UTF-8
@@ -174,17 +173,3 @@ fn bytes_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     rv.set(byte_array(scope, bytes));
 }
 
-// __dom.blobLatin1(bytes) -> them as a byte string (each byte a code unit), for the modules that take one; a RangeError
-// past the longest string V8 makes.
-fn latin1_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let bytes = handle(scope, args.get(0)).map_or_else(Vec::new, |h| h.bytes(scope));
-    match v8::String::new_from_one_byte(scope, &bytes, v8::NewStringType::Normal) {
-        Some(s) => rv.set(s.into()),
-        None => {
-            if let Some(message) = v8::String::new(scope, "Invalid string length") {
-                let error = v8::Exception::range_error(scope, message);
-                scope.throw_exception(error);
-            }
-        }
-    }
-}

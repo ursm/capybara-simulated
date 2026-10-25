@@ -179,6 +179,26 @@ RSpec.describe 'inline replaced elements' do
     end
   end
 
+  # …an image one sized by its image, whatever URL names it: a `data:` one's bytes, a `blob:` one's (Chrome: 100x100 both)
+  it 'sizes an image embed by its image, of a data: or a blob: URL' do
+    png = File.binread(File.expand_path('wpt/common/square.png', __dir__))
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const bin = atob(#{[png].pack('m0').to_json}), bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        const size = (src) => {
+          const el = Object.assign(document.createElement('embed'), {type: 'image/png', src});
+          document.body.append(el);
+          const r = el.getBoundingClientRect();
+          return [r.width, r.height];
+        };
+        return [size('data:image/png;base64,' + btoa(bin)), size(URL.createObjectURL(new Blob([bytes], {type: 'image/png'})))];
+      })()
+    JS
+    expect(got).to eq([[100, 100], [100, 100]])
+  end
+
   # `<embed>` and `<object>` are replaced only while they HAVE a resource to render. An `<embed>`
   # with none gets no box at all (though its computed `display` stays `inline` — it is a missing
   # box, not a hide), and an `<object>` with none renders its CHILDREN, which `width` / `height`
