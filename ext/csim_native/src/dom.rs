@@ -3026,6 +3026,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::event_stream::install(scope, ns, context_id);
     crate::fetch_rules::install(scope, ns, context_id);
     crate::subresource_judge::install(scope, ns, context_id);
+    crate::subresource_plan::install(scope, ns, context_id);
     crate::headers::install(scope, ns, context_id);
     crate::resource_timing::install(scope, ns, context_id);
     crate::multipart::install(scope, ns, context_id);

@@ -213,8 +213,8 @@ module Capybara
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
         '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
-        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], !!a[1], a[2] || 'same-origin', realm: a[3], referrer_policy: a[4], opaque: a[5] == true) },
-        '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], !!a[1], a[2] || 'same-origin', realm: a[3], referrer_policy: a[4], opaque: a[5] == true) },
+        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], a[1], realm: a[2]) },
+        '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], a[1], realm: a[2]) },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0]); nil },
         '__csimBlobWindow'           => ->(b, *_a) { b.blob_window },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
@@ -234,7 +234,7 @@ module Capybara
         # so an ordinary app leaves cross-origin frames lazy (= baseline) and never
         # eager-@app.calls a foreign URL (side effects: extra visit / log row).
         '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
-        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], !!a[1], a[2] || 'same-origin', realm: a[3], referrer_policy: a[4], opaque: a[5] == true) },
+        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], a[1], realm: a[2]) },
         # WebAuthn create / get raise `WebauthnState::Error` carrying
         # the DOMException name (`InvalidStateError`, …); rescue here
         # so the JS shim sees `{error:, name:}` instead of the

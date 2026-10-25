@@ -139,7 +139,7 @@ fn potentially_trustworthy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
 }
 
 // The referrer policy tokens (Referrer Policy §3).
-const POLICIES: [&str; 8] = [
+pub(crate) const POLICIES: [&str; 8] = [
     "no-referrer",
     "no-referrer-when-downgrade",
     "same-origin",

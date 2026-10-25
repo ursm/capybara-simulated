@@ -8141,14 +8141,14 @@ module Capybara
       # resource can't be fetched or decoded (the caller fires `error`). A scheme with no host-side reader returns
       # {'unsupported' => true}, which the caller takes for broken too — a blob: one it never asks for, reading the blob
       # from the VM's own store.
-      # `cors` (a `crossorigin` <img>) fetches under CORS: a cross-origin response without a
-      # matching Access-Control-Allow-Origin fails the load. `credentials` is 'include' for
-      # crossorigin="use-credentials", 'same-origin' (uncredentialed cross-origin) otherwise.
-      def load_image(url, cors = false, credentials = 'same-origin', realm: nil, referrer_policy: nil, opaque: false)
+      # Its request the engine's `plan` (subresource_plan.rs) for realm `realm`'s document: a CORS one (a `crossorigin`
+      # <img>) fails on a cross-origin response without a matching Access-Control-Allow-Origin.
+      def load_image(url, plan, realm: nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         Thread.current[:csim_image_meta] = nil
-        entry = cached_image(key, cors, credentials, client: load_client(realm, key, referrer_policy: referrer_policy, opaque: opaque))
+        cors, credentials, client = planned_request(plan, realm, key)
+        entry = cached_image(key, cors, credentials, client: client)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
         image_payload(entry, Thread.current[:csim_image_meta])
@@ -8159,10 +8159,10 @@ module Capybara
       # JS side files its pending element under, or -1 when the URL can't resolve (the caller
       # falls back to the synchronous path). The heavy call chain is exactly `load_image`'s —
       # same cache, same CORS enforcement, same taint verdict — just off-thread.
-      def image_load_start(url, cors = false, credentials = 'same-origin', realm: nil, referrer_policy: nil, opaque: false)
+      def image_load_start(url, plan, realm: nil)
         key = resolve_against_current(url.to_s)
         return -1 unless key.is_a?(String)
-        client = load_client(realm, key, referrer_policy: referrer_policy, opaque: opaque)
+        cors, credentials, client = planned_request(plan, realm, key)
         id = nil
         @image_load_lock.synchronize do
           id = (@image_load_seq += 1)
@@ -8913,13 +8913,13 @@ module Capybara
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
       # src>` pointing at a served file decodes the same way a blob: / data: source does.
       # Returns {'bytes', 'tainted'}, or nil when the fetch fails.
-      def video_bytes(url, cors = false, credentials = 'same-origin', realm: nil, referrer_policy: nil, opaque: false)
+      def video_bytes(url, plan, realm: nil)
         # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
         # load); a plain one is a no-cors fetch whose bytes TAINT a canvas they're
         # drawn into where a hop left the fetching CLIENT's origin (a frame's own
         # document, not the top window's) — the <img> model, for the client an
         # image's is (image_source_bytes).
-        client = load_client(realm, url.to_s, referrer_policy: referrer_policy, opaque: opaque)
+        cors, credentials, client = planned_request(plan, realm, url.to_s)
         result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client.url,
                             referrer: client.referrer, referrer_policy: client.referrer_policy, body_raw: true,
                             cookie_cross_site: client.cookie_cross_site, client_origin: client.origin, dest: 'video')
@@ -13061,6 +13061,12 @@ module Capybara
       # none of its own, policy; an opaque one none (Referrer Policy "determine request's referrer"). Read on the main
       # thread, which a realm's URL is asked on; a frame gone, the top-level one's.
       LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy, :origin)
+      # …and the request a subresource's `plan` (subresource_plan.rs) makes for it, to `target_url`: whether it is a CORS
+      # one, its credentials mode, its client.
+      private def planned_request(plan, realm, target_url)
+        mode, credentials, policy, opaque = Native.subresource_plan_fields(plan.to_i)
+        [mode == 'cors', credentials, load_client(realm, target_url, referrer_policy: policy, opaque: opaque)]
+      end
       def load_client(realm, target_url, referrer_policy: nil, opaque: false)
         rid    = realm.to_i
         policy = opaque ? 'no-referrer' : referrer_policy.to_s

@@ -161,6 +161,7 @@ mod slots;
 mod style;
 mod style_fonts;
 mod subresource_judge;
+mod subresource_plan;
 mod subresources;
 mod svg_geometry;
 mod tables;
@@ -280,6 +281,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;
     native.define_module_function("sw_subresource_usable", magnus::function!(fetch_rules::sw_subresource_usable_for_ruby, 5))?;
+    native.define_module_function("subresource_plan_fields", magnus::function!(subresource_plan::fields_for_ruby, 1))?;
     native.define_module_function("service_worker_start_register", magnus::function!(service_worker::start_register_for_ruby, 4))?;
     native.define_module_function("service_worker_max_scope", magnus::function!(service_worker::max_scope_for_ruby, 3))?;
     // A session's service worker registrations (sw_registry.rs).
