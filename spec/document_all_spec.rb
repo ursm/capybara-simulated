@@ -89,7 +89,8 @@ RSpec.describe 'document.all' do
     expect(got).to eq(['p,c', true, true, 'number', true])
   end
 
-  # …and a callable one wherever a callback is called: a listener, a timer's handler, an iterable's forEach (Chrome)
+  # …and a callable one wherever a callback is called: a listener, a timer's handler, an iterable's forEach, an
+  # observer's callback, a custom element reaction — by [[Call]], as it has no `call` of its own (Chrome)
   it 'is called as a callback' do
     session.visit '/'
     session.execute_script(<<~JS)
@@ -100,6 +101,12 @@ RSpec.describe 'document.all' do
       setTimeout(document.all);
       new Headers([['a', 'b']]).forEach(document.all);
       new URLSearchParams('a=b').forEach(document.all);
+      new MutationObserver(document.all).observe(document.body, {childList: true});
+      customElements.define('x-all', class extends HTMLElement {}, {});
+      const C = class extends HTMLElement {};
+      C.prototype.connectedCallback = document.all;
+      customElements.define('x-called', C);
+      document.body.append(document.createElement('x-called'));
     JS
     expect(session.evaluate_script('errors')).to eq([])
   end
