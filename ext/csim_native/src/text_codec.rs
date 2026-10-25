@@ -54,6 +54,10 @@ fn bytes_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) 
     if value.is_undefined() {
         return Some(Vec::new());
     }
+    // (…or a body's, the engine's bytes object: blob_data.rs — no BufferSource a page passes, and so none of its TypeError)
+    if let Some(bytes) = crate::blob_data::handle_bytes(scope, value) {
+        return Some(bytes);
+    }
     let (data, len) = if let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(value) {
         if !resizable_view(view) {
             let mut out = vec![0u8; view.byte_length()];

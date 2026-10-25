@@ -44,11 +44,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.integrityMatches(bytes, metadata) -> `bytes_match`: `bytes` a Uint8Array.
 fn matches_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let metadata = args.get(1).to_rust_string_lossy(scope);
-    let bytes = v8::Local::<v8::ArrayBufferView>::try_from(args.get(0)).map_or_else(|_| Vec::new(), |view| {
-        let mut bytes = vec![0u8; view.byte_length()];
-        view.copy_contents(&mut bytes);
-        bytes
-    });
+    let bytes = crate::blob_data::bytes_arg(scope, args.get(0));
     rv.set_bool(bytes_match(&bytes, &metadata));
 }
 

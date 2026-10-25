@@ -96,6 +96,12 @@ pub(crate) fn bytes_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v
     run
 }
 
+// The bytes of the blob's bytes object `value`, copied out — none for anything else: what an op that also takes a view
+// asks first (a body's bytes, fetch.js).
+pub(crate) fn handle_bytes(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    handle(scope, value).map(|h| h.bytes(scope))
+}
+
 // A Uint8Array of `bytes`, a script's to keep.
 pub(crate) fn byte_array<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: Vec<u8>) -> v8::Local<'s, v8::Value> {
     let len = bytes.len();
