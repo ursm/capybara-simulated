@@ -26,11 +26,13 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
+        else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
+        else if (u.pathname.startsWith('/scope/rp-')) e.respondWith(fetch('/log?' + u.pathname.slice(10) + '=' + e.request.referrerPolicy + ',' + (e.request.referrer || 'none')).then(() => new Response('')));
       });
     JS
     Rack::Builder.new {
       run lambda {|env|
-        hits << env['PATH_INFO']
+        hits << (env['PATH_INFO'] == '/log' ? "/log?#{env['QUERY_STRING']}" : env['PATH_INFO'])
         case Rack::Request.new(env).path_info
         when '/'                then [200, {'content-type' => 'text/html'}, ['<html><body>main</body></html>']]
         when '/sw.js'           then [200, {'content-type' => 'text/javascript'}, [worker]]
@@ -203,6 +205,62 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('ran.js' => 'load', 'gone.js' => 'error', 'sheet.css' => 'load', 'gone.css' => 'error')
     expect(session.evaluate_script('__ran')).to eq(%w[ran])
+  end
+  # A prefetch's request is a link request (HTML "create a link request"), a potential-CORS one by its `crossorigin`:
+  # the worker sees a CORS one for a link that has the attribute, a no-cors one for one that has none.
+  it "hands the worker a prefetch's request as its crossorigin makes it" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument;
+          for (const [name, cors] of [['hint-plain', false], ['hint-cors', true]]) {
+            const link = d.createElement('link');
+            link.rel = 'prefetch';
+            if (cors) link.crossOrigin = 'anonymous';
+            link.href = '/scope/' + name;
+            d.head.appendChild(link);
+          }
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    # (…the page stepped as the driver asks it)
+    expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?})).size == 2 && logged.sort }).to eq(%w[/log?hint-cors=cors /log?hint-plain=no-cors])
+  end
+  # …and as it is referred: under its element's `referrerpolicy` — an image's (a fetch event) and a script's (the
+  # synchronous one) alike — its worker's `event.request` the policy and the referrer it is made with.
+  it "hands the worker a request under its element's referrer policy" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument;
+          const img = d.createElement('img');
+          img.referrerPolicy = 'no-referrer';
+          img.src = '/scope/rp-img';
+          d.body.appendChild(img);
+          const script = d.createElement('script');
+          script.referrerPolicy = 'no-referrer';
+          script.src = '/scope/rp-script';
+          d.head.appendChild(script);
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?})).size == 2 && logged.sort }).to eq(
+      %w[/log?img=no-referrer,none /log?script=no-referrer,none]
+    )
   end
 end
 

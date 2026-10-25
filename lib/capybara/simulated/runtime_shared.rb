@@ -48,7 +48,7 @@ module Capybara
         # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
         '__csim_swScriptFetch'       => lambda {|b, *a|
           mode, credentials, = Native.subresource_plan_fields(a[5].to_i)
-          b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', mode, credentials, binary: a[6] == true, integrity: a[7] || '')
+          b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', mode, credentials, binary: a[6] == true, integrity: a[7] || '', referrer_policy: a[8])
         },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true, initiator_realm: a[2], policy: a[3].to_s, user_activated: a[4] == true); nil },
         '__locationReload'           => ->(b, *a) { b.location_reload(user_activated: a[0] == true); nil },

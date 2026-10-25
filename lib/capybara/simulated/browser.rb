@@ -5299,7 +5299,7 @@ module Capybara
       # respondWith, {'body' =>} for a served script. An OPAQUE respondWith still
       # EXECUTES (browsers run opaque classic scripts) — its bytes ride the private
       # render channel like the image path.
-      def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include', binary: false, integrity: '')
+      def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include', binary: false, integrity: '', referrer_policy: nil)
         w = @workers[handle.to_i]
         return nil unless w && w[:thread]&.alive?
         # A worker still ACTIVATING can't be waited for here — this caller blocks the
@@ -5309,25 +5309,26 @@ module Capybara
         # interception existed; the async-parking treatment is the follow-up.
         return nil unless @worker_init_lock.synchronize { w[:sw_activated] }
         req = JSON.generate(
-          method:      'GET',
-          url:         url.to_s,
-          headers:     {},
-          body_b64:    '',
+          method:         'GET',
+          url:            url.to_s,
+          headers:        {},
+          body_b64:       '',
           # The element's `crossorigin` attribute decides these (HTML "fetch a
           # classic script" / "obtain a stylesheet"), as the engine maps it
           # (fetch_rules.rs `cors_request`): absent → no-cors+include,
           # anonymous → cors+same-origin, use-credentials → cors+include.
-          mode:        mode.to_s,
+          mode:           mode.to_s,
           # The element's raw `integrity` attribute, verbatim: event.request.integrity
           # reflects it even when unparseable (parsing happens at verification time).
-          integrity:   integrity.to_s,
-          destination: destination.to_s,
-          credentials: credentials.to_s,
-          clientId:    client_id.to_s,
-          # Policy-resolved like every other controlled fetch (the raw document URL
-          # must not leak into event.request.referrer beyond what the default
-          # policy allows for a cross-origin subresource).
-          referrer:    compute_referrer(nil, referrer.to_s, url.to_s).to_s
+          integrity:      integrity.to_s,
+          destination:    destination.to_s,
+          credentials:    credentials.to_s,
+          clientId:       client_id.to_s,
+          # Policy-resolved like every other controlled fetch, under the policy the request
+          # is made under (its element's `referrerpolicy`, else its policy container's) —
+          # the raw document URL must not leak into event.request.referrer beyond it.
+          referrerPolicy: referrer_policy.to_s,
+          referrer:       compute_referrer(referrer_policy, referrer.to_s, url.to_s).to_s
         )
         r = sw_direct_fetch(handle.to_i, req, handle.to_i) or return nil
         return nil if r['fallthrough']
