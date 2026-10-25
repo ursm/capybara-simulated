@@ -92,10 +92,14 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let cid = crate::dom::realm_id(scope, &args);
     let realm = crate::dom::realm(scope, cid);
     let node = el.and_then(|id| realm.get(id));
-    let crossorigin = node.and_then(|n| n.plain_attr("crossorigin"));
+    // (…an `<input type=image>`'s request no potential-CORS one: it has no CORS settings attribute)
+    let crossorigin = node.filter(|n| !n.is_html_named("input")).and_then(|n| n.plain_attr("crossorigin"));
     // (…the attribute of an element that has one: an `<img>`'s, a `<script>`'s, a `<link>`'s — no media element's, no
-    // plugin's, no `<use>`'s)
-    let referring = matches!(kind & 0xff, J_IMAGE | J_CLASSIC_SCRIPT | J_MODULE_SCRIPT | J_SHEET | J_LINK | J_PREFETCH);
+    // plugin's, no `<use>`'s, no image input's, no SVG `<image>`'s)
+    let referring = match kind & 0xff {
+        J_IMAGE => node.is_some_and(|n| n.is_html_named("img")),
+        k => matches!(k, J_CLASSIC_SCRIPT | J_MODULE_SCRIPT | J_SHEET | J_LINK | J_PREFETCH),
+    };
     let attr = node.filter(|_| referring).map_or("", crate::url_ops::referrer_policy_attribute);
     let worker = node
         .and_then(|n| crate::script::modulepreload_destination(n.plain_attr("as").unwrap_or("")))

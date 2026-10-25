@@ -78,14 +78,16 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
         return Vec::new();
     }
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return Vec::new() };
-    let mut wanted: Vec<(&'static str, &'static str, NodeId, String)> = Vec::new();
+    // (…each by the element whose `crossorigin` its request takes, none for one of no CORS settings: a poster's)
+    let mut wanted: Vec<(&'static str, &'static str, Option<NodeId>, String)> = Vec::new();
     if n.ns == ns!(html) {
         let attr = |name: &str| n.plain_attr(name).filter(|v| !v.is_empty()).map(str::to_owned);
         match &*n.local_name {
             tag @ ("video" | "audio") => {
                 let initiator = if tag == "video" { "video" } else { "audio" };
+                // (…a poster's a plain request, its credentials included: HTML's poster frame steps)
                 if let Some(poster) = attr("poster").filter(|_| tag == "video") {
-                    wanted.push(("video", "image", id, poster));
+                    wanted.push(("video", "image", None, poster));
                 }
                 let first_source = || {
                     n.children.iter().find_map(|&c| {
@@ -98,14 +100,14 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
                         Some(src) => Some(src.to_owned()).filter(|s| !s.is_empty()),
                         None => first_source(),
                     };
-                    wanted.extend(src.map(|src| (initiator, initiator, id, src)));
+                    wanted.extend(src.map(|src| (initiator, initiator, Some(id), src)));
                 }
                 // (…a track's request by its media element's `crossorigin`: HTML's track processing model, "the state of
                 // the parent media element's crossorigin content attribute")
                 for &c in &n.children {
                     let Some(track) = arena.get(c).filter(|c| c.is_html_named("track") && c.plain_attr("default").is_some()) else { continue };
                     if let Some(src) = track.plain_attr("src").filter(|v| !v.is_empty()) {
-                        wanted.push(("track", "track", id, src.to_owned()));
+                        wanted.push(("track", "track", Some(id), src.to_owned()));
                     }
                 }
             }
@@ -115,7 +117,7 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
     let mut out = Vec::new();
     for (initiator, destination, el, raw) in wanted {
         let Some(url) = arena.parse_document_url(doc, &raw) else { continue };
-        out.push((initiator, destination, url.href().to_owned(), cors_of(arena, el)));
+        out.push((initiator, destination, url.href().to_owned(), el.map_or(NO_CORS, |el| cors_of(arena, el))));
     }
     if let Some(url) = use_reference(arena, id, doc) {
         out.push(("other", "image", url, NO_CORS));

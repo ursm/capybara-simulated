@@ -79,5 +79,28 @@ RSpec.describe 'a subresource request plan' do
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
+  # …and its poster a plain request whatever its `crossorigin` (HTML's poster frame steps), as an image input's is: an
+  # `<input type=image>` has no CORS settings attribute — no Origin sent to the other origin for either.
+  it "fetches a poster and an image input as no CORS request" do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+    session.visit '/'
+    session.execute_script(<<~JS)
+      const video = document.createElement('video');
+      video.preload = 'none';
+      video.crossOrigin = 'anonymous';
+      video.poster = 'http://other.test/poster.png';
+      document.body.append(video);
+      const input = document.createElement('input');
+      input.type = 'image';
+      input.setAttribute('crossorigin', 'anonymous');
+      input.src = 'http://other.test/input.png';
+      document.body.append(input);
+    JS
+    got = poll_until { session.evaluate_script('1') && (hit = seen.select {|(path, _, _)| path.end_with?('.png') }).size == 2 && hit.sort }
+    expect(got.map {|(path, _, origin)| [path, origin] }).to eq([['/input.png', nil], ['/poster.png', nil]])
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
 end
 
