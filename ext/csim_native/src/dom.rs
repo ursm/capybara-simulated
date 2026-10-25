@@ -1147,6 +1147,11 @@ pub(crate) struct RealmState {
     // sheets hold, as the style engine last listed them (`styleFontFaces`), which that list begins with.
     pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
     pub(crate) rule_faces: Vec<crate::font_faces::FaceRecord>,
+    // …and what a FontFaceSet makes of each of those rules (`font_faces::rule_face`), by its identity, with the referrer
+    // of its downloads — and the generation of that list, which a set's CSS-connected faces are connected for
+    // (font_face_set.rs `fsConnect`).
+    pub(crate) rule_rows: Vec<(u32, crate::font_faces::RuleFace, String)>,
+    pub(crate) rule_rows_gen: u32,
     // What a face of that list is read from, once asked (font_resolve.rs `indexed_file`), and the face each family stack
     // takes at a bucket (`family_face`) — both forgotten when the list moves.
     pub(crate) face_files: Vec<Option<Option<String>>>,
@@ -5103,12 +5108,16 @@ fn style_font_faces_unguarded(
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
     let faces = engine.font_faces(&arena.sheets);
     arena.rule_faces = faces.iter().map(|face| face.record.clone().unwrap_or_default()).collect();
-    for face in faces {
-        let rule = crate::font_faces::rule_face(&face.declared);
-        items.push(v8::Integer::new_from_unsigned(scope, face.id).into());
-        items.push(v8::Boolean::new(scope, rule.is_face).into());
+    let rows: Vec<(u32, crate::font_faces::RuleFace, String)> = faces.iter().map(|face| {
         let referrer = face.record.as_ref().and_then(|r| r.referrer.clone()).unwrap_or_default();
-        for value in [&rule.family, &rule.src, &rule.identity, &referrer].into_iter().chain(&rule.attributes) {
+        (face.id, crate::font_faces::rule_face(&face.declared), referrer)
+    }).collect();
+    arena.rule_rows = rows.clone();
+    arena.rule_rows_gen = arena.rule_rows_gen.wrapping_add(1);
+    for (id, rule, referrer) in &rows {
+        items.push(v8::Integer::new_from_unsigned(scope, *id).into());
+        items.push(v8::Boolean::new(scope, rule.is_face).into());
+        for value in [&rule.family, &rule.src, &rule.identity, referrer].into_iter().chain(&rule.attributes) {
             items.push(v8::String::new(scope, value).map_or_else(|| v8::undefined(scope).into(), Into::into));
         }
     }

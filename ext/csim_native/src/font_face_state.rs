@@ -4,7 +4,7 @@
 // object wraps (`__dom.FontFaceStateBase`). What font matching reads of it (`record`) is kept until a descriptor moves;
 // the face's promise, the loading cycle's tasks and its events are the bindings'.
 
-use std::cell::RefCell;
+use std::cell::{RefCell, UnsafeCell};
 
 use v8::cppgc::{GarbageCollected, Visitor};
 
@@ -41,6 +41,9 @@ struct Face {
     referrer: Option<String>,
     // What font matching reads of it, while its family and descriptors hold.
     record: Option<FaceRecord>,
+    // The FontFaceSets that hold it, of whichever realm — their states' objects (font_face_set.rs), which keep the link
+    // as they add and drop it. Boxed, as a traced reference keeps its place.
+    sets: Vec<Box<UnsafeCell<v8::TracedReference<v8::Object>>>>,
 }
 
 impl Face {
@@ -89,7 +92,13 @@ pub(crate) struct FaceHandle {
 }
 
 unsafe impl GarbageCollected for FaceHandle {
-    fn trace(&self, _visitor: &mut Visitor) {}
+    fn trace(&self, visitor: &mut Visitor) {
+        // SAFETY: the collector traces on the main thread between ops, none of which holds the face borrowed then; it
+        // reads each reference as TracedReference's barriers allow, and nothing here hands one out.
+        for set in &unsafe { &*self.face.as_ptr() }.sets {
+            visitor.trace(unsafe { &*set.get() });
+        }
+    }
     fn get_name(&self) -> &'static std::ffi::CStr {
         c"FaceHandle"
     }
@@ -133,7 +142,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
     let sources = sources.map(Option::unwrap_or_default);
     let status = if error.is_some() { ERROR } else { UNLOADED };
-    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, referrer: None, record: None };
+    let face = Face { family, descriptors, sources, file: None, status, error, rule: None, identity: None, reflected: None, referrer: None, record: None, sets: Vec::new() };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
     obj.set_internal_field(0, brand.into());
@@ -161,6 +170,42 @@ fn face<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -
     Some(unsafe { &(*(handle.as_ref() as *const FaceHandle)).face })
 }
 
+// The sets that hold the face of state `value`, by their states' objects: `set` linked to it (once), or unlinked.
+pub(crate) fn link(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>, set: v8::Local<'_, v8::Object>, on: bool) {
+    let Some(face) = face(scope, value) else { return };
+    let held = sets(scope, value).iter().position(|s| s.strict_equals(set.into()));
+    let mut f = face.borrow_mut();
+    match (held, on) {
+        (None, true) => {
+            let link = Box::new(UnsafeCell::new(v8::TracedReference::empty()));
+            // SAFETY: the main thread, which alone writes the references; the assignment runs TracedReference's barrier,
+            // the link at the place it keeps.
+            unsafe { (*link.get()).reset(scope, Some(set)) };
+            f.sets.push(link);
+        }
+        (Some(k), false) => {
+            f.sets.remove(k);
+        }
+        _ => {}
+    }
+}
+pub(crate) fn sets<'s>(scope: &mut v8::PinScope<'s, '_>, value: v8::Local<'_, v8::Value>) -> Vec<v8::Local<'s, v8::Object>> {
+    let Some(face) = face(scope, value) else { return Vec::new() };
+    // SAFETY: the main thread; the references are read, not written.
+    face.borrow().sets.iter().filter_map(|s| unsafe { (*s.get()).get(scope) }).collect()
+}
+// …and its status (`UNLOADED`, …), none for no face's state.
+pub(crate) fn status(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<u32> {
+    face(scope, value).map(|f| f.borrow().status)
+}
+pub(crate) fn settled(status: u32) -> bool {
+    status == LOADED || status == ERROR
+}
+
+// What makes the CSS-connected face of state `value` the face it is (`Face::identity`) — none for a script's face.
+pub(crate) fn identity(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<String> {
+    face(scope, value).and_then(|f| f.borrow().identity.clone())
+}
 // Whether `value` is the state of a CSS-connected face (a rule's).
 pub(crate) fn connected(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> bool {
     face(scope, value).is_some_and(|f| f.borrow().rule.is_some())
@@ -206,7 +251,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ffSetFile", set_file_op, context_id);
     crate::dom::register(scope, ns, "ffStart", start_op, context_id);
     crate::dom::register(scope, ns, "ffSettle", settle_op, context_id);
-    crate::dom::register(scope, ns, "ffConnect", connect_op, context_id);
     crate::dom::register(scope, ns, "ffSources", sources_op, context_id);
     crate::dom::register(scope, ns, "ffFile", file_op, context_id);
     crate::dom::register(scope, ns, "ffFetchedStatus", fetched_status_op, context_id);
@@ -217,7 +261,6 @@ const FAMILY: u32 = 11;
 const STATUS: u32 = 12;
 const ERROR_MESSAGE: u32 = 13;
 const RULE: u32 = 14;
-const IDENTITY: u32 = 15;
 
 // __dom.ffField(state, field) -> the face's `field` (null for a text it has none of).
 fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -236,7 +279,6 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             }
             return;
         }
-        IDENTITY => f.identity.as_deref(),
         _ => return,
     };
     match text.and_then(|t| v8::String::new(scope, t)) {
@@ -293,25 +335,18 @@ fn settle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_bool(open);
 }
 
-// __dom.ffConnect(state, rule, identity, declared, family, referrer) — the face is CSS-connected (CSS Font Loading
-// §2.2): of the rule `rule`, made of its `declared` descriptors (`FACE_ATTRIBUTE_DESCRIPTORS`' order, empty for one the
-// rule does not declare), what makes it that face `identity`, its family the rule's `family` as the style engine took
-// and serialized it (`math` stays `math`, which the constructor's stricter reading would have quoted), its downloads
-// referred by `referrer` (its sheet's location: CSS Values 4 "fetch a style resource"); with no `identity`, the rule
-// it is of already declaring `declared` now — reflected where they changed since (`Face::reflect`).
-fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(face) = face(scope, args.get(0)) else { return };
-    let rule = args.get(1).uint32_value(scope);
-    let identity = (!args.get(2).is_null_or_undefined()).then(|| args.get(2).to_rust_string_lossy(scope));
-    let declared = v8::Local::<v8::Array>::try_from(args.get(3)).ok();
-    let family = args.get(4).to_rust_string_lossy(scope);
-    let referrer = args.get(5).is_string().then(|| args.get(5).to_rust_string_lossy(scope)).filter(|r| !r.is_empty());
-    let mut values: [String; 11] = Default::default();
-    for (k, value) in values.iter_mut().enumerate() {
-        if let Some(v) = declared.and_then(|a| a.get_index(scope, k as u32)) {
-            *value = v.to_rust_string_lossy(scope);
-        }
+// The face of state `state` is CSS-connected (CSS Font Loading §2.2, font_face_set.rs `fsConnect`): of the rule `rule`,
+// made of its `declared` descriptors (`FACE_ATTRIBUTE_DESCRIPTORS`' order, empty for one the rule does not declare), what
+// makes it that face `identity`, its family the rule's `family` as the style engine took and serialized it (`math` stays
+// `math`, which the constructor's stricter reading would have quoted), its downloads referred by `referrer` (its sheet's
+// location: CSS Values 4 "fetch a style resource"); with no `identity`, the rule it is of already, declaring `declared`
+// now — reflected where they changed since (`Face::reflect`).
+pub(crate) fn connect(scope: &mut v8::PinScope<'_, '_>, state: v8::Local<'_, v8::Value>, rule: u32, identity: Option<String>, declared: [String; 11], family: String, referrer: Option<String>) {
+    if let Some(face) = face(scope, state) {
+        connect_face(face, Some(rule), identity, declared, family, referrer);
     }
+}
+fn connect_face(face: &RefCell<Face>, rule: Option<u32>, identity: Option<String>, values: [String; 11], family: String, referrer: Option<String>) {
     let mut f = face.borrow_mut();
     if f.referrer != referrer {
         f.referrer = referrer;

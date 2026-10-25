@@ -124,4 +124,27 @@ RSpec.describe 'FontFace bindings' do
     JS
     expect(got).to eq([true, 1, true])
   end
+
+  # …and a face held by two sets, of two realms, runs each set's loading cycle as it loads (CSS Font Loading §2.3: every
+  # set it is in) — and none of a set it was deleted from.
+  it 'runs the loading cycle of every set that holds a face' do
+    session.execute_script(<<~JS)
+      document.body.append(document.createElement('iframe'));
+    JS
+    sleep 0.1
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0], seen = [];
+      const page = document.fonts, frame = frames[0].document.fonts;
+      const a = new FontFace('Both', 'url(/missing.ttf)'), b = new FontFace('Gone', 'url(/missing.ttf)');
+      page.add(a);
+      frame.add(a);
+      frame.add(b);
+      frame.delete(b);
+      for (const [name, set] of [['page', page], ['frame', frame]]) {
+        set.addEventListener('loadingerror', (e) => seen.push(name + ':' + e.fontfaces.map((f) => f.family).join()));
+      }
+      Promise.allSettled([a.load(), b.load()]).then(() => setTimeout(() => done([seen.sort(), page.status, frame.status]), 50));
+    JS
+    expect(got).to eq([%w[frame:Both page:Both], 'loaded', 'loaded'])
+  end
 end

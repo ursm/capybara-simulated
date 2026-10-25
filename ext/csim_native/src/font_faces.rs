@@ -273,6 +273,7 @@ pub(crate) const FACE_ATTRIBUTE_DESCRIPTORS: [&str; 11] = [
 // `format("embedded-opentype")` sources is none: Chrome) — what makes it the same face from one read to the next (its
 // family's name and its sources, resolved: not its text, which a descriptor rewritten changes), and each attribute's
 // descriptor as declared, empty where it declares none.
+#[derive(Clone)]
 pub(crate) struct RuleFace {
     pub(crate) family: String,
     pub(crate) src: String,
