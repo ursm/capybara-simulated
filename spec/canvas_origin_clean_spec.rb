@@ -46,4 +46,35 @@ RSpec.describe 'canvas origin-clean flag' do
     JS
     expect(got).to eq(%w[clean SecurityError SecurityError SecurityError SecurityError SecurityError])
   end
+  # What clears it is the image's RESPONSE not being CORS-same-origin — a no-cors one any hop of which left the
+  # document's origin (Fetch's response tainting stays opaque) — whatever origin the image's URL is of: a same-origin URL
+  # redirected to another origin taints, a cross-origin one redirected back taints, a CORS one through it does not.
+  it 'is cleared by the response an image is, not its URL' do
+    app = ->(env) {
+      case [env['SERVER_NAME'], env['PATH_INFO']]
+      in [_, '/away.png'] then [302, {'location' => "http://other.test/a.png?#{env['QUERY_STRING']}"}, []]
+      in ['other.test', '/back.png'] then [302, {'location' => 'http://www.example.com/a.png'}, []]
+      in [_, '/a.png'] then [200, {'content-type' => 'image/png', 'access-control-allow-origin' => '*'}, [png]]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body></body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const read = (src, cors) => new Promise((resolve) => {
+        const img = new Image();
+        if (cors) img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          const c = document.createElement('canvas');
+          c.getContext('2d').drawImage(img, 0, 0);
+          try { c.toDataURL(); resolve('clean'); } catch (e) { resolve(e.name); }
+        };
+        img.onerror = () => resolve('error');
+        img.src = src;
+      });
+      Promise.all([read('/a.png'), read('/away.png'), read('/away.png?cors', true), read('http://other.test/back.png')]).then(done);
+    JS
+    expect(got).to eq(%w[clean SecurityError clean SecurityError])
+  end
 end

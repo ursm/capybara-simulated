@@ -8147,7 +8147,7 @@ module Capybara
         entry = cached_image(key, cors, credentials, client: load_client(realm, key, referrer_policy: referrer_policy, opaque: opaque))
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
-        image_payload(entry, image_tainted?(key, cors), Thread.current[:csim_image_meta])
+        image_payload(entry, Thread.current[:csim_image_meta])
       end
 
       # Start an async <img> load: resolve + capture the requesting document identity on THIS
@@ -8213,7 +8213,7 @@ module Capybara
         entry = cached_image(key, cors, credentials, client: client)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
-        { entry: entry, tainted: origin_tainted?(key, cors, client_url: client.url), meta: Thread.current[:csim_image_meta] }
+        { entry: entry, meta: Thread.current[:csim_image_meta] }
       end
       # A response that arrived but is no image: the element is broken, the resource was still
       # fetched — its Resource Timing entry carries the real status and size.
@@ -8266,44 +8266,20 @@ module Capybara
       private def image_result_payload(r)
         return nil if r.nil?
         return r unless r.is_a?(Hash) && r.key?(:entry)
-        image_payload(r[:entry], r[:tainted], r[:meta])
+        image_payload(r[:entry], r[:meta])
       end
 
       # What an `<img>` applies of a decoded entry (`_applyImageResult`): its size, natural size and colour space, its
       # bitmaps stashed for transfer — none for an image with no pixels, which loads with nothing to draw — and its
-      # taint verdict and Resource Timing figures.
-      private def image_payload(entry, tainted, meta)
-        out = {'width' => entry['width'], 'height' => entry['height'], 'natural' => entry['natural'], 'orientation' => entry['orientation'], 'tainted' => tainted, 'encoded' => entry['encoded'], 'meta' => meta}
+      # Resource Timing figures, and whether it taints a canvas it is drawn into: its response's (`meta`, none for a
+      # `data:` image, which is basic).
+      private def image_payload(entry, meta)
+        out = {'width' => entry['width'], 'height' => entry['height'], 'natural' => entry['natural'], 'orientation' => entry['orientation'], 'tainted' => meta&.[]('tainted') == true, 'encoded' => entry['encoded'], 'meta' => meta}
         return out.merge('noPixels' => true) if entry['noPixels']
         out['colorSpace'] = entry['colorSpace']
         out['refId']      = transfer_buffer_stash(entry['bytes'])
         out['refIdP3']    = transfer_buffer_stash(entry['bytesP3']) if entry['bytesP3']
         out
-      end
-
-      # Whether a successfully-loaded image taints a canvas it's drawn into: its bytes came
-      # cross-origin without CORS approval — i.e. a no-cors http(s) load from a different origin
-      # than the document. A CORS load that reached here passed the Access-Control check (so it's
-      # origin-clean), and same-origin / data: images are always clean. An opaque-origin document
-      # (data:/srcdoc/sandboxed — nil origin) is cross-origin to every http(s) image, so any such
-      # image taints it.
-      private def image_tainted?(key, cors)
-        origin_tainted?(key, cors)
-      end
-
-      # Whether a successfully-loaded media resource (image / video frame) taints
-      # a canvas it's drawn into: its bytes came cross-origin without CORS
-      # approval. The verdict compares against the fetching CLIENT's document
-      # origin when one is threaded (a frame's own document), else the top
-      # document — the same http(s) gate rack_fetch's client identity uses (an
-      # opaque-origin about:blank / javascript: realm falls back to the top).
-      private def origin_tainted?(url, cors, client_url: nil)
-        return false if cors || !http_url?(url)
-        res = url_origin(url.to_s)
-        return false unless res
-        base = http_url?(client_url) ? client_url : @current_url
-        doc  = url_origin(base)
-        doc.nil? || doc != res
       end
 
       # The decoded image for `key`: fetch the bytes (every load — the HTTP cache decides
@@ -8356,9 +8332,12 @@ module Capybara
                               cookie_cross_site: client.cookie_cross_site, client_origin: client.origin, dest: 'image')
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
-          # after; a 404 is a response too, the entry keeping its status.
+          # after; a 404 is a response too, the entry keeping its status. And whether it taints a canvas it is drawn
+          # into: a no-cors one any hop of which left the client's origin, which is no CORS-same-origin response (HTML
+          # "origin-clean"), whatever origin its URL is of — a CORS one that got here passed the check.
           if result
             Thread.current[:csim_image_meta] = {
+              'tainted'     => result['tainted'] == true,
               'contentType' => result['headers'].find {|k, _| k.to_s.casecmp?('content-type') }&.last,
               'tao'         => result['tao'],
               'redirected'  => result['redirected'] == true,
@@ -8932,15 +8911,14 @@ module Capybara
       # Returns {'bytes', 'tainted'}, or nil when the fetch fails.
       def video_bytes(url, cors = false, credentials = 'same-origin', client_url = nil)
         # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
-        # load); a plain one is a no-cors fetch whose cross-origin bytes TAINT a
-        # canvas they're drawn into — the exact <img> model (image_tainted?), with
-        # the fetching CLIENT's document (a frame's own, not the top window's) as
-        # the origin the verdict compares against.
+        # load); a plain one is a no-cors fetch whose bytes TAINT a canvas they're
+        # drawn into where a hop left the fetching CLIENT's origin (a frame's own
+        # document, not the top window's) — the <img> model (image_source_bytes).
         result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client_url, body_raw: true)
         return nil unless resource_loaded?(result) && result['status'].to_i < 400
         bytes = result['body_raw'].to_s
         return nil if bytes.empty?
-        {'bytes' => bytes, 'tainted' => origin_tainted?(url, cors, client_url: client_url)}
+        {'bytes' => bytes, 'tainted' => result['tainted'] == true}
       end
 
       def webauthn = (@webauthn ||= WebauthnState.new)
