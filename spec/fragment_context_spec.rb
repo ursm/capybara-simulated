@@ -57,4 +57,27 @@ RSpec.describe 'fragment parsing contexts' do
     JS
     expect(got).to eq(['input()', 'input()'])
   end
+
+  # …and a fragment's elements take its context's registry: a body made for a range its document's (HTML "create an
+  # element": Chrome), an inert document's none — insertAdjacentHTML's the node it was asked of (Chrome, WPT
+  # custom-elements/registries, whatwg/html#10854).
+  it 'gives a fragment its context’s registry' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        customElements.define('x-up', class extends HTMLElement {});
+        const reg = new CustomElementRegistry();
+        reg.define('x-up', class extends HTMLElement {});
+        const who = (n) => n.customElementRegistry === null ? 'null' : n.customElementRegistry === reg ? 'scoped' : 'global';
+        const sr = document.getElementById('h').attachShadow({mode: 'open', customElementRegistry: reg});
+        sr.append('t');
+        const at = (node) => { const r = document.createRange(); r.setStart(node, 0); return who(r.createContextualFragment('<x-up></x-up>').firstChild); };
+        const t = document.createElement('template');
+        sr.firstChild.after(document.createElement('i'));
+        sr.lastChild.insertAdjacentHTML('afterend', '<x-up></x-up>');
+        return [at(sr), at(sr.firstChild), at(t.content), who(sr.lastChild)];
+      })()
+    JS
+    expect(got).to eq(%w[global global null scoped])
+  end
 end
