@@ -86,6 +86,10 @@ impl DocumentStates {
     }
     // Whether `doc` has a browsing context — the realm's document and a frame's, not a `createHTMLDocument` /
     // DOMParser / XHR one (the bindings' flag, dom-nodes.js `DOC_NO_BROWSING_CONTEXT`).
+    // A document's mode: 0 no-quirks, 1 limited-quirks, 2 quirks.
+    pub(crate) fn mode(&self, doc: NodeId) -> u32 {
+        self.0.get(&doc).map_or(0, |s| s.mode)
+    }
     pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)
     }

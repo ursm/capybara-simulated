@@ -1387,10 +1387,9 @@ impl<'s> Build<'s> {
     }
 }
 
-// __dom.htmlParseFragment(html, wellFormed, contextNs, contextLocalName, formNid, quirks, document, templateDocument,
-// declarative, registry, registryObject) -> [count, nodes…, element, names, flags, …]: HTML's fragment
-// parsing algorithm in the context of an element (its namespace as `ns_code` numbers it, its local name; the nearest form
-// its form element pointer, -1 for none; its document's mode, as `htmlParse` takes it), built by the engine — the nodes
+// __dom.htmlParseFragment(html, wellFormed, contextNid, htmlAsBody, document, templateDocument, declarative, registry,
+// registryObject) -> [count, nodes…, element, names, flags, …]: HTML's fragment parsing algorithm in the context of an
+// element (none: a body), built by the engine — the nodes
 // in `document`, those in template contents in `templateDocument` — and answered as the parse's top-level nodes, out
 // of any parent, then the elements the bindings have steps for (`BUILT_*`), each with the names of its attributes whose
 // steps are theirs (undefined for none). With `declarative` (setHTMLUnsafe's), the declarative shadow roots the markup
@@ -1401,31 +1400,41 @@ fn html_parse_fragment(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         let mut standins = StandIns::default();
         let well_formed = args.get(1).boolean_value(scope);
         let html = parser_text(scope, args.get(0), well_formed, &mut standins);
-        let ns = args.get(2).int32_value(scope).unwrap_or(1);
-        let local = args.get(3).to_rust_string_lossy(scope);
-        let form = crate::dom::nid_arg(scope, &args, 4);
+        // (…in its context element's context, where it is one — "in body" where it is none or, with `htmlAsBody`, an HTML
+        // `html`: insertAdjacentHTML's and createContextualFragment's rule — the form element pointer its nearest
+        // `form`, the mode its node document's)
+        let context = crate::dom::nid_arg(scope, &args, 2);
+        let html_as_body = args.get(3).boolean_value(scope);
+        let context_doc = crate::node_handle::nid_of(scope, args.get(4));
+        let cid = crate::dom::realm_id(scope, &args);
+        let arena = crate::dom::realm(scope, cid);
+        let element = context.and_then(|c| arena.get(c).map(|n| (c, n))).filter(|(_, n)| {
+            n.kind == crate::dom::NodeKind::Element && !(html_as_body && n.is_html_named("html"))
+        });
+        let name = element.map_or_else(
+            || QualName::new(None, html5ever::ns!(html), html5ever::local_name!("body")),
+            |(_, n)| QualName::new(None, Namespace::from(&*n.ns), LocalName::from(&*n.local_name)),
+        );
+        let form = element.and_then(|(c, _)| arena.element_ancestor(c, &web_atoms::ns!(html), "form", true));
+        let mode = context_doc.map_or(0, |d| arena.document_states.mode(d));
         // (…its scripting flag the context's node document's: off for one with no browsing context — a DOMParser's, a
         // `createHTMLDocument` one's — or one sandboxed against scripts, a `<noscript>`'s content then markup: HTML "parse
         // HTML from a string", "scripting is disabled")
-        let context_doc = crate::node_handle::nid_of(scope, args.get(6));
-        let cid = crate::dom::realm_id(scope, &args);
-        let arena = crate::dom::realm(scope, cid);
         let scripting = context_doc.is_some_and(|d| {
             arena.document_states.has_browsing_context(d) && !arena.get(d).is_some_and(|n| arena.scripts_sandboxed(n.realm))
         });
-        let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode: quirks_mode(args.get(5).int32_value(scope)), ..Default::default() };
-        let name = QualName::new(None, namespace_of(ns), LocalName::from(local.as_str()));
-        let declarative = args.get(8).boolean_value(scope);
+        let opts = TreeBuilderOpts { scripting_enabled: scripting, quirks_mode: quirks_mode(i32::try_from(mode).ok()), ..Default::default() };
+        let declarative = args.get(6).boolean_value(scope);
         let builder = TreeBuilder::new_for_fragment(Sink::new(Some(name), declarative), 1, form.is_some().then_some(2), opts);
         let initial_state = Some(builder.tokenizer_state_for_context_elem(scripting));
         let tokenizer = Tokenizer::new(builder, TokenizerOpts { initial_state, discard_bom: false, ..Default::default() });
         // (…re-rooted in this scope, as the build's other handles are)
-        let doc = v8::Local::<v8::Object>::try_from(args.get(6)).ok().map(|d| v8::Local::new(scope, d));
-        let template_doc = v8::Local::<v8::Object>::try_from(args.get(7)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
+        let doc = v8::Local::<v8::Object>::try_from(args.get(4)).ok().map(|d| v8::Local::new(scope, d));
+        let template_doc = v8::Local::<v8::Object>::try_from(args.get(5)).ok().map(|d| v8::Local::new(scope, d)).or(doc);
         let mut build = Build::new(cid, doc, template_doc, vec![None, None, form]);
         build.contents_script = crate::script::SCRIPT_ALREADY_STARTED;
-        let registry = args.get(9).uint32_value(scope).unwrap_or(0);
-        let registry_object = v8::Local::<v8::Object>::try_from(args.get(10)).ok().map(|r| v8::Local::new(scope, r));
+        let registry = args.get(7).uint32_value(scope).unwrap_or(0);
+        let registry_object = v8::Local::<v8::Object>::try_from(args.get(8)).ok().map(|r| v8::Local::new(scope, r));
         build.registry = (registry != 0).then_some((registry, registry_object));
         let ops = parsed(tokenizer, html);
         build.standins = standins;
