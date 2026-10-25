@@ -36,7 +36,8 @@ pub(crate) const V_FETCHED: u32 = 2;
 pub(crate) const V_CROSS_ORIGIN: u32 = 4;
 
 // Who fetched it: the consumer, and for a link what it obtains and the destinations its `as` names; the mode its request
-// was in (its element's `crossorigin`: fetch_rules.rs `cors_request`); whether its document is in quirks mode.
+// was in (as it was made: its element's `crossorigin` then, fetch_rules.rs `cors_request`, which may have changed since);
+// whether its document is in quirks mode.
 pub(crate) struct Consumer<'a> {
     pub(crate) kind: u32,
     pub(crate) obtains: u32,
@@ -149,20 +150,17 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
     let k = v8::String::new(scope, key)?;
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
-// __dom.subresourceJudge(kind, nid, resp, source, doc, moduleDestination, preloadDestination) -> `judge` of `resp` — the
+// __dom.subresourceJudge(kind, mode, resp, source, doc, moduleDestination, preloadDestination) -> `judge` of `resp` — the
 // response as the host, a service worker or a scheme's processor gives it (its `status`, `type`, `redirected`, `tainted`,
 // `body_error`, its `headers`' Content-Type — else its `contentType` — and `X-Content-Type-Options`; `blocked` or
 // `__networkError` a network error, as no response at all is, but for an asset's, whose facts the host may not have
-// kept), its request made for the element `nid` (none for a worker's own), in the document `doc`; a link's the
-// destinations its `as` named as it planned the fetch — as its verdict bits.
+// kept), its request made in `mode` (null for no-cors), in the document `doc`; a link's the destinations its `as` named
+// as it planned the fetch — as its verdict bits.
 fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let packed = args.get(0).uint32_value(scope).unwrap_or(0);
     let (kind, obtains) = (packed & 0xff, packed >> 8);
     let source = args.get(3).uint32_value(scope).unwrap_or(0);
-    let attr = crate::dom::nid_arg(scope, &args, 1)
-        .and_then(|id| crate::dom::dom(scope).arena.get(id))
-        .and_then(|n| n.plain_attr("crossorigin").map(str::to_owned));
-    let (mode, _) = crate::fetch_rules::cors_request(attr.as_deref(), false);
+    let mode = if args.get(1).is_null_or_undefined() { "no-cors".to_owned() } else { args.get(1).to_rust_string_lossy(scope) };
     let quirks = matches!(kind, J_SHEET | J_LINK) && {
         let doc = crate::dom::nid_arg(scope, &args, 4);
         let cid = crate::dom::realm_id(scope, &args);
@@ -201,7 +199,7 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         if v.is_null_or_undefined() { String::new() } else { v.to_rust_string_lossy(scope) }
     };
     let (module_destination, preload_destination) = if kind == J_LINK { (destination(scope, 5), destination(scope, 6)) } else { Default::default() };
-    let consumer = Consumer { kind, obtains, module_destination: &module_destination, preload_destination: &preload_destination, mode, quirks };
+    let consumer = Consumer { kind, obtains, module_destination: &module_destination, preload_destination: &preload_destination, mode: &mode, quirks };
     rv.set_uint32(judge(&consumer, source, &facts));
 }
 
@@ -276,10 +274,14 @@ mod tests {
         assert_eq!(sheet("text/html", "basic", SRC_ASSET, false), V_FETCHED);
         assert_eq!(sheet("text/html", "basic", SRC_ASSET, true), OK);
         assert_eq!(sheet("text/html", "opaque", SRC_ASSET, true), V_FETCHED | V_CROSS_ORIGIN);
+        // (…as a no-cors one is whose chain left the document's origin and came back)
+        let back = Facts { content_type: "text/html".to_owned(), tainted: true, ..resp("basic", Some(200)) };
+        assert_eq!(judge(&Consumer { quirks: true, ..Consumer::of(J_SHEET) }, SRC_ASSET, &back), V_FETCHED | V_CROSS_ORIGIN);
         // (…a service worker's answer whatever its type; one the host refused for its status still a response; an asset
         // with no body none, one with no facts kept one to use)
         assert_eq!(sheet("text/html", "basic", SRC_SW_SYNC, false), OK);
         assert_eq!(judge(&Consumer::of(J_SHEET), SRC_SW_SYNC, &Facts { network_error: true, ..resp("basic", Some(404)) }), V_FETCHED);
+        assert_eq!(judge(&Consumer::of(J_SHEET), SRC_SW_SYNC, &Facts { network_error: true, ..resp("opaque", Some(404)) }), V_FETCHED | V_CROSS_ORIGIN);
         assert_eq!(judge(&Consumer::of(J_SHEET), SRC_SW_SYNC, &Facts { network_error: true, ..resp("basic", None) }), 0);
         assert_eq!(judge(&Consumer::of(J_SHEET), SRC_ASSET | S_NO_BODY, &Facts::default()), 0);
         assert_eq!(judge(&Consumer::of(J_SHEET), SRC_ASSET | S_NO_BODY, &resp("basic", Some(404))), V_FETCHED);

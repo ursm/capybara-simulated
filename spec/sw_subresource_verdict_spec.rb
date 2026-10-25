@@ -12,7 +12,9 @@ require_relative 'support/poll_until'
 RSpec.describe 'Service Worker subresource verdict' do
   include PollUntil
 
+  let(:hits) { [] }
   let(:app) {
+    hits = self.hits
     worker = <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
       self.addEventListener('fetch', e => {
@@ -21,15 +23,20 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/found') e.respondWith(new Response('yes'));
         else if (u.pathname === '/scope/unmodified') e.respondWith(new Response(null, {status: 304}));
         else if (u.pathname === '/scope/swerr.js') e.respondWith(Response.error());
+        else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
+        else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
       });
     JS
     Rack::Builder.new {
       run lambda {|env|
+        hits << env['PATH_INFO']
         case Rack::Request.new(env).path_info
         when '/'                then [200, {'content-type' => 'text/html'}, ['<html><body>main</body></html>']]
         when '/sw.js'           then [200, {'content-type' => 'text/javascript'}, [worker]]
         when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<html><body>in-scope</body></html>']]
         when '/scope/parsed.html' then [200, {'content-type' => 'text/html'}, ['<html><body><script src="/scope/swerr.js"></script></body></html>']]
+        when '/scope/refused.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+        when '/a.mp3' then [200, {'content-type' => 'audio/mpeg'}, [File.binread(File.expand_path('wpt/media/sound_5.mp3', __dir__))]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -128,4 +135,40 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq([['script:0'], ['script:0']])
   end
+  # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
+  # rules, and the network never asked for it — the cascade's and the getter's one answer. And a response is judged by
+  # the mode its request was made in: an audio whose `crossorigin` is set while its no-cors request is in flight takes
+  # the opaque answer a no-cors request may.
+  it "takes a worker's answer as its request was made" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument, seen = {};
+          const link = d.createElement('link');
+          link.rel = 'stylesheet';
+          link.onerror = () => { seen.sheet = link.sheet ? link.sheet.cssRules.length : null; };
+          link.href = '/scope/refused.css';
+          d.head.appendChild(link);
+          const audio = d.createElement('audio');
+          for (const type of ['canplaythrough', 'error']) audio.addEventListener(type, () => { seen.audio ??= type; });
+          audio.src = '/scope/away.mp3';
+          d.body.appendChild(audio);
+          setTimeout(() => { audio.crossOrigin = 'anonymous'; }, 0);
+          const done = () => (seen.sheet !== undefined && seen.audio ? (globalThis.__seen = seen) : setTimeout(done, 10));
+          done();
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('sheet' => 0, 'audio' => 'canplaythrough')
+    expect(hits).not_to include('/scope/refused.css')
+  end
 end
+

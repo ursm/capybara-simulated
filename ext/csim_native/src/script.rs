@@ -444,8 +444,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
     crate::dom::register(scope, ns, "prepareScript", prepare_script_op, context_id);
 }
-// Capybara::Simulated::Native.javascript_content(content_type) -> the same, for the host's worker and service worker
-// scripts.
+// Capybara::Simulated::Native.javascript_content(content_type) -> whether a response's `Content-Type` (Fetch "extract a
+// MIME type") is a JavaScript MIME type, for the host's worker and service worker scripts.
 pub(crate) fn javascript_content_for_ruby(content_type: String) -> bool {
     crate::mime::extract(&content_type).is_some_and(|m| is_javascript_mime(&m.essence))
 }

@@ -5334,7 +5334,7 @@ module Capybara
         # MIME enforcement is the consumer's, which the answer's content type
         # rides along for: a module script's applies (`module_content`), but a
         # stylesheet's is deliberately not applied to a worker's answer yet — the
-        # network path enforces it (`stylesheetResponseAccepted`, css-utils.js),
+        # network path enforces it (subresource_judge.rs `judge`),
         # but a `new Response(text)` respondWith (text/plain) serving a
         # stylesheet is load-bearing for green static-router subtests.
         type   = r['type'].to_s

@@ -58,7 +58,7 @@ RSpec.describe 'a stylesheet served as something other than CSS' do
   it 'applies none another origin redirected to it, in a quirks-mode document' do
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']
     ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
-    expect(outcome(doctype: '', type: 'text/plain', back: true)[1..]).to eq(%w[block inline SecurityError SecurityError])
+    expect(outcome(doctype: '', type: 'text/plain', back: true)).to eq(%w[error block inline SecurityError SecurityError])
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
