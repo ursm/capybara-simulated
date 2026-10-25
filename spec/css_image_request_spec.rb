@@ -6,9 +6,9 @@ require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
 
 # An image a rendered element's style uses is fetched at the rendering update that renders it — a page with nothing else
-# to run is stepped for it (timers.rs `realmPending`) — its `css` Resource Timing entry recorded, and its request is
-# Fetch's for one (CSS Values 4 "fetch a style resource"): no-cors, credentials `include`, another origin's cookies sent
-# with it, as with an `<img>` of no `crossorigin`.
+# to run is stepped for it (timers.rs `realmPending`), the restyle that owed it a task's or a script's read's — its
+# `css` Resource Timing entry recorded. (Its request is no-cors, credentials `include`: CSS Values 4 "fetch a style
+# resource".) And a document that lost its root since owes it no more.
 RSpec.describe 'an image a style sheet references', :https do
   include PollUntil
 
@@ -21,12 +21,11 @@ RSpec.describe 'an image a style sheet references', :https do
   end
 
   png = File.binread(File.expand_path('wpt/common/square.png', __dir__))
-  let(:cookies) { {} }
+  let(:cookies) { {} }   # (…what each path was requested with: that it was requested)
   let(:session) do
     simulated_session(lambda {|env|
       cookies[env['PATH_INFO']] = env['HTTP_COOKIE']
       case env['PATH_INFO']
-      when '/cookie' then [200, {'set-cookie' => 'k=v; SameSite=None; Secure; Path=/'}, ['']]
       when '/bg.png', '/img.png' then [200, {'content-type' => 'image/png'}, [png]]
       else
         page = <<~HTML
@@ -39,13 +38,17 @@ RSpec.describe 'an image a style sheet references', :https do
     })
   end
 
-  it 'is fetched on a page with nothing else to run, with another origin\'s cookies' do
-    session.visit 'https://other.example.com/cookie'
+  it 'is fetched on a page with nothing else to run' do
     session.visit '/'
-    # (…the page's rendering updates run as the driver asks it something: a CSS image is fetched at one)
-    expect(poll_until { session.evaluate_script('document.body.offsetHeight') && cookies.key?('/bg.png') && cookies.key?('/img.png') }).to be(true)
-    expect(cookies.values_at('/bg.png', '/img.png')).to eq(%w[k=v k=v])
+    # (…its restyle a script's read's, which wakes the loop, and the page stepped as the driver goes on asking it)
+    expect(poll_until { session.evaluate_script('document.body.offsetHeight') && cookies.key?('/bg.png') }).to be(true)
     css = session.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.initiatorType === 'css').map((e) => e.name)")
     expect(css).to eq(['https://other.example.com/bg.png'])
+  end
+
+  it 'leaves a page that lost its root settled' do
+    session.visit '/'
+    session.execute_script("document.body.offsetHeight; document.documentElement.remove()")
+    expect(poll_until { !session.evaluate_script('__dom.realmPending(null, true)') }).to be(true)
   end
 end

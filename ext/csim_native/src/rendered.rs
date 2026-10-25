@@ -719,6 +719,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "innerText", inner_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
     crate::dom::register(scope, ns, "cssImagesOwed", css_images_owed_op, context_id);
+    crate::dom::register(scope, ns, "cssImagesWaiting", css_images_waiting_op, context_id);
     crate::dom::register(scope, ns, "transparent", transparent_op, context_id);
 }
 
@@ -836,6 +837,13 @@ pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedVa
 // what its restyles left owed (`note_css_images`), in the order the restyles reached them — each its Resource Timing
 // initiator: `body` for a `<body background>` attribute's (which the style engine folds into `background-image` as a
 // presentational hint), `css` for every other. Undefined where the realm has no engine.
+// __dom.cssImagesWaiting() -> whether the calling realm's restyles left images owed their fetch (`CssImages::owed`):
+// what wakes an idle event loop after a read's style flush (timers.js `__csimWakeForRendering`).
+fn css_images_waiting_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).css_images.borrow().owed());
+}
+
 fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(owed) = with_engine(scope, &args, |engine, arena, now| {
         engine.flush(arena, now);
@@ -847,7 +855,13 @@ fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
                 (if body { "body" } else { "css" }, url)
             })
             .collect::<Vec<_>>()
-    }) else { return };
+    }) else {
+        // (…none fetched where the realm has no engine to say which: let go of all the same — owed for ever, they would
+        // keep its event loop stepping, `realmPending`)
+        let cid = crate::dom::realm_id(scope, &args);
+        crate::dom::realm(scope, cid).css_images.get_mut().owed.clear();
+        return;
+    };
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(owed.len() * 2);
     for (initiator, url) in &owed {
         let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };

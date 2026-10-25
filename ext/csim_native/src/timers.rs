@@ -507,8 +507,9 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 
 // __dom.realmPending(realm, subtree) -> whether realm `realm` (the calling one, for null) has work its event loop is to
 // run — a timer, an animation frame or idle callback, an observation owed at its next rendering update
-// (`GEN_OBSERVATIONS`), a CSS image owed its fetch there (rendered.rs `CssImages::owed`), an autofocus candidate a flush is owed for, an animation that needs frames (`frames_due`) — and,
-// with `subtree`, any realm of its child navigables does, theirs too: what keeps the driver stepping the page.
+// (`GEN_OBSERVATIONS`), a CSS image owed its fetch there (rendered.rs `CssImages::owed`), an autofocus candidate a flush
+// is owed for, an animation that needs frames (`frames_due`) — and, with `subtree`, any realm of its child navigables
+// does, theirs too: what keeps the driver stepping the page.
 fn realm_pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = if args.get(0).is_int32() { args.get(0).int32_value(scope).unwrap_or(0) } else { realm_id(scope, &args) };
     let subtree = args.get(1).is_true();
