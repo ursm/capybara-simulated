@@ -48,7 +48,7 @@ RSpec.describe 'an image a style sheet references', :https do
 
   it 'leaves a page that lost its root settled' do
     session.visit '/'
-    session.execute_script("document.body.offsetHeight; document.documentElement.remove()")
+    session.execute_script('document.body.offsetHeight; document.documentElement.remove()')
     expect(poll_until { !session.evaluate_script('__dom.realmPending(null, true)') }).to be(true)
   end
 end

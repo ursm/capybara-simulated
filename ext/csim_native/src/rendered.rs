@@ -837,13 +837,6 @@ pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedVa
 // what its restyles left owed (`note_css_images`), in the order the restyles reached them — each its Resource Timing
 // initiator: `body` for a `<body background>` attribute's (which the style engine folds into `background-image` as a
 // presentational hint), `css` for every other. Undefined where the realm has no engine.
-// __dom.cssImagesWaiting() -> whether the calling realm's restyles left images owed their fetch (`CssImages::owed`):
-// what wakes an idle event loop after a read's style flush (timers.js `__csimWakeForRendering`).
-fn css_images_waiting_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).css_images.borrow().owed());
-}
-
 fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(owed) = with_engine(scope, &args, |engine, arena, now| {
         engine.flush(arena, now);
@@ -869,6 +862,13 @@ fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         items.push(u.into());
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.cssImagesWaiting() -> whether the calling realm's restyles left images owed their fetch (`CssImages::owed`):
+// what wakes an idle event loop after a read's style flush (timers.js `__csimWakeForRendering`).
+fn css_images_waiting_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).css_images.borrow().owed());
 }
 
 // Whether `id` or an element of its flat-tree ancestry has an `opacity` of 0 — what `checkVisibility({opacityProperty})`
