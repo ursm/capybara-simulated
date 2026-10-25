@@ -90,6 +90,17 @@ RSpec.describe 'resource timing' do
     expect(entries(s).map {|e| e['entryType'] }.uniq).to eq(['resource'])
   end
 
+  # …once for the PAGE: a new one — a reload, its Document reused in place — fetches its image and its imports anew, and
+  # records them again (the memory cache is the page's: subresources.rs `timedOnce`)
+  it 'records a reloaded page\'s image and import again' do
+    s = session
+    await_images(s)
+    s.execute_script('window.__old = true; location.reload()')
+    expect(poll_until { s.evaluate_script('window.__old') != true }).to be(true)
+    await_images(s)
+    expect([entries(s, '/i.png').length, entries(s, '/i.css').length]).to eq([1, 1])
+  end
+
   it 'records fetch, XMLHttpRequest and sendBeacon entries' do
     s = session
     s.execute_script("fetch('/d.json'); var x = new XMLHttpRequest(); x.open('GET', '/b.js', false); x.send(); navigator.sendBeacon('/beacon', 'x');")

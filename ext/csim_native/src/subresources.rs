@@ -25,6 +25,19 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
     crate::dom::register(scope, ns, "setObjectFallback", set_object_fallback_op, context_id);
     crate::dom::register(scope, ns, "useReference", use_reference_op, context_id);
+    crate::dom::register(scope, ns, "timedOnce", timed_once_op, context_id);
+}
+
+// What a resource fetched once for the page — its Resource Timing entry recorded once, as the memory cache serves it
+// after (`timed_resources`) — is kept under: an image's (an `<img>`'s, an `<input type=image>`'s), an `@import`'s.
+const TIMED_KINDS: [&str; 2] = ["image", "css"];
+
+// __dom.timedOnce(kind, url) -> whether the page fetches the resource at `url` of `kind` (`TIMED_KINDS`' place) the first
+// time — none before since it began (`RealmArena::timed_resources`, cleared as it does) — now entered.
+fn timed_once_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(&kind) = args.get(0).uint32_value(scope).and_then(|k| TIMED_KINDS.get(k as usize)) else { return rv.set_bool(false) };
+    let url = args.get(1).to_rust_string_lossy(scope);
+    rv.set_bool(crate::dom::dom(scope).arena.timed_resources.insert((kind, url)));
 }
 
 // The URL an SVG `<use>` element `id` references in another document — its `href`, else its XLink one, trimmed and
