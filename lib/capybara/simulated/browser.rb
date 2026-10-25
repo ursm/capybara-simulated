@@ -10024,11 +10024,12 @@ module Capybara
         # the per-hop referrer reassignment (5927 below) degrades ref_source, and independent of
         # Referrer-Policy: the initiator is the referrer's origin (a SW's `fetch(event.request)`
         # carries the navigating frame's origin here, so a cross-origin passthrough is same-/cross-site
-        # correctly), falling back to the document origin when the referrer was policy-emptied — never
-        # 'none' for a request that has a real initiator. An explicit `initiator` is authoritative:
+        # correctly), falling back to the client's origin when the referrer was policy-emptied or has
+        # none (an about:blank document's: its creator's) — never 'none' for a request that has a real
+        # initiator. An explicit `initiator` is authoritative:
         # it survives the referrer reset a `new Request(event.request, init)` performs (referrer →
         # about:client), so a SW's change-request re-fetch is same-origin to the SW's own script.
-        sec_initiator = initiator || url_origin(ref_source) || url_origin(@current_url)
+        sec_initiator = initiator || url_origin(ref_source) || client_origin
         # (…the site for cookies and the client it is judged by, kept across the hops: a redirect back to the client's own
         # site is still a cross-site chain's)
         cookie_site = cookie_client = nil
