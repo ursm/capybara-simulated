@@ -72,11 +72,6 @@ pub(crate) fn blocked_by_nosniff(destination: &str, content_type: &str, nosniff:
     }
     is("style") && essence.as_deref() != Some("text/css")
 }
-// __dom.nosniffBlocked(destination, contentType, nosniff) -> `blocked_by_nosniff`.
-fn nosniff_blocked_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [destination, content_type, nosniff] = [0, 1, 2].map(|i| args.get(i).to_rust_string_lossy(scope));
-    rv.set_bool(blocked_by_nosniff(&destination, &content_type, &nosniff));
-}
 
 // Fetch "HTTP fetch" (§4.4) step 5.5: whether a service worker's response may answer a request in `mode` with
 // `redirect` — none of an error, a CORS response to a same-origin request, an opaque one to a request not no-cors, an
@@ -429,8 +424,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "interceptedHop", intercepted_hop_op, context_id);
     crate::dom::register(scope, ns, "requestBodyHeader", request_body_header_op, context_id);
     crate::dom::register(scope, ns, "responseHeader", response_header_op, context_id);
-    crate::dom::register(scope, ns, "swSubresourceUsable", sw_subresource_usable_op, context_id);
-    crate::dom::register(scope, ns, "nosniffBlocked", nosniff_blocked_op, context_id);
     crate::dom::register(scope, ns, "fetchRoute", fetch_route_op, context_id);
     crate::dom::register(scope, ns, "forbiddenMethod", forbidden_method_op, context_id);
     crate::dom::register(scope, ns, "headerValue", header_value_op, context_id);
@@ -507,12 +500,6 @@ fn fetch_route_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let (url, here) = (args.get(0).to_rust_string_lossy(scope), args.get(2).to_rust_string_lossy(scope));
     let flags = args.get(1).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(fetch_route(&url, flags, &here));
-}
-// __dom.swSubresourceUsable(destination, mode, type, redirected, status) -> `sw_subresource_usable`.
-fn sw_subresource_usable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [destination, mode, response_type] = [0, 1, 2].map(|k| args.get(k).to_rust_string_lossy(scope));
-    let status = args.get(4).uint32_value(scope).unwrap_or(0);
-    rv.set_bool(sw_subresource_usable(&destination, &mode, &response_type, args.get(3).is_true(), status));
 }
 // __dom.corsRequest(el, module) -> [mode, credentials] of the request element `el` makes (`cors_request`, by its
 // `crossorigin` attribute) — one of no element (a module graph's root nobody's) as one of no attribute.

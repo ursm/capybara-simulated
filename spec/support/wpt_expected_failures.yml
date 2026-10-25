@@ -1975,10 +1975,6 @@ css/cssom/serialize-values.html:
 - 'outline-color: invert'
 - 'widows: 101'
 - 'widows: inherit'
-css/cssom/stylesheet-cross-origin-redirect-quirks.sub.html:
-- Cross-origin redirect to same-origin with wrong MIME type
-- Same-origin redirect to cross-origin redirect back to same-origin with wrong MIME
-  type
 custom-elements/cross-realm-callback-report-exception.html:
 - constructor
 custom-elements/custom-element-reaction-queue.html:

@@ -8,7 +8,6 @@ use crate::token_list::{link_types, LINK_MANIFEST, LINK_MODULEPRELOAD, LINK_PREF
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "linkPlan", link_plan_op, context_id);
     crate::dom::register(scope, ns, "linkMediaSkipped", link_media_skipped_op, context_id);
-    crate::dom::register(scope, ns, "linkResponseAccepted", link_response_accepted_op, context_id);
 }
 
 // What a link's load does (`link_plan`): nothing — no fetch, no event; fail at once — its `error`, no fetch; or fetch.
@@ -17,10 +16,10 @@ const PLAN_FAIL: u32 = 1;
 const PLAN_FETCH: u32 = 2;
 // The resources a link obtains, by its link types (`link_plan`'s second answer): a style sheet, a prefetch, a module
 // preload, a preload — one that is none of the others — and a manifest.
-const OBTAINS_STYLESHEET: u32 = 1;
-const OBTAINS_PREFETCH: u32 = 1 << 1;
-const OBTAINS_MODULEPRELOAD: u32 = 1 << 2;
-const OBTAINS_PRELOAD: u32 = 1 << 3;
+pub(crate) const OBTAINS_STYLESHEET: u32 = 1;
+pub(crate) const OBTAINS_PREFETCH: u32 = 1 << 1;
+pub(crate) const OBTAINS_MODULEPRELOAD: u32 = 1 << 2;
+pub(crate) const OBTAINS_PRELOAD: u32 = 1 << 3;
 const OBTAINS_MANIFEST: u32 = 1 << 4;
 
 pub(crate) struct Plan {
@@ -125,21 +124,6 @@ fn link_media_skipped_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(realm(scope, cid).get(id).is_some_and(|n| n.state & STATE_LINK_MEDIA_SKIPPED != 0));
-}
-
-// __dom.linkResponseAccepted(obtains, moduleDestination, preloadDestination, contentType, nosniff, url, quirks, worker)
-// -> `link_response_accepted`, same-origin by `url` against this realm's origin.
-fn link_response_accepted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let obtains = args.get(0).uint32_value(scope).unwrap_or(0);
-    let [module, preload, content_type, nosniff, url] = [1, 2, 3, 4, 5].map(|i| {
-        let v = args.get(i);
-        if v.is_null_or_undefined() { String::new() } else { v.to_rust_string_lossy(scope) }
-    });
-    let (quirks, worker) = (args.get(6).is_true(), args.get(7).is_true());
-    let cid = realm_id(scope, &args);
-    let origin = realm(scope, cid).location.origin().to_owned();
-    let same_origin = || ada_url::Url::parse(&url, None).is_ok_and(|u| u.origin() == origin);
-    rv.set_bool(link_response_accepted(obtains, &module, &preload, &content_type, &nosniff, quirks, worker, same_origin));
 }
 
 #[cfg(test)]
