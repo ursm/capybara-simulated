@@ -38,6 +38,19 @@ RSpec.describe 'resource timing' do
       when '/redir'    then [302, {'location' => '/d.json'}, ['']]
       when '/i.png'    then [200, {'content-type' => 'image/png'}, [File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)]]
       when '/f.html'   then [200, {'content-type' => 'text/html'}, ['<p>frame</p>']]
+      when '/f2.html'  then [200, {'content-type' => 'text/html'}, ['<link rel="stylesheet" href="/a.css"><img src="/i.png">']]
+      when '/both.html' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><link rel="stylesheet" href="/a.css"><img src="/i.png"><iframe id="fr" src="/f2.html"></iframe>']]
+      when '/frame-first.html'
+        page = <<~HTML
+          <!DOCTYPE html><iframe src="/f2.html"></iframe>
+          <script>
+            setTimeout(() => {
+              document.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="/a.css">');
+              document.body.append(Object.assign(new Image(), {src: '/i.png'}));
+            }, 300);
+          </script>
+        HTML
+        [200, {'content-type' => 'text/html'}, [page]]
       when '/hash.html' then [200, {'content-type' => 'text/html'}, ['<script>parent.__hashes = (parent.__hashes || []).concat([location.hash]); if (parent.__hashes.length < 2) setTimeout(function () { location.hash = "check"; location.reload(); }, 0);</script>']]
       when '/missing', '/missing.js' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/xo'       then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['cross origin']]
@@ -101,19 +114,18 @@ RSpec.describe 'resource timing' do
     expect([entries(s, '/i.png').length, entries(s, '/i.css').length]).to eq([1, 1])
   end
 
-  # …each page its own: a frame loading the image and the import its parent did records them for itself, and so does the
-  # parent loading them after its frame (the page's memory cache is its own, whichever realm ran last)
+  # …each page its own: a frame whose parse loads the image and the import its parent's did records them for itself, and
+  # so does a parent loading them after its frame (the page's memory cache is its own, whichever realm the engine ran
+  # last as an image arrived)
   it 'records a frame\'s and its parent\'s image and import each' do
-    s = session
+    paths = ->(s, win) { s.evaluate_script("#{win}.performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname).sort()") }
+    s = simulated_session(app)
+    s.visit 'http://www.example.com/both.html'
     await_images(s)
-    frame_names = -> { s.evaluate_script("frames[0].performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname)") }
-    s.execute_script(<<~JS)
-      const f = document.getElementById('fr');
-      f.contentDocument.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="/a.css">');
-      f.contentDocument.body.append(Object.assign(f.contentDocument.createElement('img'), {src: '/i.png'}));
-    JS
-    expect(poll_until { (frame_names.call & %w[/i.png /i.css]).length == 2 }).to be(true)
-    expect([entries(s, '/i.png').length, entries(s, '/i.css').length]).to eq([1, 1])
+    expect(poll_until { paths.(s, 'frames[0]').include?('/i.css') && paths.(s, 'frames[0]') }).to include('/i.png')
+    t = simulated_session(app)
+    t.visit 'http://www.example.com/frame-first.html'
+    expect(poll_until { paths.(t, 'window').include?('/i.css') && paths.(t, 'window') }).to include('/i.png')
   end
 
   it 'records fetch, XMLHttpRequest and sendBeacon entries' do

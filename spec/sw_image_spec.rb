@@ -31,8 +31,8 @@ RSpec.describe 'a service worker image' do
       when '/scope/s.svg' then [200, {'content-type' => 'image/svg+xml'}, ['<svg xmlns="http://www.w3.org/2000/svg"><rect id="r" width="5" height="5"/></svg>']]
       when '/scope/use.html'
         page = <<~HTML
-          <!doctype html><meta charset="utf-8"><img src="/scope/s.svg">
-          <script>setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<svg><use href="/scope/s.svg#r"/></svg>'), 300)</script>
+          <!doctype html><meta charset="utf-8"><svg><use href="/scope/s.svg#r"/></svg>
+          <script>setTimeout(() => document.body.append(Object.assign(new Image(), {src: '/scope/s.svg'})), 300)</script>
         HTML
         [200, {'content-type' => 'text/html'}, [page]]
       else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>page']]
@@ -51,7 +51,8 @@ RSpec.describe 'a service worker image' do
   end
 
   # …and an image and an SVG `<use>` of the same URL are two resources of two types — two requests, two entries — not the
-  # one the page's memory cache served the second (Blink keys its memory cache by type)
+  # one the page's memory cache served the second (Blink keys its memory cache by type): an image after a use of its URL
+  # times its own
   it 'times an image and a use of its URL apart' do
     session = simulated_session(app)
     session.visit '/'
