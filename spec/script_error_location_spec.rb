@@ -99,6 +99,25 @@ RSpec.describe 'script error locations' do
     expect(s.evaluate_script('seen')).to eq([6, 3])
   end
 
+  # …and a small script's text that does not compile where it stopped, its document's line and its own column; one
+  # inserted at its own line; a SyntaxError the script threw as it ran where it threw it (Chrome: 6:10, 2:7)
+  it 'reports a small script’s syntax error where its text stopped' do
+    page = <<~HTML
+      <!DOCTYPE html>
+      <script>window.seen = []; onerror = (m, f, l, c, e) => { seen.push([l, c, e.name]); };</script>
+
+      <script>
+        x = 1;
+           var = ;
+      </script>
+      <script>window.thrown = new SyntaxError('ran'); throw thrown;</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script("const s = document.createElement('script'); s.text = '\\n  foo bar'; document.body.append(s)")
+    expect(s.evaluate_script('seen')).to eq([[6, 10, 'SyntaxError'], [8, 17, 'SyntaxError'], [2, 7, 'SyntaxError']])
+  end
+
   # …nor the parser's line to an empty script it made, its text given later: that text the parser's no more than an
   # inserted script's is, counted from its own first line (Chrome: 3)
   it 'counts a parser script’s later text from its own first line' do

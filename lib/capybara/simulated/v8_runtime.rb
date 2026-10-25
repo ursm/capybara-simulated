@@ -1783,6 +1783,13 @@ module Capybara
           # (…named its label, as a module's referrer: an `import()` in it resolves against its script's base URL)
           c.eval_void("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}", filename: label.to_s)
         })
+        # A script's text compiled and never run, named its label: the SyntaxError
+        # it throws where it does not compile carries where in that text it
+        # stopped, as the eval path's cannot (the dispatcher below).
+        c.attach('__csim_compileScript', ->(label, body) {
+          c.compile(body.to_s, filename: label.to_s).dispose
+          nil
+        })
         # A javascript: URL's source (url-parse.js `runJavascriptURL`), run as a top-level Script, as HTML runs it — its
         # declarations the global's wherever they sit — its completion value handed back only where it is a primitive:
         # a string replaces the document, and an object it ends with (`javascript:window.open(…)`'s Window) is never
@@ -1802,6 +1809,7 @@ module Capybara
           (function () {
             const cached    = globalThis.__csim_runScriptCached;
             const runEval   = globalThis.__csim_runScriptEval;
+            const compile   = globalThis.__csim_compileScript;
             const threshold = #{SCRIPT_CACHE_MIN_BYTES};
             // (…the realm's own eval, taken as the realm is built: a page that replaced `window.eval` stops none of
             // its later scripts, as Chrome compiles them without calling it)
@@ -1838,7 +1846,15 @@ module Capybara
               // (…and one that may `import()`: run as a script named its label, the referrer its import resolves through —
               // the `(0, eval)` path's is the anonymous `<eval>` of every one of them)
               if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body) || MAY_IMPORT.test(body)) return runEval(label || 'csim-eval', body);
-              indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
+              try {
+                indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
+              } catch (e) {
+                // (…its text that did not compile reported where it stopped (Chrome): the eval's SyntaxError names no
+                // script, as V8 never reached the `sourceURL` after it — compiled again on this, the error path alone,
+                // which throws the one that does; one the script threw as it ran compiles, and is rethrown)
+                if (e instanceof SyntaxError) compile(label || 'csim-eval', body);
+                throw e;
+              }
             };
           })();
         JS
