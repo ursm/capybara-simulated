@@ -255,18 +255,23 @@ fn thrown_at(scope: &mut v8::PinScope<'_, '_>, e: v8::Local<'_, v8::Value>) -> O
 }
 
 // The line of its document a `line` of the code named `url` is: an inline script's counted from the line its text begins
-// on (`inline://…@N`: bridge.entry.js `executeClassicScript`, where the parser made it), any other's its own.
-fn document_line(url: &str, line: u32) -> u32 {
-    let start = url.strip_prefix("inline://").and_then(|r| r.split_once('@')).and_then(|(_, n)| n.split('~').next()?.parse::<u32>().ok());
-    start.map_or(line, |s| line + s.saturating_sub(1))
+// on (`inline_lines`, where the parser made it), any other's its own.
+fn document_line(inline_lines: &std::collections::HashMap<String, u32>, url: &str, line: u32) -> u32 {
+    inline_lines.get(url).map_or(line, |start| line + start.saturating_sub(1))
 }
 
-// __dom.takeScriptLine(nid) -> the line of its document the script the parser made begins on (`script_lines`), 0 for a
-// script it did not make — taken, as it runs once.
-fn take_script_line_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
+// __dom.takeScriptLine(nid, name): the inline script `nid` runs under the name `name`, from the line of its document the
+// parser made it begin on (`script_lines`, taken: it runs once) — none for a script the parser did not make, whose lines
+// are its own (`inline_lines`).
+fn take_script_line_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = nid_arg(scope, &args, 0) else { return };
+    let name = args.get(1).to_rust_string_lossy(scope);
     let cid = crate::dom::realm_id(scope, &args);
-    rv.set_uint32(crate::dom::realm(scope, cid).script_lines.remove(&id).unwrap_or(0));
+    let arena = crate::dom::realm(scope, cid);
+    match arena.script_lines.remove(&id).filter(|&line| line > 1) {
+        Some(line) => arena.inline_lines.insert(name, line),
+        None => arena.inline_lines.remove(&name),
+    };
 }
 
 // src/v8_shim.cc: the function a bound function calls.
@@ -321,13 +326,17 @@ fn exception_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     }
     let muted = v8::Boolean::new(scope, muted).into();
     let items = match thrown.or(stack) {
-        Some((document, url, line, column)) => vec![
-            muted,
-            v8::Boolean::new(scope, document).into(),
-            v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
-            v8::Integer::new_from_unsigned(scope, document_line(&url, line)).into(),
-            v8::Integer::new_from_unsigned(scope, column).into(),
-        ],
+        Some((document, url, line, column)) => {
+            // (…an inline script's line its document's)
+            let line = document_line(&crate::dom::realm(scope, cid).inline_lines, &url, line);
+            vec![
+                muted,
+                v8::Boolean::new(scope, document).into(),
+                v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into),
+                v8::Integer::new_from_unsigned(scope, line).into(),
+                v8::Integer::new_from_unsigned(scope, column).into(),
+            ]
+        }
         None => vec![muted],
     };
     rv.set(v8::Array::new_with_elements(scope, &items).into());
@@ -645,8 +654,8 @@ mod tests {
         assert_eq!(stack_location("E\n    at eval (eval at g (eval at f (http://a/s.js:1:2), <anonymous>:3:4), <anonymous>:1:7)"), Some((true, "http://a/s.js".to_owned(), 1, 7)));
         assert_eq!(stack_location("E\n    at eval (eval at http://a/s.js:1:5, <anonymous>:2:3)"), Some((true, "http://a/s.js".to_owned(), 2, 3)));
         assert_eq!(stack_location("E\n    at inline://3:2:1"), Some((true, "inline://3".to_owned(), 2, 1)));
-        assert_eq!(stack_location("E\n    at inline://3@12~1:2:1"), Some((true, "inline://3@12~1".to_owned(), 2, 1)));
-        assert_eq!((super::document_line("inline://3@12~1", 2), super::document_line("inline://3", 2), super::document_line("http://a/s.js", 2)), (13, 2, 2));
+        let lines = std::collections::HashMap::from([("inline://3".to_owned(), 12)]);
+        assert_eq!((super::document_line(&lines, "inline://3", 2), super::document_line(&lines, "inline://4", 2), super::document_line(&lines, "http://a/s.js", 2)), (13, 2, 2));
         assert_eq!(stack_location("no frames"), None);
         // (…a function name of parentheses its own, the location after the last ` (`; a URL of them kept)
         assert_eq!(stack_location("E\n    at foo (bar) (http://a/s.js:3:22)"), Some((false, "http://a/s.js".to_owned(), 3, 22)));
