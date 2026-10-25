@@ -1459,12 +1459,13 @@ module Capybara
           # (HTML "resolve a module integrity metadata").
           integ = url_s == sw[:root] ? sw[:integrity].to_s : ''
           integ = @browser.importmap_integrity(url_s, realm_key(target)) if integ.empty?
+          # (…its destination its module type's, a JSON module's `json`, as the network's below)
           r = @browser.sw_script_subresource_fetch(
             sw[:handle],
             url_s,
             sw[:client_id],
             sw[:referrer],
-            'script',
+            json_module?(url_s) ? 'json' : 'script',
             'cors',
             sw[:credentials] || 'same-origin',
             integrity: integ
