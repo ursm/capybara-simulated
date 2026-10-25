@@ -154,9 +154,10 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "subresourceJudge", judge_op, context_id);
 }
-// The member `key` of `obj`, None where it is null or undefined.
+// The member `key` of `obj`, None where it is null or undefined — its name internalized, as a property key is (every
+// script asks: the op is on the path of each).
 fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, key: &str) -> Option<v8::Local<'s, v8::Value>> {
-    let k = v8::String::new(scope, key)?;
+    let k = v8::String::new_from_one_byte(scope, key.as_bytes(), v8::NewStringType::Internalized)?;
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
 // __dom.subresourceJudge(kind, mode, resp, source, doc, a, b) -> `judge` of `resp` — the
@@ -180,22 +181,30 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         Err(_) => Facts { network_error: source & SRC_MASK != SRC_ASSET, ..Facts::default() },
         Ok(resp) => {
             let flag = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, resp, key).is_some_and(|v| v.boolean_value(scope));
-            let network_error = flag(scope, "blocked") || flag(scope, "__networkError");
+            // (…an asset's no network error, its facts the host's of a response it had; a redirect a fetch event's answer's
+            // alone to judge)
+            let from = source & SRC_MASK;
+            let network_error = from != SRC_ASSET && (flag(scope, "blocked") || flag(scope, "__networkError"));
             let response_type = member(scope, resp, "type").map_or_else(|| "default".to_owned(), |v| v.to_rust_string_lossy(scope));
             let status = member(scope, resp, "status").and_then(|v| v.number_value(scope)).map(|n| n as u32);
             let typed = matches!(kind, J_CLASSIC_SCRIPT | J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK);
             let headers = if typed { member(scope, resp, "headers").and_then(|h| v8::Local::<v8::Object>::try_from(h).ok()) } else { None };
-            let header = |scope: &mut v8::PinScope<'_, '_>, name: &str| headers.and_then(|h| crate::fetch_rules::response_header(scope, h, name));
+            let sniffed = matches!(kind, J_CLASSIC_SCRIPT | J_SHEET | J_LINK);
+            let [content_type, nosniff] = match headers {
+                Some(h) if sniffed => crate::fetch_rules::response_headers(scope, h, ["content-type", "x-content-type-options"]),
+                Some(h) => [crate::fetch_rules::response_header(scope, h, "content-type"), None],
+                None => [None, None],
+            };
             let content_type = if typed {
-                header(scope, "content-type").or_else(|| member(scope, resp, "contentType").map(|v| v.to_rust_string_lossy(scope))).unwrap_or_default()
+                content_type.or_else(|| member(scope, resp, "contentType").map(|v| v.to_rust_string_lossy(scope))).unwrap_or_default()
             } else {
                 String::new()
             };
-            let nosniff = if matches!(kind, J_CLASSIC_SCRIPT | J_SHEET | J_LINK) { header(scope, "x-content-type-options").unwrap_or_default() } else { String::new() };
+            let nosniff = nosniff.unwrap_or_default();
             Facts {
                 network_error,
                 response_type,
-                redirected: flag(scope, "redirected"),
+                redirected: from == SRC_SW_EVENT && flag(scope, "redirected"),
                 status,
                 body_error: flag(scope, "body_error"),
                 tainted: flag(scope, "tainted"),

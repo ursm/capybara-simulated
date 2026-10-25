@@ -539,19 +539,27 @@ fn forbidden_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // The value of the header `name` (lowercase) among a response's headers as the host gives them — an object keyed by
 // name, in any case, a list of values joined with ", " — or None for none.
 pub(crate) fn response_header(scope: &mut v8::PinScope<'_, '_>, headers: v8::Local<'_, v8::Object>, name: &str) -> Option<String> {
-    let keys = headers.get_own_property_names(scope, Default::default())?;
+    let [value] = response_headers(scope, headers, [name]);
+    value
+}
+// …and those of several `names`, in one pass over the headers.
+pub(crate) fn response_headers<const N: usize>(scope: &mut v8::PinScope<'_, '_>, headers: v8::Local<'_, v8::Object>, names: [&str; N]) -> [Option<String>; N] {
+    let mut out = [const { None }; N];
+    let Some(keys) = headers.get_own_property_names(scope, Default::default()) else { return out };
     for i in 0..keys.length() {
         let Some(key) = keys.get_index(scope, i) else { continue };
-        if !key.to_rust_string_lossy(scope).eq_ignore_ascii_case(name) {
+        let name = key.to_rust_string_lossy(scope);
+        let Some(at) = names.iter().position(|n| name.eq_ignore_ascii_case(n)) else { continue };
+        if out[at].is_some() {
             continue;
         }
-        let value = headers.get(scope, key).filter(|v| !v.is_null_or_undefined())?;
-        return Some(match v8::Local::<v8::Array>::try_from(value) {
+        let Some(value) = headers.get(scope, key).filter(|v| !v.is_null_or_undefined()) else { continue };
+        out[at] = Some(match v8::Local::<v8::Array>::try_from(value) {
             Ok(list) => (0..list.length()).filter_map(|j| list.get_index(scope, j)).map(|v| v.to_rust_string_lossy(scope)).collect::<Vec<_>>().join(", "),
             Err(_) => value.to_rust_string_lossy(scope),
         });
     }
-    None
+    out
 }
 // __dom.responseHeader(headers, name) -> `response_header`, null for none.
 fn response_header_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
