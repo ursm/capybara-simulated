@@ -5379,7 +5379,7 @@ module Capybara
         opaque   = r['type'].to_s == 'opaque'
         body_b64 = opaque && r['render_b64'] ? r['render_b64'].to_s : r['body_b64'].to_s
         {
-          'status'  => opaque ? 200 : (r['status'] || 200).to_i,
+          'status'  => (opaque ? r['render_status'] : r['status'] || 200).to_i,
           'type'    => r['type'].to_s,
           'headers' => opaque ? {'content-type' => r['render_ct'].to_s} : r['headers'] || {},
           'body'    => RuntimeShared.utf8_text(Base64.decode64(body_b64))
@@ -10411,7 +10411,7 @@ module Capybara
           # for a cross-origin (CORS-allowed) response, else 'basic'.
           if no_cors_mode && crossed
             return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size,
-                                                                                    opaque_render_type: header_text(header_field(resp_headers, 'content-type')))
+                                                                                    opaque_render_meta: [status, header_text(header_field(resp_headers, 'content-type'))])
           end
           out = marked.(response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers))
           # (…a document's navigation request's the method its last hop went with, which its session history entry
@@ -10527,7 +10527,7 @@ module Capybara
       # that decodes the bytes here and never shows them to script): the bytes ride
       # `body_raw` untouched and the text decode is skipped — it would be pure waste on
       # a path that runs for EVERY image load.
-      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, body_cut_short: false, opaque_render: nil, opaque_render_type: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
+      def response_hash(status, headers, body, url, redirected, type: 'basic', body_null: false, body_cut_short: false, opaque_render: nil, opaque_render_meta: nil, body_raw: false, cached: nil, encoded: nil, raw_headers: nil)
         raw     = body.to_s
         hdrs    = stringify(headers)
         # Resource Timing's sizes: the decoded body, the body on the wire (before a
@@ -10611,8 +10611,8 @@ module Capybara
         # destination (a SW's own no-cors `fetch()` doesn't know its eventual consumer is an <img>),
         # so the choice is made client-side. The bytes are already in memory (`body_str`).
         out['opaque_render'] = opaque_render.b if opaque_render && !opaque_render.empty?
-        # (…and the MIME type it hides, for a consumer that checks it — a worker-imported script's)
-        out['render_ct'] = opaque_render_type if opaque_render_type
+        # (…and the status and MIME type it hides, for a consumer that checks them — a worker-imported script's)
+        out['render_status'], out['render_ct'] = opaque_render_meta if opaque_render_meta
         out
       end
 
