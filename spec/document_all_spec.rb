@@ -1,0 +1,34 @@
+# frozen_string_literal: true
+
+require 'capybara/simulated'
+require_relative 'support/session_teardown'
+
+# `document.all` (HTML §2.6.2): an HTMLAllCollection that is HTML's [[IsHTMLDDA]] object — typeof "undefined", falsy,
+# == null, so `if (document.all)` takes the path a library takes in a modern browser — yet a live collection of the
+# document's elements in tree order, its indices and its all-named elements (an id, or the name of an `a`, `img`, `form`,
+# …: one an element, more an HTMLCollection), and callable as its `item`.
+RSpec.describe 'document.all' do
+  let(:page) { '<!DOCTYPE html><p id="a">x</p><img name="b"><img name="b"><form name="f"></form><span name="s"></span>' }
+  let(:session) { simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] }) }
+
+  it 'is an undetectable live collection of the document’s elements' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      [typeof document.all, !!document.all, document.all == null, document.all === document.all,
+       document.all.length === document.getElementsByTagName('*').length, document.all[0].localName,
+       String(document.all), document.all instanceof HTMLAllCollection]
+    JS
+    expect(got).to eq(['undefined', false, true, true, true, 'html', '[object HTMLAllCollection]', true])
+    session.execute_script("document.body.append(document.createElement('i'))")
+    expect(session.evaluate_script("document.all[document.all.length - 1].localName")).to eq('i')
+  end
+
+  it 'finds its all-named elements, by its members and by a call' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      [document.all.a.id, String(document.all.b), document.all.b.length, document.all('f').localName, document.all.item('a').id,
+       document.all.s, document.all(), document.all.namedItem('zz'), document.all('1').localName]
+    JS
+    expect(got).to eq(['a', '[object HTMLCollection]', 2, 'form', 'a', nil, nil, nil, 'head'])
+  end
+end

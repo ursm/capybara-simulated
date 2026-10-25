@@ -1,5 +1,5 @@
-// V8 APIs rusty_v8 does not bind, for node_handle.rs and script.rs (build.rs compiles this against the v8 crate's
-// headers).
+// V8 APIs rusty_v8 does not bind, for node_handle.rs, script.rs and legacy.rs (build.rs compiles this against the v8
+// crate's headers).
 
 #include "v8-embedder-heap.h"
 #include "v8-function.h"
@@ -7,6 +7,7 @@
 #include "v8-local-handle.h"
 #include "v8-object.h"
 #include "v8-proxy.h"
+#include "v8-template.h"
 #include "v8-traced-handle.h"
 
 // Reset `self` to `other` as a DROPPABLE traced reference: a young, unmodified API object it holds may be dropped by a
@@ -32,6 +33,26 @@ extern "C" const v8::Function* csim_bound_target(const v8::Function* f) {
     fn = target;
   }
   return *fn.As<v8::Function>();
+}
+
+// …an object of the template `t` HTML's [[IsHTMLDDA]] one (V8's undetectable: typeof "undefined", falsy, == null) and
+// callable, a call of it the function `call`'s of its first argument, the one HTMLAllCollection's [[Call]] reads, and of
+// no receiver (legacy.rs `allCollectionObject`).
+namespace {
+void call_data(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  v8::Isolate* isolate = info.GetIsolate();
+  v8::Local<v8::Value> argv[1] = {info[0]};
+  v8::Local<v8::Value> result;
+  if (info.Data().As<v8::Function>()->Call(isolate->GetCurrentContext(), v8::Undefined(isolate), info.Length() > 0 ? 1 : 0, argv).ToLocal(&result)) {
+    info.GetReturnValue().Set(result);
+  }
+}
+}  // namespace
+extern "C" void csim_template_undetectable_callable(v8::ObjectTemplate* t, const v8::Function* call) {
+  auto tpl = *reinterpret_cast<v8::Local<v8::ObjectTemplate>*>(&t);
+  auto fn = *reinterpret_cast<const v8::Local<v8::Function>*>(&call);
+  tpl->MarkAsUndetectable();
+  tpl->SetCallAsFunctionHandler(call_data, fn);
 }
 
 // What a dropped object's wrappable is told (node_handle.rs `csim_node_reset_root`).

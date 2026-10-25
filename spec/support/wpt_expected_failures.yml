@@ -3661,27 +3661,6 @@ html/dom/idlharness.https.html:
 - 'Element interface: document.createElement("noscript") must inherit property "setHTML(DOMString,
   optional SetHTMLOptions)" with the proper type'
 - 'Element interface: operation setHTML(DOMString, optional SetHTMLOptions)'
-- HTMLAllCollection interface object length
-- HTMLAllCollection interface object name
-- 'HTMLAllCollection interface: attribute length'
-- 'HTMLAllCollection interface: calling item(optional DOMString) on document.all with
-  too few arguments must throw TypeError'
-- 'HTMLAllCollection interface: calling namedItem(DOMString) on document.all with
-  too few arguments must throw TypeError'
-- 'HTMLAllCollection interface: document.all must inherit property "item(optional
-  DOMString)" with the proper type'
-- 'HTMLAllCollection interface: document.all must inherit property "length" with the
-  proper type'
-- 'HTMLAllCollection interface: document.all must inherit property "namedItem(DOMString)"
-  with the proper type'
-- 'HTMLAllCollection interface: existence and properties of interface object'
-- 'HTMLAllCollection interface: existence and properties of interface prototype object'
-- 'HTMLAllCollection interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'HTMLAllCollection interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'HTMLAllCollection interface: operation item(optional DOMString)'
-- 'HTMLAllCollection interface: operation namedItem(DOMString)'
 - 'HTMLCanvasElement interface: document.createElement("canvas") must inherit property
   "transferControlToOffscreen()" with the proper type'
 - 'HTMLCanvasElement interface: operation transferControlToOffscreen()'
@@ -3986,7 +3965,6 @@ html/dom/idlharness.https.html:
 - 'Sanitizer interface: operation setComments(boolean)'
 - 'Sanitizer interface: operation setDataAttributes(boolean)'
 - 'ShadowRoot interface: operation setHTML(DOMString, optional SetHTMLOptions)'
-- Stringification of document.all
 - Stringification of document.createElement("track").track
 - Stringification of document.createElement("video").addTextTrack("subtitles").cues
 - Stringification of document.createElement("video").textTracks
@@ -5769,8 +5747,7 @@ selection/selection-direction-on-single-click.html:
 selection/selection-focused-element-becomes-nonfocusable.html:
 - Focused element is removed
 selection/textcontrols/focus.html:
-- "[harness] ERROR"
-- "[harness] no subtests"
+- focus() should cancel selection extension by pointer device
 selection/textcontrols/selectionchange-on-shadow-dom.html:
 - selectionchange event fired on a shadow dom bubble to the document
 selection/toString-user-select-none.html:
@@ -6567,8 +6544,7 @@ xhr/response-data-progress.htm:
 - 'XMLHttpRequest: progress events grow response body size, known content-length'
 - 'XMLHttpRequest: progress events grow response body size, unknown content-length'
 xhr/responsexml-document-properties.htm:
-- "[harness] ERROR"
-- "[harness] no subtests"
+- lastModified set to related HTTP header if provided
 xhr/send-authentication-cors-setrequestheader-no-cred.htm:
 - CORS request with setRequestHeader auth to URL NOT accepting Authorization header
 xhr/send-conditional-cors.htm:

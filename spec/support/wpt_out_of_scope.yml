@@ -46145,13 +46145,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
     is not being rendered and its innerText is its textContent — "abc" in Chrome AND
     Firefox (measured 2026-09-26), where the test expects "". Kept out so the gate
     does not reward the wrong answer.'
-html/dom/historical.html:
-- name: document.all cannot find applet
-  reason: document.all is the [[IsHTMLDDA]] exotic object (falsy in boolean context,
-    typeof === "undefined"); it is unmodellable in plain JS and we deliberately omit
-    it so `if (document.all)` / `typeof document.all` feature-detection takes the
-    modern path. The subtest reads document.all.war, which requires document.all to
-    exist. (CLAUDE.md rule 2.)
 html/dom/idlharness.any.js:
 - name: 'MessagePort interface: attribute onclose'
   reason: 'Withdrawn text (CLAUDE.md rule 1(3)). The test''s interfaces/html.idl still
@@ -59733,15 +59726,6 @@ shadow-dom/focus-navigation/tentative/focus-scroller-layout-update.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-shadow-dom/leaktests/html-collection.html:
-- name: document.all should not contain shadow nodes
-  reason: We deliberately do not expose document.all. Its defining behaviour is the
-    [[IsHTMLDDA]] exotic slot (falsy in boolean context, `typeof` === 'undefined'),
-    unmodellable in plain JS; a normal object would break the `if (document.all)`
-    / `typeof document.all` feature-detection real libraries rely on (rule 2). The
-    shadow-exclusion this subtest checks is already covered by the other document.*
-    collections in this file (scripts/forms/images/links/anchors/embeds/plugins),
-    which pass. document.applets (always-empty per spec) is supported and passes.
 shadow-dom/reference-target/tentative/aria-labelledby.html:
 - name: "[harness] ERROR"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -60311,14 +60295,6 @@ shadow-dom/untriaged/elements-and-dom-objects/shadowroot-object/shadowroot-metho
     — so a range in a shadow tree selects nothing, and ShadowRoot has no getSelection
     in any current spec. Chrome and Firefox (measured) still take the range, but the
     explicit spec text wins over both (CLAUDE.md rule 1).'
-shadow-dom/untriaged/shadow-trees/upper-boundary-encapsulation/dom-tree-accessors-001.html:
-- name: Elements in a shadow tree should not be accessible from owner document's "all"
-    attribute.
-  reason: 'Needs document.all, whose modern-browser identity is the [[IsHTMLDDA]]
-    platform exotic (== undefined, typeof ''undefined'', falsy) — not expressible
-    in pure JS. A plain-object document.all would be truthy and break legacy `if (document.all)`
-    feature-detection (rule 1: platform exotic object). The other accessors (getElementsByTagName/NS/ClassName/getElementById)
-    in this file already pass.'
 shadow-dom/untriaged/user-interaction/ranges-and-selections/test-002.html:
 - name: A_07_01_02_T01
   reason: 'Holds the Shadow DOM v0 draft ("The getSelection() method of the shadow
