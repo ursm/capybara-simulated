@@ -105,7 +105,7 @@ impl RealmArena {
     // current load the host is fetching — or, `arrivals_only`, none of those, the host counting them itself — or whose
     // result its server's delay holds back. A load a later one superseded delays nothing: aborted, it is in progress no
     // more.
-    fn images_delay_load(&self, realm: i32, arrivals_only: bool) -> bool {
+    pub(crate) fn images_delay_load(&self, realm: i32, arrivals_only: bool) -> bool {
         let current = |node: NodeId, load: u32| self.get(node).is_some() && self.image_load_current(node, load);
         (!arrivals_only && self.image_fetches.values().any(|f| f.realm == realm && current(f.node, f.load)))
             || self.image_arrivals.iter().any(|&(r, node, load)| r == realm && current(node, load))

@@ -1043,6 +1043,9 @@ pub(crate) struct RealmArena {
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
+    // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
+    // load owed to the parent after it (frame_navigation.rs `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`).
+    pub(crate) load_delay: u8,
     // Its window viewport and its resize steps' (viewport.rs).
     pub(crate) window_viewport: crate::viewport::Viewport,
     // What its navigator says of the user agent (navigator.rs).

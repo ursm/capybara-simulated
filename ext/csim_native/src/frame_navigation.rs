@@ -146,6 +146,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameLoadsOwed", frame_loads_owed, context_id);
+    crate::dom::register(scope, ns, "loadDelay", load_delay, context_id);
+    crate::dom::register(scope, ns, "setLoadDelay", set_load_delay, context_id);
+    crate::dom::register(scope, ns, "oweContainerLoad", owe_container_load, context_id);
+    crate::dom::register(scope, ns, "loadDelayedHere", load_delayed_here, context_id);
     crate::dom::register(scope, ns, "frameNavGeneration", frame_nav_generation, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
@@ -456,6 +460,53 @@ fn frame_loads_owed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         nav.flags & LOAD_OWED != 0 && arena.get(container).is_some_and(|n| n.realm == cid) && arena.is_connected(container)
     });
     rv.set_bool(owed);
+}
+
+// A realm's document's load event: delayed, or delayed and its container's load owed to the parent after it (HTML: a
+// child navigable's document delays its container's document's load until its own fired; the container's `load` comes
+// after it). `RealmState::load_delay`.
+pub(crate) const LOAD_DELAYED: u8 = 1;
+pub(crate) const CONTAINER_LOAD_OWED: u8 = 2;
+
+// __dom.loadDelay() -> the calling realm's document's load delay (0 none, `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`);
+// __dom.setLoadDelay(delay) sets it — `LOAD_DELAYED` only where none was (a container's load owed stays owed).
+fn load_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(u32::from(crate::dom::dom(scope).arena.realm_state(cid).map_or(0, |s| s.load_delay)));
+}
+fn set_load_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let delay = args.get(0).uint32_value(scope).and_then(|d| u8::try_from(d).ok()).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    if let Some(s) = crate::dom::dom(scope).arena.realm_state_mut(cid) {
+        if delay != LOAD_DELAYED || s.load_delay == 0 {
+            s.load_delay = delay;
+        }
+    }
+}
+
+// __dom.oweContainerLoad(realm) -> whether realm `realm`'s document (the calling realm's, -1) has its load delayed, its
+// container's load then owed to its parent after it: what the parent's frame load steps leave to it.
+fn owe_container_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).filter(|&r| r >= 0).unwrap_or_else(|| realm_id(scope, &args));
+    let state = crate::dom::dom(scope).arena.realm_state_mut(realm).filter(|s| s.load_delay != 0);
+    rv.set_bool(state.map(|s| s.load_delay = CONTAINER_LOAD_OWED).is_some());
+}
+
+// __dom.loadDelayedHere(page) -> whether something delays the calling realm's document's load event now: its images
+// (image_requests.rs `images_delay_load`; `page`, as the host asks before it fires the page's load, those whose
+// arrival the host's own count does not hold), its containers' loads still owed (not for the page's: the load the host
+// asks for flushes their builds first), and its child navigables' documents whose own load is delayed.
+fn load_delayed_here(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let page = args.get(0).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = &crate::dom::dom(scope).arena;
+    let owed = || arena.frame_navigations.0.iter().any(|(&container, nav)| {
+        nav.flags & LOAD_OWED != 0 && arena.get(container).is_some_and(|n| n.realm == cid) && arena.is_connected(container)
+    });
+    let delayed = arena.images_delay_load(cid, page)
+        || (!page && owed())
+        || arena.child_realms(cid).into_iter().any(|kid| arena.realm_state(kid).is_some_and(|s| s.load_delay != 0));
+    rv.set_bool(delayed);
 }
 
 // __dom.setFrameNav(containerNid, flags, on) — sets (`on`) or clears the flags.
