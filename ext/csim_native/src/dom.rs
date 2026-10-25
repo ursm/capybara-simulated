@@ -1148,10 +1148,13 @@ pub(crate) struct RealmState {
     pub(crate) font_faces: Vec<crate::font_faces::FaceRecord>,
     pub(crate) rule_faces: Vec<crate::font_faces::FaceRecord>,
     // …and what a FontFaceSet makes of each of those rules (`font_faces::rule_face`), by its identity, with the referrer
-    // of its downloads — and the generation of that list, which a set's CSS-connected faces are connected for
-    // (font_face_set.rs `fsConnect`).
+    // of its downloads — and the generation of that list, which moves as it changes: what a set's CSS-connected faces are
+    // connected for (font_face_set.rs `fsConnect`), and the document's face list handed for (`fontFacesHand`).
     pub(crate) rule_rows: Vec<(u32, crate::font_faces::RuleFace, String)>,
     pub(crate) rule_rows_gen: u32,
+    // …and what the document's face list was last made of (font_faces.rs `fontFacesHand`): the rules' generation (none for
+    // a document no engine styles), its FontFaceSet (by its handle) and that set's generation.
+    pub(crate) faces_handed: Option<(Option<u32>, usize, u32)>,
     // What a face of that list is read from, once asked (font_resolve.rs `indexed_file`), and the face each family stack
     // takes at a bucket (`family_face`) — both forgotten when the list moves.
     pub(crate) face_files: Vec<Option<Option<String>>>,
@@ -5088,7 +5091,7 @@ fn style_shadow_sheets_unguarded(
 // __dom.styleFontFaces() -> [faceId, isFace, family, src, identity, attribute × 11, …]: the `@font-face` rules the
 // document's sheets hold that apply (`StyleEngine::font_faces`), each by its identity and what the FontFaceSet makes of
 // it (`font_faces::rule_face`) — their faces kept for the document's face list (`RealmArena::rule_faces`,
-// `fontFacesSet`). Undefined with no engine yet.
+// `fontFacesHand`). Undefined with no engine yet.
 fn style_font_faces(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -5107,7 +5110,7 @@ fn style_font_faces_unguarded(
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let mut items: Vec<v8::Local<v8::Value>> = Vec::new();
     let faces = engine.font_faces(&arena.sheets);
-    arena.rule_faces = faces.iter().map(|face| face.record.clone().unwrap_or_default()).collect();
+    let records: Vec<crate::font_faces::FaceRecord> = faces.iter().map(|face| face.record.clone().unwrap_or_default()).collect();
     let rows: Vec<(u32, crate::font_faces::RuleFace, String)> = faces.iter().map(|face| {
         let referrer = face.record.as_ref().and_then(|r| r.referrer.clone()).unwrap_or_default();
         (face.id, crate::font_faces::rule_face(&face.declared), referrer)
@@ -5119,9 +5122,13 @@ fn style_font_faces_unguarded(
             items.push(v8::String::new(scope, value).map_or_else(|| v8::undefined(scope).into(), Into::into));
         }
     }
+    // (…its generation moving only as they change: the face list handed again, a set's faces connected again)
     let arena = dom(scope).arena.enter(cid);
-    arena.rule_rows = rows;
-    arena.rule_rows_gen = arena.rule_rows_gen.wrapping_add(1);
+    if arena.rule_rows != rows || arena.rule_faces != records {
+        arena.rule_rows = rows;
+        arena.rule_faces = records;
+        arena.rule_rows_gen = arena.rule_rows_gen.wrapping_add(1);
+    }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 

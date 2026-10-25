@@ -123,6 +123,10 @@ unsafe impl GarbageCollected for SetHandle {
 }
 
 impl SetHandle {
+    // The generation of what script made it hold.
+    pub(crate) fn generation(&self) -> u32 {
+        self.generation.get()
+    }
     fn touch(&self) {
         self.generation.set(self.generation.get().wrapping_add(1));
     }

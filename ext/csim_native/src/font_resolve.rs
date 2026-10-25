@@ -2,7 +2,7 @@
 // shapes its text with: the document's `@font-face` the stack takes (font_faces.rs `pick`) under its `size-adjust`, read
 // from the first of its sources that gives a file (font_files.rs `face_file`), else the family's system face — or,
 // where the document's faces split a run's characters by `unicode-range`, the stack of them registered as one face
-// (`font::register_stack`). Kept per (stack, bucket) until the document's face list moves (`fontFacesSet`). The page side
+// (`font::register_stack`). Kept per (stack, bucket) until the document's face list moves (`fontFacesHand`). The page side
 // fetches what a source names, settles a face in its FontFaceSet's loading cycle, and names a family's system file.
 
 use crate::dom::{realm, realm_id, register};

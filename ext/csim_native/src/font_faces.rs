@@ -273,7 +273,7 @@ pub(crate) const FACE_ATTRIBUTE_DESCRIPTORS: [&str; 11] = [
 // `format("embedded-opentype")` sources is none: Chrome) — what makes it the same face from one read to the next (its
 // family's name and its sources, resolved: not its text, which a descriptor rewritten changes), and each attribute's
 // descriptor as declared, empty where it declares none.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub(crate) struct RuleFace {
     pub(crate) family: String,
     pub(crate) src: String,
@@ -416,7 +416,8 @@ fn weight_distance(want: f64, (lo, hi): (f64, f64)) -> f64 {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "fontFacesSet", font_faces_set, context_id);
+    crate::dom::register(scope, ns, "fontFacesHand", font_faces_hand, context_id);
+    crate::dom::register(scope, ns, "fontRuleGeneration", font_rule_generation, context_id);
     crate::dom::register(scope, ns, "fontFacesMatching", font_faces_matching, context_id);
 }
 
@@ -464,22 +465,34 @@ pub(crate) fn descriptor_default(name: &str) -> Option<&'static str> {
     })
 }
 
-// __dom.fontFacesSet(rules, set): a document's faces, in order — the realm's from now on, what it read of them before
-// forgotten (font_resolve.rs). First the faces of the `rules` `@font-face` rules its sheets hold, as the style engine
-// last listed them (`RealmArena::rule_faces`) — none for a document no engine styles; then the faces script added to its
-// FontFaceSet `set`, the state of its set (font_face_set.rs `added_records`) — none for a document none was made for. A face with nothing to read holds a place all the same — and so does each
-// of a list of rules the engine no longer holds (an index listed before the rules last moved): where the page side's
-// list and this one disagree, nothing is picked rather than another rule's face.
-fn font_faces_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let rules = args.get(0).uint32_value(scope).unwrap_or(0) as usize;
-    let added = crate::font_face_set::added_records(scope, args.get(1));
+// __dom.fontFacesHand(styled, set): the realm's document's faces, in order, made the realm's face list (font_resolve.rs
+// reads it) — what it read of them before forgotten — where they are other than it was last made of: first the faces of
+// the `@font-face` rules its sheets hold, as the style engine last listed them (`RealmArena::rule_faces`) — none for a
+// document no engine styles (`styled` false); then the faces script added to its FontFaceSet `set`, the state of its set
+// (font_face_set.rs `added_records`) — none for a document none was made for. A face with nothing to read holds a place
+// all the same. Kept while the rules' generation, the set and its generation hold (`RealmArena::faces_handed`).
+fn font_faces_hand(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let styled = args.get(0).is_true();
+    let set = crate::font_face_set::set(scope, args.get(1));
     let cid = crate::dom::realm_id(scope, &args);
+    let key = (styled.then(|| crate::dom::realm(scope, cid).rule_rows_gen), set.map_or(0, |s| s as *const _ as usize), set.map_or(0, crate::font_face_set::SetHandle::generation));
+    if crate::dom::realm(scope, cid).faces_handed == Some(key) {
+        return;
+    }
+    let added = crate::font_face_set::added_records(scope, args.get(1));
     let arena: &mut RealmArena = crate::dom::realm(scope, cid);
-    let ruled = if arena.rule_faces.len() == rules { arena.rule_faces.clone() } else { vec![FaceRecord::default(); rules] };
-    let faces: Vec<FaceRecord> = ruled.into_iter().chain(added).collect();
-    arena.font_faces = faces;
+    let ruled = if styled { arena.rule_faces.clone() } else { Vec::new() };
+    arena.font_faces = ruled.into_iter().chain(added).collect();
     arena.face_files.clear();
     arena.family_faces.clear();
+    arena.faces_handed = Some(key);
+}
+
+// __dom.fontRuleGeneration() -> the generation of the realm's `@font-face` rules (`RealmArena::rule_rows_gen`), which
+// moves as they change: what a FontFaceSet's rendering-update load compares.
+fn font_rule_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_uint32(crate::dom::realm(scope, cid).rule_rows_gen);
 }
 
 // __dom.fontFacesMatching(font, text, states) -> the indices of the faces `font` and `text` match among a font face
