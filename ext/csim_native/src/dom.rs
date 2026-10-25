@@ -1043,6 +1043,10 @@ pub(crate) struct RealmArena {
 // A realm's own state (`RealmArena`): its document's.
 #[derive(Default)]
 pub(crate) struct RealmState {
+    // A service worker's script resource map (Service Workers §3.1.4: its imported scripts, by URL — each its source text
+    // and whether its errors are muted), which a repeated `importScripts` of one runs again from, before any fetch
+    // (service_worker.rs `swScriptResource`).
+    pub(crate) script_resources: std::collections::HashMap<String, (Vec<u16>, bool)>,
     // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
     // load owed to the parent after it (frame_navigation.rs `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`).
     pub(crate) load_delay: u8,

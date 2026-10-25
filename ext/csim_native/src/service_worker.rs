@@ -112,6 +112,27 @@ pub(crate) fn claims(href: &str, scope: &str, scopes: &[String]) -> bool {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
+    crate::dom::register(scope, ns, "swScriptResource", script_resource_op, context_id);
+    crate::dom::register(scope, ns, "swScriptResourceSet", script_resource_set_op, context_id);
+}
+
+// __dom.swScriptResource(url) -> `[source, muted]` of the script the calling service worker imported from `url`
+// (`RealmState::script_resources`), or undefined for one it has not; __dom.swScriptResourceSet(url, source, muted) enters
+// one — as it is fetched, before it runs: a re-import from inside it finds it.
+fn script_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some((source, muted)) = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.script_resources.get(&url)).cloned() else { return };
+    let source = crate::dom::utf16_value(scope, &source);
+    let muted = v8::Boolean::new(scope, muted).into();
+    rv.set(v8::Array::new_with_elements(scope, &[source, muted]).into());
+}
+fn script_resource_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (url, source, muted) = (args.get(0).to_rust_string_lossy(scope), crate::dom::utf16_arg(scope, args.get(1)), args.get(2).is_true());
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some(s) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
+        s.script_resources.insert(url, (source, muted));
+    }
 }
 
 // __dom.swClaims(href, scope, scopes) -> `claims`.
