@@ -36,8 +36,8 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15], client_origin: a[16], client_realm: a[17], navigation: a[18] == true, dest: a[19], user_activated: a[20] == true) },
-        '__csimExternalAsset'        => ->(b, *a) { b.external_asset_source(a[0], a[1], a[2], a[3], dest: a[4], mode: a[5], credentials: a[6] || 'same-origin') },
-        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2], a[3], a[4], a[5] || 'same-origin') },
+        '__csimExternalAsset'        => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4]) },
+        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2], a[3]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
         '__csimExternalAssetMeta'    => ->(b, *a) { b.external_asset_meta(a[0]) },
         '__csimExternalAssetBytes'   => ->(b, *a) { b.external_asset_bytes(a[0]) },
@@ -209,12 +209,12 @@ module Capybara
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
         '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2]) },
         '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
-        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_s, a[2] || 'same-origin', a[3].to_i, a[4], a[5]) },
+        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2], a[3]) },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
         '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
-        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], a[1], realm: a[2]) },
-        '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], a[1], realm: a[2]) },
+        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], a[2], realm: a[1]) },
+        '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], a[2], realm: a[1]) },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0]); nil },
         '__csimBlobWindow'           => ->(b, *_a) { b.blob_window },
         '__csim_blobUnregister'      => ->(b, *a) { b.blob_unregister(a[0]); nil },
@@ -234,7 +234,7 @@ module Capybara
         # so an ordinary app leaves cross-origin frames lazy (= baseline) and never
         # eager-@app.calls a foreign URL (side effects: extra visit / log row).
         '__csim_allHostsLocal'       => ->(b, *a) { b.send(:all_hosts_local?) },
-        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], a[1], realm: a[2]) },
+        '__csim_videoBytes'          => ->(b, *a) { b.video_bytes(a[0], a[2], realm: a[1]) },
         # WebAuthn create / get raise `WebauthnState::Error` carrying
         # the DOMException name (`InvalidStateError`, …); rescue here
         # so the JS shim sees `{error:, name:}` instead of the

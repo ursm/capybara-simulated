@@ -3835,9 +3835,10 @@ module Capybara
 
       # (…a mode's verdicts judged against `client_url`'s origin, a worker script's 'same-origin')
       # An element's GET of `url` (a script inserted, a `<link>` that is no sheet, a hint) as its node document — realm
-      # `realm` — requests it, under the policy its `referrerpolicy` sets (`policy`): `rack_fetch`'s answer — a CORS
-      # request of `credentials` where its `crossorigin` makes it one (`mode`).
-      def subresource_fetch(url, realm, policy, dest = nil, mode = nil, credentials = 'same-origin')
+      # `realm` — requests it, as the engine's `plan` of it says (`request_of_plan`): `rack_fetch`'s answer — a CORS
+      # request where its `crossorigin` makes it one.
+      def subresource_fetch(url, realm, plan, dest = nil)
+        mode, credentials, policy = request_of_plan(plan)
         client = request_client(realm, policy)
         rack_fetch('GET', url, '', nil, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
@@ -3922,11 +3923,12 @@ module Capybara
       # `<object>` / `<track>` source the driver does not otherwise decode or play. Returns the fetch
       # facts (`resource_timing_meta`), or nil when the URL can't resolve; a 4xx/5xx still returns
       # facts so the entry records, as a browser files one for a failed media load.
-      # (…an element's of the document of realm `realm`, its request of mode `mode` and destination `dest`, under the
-      # policy its `referrerpolicy` sets, `policy`)
-      def resource_timing_fetch(url, mode = 'no-cors', credentials = 'same-origin', realm = 0, dest = nil, policy = nil)
+      # (…an element's of the document of realm `realm`, its request of destination `dest` the engine's `plan` of it —
+      # subresource_plan.rs — its mode as it says, no-cors too)
+      def resource_timing_fetch(url, realm, plan, dest = nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
+        mode, credentials, policy = Native.subresource_plan_fields(plan.to_i)
         client = request_client(realm, policy)
         result = rack_fetch('GET', key, '', {}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
@@ -4073,6 +4075,11 @@ module Capybara
       # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports, and `mode` its mode — a module
       # script's "cors", with its `credentials` mode, which its response is checked by: a body either memo keeps answers
       # only a request of the same mode, credentials and client origin, which the CORS check it passed was of)
+      # …a page's request of one — its client realm `realm`'s, of destination `dest`, as the engine's `plan` of it says.
+      def planned_external_asset(url, document, realm, plan, dest)
+        mode, credentials, policy = request_of_plan(plan)
+        external_asset_source(url, document, realm, policy, dest: dest, mode: mode, credentials: credentials)
+      end
       def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
@@ -13061,6 +13068,13 @@ module Capybara
       # none of its own, policy; an opaque one none (Referrer Policy "determine request's referrer"). Read on the main
       # thread, which a realm's URL is asked on; a frame gone, the top-level one's.
       LoadClient = Struct.new(:url, :cookie_cross_site, :referrer, :referrer_policy, :origin)
+      # The mode, credentials mode and referrer policy of the request a subresource's `plan` (subresource_plan.rs) is, as a
+      # request the asset cache and `subresource_fetch` make takes them: a no-cors one none — the mode-less request an
+      # element's load always was, of no response tainting of its own — but a CORS one's, a plugin's navigation.
+      private def request_of_plan(plan)
+        mode, credentials, policy = Native.subresource_plan_fields(plan.to_i)
+        mode == 'no-cors' ? [nil, 'same-origin', policy] : [mode, credentials, policy]
+      end
       # …and the request a subresource's `plan` (subresource_plan.rs) makes for it, to `target_url`: whether it is a CORS
       # one, its credentials mode, its client.
       private def planned_request(plan, realm, target_url)

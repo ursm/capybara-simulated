@@ -132,6 +132,15 @@ fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
     }
 }
 
+// …and the mode and credentials mode a `cors` code (`cors_of`) is.
+pub(crate) fn timed_cors_request(cors: u32) -> (&'static str, &'static str) {
+    match cors {
+        NO_CORS => ("no-cors", "include"),
+        CORS_CREDENTIALS => ("cors", "include"),
+        _ => ("cors", "same-origin"),
+    }
+}
+
 // __dom.timedResources(el, docNid) -> `[initiator, destination, url, cors, …]`: the resources connecting `el` fetches
 // for no consumer (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS; undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

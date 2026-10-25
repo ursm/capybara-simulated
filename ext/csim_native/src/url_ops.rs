@@ -138,7 +138,8 @@ fn potentially_trustworthy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     rv.set_bool(potentially_trustworthy(&origin));
 }
 
-// The referrer policy tokens (Referrer Policy §3).
+// The referrer policy tokens (Referrer Policy §3), and the default one, a request's whose policy container names none.
+pub(crate) const DEFAULT_POLICY: &str = "strict-origin-when-cross-origin";
 pub(crate) const POLICIES: [&str; 8] = [
     "no-referrer",
     "no-referrer-when-downgrade",
