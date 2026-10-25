@@ -100,10 +100,12 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
                     };
                     wanted.extend(src.map(|src| (initiator, initiator, id, src)));
                 }
+                // (…a track's request by its media element's `crossorigin`: HTML's track processing model, "the state of
+                // the parent media element's crossorigin content attribute")
                 for &c in &n.children {
                     let Some(track) = arena.get(c).filter(|c| c.is_html_named("track") && c.plain_attr("default").is_some()) else { continue };
                     if let Some(src) = track.plain_attr("src").filter(|v| !v.is_empty()) {
-                        wanted.push(("track", "track", c, src.to_owned()));
+                        wanted.push(("track", "track", id, src.to_owned()));
                     }
                 }
             }

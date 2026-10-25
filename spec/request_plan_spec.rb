@@ -55,4 +55,29 @@ RSpec.describe 'a subresource request plan' do
     session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
     expect(seen.select {|(path, _, _)| %w[/p.js /c.css].include?(path) }.map(&:first).sort).to eq(%w[/c.css /p.js])
   end
+  # A media element's shown track is fetched by the media element's `crossorigin` (HTML's track processing model): a
+  # CORS request — its Origin sent to the other origin — under a `crossorigin` video, and a `crossorigin` on the track
+  # itself, which has no such attribute, nothing.
+  it "fetches a track by its media element's crossorigin" do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+    session.visit '/'
+    session.execute_script(<<~JS)
+      for (const [name, on] of [['video', true], ['track', false]]) {
+        const video = document.createElement('video');
+        video.preload = 'none';
+        const track = document.createElement('track');
+        track.default = true;
+        track.src = 'http://other.test/' + name + '.vtt';
+        if (on) video.crossOrigin = 'anonymous'; else track.setAttribute('crossorigin', 'anonymous');
+        video.append(track);
+        document.body.append(video);
+      }
+    JS
+    tracks = poll_until { session.evaluate_script('1') && (got = seen.select {|(path, _, _)| path.end_with?('.vtt') }).size == 2 && got.sort }
+    expect(tracks.map {|(path, _, origin)| [path, origin] }).to eq([['/track.vtt', nil], ['/video.vtt', 'http://www.example.com']])
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
 end
+
