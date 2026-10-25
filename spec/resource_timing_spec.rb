@@ -101,6 +101,21 @@ RSpec.describe 'resource timing' do
     expect([entries(s, '/i.png').length, entries(s, '/i.css').length]).to eq([1, 1])
   end
 
+  # …each page its own: a frame loading the image and the import its parent did records them for itself, and so does the
+  # parent loading them after its frame (the page's memory cache is its own, whichever realm ran last)
+  it 'records a frame\'s and its parent\'s image and import each' do
+    s = session
+    await_images(s)
+    frame_names = -> { s.evaluate_script("frames[0].performance.getEntriesByType('resource').map((e) => new URL(e.name).pathname)") }
+    s.execute_script(<<~JS)
+      const f = document.getElementById('fr');
+      f.contentDocument.head.insertAdjacentHTML('beforeend', '<link rel="stylesheet" href="/a.css">');
+      f.contentDocument.body.append(Object.assign(f.contentDocument.createElement('img'), {src: '/i.png'}));
+    JS
+    expect(poll_until { (frame_names.call & %w[/i.png /i.css]).length == 2 }).to be(true)
+    expect([entries(s, '/i.png').length, entries(s, '/i.css').length]).to eq([1, 1])
+  end
+
   it 'records fetch, XMLHttpRequest and sendBeacon entries' do
     s = session
     s.execute_script("fetch('/d.json'); var x = new XMLHttpRequest(); x.open('GET', '/b.js', false); x.send(); navigator.sendBeacon('/beacon', 'x');")

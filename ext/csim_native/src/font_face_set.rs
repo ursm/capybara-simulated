@@ -261,6 +261,7 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let rules = s.css_rules.borrow().clone();
     let make = v8::Local::<v8::Function>::try_from(args.get(2)).ok();
     s.connecting.set(true);
+    let mut complete = true;
     let mut connected: Vec<v8::Local<v8::Object>> = Vec::with_capacity(2 * rows.len());
     let mut connected_rules = Vec::with_capacity(rows.len());
     let mut made: Vec<v8::Local<v8::Value>> = Vec::new();
@@ -272,8 +273,12 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let (face, state, identity) = match had {
             Some((face, state)) => (face, state, None),
             None => {
-                // (…none where the bindings threw: what it has connected so far is what it has)
-                let Some((face, state)) = make.and_then(|make| make_face(scope, make, &rule)) else { break };
+                // (…none where the bindings threw: what it has connected so far is what it has, connected again at the
+                // next ask)
+                let Some((face, state)) = make.and_then(|make| make_face(scope, make, &rule)) else {
+                    complete = false;
+                    break;
+                };
                 made.push(face.into());
                 crate::font_face_state::link(scope, state.into(), me, true);
                 (face, state, Some(rule.identity.clone()))
@@ -291,7 +296,7 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     s.css.set(scope, &connected);
     *s.css_rules.borrow_mut() = connected_rules;
-    s.css_at.set(Some(at));
+    s.css_at.set(complete.then_some(at));
     let faces = v8::Array::new_with_elements(scope, &values(faces_of(&connected)));
     let made = v8::Array::new_with_elements(scope, &made);
     rv.set(v8::Array::new_with_elements(scope, &[faces.into(), made.into()]).into());

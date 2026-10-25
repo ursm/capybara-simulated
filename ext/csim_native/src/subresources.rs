@@ -29,15 +29,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // What a resource fetched once for the page — its Resource Timing entry recorded once, as the memory cache serves it
-// after (`timed_resources`) — is kept under: an image's (an `<img>`'s, an `<input type=image>`'s), an `@import`'s.
-const TIMED_KINDS: [&str; 2] = ["image", "css"];
+// after (`timed_resources`) — is kept under: an image's (an `<img>`'s, an `<input type=image>`'s), an `@import`'s. (An
+// SVG `<use>`'s external document is a resource of another type, kept apart: `use`.)
+const TIMED_KINDS: [&str; 2] = ["img", "css"];
 
-// __dom.timedOnce(kind, url) -> whether the page fetches the resource at `url` of `kind` (`TIMED_KINDS`' place) the first
-// time — none before since it began (`RealmArena::timed_resources`, cleared as it does) — now entered.
+// __dom.timedOnce(kind, url) -> whether the calling realm's page fetches the resource at `url` of `kind` (`TIMED_KINDS`'
+// place) the first time — none before since it began (`RealmArena::timed_resources`, cleared as it does) — now entered.
+// (…the caller's realm, not the one entered: an image's arrives on a host thread's task, whatever realm ran last)
 fn timed_once_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(&kind) = args.get(0).uint32_value(scope).and_then(|k| TIMED_KINDS.get(k as usize)) else { return rv.set_bool(false) };
     let url = args.get(1).to_rust_string_lossy(scope);
-    rv.set_bool(crate::dom::dom(scope).arena.timed_resources.insert((kind, url)));
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).timed_resources.insert((kind, url)));
 }
 
 // The URL an SVG `<use>` element `id` references in another document — its `href`, else its XLink one, trimmed and
@@ -133,7 +136,8 @@ fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
 // for no consumer (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS; undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let found = timed_resources(&mut crate::dom::dom(scope).arena, id, doc);
+    let cid = crate::dom::realm_id(scope, &args);
+    let found = timed_resources(crate::dom::realm(scope, cid), id, doc);
     if found.is_empty() {
         return;
     }
@@ -152,8 +156,9 @@ fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // controlled document fetches through its service worker (destination `image`) — once for the page, undefined after.
 fn use_reference_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let arena = &mut crate::dom::dom(scope).arena;
-    let Some(url) = use_reference(arena, id, doc).filter(|u| arena.timed_resources.insert(("image", u.clone()))) else { return };
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let Some(url) = use_reference(arena, id, doc).filter(|u| arena.timed_resources.insert(("use", u.clone()))) else { return };
     if let Some(url) = v8::String::new(scope, &url) {
         rv.set(url.into());
     }

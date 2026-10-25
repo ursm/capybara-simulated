@@ -1699,6 +1699,7 @@ impl RealmArena {
         self.sheets.reset();
         *self.css_images.get_mut() = Default::default();
         self.timed_resources.clear();
+        self.faces_handed = None;
         // (…in place: the style engine holds the same table, and outlives the page)
         self.faces.with(|faces| *faces = Default::default());
         self.mutations += 1;
