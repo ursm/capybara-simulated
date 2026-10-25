@@ -268,7 +268,8 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let (face, state, identity) = match had {
             Some((face, state)) => (face, state, None),
             None => {
-                let Some((face, state)) = make.and_then(|make| make_face(scope, make, &rule)) else { continue };
+                // (…none where the bindings threw: what it has connected so far is what it has)
+                let Some((face, state)) = make.and_then(|make| make_face(scope, make, &rule)) else { break };
                 made.push(face.into());
                 crate::font_face_state::link(scope, state.into(), me, true);
                 (face, state, Some(rule.identity.clone()))
@@ -293,7 +294,7 @@ fn connect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 // …a face made for `rule` by the bindings' `make`, as `[face, state]`.
 fn make_face<'s>(scope: &mut v8::PinScope<'s, '_>, make: v8::Local<'_, v8::Function>, rule: &crate::font_faces::RuleFace) -> Option<(v8::Local<'s, v8::Object>, v8::Local<'s, v8::Object>)> {
-    let attributes: Vec<v8::Local<v8::Value>> = rule.attributes.iter().filter_map(|a| v8::String::new(scope, a).map(Into::into)).collect();
+    let attributes: Vec<v8::Local<v8::Value>> = rule.attributes.iter().map(|a| v8::String::new(scope, a).map_or_else(|| v8::undefined(scope).into(), Into::into)).collect();
     let call = [v8::String::new(scope, &rule.family)?.into(), v8::String::new(scope, &rule.src)?.into(), v8::Array::new_with_elements(scope, &attributes).into()];
     let recv = v8::undefined(scope).into();
     let pair = v8::Local::<v8::Array>::try_from(make.call(scope, recv, &call)?).ok()?;
