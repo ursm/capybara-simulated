@@ -27,6 +27,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
+        else if (u.pathname === '/scope/mod.css') e.respondWith(fetch('/log?mod').then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname.startsWith('/scope/rp-')) e.respondWith(fetch('/log?' + u.pathname.slice(10) + '=' + e.request.referrerPolicy + ',' + (e.request.referrer || 'none')).then(() => new Response('')));
       });
     JS
@@ -261,6 +262,29 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?})).size == 2 && logged.sort }).to eq(
       %w[/log?img=no-referrer,none /log?script=no-referrer,none]
     )
+  end
+  # A CSS module script a document fetched before a worker controlled it is asked of the worker once one does: the
+  # module map keeps responses, not that none answered (a worker that `clients.claim()`s takes the next fetch).
+  it 'asks a worker that claimed the document for a CSS module fetched before it did' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      const f = document.createElement('iframe');
+      f.src = '/scope/page.html';
+      f.onload = () => {
+        const adopt = () => f.contentDocument.body.appendChild(f.contentDocument.createElement('div'))
+          .setHTMLUnsafe('<div><template shadowrootmode=open shadowrootadoptedstylesheets="/scope/mod.css"><p>x</p></template></div>');
+        adopt();
+        navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+          const w = reg.installing || reg.waiting || reg.active;
+          await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+          const claimed = () => (f.contentWindow.navigator.serviceWorker.controller ? adopt() : setTimeout(claimed, 10));
+          claimed();
+        });
+      };
+      document.body.appendChild(f);
+    JS
+    expect(poll_until { session.evaluate_script('1') && hits.include?('/log?mod') }).to be(true)
   end
 end
 
