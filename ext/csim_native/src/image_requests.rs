@@ -125,7 +125,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageFetchTake", fetch_take, context_id);
     crate::dom::register(scope, ns, "imageFetchRealm", fetch_realm, context_id);
     crate::dom::register(scope, ns, "imageArrival", arrival, context_id);
-    crate::dom::register(scope, ns, "imagesDelayLoad", delay_load, context_id);
 }
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
@@ -311,10 +310,4 @@ fn arrival(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     } else if let Some(i) = arena.image_arrivals.iter().position(|&a| a == (realm, node, load)) {
         arena.image_arrivals.remove(i);
     }
-}
-// __dom.imagesDelayLoad(arrivalsOnly) -> whether the calling realm's images delay its document's load (`images_delay_load`).
-fn delay_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let arrivals_only = args.get(0).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(crate::dom::dom(scope).arena.images_delay_load(cid, arrivals_only));
 }
