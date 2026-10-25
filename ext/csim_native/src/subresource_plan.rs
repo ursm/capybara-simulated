@@ -15,19 +15,21 @@ pub(crate) const J_MODULE_SCRIPT: u32 = 15;
 // The plan's fields: bits 0-1 the mode, 2-3 the credentials mode, 4-7 the referrer policy (0 none, else one past its
 // index in url_ops.rs `POLICIES`), 8 an opaque client.
 const MODES: [&str; 4] = ["no-cors", "cors", "same-origin", "navigate"];
-const CREDENTIALS: [&str; 3] = ["omit", "same-origin", "include"];
+// (…a plan of nothing a request's defaults: no-cors, same-origin — Fetch "request")
+const CREDENTIALS: [&str; 3] = ["same-origin", "include", "omit"];
 const OPAQUE: u32 = 1 << 8;
 
 // The plan of a `kind` consumer's request:
 // - its mode and credentials mode: an image's, a video's, a classic script's, a style sheet's and a link's a
 //   potential-CORS request by the element's `crossorigin` (HTML "create a potential-CORS request": fetch_rules.rs
 //   `cors_request`), a module script's, a module preload's and a CSS module script's a module script's (a CORS one
-//   whatever); a prefetch's, a CSS image's no-cors
-//   with its credentials included (CSS Values 4 "fetch a style resource"); a plugin's a navigation's; a timed
-//   resource's as `timed_resources` found it;
+//   whatever); a CSS image's no-cors with its credentials included (CSS Values 4 "fetch a style resource"), a
+//   prefetch's so too (as it has been: HTML's "create a link request" would honour its `crossorigin`); a plugin's a
+//   navigation's; a timed resource's as `timed_resources` found it;
 // - the referrer policy it is made under: the element's `referrerpolicy` (`attr`), else the one its document had as
-//   the element was inserted (`noted`: its default where it had none), else its document's (`document`, its
-//   `<meta name="referrer">`'s);
+//   the element was inserted (`noted`: its default where it had none); else, for a load the host makes for an image, a
+//   video or a CSS image, its document's (`document`, its `<meta name="referrer">`'s) — none for any other, whose
+//   fetch takes its policy container's as it is made (Fetch "main fetch"): a module script's options keep its own;
 // - its client's origin opaque or not.
 pub(crate) fn plan(kind: u32, crossorigin: Option<&str>, attr: &str, noted: Option<&str>, document: &str, opaque: bool) -> u32 {
     let (kind, high) = (kind & 0xff, kind >> 8);
@@ -42,7 +44,8 @@ pub(crate) fn plan(kind: u32, crossorigin: Option<&str>, attr: &str, noted: Opti
         _ => ("no-cors", "include"),
     };
     let noted = noted.map(|p| if p.is_empty() { crate::url_ops::DEFAULT_POLICY } else { p });
-    let policy = if !attr.is_empty() { attr } else { noted.unwrap_or(document) };
+    let load = matches!(kind, J_IMAGE | J_VIDEO | J_CSS_IMAGE);
+    let policy = if !attr.is_empty() { attr } else { noted.unwrap_or(if load { document } else { "" }) };
     let index = |table: &[&str], v: &str| table.iter().position(|t| *t == v).unwrap_or(0) as u32;
     let policy = crate::url_ops::POLICIES.iter().position(|p| *p == policy).map_or(0, |i| i as u32 + 1);
     index(&MODES, mode) | index(&CREDENTIALS, credentials) << 2 | policy << 4 | if opaque { OPAQUE } else { 0 }
@@ -106,6 +109,9 @@ mod tests {
         assert_eq!(fields(plan(J_CLASSIC_SCRIPT, None, "", Some(""), "origin", false)).2, "strict-origin-when-cross-origin");
         assert_eq!(fields(plan(J_SHEET, None, "", Some("same-origin"), "origin", false)).2, "same-origin");
         assert_eq!(fields(plan(J_SHEET, None, "unsafe-url", Some("same-origin"), "origin", false)).2, "unsafe-url");
+        // (…and none of its document's now but a load's: a module script's fetch reads its container's as it is made)
+        assert_eq!(fields(plan(J_MODULE_SCRIPT, None, "", None, "origin", false)).2, "");
+        assert_eq!(fields(0), ("no-cors", "same-origin", "", false));
         // (…a module preload's a CORS request, a plugin's a navigation, a prefetch's no-cors)
         let modulepreload = J_LINK | crate::link_resource::OBTAINS_MODULEPRELOAD << 8;
         assert_eq!(fields(plan(modulepreload, None, "", None, "", false)).0, "cors");
