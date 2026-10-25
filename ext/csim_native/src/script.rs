@@ -438,7 +438,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moduleContent", module_content_op, context_id);
     crate::dom::register(scope, ns, "modulepreloadDestination", modulepreload_destination_op, context_id);
     crate::dom::register(scope, ns, "preloadDestination", preload_destination_op, context_id);
-    crate::dom::register(scope, ns, "scriptResponseRefused", script_response_refused_op, context_id);
     crate::dom::register(scope, ns, "classicScriptEncoding", classic_script_encoding_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
     crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
@@ -524,28 +523,6 @@ pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integri
     let sniffed = crate::fetch_rules::blocked_by_nosniff("script", content_type, nosniff);
     let integrity_fails = !crate::integrity::response_matches(body, integrity, !opaque);
     never || sniffed || integrity_fails
-}
-// __dom.scriptResponseRefused(nid, opaque, contentType, nosniff, body) -> `script_response_refused` of the response the
-// classic script element `nid` fetched — by its `integrity`, the body its bytes (a Uint8Array) or a string whose UTF-8
-// is them, '' where it has none; `opaque` whether the response is (its type, which a redirect through another origin
-// taints as a cross-origin URL does: handles.js `corsCrossOrigin`), not what its URL's origin says.
-fn script_response_refused_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let opaque = args.get(1).boolean_value(scope);
-    let [content_type, nosniff] = [2, 3].map(|i| args.get(i).to_rust_string_lossy(scope));
-    let body = match v8::Local::<v8::ArrayBufferView>::try_from(args.get(4)) {
-        Ok(view) => {
-            let mut bytes = vec![0u8; view.byte_length()];
-            view.copy_contents(&mut bytes);
-            bytes
-        }
-        Err(_) => args.get(4).to_rust_string_lossy(scope).into_bytes(),
-    };
-    let integrity = nid_arg(scope, &args, 0)
-        .and_then(|id| dom(scope).arena.get(id))
-        .and_then(|n| n.plain_attr("integrity"))
-        .unwrap_or("")
-        .to_owned();
-    rv.set_bool(script_response_refused(&content_type, &nosniff, &integrity, &body, opaque));
 }
 // The encoding a classic script's response decodes with (HTML "fetch a classic script"): its `Content-Type`'s charset
 // where that names one ("legacy extract an encoding": a label of none as good as none), else its document's.

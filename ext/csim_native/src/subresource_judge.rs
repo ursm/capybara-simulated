@@ -6,6 +6,7 @@
 
 // The consumer (`kind`, low byte): what it makes of a status and of the response's content is its family's — a link's by
 // what it obtains (the high bits: link_resource.rs `OBTAINS_*`).
+pub(crate) const J_CLASSIC_SCRIPT: u32 = 1;
 pub(crate) const J_WORKER_IMPORT: u32 = 2;
 pub(crate) const J_SHEET: u32 = 3;
 pub(crate) const J_CSS_MODULE: u32 = 4;
@@ -43,12 +44,16 @@ pub(crate) struct Consumer<'a> {
     pub(crate) obtains: u32,
     pub(crate) module_destination: &'a str,
     pub(crate) preload_destination: &'a str,
+    // (…a classic script's `integrity` as its request was made, and its response's bytes, which a digest is of: none
+    // asked for where it has none)
+    pub(crate) integrity: &'a str,
+    pub(crate) body: &'a [u8],
     pub(crate) mode: &'a str,
     pub(crate) quirks: bool,
 }
 impl Consumer<'static> {
     pub(crate) fn of(kind: u32) -> Self {
-        Consumer { kind, obtains: 0, module_destination: "", preload_destination: "", mode: "no-cors", quirks: false }
+        Consumer { kind, obtains: 0, module_destination: "", preload_destination: "", integrity: "", body: b"", mode: "no-cors", quirks: false }
     }
 }
 
@@ -73,14 +78,17 @@ pub(crate) struct Facts {
 //   answer the request (`service_worker_response_allowed`, redirect mode follow);
 // - its status by what the consumer makes of one: an image decodes what it is given and a font's file is what it is,
 //   a media resource's fetch errs on an HTTP 4xx or 5xx (HTML's media data processing list), a classic
-//   worker-imported script and an `<object>`'s resource want an ok status ("fetch a classic worker-imported script",
+//   script, a worker-imported one and an `<object>`'s resource want an ok status ("fetch a classic script", "fetch a
+//   classic worker-imported script",
 //   the object element's processing model) as a link's does ("fetch and process the linked resource") but a
 //   prefetch's, which loads where it is no network error whatever its status (HTML's prefetch "process the linked
 //   resource"; Chrome errs on a 404, the spec says otherwise) — none the bindings judge of
 //   an answer the host judged already, nor of an opaque answer to a fetch event, whose status a no-cors consumer cannot
 //   read, nor of a scheme's;
 // - a body cut short is none to use, nor one with no body or (for a decoded one) an empty one;
-// - a worker-imported script's from the network must be of a JavaScript MIME type; a style sheet's must be one
+// - a classic script's must be none Fetch refuses it for (script.rs `script_response_refused`: its MIME type, `nosniff`,
+//   its integrity, which an opaque response fails); a worker-imported script's from the network must be of a
+//   JavaScript MIME type; a style sheet's must be one
 //   (sheet_owners.rs `sheet_response_accepted`, a quirks document's CORS-same-origin one of any type) — a service
 //   worker's answer whatever its type; a CSS module script's must be `text/css`; a link's what it obtains
 //   (link_resource.rs `link_response_accepted`, `nosniff` read off a network response's alone) — one whose facts were
@@ -111,7 +119,7 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
             J_PREFETCH => true,
             J_LINK if consumer.obtains == crate::link_resource::OBTAINS_PREFETCH => true,
             J_AUDIO | J_VIDEO => status < 400,
-            J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK | J_OBJECT => (200..=299).contains(&status),
+            J_CLASSIC_SCRIPT | J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK | J_OBJECT => (200..=299).contains(&status),
             _ => false,
         };
         if !ok {
@@ -126,6 +134,7 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
     }
     let essence = || crate::mime::extract(&facts.content_type).map(|m| m.essence);
     let content = match kind {
+        J_CLASSIC_SCRIPT => !crate::script::script_response_refused(&facts.content_type, &facts.nosniff, consumer.integrity, consumer.body, cross),
         J_WORKER_IMPORT => from == SRC_SCHEME || essence().as_deref().is_some_and(crate::script::is_javascript_mime),
         J_SHEET => worker || crate::sheet_owners::sheet_response_accepted(&facts.content_type, &facts.nosniff, consumer.quirks, || !cross),
         J_CSS_MODULE => essence().as_deref() == Some("text/css"),
@@ -137,7 +146,7 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
         _ => true,
     };
     if !content {
-        return if kind == J_WORKER_IMPORT { 0 } else { V_FETCHED | cross_bit };
+        return if matches!(kind, J_CLASSIC_SCRIPT | J_WORKER_IMPORT) { 0 } else { V_FETCHED | cross_bit };
     }
     V_OK | V_FETCHED | cross_bit
 }
@@ -150,12 +159,13 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
     let k = v8::String::new(scope, key)?;
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
-// __dom.subresourceJudge(kind, mode, resp, source, doc, moduleDestination, preloadDestination) -> `judge` of `resp` — the
+// __dom.subresourceJudge(kind, mode, resp, source, doc, a, b) -> `judge` of `resp` — the
 // response as the host, a service worker or a scheme's processor gives it (its `status`, `type`, `redirected`, `tainted`,
 // `body_error`, its `headers`' Content-Type — else its `contentType` — and `X-Content-Type-Options`; `blocked` or
 // `__networkError` a network error, as no response at all is, but for an asset's, whose facts the host may not have
-// kept), its request made in `mode` (null for no-cors), in the document `doc`; a link's the destinations its `as` named
-// as it planned the fetch — as its verdict bits.
+// kept), its request made in `mode` (null for no-cors), in the document `doc`; `a` and `b` a link's destinations its
+// `as` named as it planned the fetch, a classic script's `integrity` and its response's bytes (a Uint8Array, or a string
+// whose UTF-8 they are; none where it has no integrity) — as its verdict bits.
 fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let packed = args.get(0).uint32_value(scope).unwrap_or(0);
     let (kind, obtains) = (packed & 0xff, packed >> 8);
@@ -173,7 +183,7 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             let network_error = flag(scope, "blocked") || flag(scope, "__networkError");
             let response_type = member(scope, resp, "type").map_or_else(|| "default".to_owned(), |v| v.to_rust_string_lossy(scope));
             let status = member(scope, resp, "status").and_then(|v| v.number_value(scope)).map(|n| n as u32);
-            let typed = matches!(kind, J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK);
+            let typed = matches!(kind, J_CLASSIC_SCRIPT | J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK);
             let headers = if typed { member(scope, resp, "headers").and_then(|h| v8::Local::<v8::Object>::try_from(h).ok()) } else { None };
             let header = |scope: &mut v8::PinScope<'_, '_>, name: &str| headers.and_then(|h| crate::fetch_rules::response_header(scope, h, name));
             let content_type = if typed {
@@ -181,7 +191,7 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             } else {
                 String::new()
             };
-            let nosniff = if matches!(kind, J_SHEET | J_LINK) { header(scope, "x-content-type-options").unwrap_or_default() } else { String::new() };
+            let nosniff = if matches!(kind, J_CLASSIC_SCRIPT | J_SHEET | J_LINK) { header(scope, "x-content-type-options").unwrap_or_default() } else { String::new() };
             Facts {
                 network_error,
                 response_type,
@@ -199,7 +209,29 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         if v.is_null_or_undefined() { String::new() } else { v.to_rust_string_lossy(scope) }
     };
     let (module_destination, preload_destination) = if kind == J_LINK { (destination(scope, 5), destination(scope, 6)) } else { Default::default() };
-    let consumer = Consumer { kind, obtains, module_destination: &module_destination, preload_destination: &preload_destination, mode: &mode, quirks };
+    let integrity = if kind == J_CLASSIC_SCRIPT { destination(scope, 5) } else { String::new() };
+    let body = if integrity.is_empty() {
+        Vec::new()
+    } else {
+        match v8::Local::<v8::ArrayBufferView>::try_from(args.get(6)) {
+            Ok(view) => {
+                let mut bytes = vec![0u8; view.byte_length()];
+                view.copy_contents(&mut bytes);
+                bytes
+            }
+            Err(_) => args.get(6).to_rust_string_lossy(scope).into_bytes(),
+        }
+    };
+    let consumer = Consumer {
+        kind,
+        obtains,
+        module_destination: &module_destination,
+        preload_destination: &preload_destination,
+        integrity: &integrity,
+        body: &body,
+        mode: &mode,
+        quirks,
+    };
     rv.set_uint32(judge(&consumer, source, &facts));
 }
 
@@ -323,5 +355,22 @@ mod tests {
         let both = Consumer { obtains: OBTAINS_PREFETCH | OBTAINS_STYLESHEET, ..Consumer::of(J_LINK) };
         assert_eq!(judge(&both, SRC_NETWORK, &Facts { content_type: "text/css".to_owned(), ..resp("basic", Some(404)) }), 0);
         assert_eq!(judge(&Consumer::of(J_PREFETCH), SRC_SW_EVENT, &resp("error", None)), 0);
+    }
+
+    #[test]
+    fn a_classic_script_is_one_fetch_does_not_refuse() {
+        let script = |ct: &str, response_type, integrity, source| {
+            let consumer = Consumer { integrity, body: b"x", ..Consumer::of(J_CLASSIC_SCRIPT) };
+            judge(&consumer, source, &Facts { content_type: ct.to_owned(), ..resp(response_type, Some(200)) })
+        };
+        assert_eq!(script("text/javascript", "basic", "", SRC_NETWORK), OK);
+        assert_eq!(script("image/png", "basic", "", SRC_ASSET), 0);
+        // (…its integrity a digest of its bytes, which an opaque response fails; muted where it is of another origin)
+        let sha = "sha256-LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIE=";
+        assert_eq!(script("text/javascript", "basic", sha, SRC_NETWORK), OK);
+        assert_eq!(script("text/javascript", "basic", "sha256-AAAA", SRC_NETWORK), 0);
+        assert_eq!(script("text/javascript", "opaque", sha, SRC_ASSET), 0);
+        assert_eq!(script("text/javascript", "opaque", "", SRC_ASSET), OK | V_CROSS_ORIGIN);
+        assert_eq!(judge(&Consumer::of(J_CLASSIC_SCRIPT), SRC_NETWORK, &resp("basic", Some(404))), 0);
     }
 }
