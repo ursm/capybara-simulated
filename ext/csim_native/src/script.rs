@@ -274,7 +274,8 @@ fn function_script(scope: &mut v8::PinScope<'_, '_>, f: v8::Local<'_, v8::Value>
 // `stack`'s top frame of the page's (`stack_location`: an Error the driver's own code made, a binding's DOMException) —
 // read too where V8's place is the document's code, as an evaluation's names the script that made it; and only after V8
 // was asked, as an Error's `stack` once made leaves it no frames of its own to make a message of — and only of an
-// `error` (an Error or a DOMException of any realm, the bindings' brand checks), whose getter's throw is the caller's. Muted where a
+// `error` (an Error or a DOMException of any realm, the bindings' brand checks), a getter's throw no stack: the report
+// is made all the same, as a browser's consults no page getter. Muted where a
 // script it came out of is a classic one whose errors are (`muted_scripts`), and, where V8 says nowhere (a thrown string,
 // an evaluation's code, whose stack a page may have rewritten), where the script it was run as (`where`, its URL) or the
 // callback that threw it is.
@@ -286,20 +287,23 @@ fn exception_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let thrown = thrown_at(scope, e);
     let mut stack = None;
     if thrown.as_ref().is_none_or(|t| t.0) && args.get(1).is_true() {
-        let key = v8::String::new(scope, "stack").unwrap();
-        let Some(text) = e.to_object(scope).and_then(|o| o.get(scope, key.into())) else { return };
-        if text.is_string() {
-            stack = stack_location(&text.to_rust_string_lossy(scope));
+        v8::tc_scope!(let tc, scope);
+        let key = v8::String::new(tc, "stack").unwrap();
+        if let Some(text) = e.to_object(tc).and_then(|o| o.get(tc, key.into())).filter(|t| t.is_string()) {
+            stack = stack_location(&text.to_rust_string_lossy(tc));
         }
     }
     let cid = crate::dom::realm_id(scope, &args);
-    let mut scripts: Vec<String> = [&thrown, &stack].into_iter().flatten().map(|at| at.1.clone()).collect();
-    if thrown.is_none() {
-        scripts.push(args.get(2).to_rust_string_lossy(scope));
-        scripts.extend(function_script(scope, args.get(3)));
+    let mut muted = false;
+    if !crate::dom::realm(scope, cid).muted_scripts.is_empty() {
+        let mut scripts: Vec<String> = [&thrown, &stack].into_iter().flatten().map(|at| at.1.clone()).collect();
+        if thrown.is_none() {
+            scripts.push(args.get(2).to_rust_string_lossy(scope));
+            scripts.extend(function_script(scope, args.get(3)));
+        }
+        let muted_scripts = &crate::dom::realm(scope, cid).muted_scripts;
+        muted = scripts.iter().any(|url| !url.is_empty() && muted_scripts.contains(url));
     }
-    let muted_scripts = &crate::dom::realm(scope, cid).muted_scripts;
-    let muted = !muted_scripts.is_empty() && scripts.iter().any(|url| !url.is_empty() && muted_scripts.contains(url));
     let muted = v8::Boolean::new(scope, muted).into();
     let items = match thrown.or(stack) {
         Some((document, url, line, column)) => vec![

@@ -53,11 +53,22 @@ RSpec.describe 'script error locations' do
     big, syntax, lexical = s.evaluate_script('seen')
     # (…the value the script threw, as the error a small one reports is: not a copy the driver made of its text)
     expect(big).to eq(['http://www.example.com/js/big.js', 3, 'Error', true])
-    # (A parse error's own location is the engine's message, not a stack frame, and no path reads it yet — a small
-    # script's is as bare.)
-    expect(syntax[2]).to eq('SyntaxError')
+    # (…a parse error at the place in its text that did not compile: the engine's message, not a stack frame)
+    expect(syntax[0, 3]).to eq(['http://www.example.com/js/big-syntax.js', 3, 'SyntaxError'])
     # …and one that opens with a lexical declaration, which runs by the realm's top-level eval
     expect(lexical).to eq(['http://www.example.com/big', 1, 'TypeError', true])
+  end
+
+  # …and an Error whose `stack` getter throws is reported all the same, at where it was thrown: a browser's report
+  # consults no page getter.
+  it 'reports an exception whose stack getter throws' do
+    page = <<~HTML
+      <!DOCTYPE html><script>window.seen = []; onerror = (m, f, l, c, e) => { seen.push([m, l, c, !!e]); };</script>
+      <script>const e = new Error('x'); Object.defineProperty(e, 'stack', {get() { throw 1 }}); throw e;</script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    expect(s.evaluate_script('seen')).to eq([['Error: x', 1, 11, true]])
   end
 
   it 'raises a script timeout where an asynchronous script never calls back' do
