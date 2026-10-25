@@ -112,9 +112,7 @@ Navigator:
   - login
   - managed
   - mediaSession
-  - mimeTypes
   - ml
-  - plugins
   - preferences
   - presentation
   - queryHandwritingRecognizer

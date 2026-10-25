@@ -308,6 +308,12 @@ const INTERFACES = [
   ['html', 'ImageData', { install: true }],
   ['html', 'ImageBitmap'],
   ['html', 'BarProp'],
+  // (…the PDF viewer plugins and their MIME types, none where the user agent views no PDF inline — this one, whose
+  // `pdfViewerEnabled` is false (HTML §8.9.1.6): every list empty, so none has a named property)
+  ['html', 'PluginArray', { namedProperties: 'none: the list is empty (no PDF viewer)' }],
+  ['html', 'MimeTypeArray', { namedProperties: 'none: the list is empty (no PDF viewer)' }],
+  ['html', 'Plugin', { namedProperties: 'none: no Plugin is made (no PDF viewer)' }],
+  ['html', 'MimeType'],
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
   ['html', 'ValidityState'],
@@ -613,8 +619,6 @@ const INTERFACES = [
       'window-controls-overlay': 'windowControlsOverlay: not implemented'
     },
     omitMembers: {
-      plugins: 'the PluginArray interface is not implemented',
-      mimeTypes: 'the MimeTypeArray interface is not implemented',
       oscpu: "NavigatorID's Gecko compatibility mode: the navigator answers in Chrome's (HTML §8.9.1.1)",
       taintEnabled: "NavigatorID's Gecko compatibility mode: the navigator answers in Chrome's (HTML §8.9.1.1)"
     }

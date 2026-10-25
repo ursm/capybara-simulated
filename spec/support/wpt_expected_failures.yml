@@ -3776,29 +3776,6 @@ html/dom/idlharness.https.html:
   object''s @@unscopables property'
 - 'ImageBitmapRenderingContext interface: operation transferFromImageBitmap(ImageBitmap?)'
 - 'Location interface: stringifier'
-- MimeType interface object length
-- MimeType interface object name
-- 'MimeType interface: attribute description'
-- 'MimeType interface: attribute enabledPlugin'
-- 'MimeType interface: attribute suffixes'
-- 'MimeType interface: attribute type'
-- 'MimeType interface: existence and properties of interface object'
-- 'MimeType interface: existence and properties of interface prototype object'
-- 'MimeType interface: existence and properties of interface prototype object''s "constructor"
-  property'
-- 'MimeType interface: existence and properties of interface prototype object''s @@unscopables
-  property'
-- MimeTypeArray interface object length
-- MimeTypeArray interface object name
-- 'MimeTypeArray interface: attribute length'
-- 'MimeTypeArray interface: existence and properties of interface object'
-- 'MimeTypeArray interface: existence and properties of interface prototype object'
-- 'MimeTypeArray interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'MimeTypeArray interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'MimeTypeArray interface: operation item(unsigned long)'
-- 'MimeTypeArray interface: operation namedItem(DOMString)'
 - NavigateEvent interface object length
 - NavigateEvent interface object name
 - 'NavigateEvent interface: attribute canIntercept'
@@ -3926,16 +3903,10 @@ html/dom/idlharness.https.html:
   object''s "constructor" property'
 - 'NavigationTransition interface: existence and properties of interface prototype
   object''s @@unscopables property'
-- 'Navigator interface: attribute mimeTypes'
 - 'Navigator interface: attribute oscpu'
-- 'Navigator interface: attribute plugins'
 - 'Navigator interface: operation taintEnabled()'
-- 'Navigator interface: window.navigator must inherit property "mimeTypes" with the
-  proper type'
 - 'Navigator interface: window.navigator must inherit property "oscpu" with the proper
   type'
-- 'Navigator interface: window.navigator must inherit property "plugins" with the
-  proper type'
 - 'Navigator interface: window.navigator must inherit property "taintEnabled()" with
   the proper type'
 - NotRestoredReasonDetails interface object length
@@ -3995,32 +3966,6 @@ html/dom/idlharness.https.html:
   "constructor" property'
 - 'PageSwapEvent interface: existence and properties of interface prototype object''s
   @@unscopables property'
-- Plugin interface object length
-- Plugin interface object name
-- 'Plugin interface: attribute description'
-- 'Plugin interface: attribute filename'
-- 'Plugin interface: attribute length'
-- 'Plugin interface: attribute name'
-- 'Plugin interface: existence and properties of interface object'
-- 'Plugin interface: existence and properties of interface prototype object'
-- 'Plugin interface: existence and properties of interface prototype object''s "constructor"
-  property'
-- 'Plugin interface: existence and properties of interface prototype object''s @@unscopables
-  property'
-- 'Plugin interface: operation item(unsigned long)'
-- 'Plugin interface: operation namedItem(DOMString)'
-- PluginArray interface object length
-- PluginArray interface object name
-- 'PluginArray interface: attribute length'
-- 'PluginArray interface: existence and properties of interface object'
-- 'PluginArray interface: existence and properties of interface prototype object'
-- 'PluginArray interface: existence and properties of interface prototype object''s
-  "constructor" property'
-- 'PluginArray interface: existence and properties of interface prototype object''s
-  @@unscopables property'
-- 'PluginArray interface: operation item(unsigned long)'
-- 'PluginArray interface: operation namedItem(DOMString)'
-- 'PluginArray interface: operation refresh()'
 - 'SVGElement interface: attribute onmouseenter'
 - 'SVGElement interface: attribute onmouseleave'
 - 'SVGSVGElement interface: attribute onafterprint'
