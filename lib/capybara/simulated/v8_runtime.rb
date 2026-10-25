@@ -1468,7 +1468,8 @@ module Capybara
             json_module?(url_s) ? 'json' : 'script',
             'cors',
             sw[:credentials] || 'same-origin',
-            integrity: integ
+            integrity: integ,
+            referrer_policy: sw[:referrer_policy]
           )
           return handles[url] = nil if r && r['blocked']   # respondWith failed the load
           src = r && r['body']
@@ -1638,11 +1639,12 @@ module Capybara
       def esm_sw_ctx(sw)
         return nil unless sw && sw[0].to_i.positive?
         {
-          handle:      sw[0].to_i,
-          client_id:   sw[1].to_s,
-          referrer:    sw[2].to_s,
-          credentials: sw[3].to_s,
-          integrity:   sw[4].to_s
+          handle:          sw[0].to_i,
+          client_id:       sw[1].to_s,
+          referrer:        sw[2].to_s,
+          credentials:     sw[3].to_s,
+          integrity:       sw[4].to_s,
+          referrer_policy: sw[5].to_s
         }
       end
 

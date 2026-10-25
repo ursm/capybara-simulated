@@ -5313,10 +5313,10 @@ module Capybara
           url:            url.to_s,
           headers:        {},
           body_b64:       '',
-          # The element's `crossorigin` attribute decides these (HTML "fetch a
-          # classic script" / "obtain a stylesheet"), as the engine maps it
-          # (fetch_rules.rs `cors_request`): absent → no-cors+include,
-          # anonymous → cors+same-origin, use-credentials → cors+include.
+          # As the engine planned the request (subresource_plan.rs `plan`): by the
+          # element's `crossorigin` for a potential-CORS one (absent → no-cors+include,
+          # anonymous → cors+same-origin, use-credentials → cors+include), a font's
+          # and a CSS module's cors+same-origin, a worker's module preload same-origin.
           mode:           mode.to_s,
           # The element's raw `integrity` attribute, verbatim: event.request.integrity
           # reflects it even when unparseable (parsing happens at verification time).

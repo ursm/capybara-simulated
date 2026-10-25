@@ -234,8 +234,9 @@ RSpec.describe 'Service Worker subresource verdict' do
     # (…the page stepped as the driver asks it)
     expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?})).size == 2 && logged.sort }).to eq(%w[/log?hint-cors=cors /log?hint-plain=no-cors])
   end
-  # …and as it is referred: under its element's `referrerpolicy` — an image's (a fetch event) and a script's (the
-  # synchronous one) alike — its worker's `event.request` the policy and the referrer it is made with.
+  # …and as it is referred: under its element's `referrerpolicy` — an image's (a fetch event), a script's and a module
+  # script's (the synchronous one) alike — its worker's `event.request` the policy and the referrer it is made with; an
+  # audio, which has no such attribute, under its document's.
   it "hands the worker a request under its element's referrer policy" do
     session = simulated_session(app)
     session.visit '/'
@@ -255,12 +256,21 @@ RSpec.describe 'Service Worker subresource verdict' do
           script.referrerPolicy = 'no-referrer';
           script.src = '/scope/rp-script';
           d.head.appendChild(script);
+          const module = d.createElement('script');
+          module.type = 'module';
+          module.referrerPolicy = 'no-referrer';
+          module.src = '/scope/rp-module';
+          d.head.appendChild(module);
+          const audio = d.createElement('audio');
+          audio.setAttribute('referrerpolicy', 'no-referrer');
+          audio.src = '/scope/rp-audio';
+          d.body.appendChild(audio);
         };
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?})).size == 2 && logged.sort }).to eq(
-      %w[/log?img=no-referrer,none /log?script=no-referrer,none]
+    expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?(img|script|module|audio)=})).size == 4 && logged.sort }).to eq(
+      %w[/log?audio=strict-origin-when-cross-origin,http://www.example.com/scope/page.html /log?img=no-referrer,none /log?module=no-referrer,none /log?script=no-referrer,none]
     )
   end
   # A CSS module script a document fetched before a worker controlled it is asked of the worker once one does: the
