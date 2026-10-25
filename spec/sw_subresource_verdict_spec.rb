@@ -25,6 +25,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/swerr.js') e.respondWith(Response.error());
         else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
+        else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
       });
     JS
     Rack::Builder.new {
@@ -36,6 +37,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<html><body>in-scope</body></html>']]
         when '/scope/parsed.html' then [200, {'content-type' => 'text/html'}, ['<html><body><script src="/scope/swerr.js"></script></body></html>']]
         when '/scope/refused.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+        when '/ran.js' then [200, {'content-type' => 'text/javascript'}, ['parent.__ran.push("ran")']]
         when '/a.mp3' then [200, {'content-type' => 'audio/mpeg'}, [File.binread(File.expand_path('wpt/media/sound_5.mp3', __dir__))]]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
@@ -169,6 +171,35 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('sheet' => 0, 'audio' => 'canplaythrough')
     expect(hits).not_to include('/scope/refused.css')
+  end
+  # A classic script a worker answers with an opaque response runs where the response it hides is an ok one — HTML
+  # "fetch a classic script" takes the response's unsafe response — and fails where that is a 404.
+  it 'runs an opaque script by the status it hides' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      globalThis.__ran = [];
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument, seen = {};
+          for (const name of ['ran.js', 'gone.js']) {
+            const s = d.createElement('script');
+            s.onload = () => { seen[name] = 'load'; if (Object.keys(seen).length === 2) globalThis.__seen = seen; };
+            s.onerror = () => { seen[name] = 'error'; if (Object.keys(seen).length === 2) globalThis.__seen = seen; };
+            s.src = '/scope/away-' + name;
+            d.head.appendChild(s);
+          }
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('ran.js' => 'load', 'gone.js' => 'error')
+    expect(session.evaluate_script('__ran')).to eq(%w[ran])
   end
 end
 

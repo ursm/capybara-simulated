@@ -5340,8 +5340,10 @@ module Capybara
         type   = r['type'].to_s
         status = type == 'opaque' ? 0 : (r['status'] || 200).to_i
         return {'blocked' => true} unless sw_response_allowed?(r, mode)
-        # (…a non-ok answer is still a response, whose status a Resource Timing entry reports)
-        return {'blocked' => true, 'status' => status} unless Native.sw_subresource_usable(destination.to_s, mode.to_s, type, r['redirected'] == true, status)
+        # (…a non-ok answer is still a response, whose status a Resource Timing entry reports; judged by the status an
+        # opaque one hides, the one a classic script's fetch reads)
+        unsafe = type == 'opaque' ? (r['render_status'] || 200).to_i : status
+        return {'blocked' => true, 'status' => status} unless Native.sw_subresource_usable(destination.to_s, mode.to_s, type, r['redirected'] == true, unsafe)
 
         body_b64 = r['body_b64'].to_s
         body_b64 = r['render_b64'].to_s if body_b64.empty? && r['render_b64']
