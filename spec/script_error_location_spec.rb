@@ -99,6 +99,22 @@ RSpec.describe 'script error locations' do
     expect(s.evaluate_script('seen')).to eq([6, 3])
   end
 
+  # …nor the parser's line to an empty script it made, its text given later: that text the parser's no more than an
+  # inserted script's is, counted from its own first line (Chrome: 3)
+  it 'counts a parser script’s later text from its own first line' do
+    page = <<~HTML
+      <!DOCTYPE html>
+      <script>window.seen = []; onerror = (m, f, l) => { seen.push(l); };</script>
+      <p>x</p>
+
+      <script id="s"></script>
+    HTML
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [page]] })
+    s.visit '/'
+    s.execute_script("document.getElementById('s').textContent = '\\n\\nnull.c'")
+    expect(s.evaluate_script('seen')).to eq([3])
+  end
+
   # …and an Error whose `stack` getter throws is reported all the same, at where it was thrown: a browser's report
   # consults no page getter.
   it 'reports an exception whose stack getter throws' do
