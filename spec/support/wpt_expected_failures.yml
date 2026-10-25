@@ -5560,11 +5560,6 @@ html/webappapis/scripting/events/event-handler-idl-attribute-realm.window.js:
   global
 - Event handler IDL attributes must return a function from the element's document's
   realm
-html/webappapis/scripting/events/onerroreventhandler.html:
-- "[harness] TIMEOUT"
-- onerror + !ErrorEvent + Window
-- onerror + Document
-- onerror + ErrorEvent + Window
 input-events/input-events-arrow-key-on-number-input-delete-document.html:
 - Number input should not crash and not fire subsequent events when event handler
   removes document
