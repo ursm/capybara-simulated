@@ -54,6 +54,19 @@ RSpec.describe 'document.all' do
     expect(session.evaluate_script('document.all').map(&:tag_name).first(3)).to eq(%w[html head body])
   end
 
+  # …and no null to a binding: an argument of a nullable type `document.all` is an object of the wrong interface
+  # (Web IDL asks for null or undefined, which `== null` would take it for: Chrome, Firefox — TypeError)
+  it 'is no null to a nullable argument' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const el = document.createElement('i');
+        try { document.body.insertBefore(el, document.all); return 'inserted'; } catch (e) { return e.name; }
+      })()
+    JS
+    expect(got).to eq('TypeError')
+  end
+
   # …and a frame's live collections — its `all`'s names among them — follow an id or a class written through another
   # realm's wrapper of its node, as through its own.
   it 'follows a write another realm makes to a frame’s node' do

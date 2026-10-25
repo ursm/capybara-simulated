@@ -41,6 +41,9 @@ const NO_WINDOW_HANDLERS = {
   gamepad: 'ongamepad*: the Gamepad API is not implemented',
   portals: 'portalHost / onportalactivate: portals are not implemented'
 };
+// Whether the JS value `expr` is null or undefined, as Web IDL's conversions ask (a nullable type's, a dictionary's): by
+// identity, not `== null`, which an [[IsHTMLDDA]] object — `document.all` — equals too, though it is an object.
+const nullish = (expr) => `(${expr} === null || ${expr} === undefined)`;
 const INTERFACES = [
   ['dom', 'DOMTokenList'],
   ['dom', 'NodeFilter'],
@@ -976,7 +979,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     const each = conversion(t.idlType[0], 'x', where, checks);
     const c = `toSequence(${expr}, (x) => ${each}, ${failure(where)})`;
     const value = t.generic === 'FrozenArray' ? `Object.freeze(${c})` : c;
-    return t.nullable ? `(${expr} == null ? null : ${value})` : value;
+    return t.nullable ? `(${nullish(expr)} ? null : ${value})` : value;
   }
   if (t.generic === 'record') {
     // (Web IDL §3.2.24: the object's own enumerable keys, each converted — a symbol one a TypeError — with its value,
@@ -984,7 +987,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     const k = conversion(t.idlType[0], 'k', where, checks);
     const v = conversion(t.idlType[1], 'x', where, checks);
     const c = `toRecord(${expr}, (k) => ${k}, (x) => ${v}, ${failure(where)})`;
-    return t.nullable ? `(${expr} == null ? null : ${c})` : c;
+    return t.nullable ? `(${nullish(expr)} ? null : ${c})` : c;
   }
   if (t.generic === 'Promise') {
     // (Web IDL §3.2.23: a new promise of %Promise% resolved with the value — its resolution converted to T where the
@@ -1009,7 +1012,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
     c = t.checked
       ? `checkBuffer(${expr}, ${JSON.stringify(t.idlType)}, ${allowShared}, ${allowResizable}, ${failure(where)})`
       : `toBuffer(${expr}, ${JSON.stringify(t.idlType)}, ${allowShared}, ${allowResizable}, ${conversionError(where, t.idlType)}, ${failure(where)})`;
-    return t.nullable ? `(${expr} == null ? null : ${c})` : c;
+    return t.nullable ? `(${nullish(expr)} ? null : ${c})` : c;
   }
   switch (enforceRange ? 'EnforceRange' : clamp ? 'Clamp' : t.idlType) {
     case 'EnforceRange': c = `toEnforcedInteger(${expr}, ${JSON.stringify(t.idlType)}, ${failure(where)})`; break;
@@ -1060,7 +1063,7 @@ function conversion(t, expr, where, checks, argExtAttrs = []) {
       }
     }
   }
-  return t.nullable ? `(${expr} == null ? null : ${c})` : c;
+  return t.nullable ? `(${nullish(expr)} ? null : ${c})` : c;
 }
 
 // Interfaces of specs no implementation here answers, which no value is an object of — a union member of one is
@@ -1142,13 +1145,13 @@ function unionConversion(t, expr, where, checks, argExtAttrs) {
   // (…the last conversion, which takes what no step before it did — so no step of its own)
   const last = string || numeric || boolean;
   const steps = [];
-  if (includesNullable) steps.push([`${expr} == null`, 'null']);
+  if (includesNullable) steps.push([nullish(expr), 'null']);
   // (…a string the string type's at once — every test before its would fail on one: the common BlobPart, the common
   // string-or-options argument, asks nothing else)
   if (string && ifaces.length + buffers.length + sequences.length + records.length + callbacks.length + dicts.length + objects.length) {
     steps.push([`typeof ${expr} === 'string'`, convert(string)]);
   }
-  if (dict) steps.push([`${expr} == null`, convert(dict)]);
+  if (dict) steps.push([nullish(expr), convert(dict)]);
   for (const u of ifaces) {
     const check = u.idlType === 'WindowProxy' ? 'Window' : u.idlType;
     checks.add(check);
@@ -1221,7 +1224,7 @@ function dictionaryConverter(name, after = null) {
     for (const m of members.sort((a, b) => (a.name < b.name ? -1 : 1))) {
       const where = { dictionary: d.name, member: m.name };
       lines.push(`  {`);
-      lines.push(`    const x = v == null ? undefined : v.${m.name};`);
+      lines.push(`    const x = ${nullish('v')} ? undefined : v.${m.name};`);
       const missing = m.required ? `(() => { throw new TypeError(${failure(where, 'Required member is undefined.')}); })()`
         : m.default ? defaultValue(m.default, `${d.name}.${m.name}`) : null;
       if (missing !== null) defaults = true;
@@ -1244,7 +1247,7 @@ function dictionaryConverter(name, after = null) {
   }
   // (…and, for a dictionary none of whose members has a default or is required, null or undefined the one empty
   // dictionary: the common call with no options allocates nothing)
-  if (!defaults) lines.splice(head, 0, '  if (v == null) return EMPTY_DICTIONARY;');
+  if (!defaults) lines.splice(head, 0, `  if (${nullish('v')}) return EMPTY_DICTIONARY;`);
   lines.push(`  return dict;`);
   lines.push(`}`);
   dictionaryConverters.set(fn, lines.join('\n'));
@@ -1419,7 +1422,7 @@ function generateInterface(def, options = {}) {
       } else if (!m.readonly && enums.has(m.idlType.idlType)) {
         // (…an enumeration's: a string it has not is ignored, not an error — Web IDL §3.7.6)
         const value = `enumValue(v, ${JSON.stringify(enums.get(m.idlType.idlType))}, ${failure({ iface: name, member: m.name })})`;
-        const v = m.idlType.nullable ? `v == null ? null : ${value}` : value;
+        const v = m.idlType.nullable ? `${nullish('v')} ? null : ${value}` : value;
         out.push(`    set ${key}(v) { const self = ${self}; const value = ${v}; if (value !== undefined) { ${withCEReactions(m, `${setImpl}(self, value);`)} } }`);
       } else if (!m.readonly && reflection) {
         const v = conversion(m.idlType, 'v', { iface: name, member: m.name }, checks);
@@ -1780,7 +1783,7 @@ function overloadSwitch(iface, name, { cases, most, required }, source, checks, 
     const v = `${source}[${m.index}]`;
     if (m.dictionary) {
       // (…two of the count told apart by the distinguishing argument: undefined, null or an object the dictionary's)
-      lines.push(`  case ${n}: if (${v} == null || typeof ${v} === 'object' || typeof ${v} === 'function') ${call(m.dictionary)}`);
+      lines.push(`  case ${n}: if (${nullish(v)} || typeof ${v} === 'object' || typeof ${v} === 'function') ${call(m.dictionary)}`);
       lines.push(`    ${call(m.other)}`);
       return;
     }
