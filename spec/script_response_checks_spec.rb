@@ -86,4 +86,32 @@ RSpec.describe 'script response checks' do
     JS
     expect(s.evaluate_script('[ran.slice().sort(), failed, window.e]')).to eq([%w[bom bom framed latin], [], "\u00e9"])
   end
+  # An opaque response is the one Fetch made — a no-cors request any hop of which left the document's origin (a
+  # redirect's response tainting stays opaque) — whatever origin the script's URL is of: a same-origin URL redirected to
+  # another origin fails its integrity, a CORS one there does not, and a cross-origin URL redirected back stays opaque.
+  it 'fails the integrity of an opaque response, whatever origin its URL is of' do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+    sha  = "sha256-#{Base64.strict_encode64(Digest::SHA256.digest(BODY))}"
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8>
+      <script>window.ran = []; window.failed = [];</script>
+      <script id="away" src="/away.js" integrity="#{sha}" onerror="failed.push(this.id)"></script>
+      <script id="cors" src="/away.js?cors" crossorigin integrity="#{sha}" onerror="failed.push(this.id)"></script>
+      <script id="back" src="http://other.example.com/back.js" integrity="#{sha}" onerror="failed.push(this.id)"></script>
+    HTML
+    app = lambda do |env|
+      case [env['SERVER_NAME'], env['PATH_INFO']]
+      in [/\Aother/, '/back.js'] then [302, {'location' => 'http://www.example.com/script.js'}, []]
+      in [/\Aother/, _] then [200, {'content-type' => 'text/javascript', 'access-control-allow-origin' => '*'}, [BODY]]
+      in [_, '/away.js'] then [302, {'location' => "http://other.example.com/script.js?#{env['QUERY_STRING']}"}, []]
+      in [_, '/script.js'] then [200, {'content-type' => 'text/javascript'}, [BODY]]
+      else [200, {'content-type' => 'text/html'}, [page]]
+      end
+    end
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    expect(s.evaluate_script('[ran, failed.slice().sort()]')).to eq([%w[cors], %w[away back]])
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
 end
