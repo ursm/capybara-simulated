@@ -8138,11 +8138,12 @@ module Capybara
       # from the VM's own store.
       # Its request the engine's `plan` (subresource_plan.rs) for realm `realm`'s document: a CORS one (a `crossorigin`
       # <img>) fails on a cross-origin response without a matching Access-Control-Allow-Origin.
-      def load_image(url, plan, realm: nil)
+      # (…`referrer` where the request names one of its own — a CSS image's sheet's location — else its client's URL)
+      def load_image(url, plan, realm: nil, referrer: nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         Thread.current[:csim_image_meta] = nil
-        cors, credentials, client = planned_request(plan, realm, key)
+        cors, credentials, client = planned_request(plan, realm, key, referrer: referrer)
         entry = cached_image(key, cors, credentials, client: client)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
@@ -13092,9 +13093,9 @@ module Capybara
       # …and the request a load the host makes for a subresource's `plan` (subresource_plan.rs) is, to `target_url`: whether
       # it is a CORS one, its credentials mode, its client — pinned, as it is fetched off the main thread, its opacity the
       # bindings' (`client_for`).
-      private def planned_request(plan, realm, target_url)
+      private def planned_request(plan, realm, target_url, referrer: nil)
         mode, credentials, policy, opaque = Native.subresource_plan_fields(plan.to_i)
-        [mode == 'cors', credentials, pinned_client(client_for(realm, policy, opaque: opaque), target_url)]
+        [mode == 'cors', credentials, pinned_client(client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, opaque: opaque), target_url)]
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
       # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's.

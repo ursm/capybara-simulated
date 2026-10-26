@@ -57,6 +57,10 @@ pub(crate) struct StoredSheet {
     pub(crate) owner: Option<crate::dom::NodeId>,
     pub(crate) enabled: bool,
     pub(crate) set_excluded: bool,
+    // …and whether it has a location of its own — a `<link>`'s, an `<?xml-stylesheet?>`'s, fetched by URL — which a
+    // resource it requests is referred by (CSS Values 4 "fetch a style resource"); a `<style>`'s, a constructed one's
+    // none: its document's.
+    pub(crate) located: bool,
     // The parse is the store's kept one (`parsed`), which other sheets of the same text share: CSSOM takes a copy of
     // its own before it reaches a rule (`own`).
     shared: bool,
@@ -173,6 +177,7 @@ impl SheetStore {
             owner: None,
             enabled: false,
             set_excluded: false,
+            located: false,
             shared: false,
         };
         self.sheets.insert(id, stored);
@@ -347,6 +352,7 @@ impl SheetStore {
             owner: None,
             enabled: false,
             set_excluded: false,
+            located: false,
             shared,
         }
     }

@@ -5224,6 +5224,8 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     };
     let same = made.as_ref().filter(|m| m.base == base && m.quirks == quirks && m.count == count).filter(|m| same_text(scope, m)).cloned();
     let media_moved = same.as_ref().is_some_and(|m| m.media != media);
+    // (…a sheet handed its text a fetched one — a `<link>`'s, an `<?xml-stylesheet?>`'s — of a location of its own)
+    let located = css.is_some();
     // (…the text read out only to make the sheet of it)
     let (kept, css) = match (&same, css) {
         (Some(m), _) => (m.text.clone(), None),
@@ -5252,6 +5254,7 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         // (…a new sheet, made in place or anew, the owner's: its flags its own, as "add a CSS style sheet" begins them)
         if let Some(stored) = arena.sheets.stored_mut(id) {
             stored.owner = Some(owner);
+            stored.located = located;
             stored.disabled = false;
             stored.enabled = false;
             stored.set_excluded = false;

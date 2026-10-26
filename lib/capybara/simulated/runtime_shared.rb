@@ -214,7 +214,7 @@ module Capybara
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
         '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },
-        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], a[2], realm: a[1]) },
+        '__csim_loadImage'           => ->(b, *a) { b.load_image(a[0], a[2], realm: a[1], referrer: a[3]) },
         '__csim_imageLoadStart'      => ->(b, *a) { b.image_load_start(a[0], a[2], realm: a[1]) },
         '__csim_blobRegister'        => ->(b, *a) { b.blob_register(a[0]); nil },
         '__csimBlobWindow'           => ->(b, *_a) { b.blob_window },

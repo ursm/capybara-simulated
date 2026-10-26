@@ -752,7 +752,7 @@ fn box_kind(arena: &RealmArena, id: NodeId) -> i32 {
 // takes the address: a restyle of many elements under one rule finds them there without hashing the URL)
 #[derive(Default)]
 pub(crate) struct CssImages {
-    owed: Vec<(NodeId, String)>,
+    owed: Vec<(NodeId, style::servo_arc::Arc<url::Url>)>,
     seen: std::collections::HashSet<String>,
     recent: [Option<style::servo_arc::Arc<url::Url>>; 8],
     next_recent: usize,
@@ -828,15 +828,16 @@ pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedVa
         images.next_recent = (at + 1) % images.recent.len();
         if !images.seen.contains(url.as_str()) {
             images.seen.insert(url.as_str().to_owned());
-            images.owed.push((id, url.as_str().to_owned()));
+            images.owed.push((id, url.clone()));
         }
     }
 }
 
-// __dom.cssImagesOwed() -> `[initiator, url, …]`: the images the rendering update fetches — the page styled as it stands,
-// what its restyles left owed (`note_css_images`), in the order the restyles reached them — each its Resource Timing
-// initiator: `body` for a `<body background>` attribute's (which the style engine folds into `background-image` as a
-// presentational hint), `css` for every other. Undefined where the realm has no engine.
+// __dom.cssImagesOwed() -> `[initiator, url, referrer, …]`: the images the rendering update fetches — the page styled as
+// it stands, what its restyles left owed (`note_css_images`), in the order the restyles reached them — each its Resource
+// Timing initiator (`body` for a `<body background>` attribute's, which the style engine folds into `background-image`
+// as a presentational hint, `css` for every other) and the location of the sheet that declared it, which it is referred
+// by ('' for its document: `StyleEngine::image_referrer`). Undefined where the realm has no engine.
 fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(owed) = with_engine(scope, &args, |engine, arena, now| {
         engine.flush(arena, now);
@@ -844,8 +845,9 @@ fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         owed.into_iter()
             .map(|(id, url)| {
                 let attr = arena.get(id).filter(|n| n.is_html_named("body")).and_then(|n| n.plain_attr("background"));
-                let body = attr.and_then(|bg| engine.resolve_url(bg.trim())).is_some_and(|bg| bg == url);
-                (if body { "body" } else { "css" }, url)
+                let body = attr.and_then(|bg| engine.resolve_url(bg.trim())).is_some_and(|bg| bg == url.as_str());
+                let referrer = engine.image_referrer(&url).unwrap_or("").to_owned();
+                (if body { "body" } else { "css" }, url.as_str().to_owned(), referrer)
             })
             .collect::<Vec<_>>()
     }) else {
@@ -855,11 +857,10 @@ fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         crate::dom::realm(scope, cid).css_images.get_mut().owed.clear();
         return;
     };
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(owed.len() * 2);
-    for (initiator, url) in &owed {
-        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
-        items.push(i.into());
-        items.push(u.into());
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(owed.len() * 3);
+    for (initiator, url, referrer) in &owed {
+        let (Some(i), Some(u), Some(r)) = (v8::String::new(scope, initiator), v8::String::new(scope, url), v8::String::new(scope, referrer)) else { continue };
+        items.extend::<[v8::Local<v8::Value>; 3]>([i.into(), u.into(), r.into()]);
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

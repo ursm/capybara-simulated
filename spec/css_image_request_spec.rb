@@ -51,4 +51,30 @@ RSpec.describe 'an image a style sheet references', :https do
     session.execute_script('document.body.offsetHeight; document.documentElement.remove()')
     expect(poll_until { !session.evaluate_script('__dom.realmPending(null, true)') }).to be(true)
   end
+  # …and referred by the sheet that declared it (CSS Values 4 "fetch a style resource": its style resource's location) —
+  # a linked sheet's and an imported one's by its own URL — or, declared by no located sheet (a `<style>`, an inline
+  # `style`), by its document.
+  it 'is referred by the sheet that declared it' do
+    referers = {}
+    s = simulated_session(lambda {|env|
+      referers[env['PATH_INFO']] = env['HTTP_REFERER']
+      case env['PATH_INFO']
+      when '/l.css' then [200, {'content-type' => 'text/css'}, ['@import url(/i.css); #a { background-image: url(/a.png) }']]
+      when '/i.css' then [200, {'content-type' => 'text/css'}, ['#b { background-image: url(/b.png) }']]
+      when %r{\A/[a-d]\.png\z} then [200, {'content-type' => 'image/png'}, [File.binread(File.expand_path('wpt/common/square.png', __dir__))]]
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><meta charset="utf-8"><link rel=stylesheet href="/l.css"><style>#c { background-image: url(/c.png) }</style>
+          <div id=a style="width:9px;height:9px"></div><div id=b style="width:9px;height:9px"></div><div id=c style="width:9px;height:9px"></div>
+          <div style="width:9px;height:9px;background-image:url(/d.png)"></div>
+        HTML
+      end
+    })
+    s.visit '/'
+    expect(poll_until { s.evaluate_script('document.body.offsetHeight') && (got = referers.slice('/a.png', '/b.png', '/c.png', '/d.png')).size == 4 && got }).to eq(
+      '/a.png' => 'https://www.example.com/l.css', '/b.png' => 'https://www.example.com/i.css',
+      '/c.png' => 'https://www.example.com/', '/d.png' => 'https://www.example.com/'
+    )
+  end
 end
+
