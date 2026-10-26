@@ -270,6 +270,70 @@ fn flag_of(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Objec
     let v = raw(scope, obj, name);
     v.boolean_value(scope)
 }
+// The kinds of a fetch only a Resource Timing entry is filed for, which no consumer of the judge's or the plan's makes: a
+// frame's document; a dedicated worker's main script (`WORKER_MODULE` a module worker's); a `fetch()` (`FETCH_BEACON`
+// `sendBeacon`'s); an XMLHttpRequest; an EventSource's connection. (constants.js mirrors them.)
+pub(crate) const J_FRAME: u32 = 16;
+pub(crate) const J_WORKER_SCRIPT: u32 = 17;
+pub(crate) const J_FETCH: u32 = 18;
+pub(crate) const J_XHR: u32 = 19;
+pub(crate) const J_EVENT_SOURCE: u32 = 20;
+const WORKER_MODULE: u32 = 1;
+const FETCH_BEACON: u32 = 1;
+// The initiator type of an entry of `kind` (the detail in its high bits), of its element `nid` (Resource Timing
+// "initiator type", resource-timing/initiator-type/*) — None where the caller names it: a timed resource's, a CSS
+// image's, which the engine handed it (subresources.rs `timed_resources`, rendered.rs `css_images_owed`).
+fn initiator_of(realm: &crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>) -> Option<&'static str> {
+    use crate::subresource_judge::{J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET};
+    let node = nid.and_then(|id| realm.get(id));
+    let detail = kind >> 8;
+    Some(match kind & 0xff {
+        J_IMAGE if node.is_some_and(|n| n.is_html_named("input")) => "input",
+        J_IMAGE if node.is_some_and(|n| &*n.local_name == "image") => "image",
+        J_IMAGE => "img",
+        J_CLASSIC_SCRIPT | crate::subresource_plan::J_MODULE_SCRIPT => "script",
+        // (…a module preload's a script fetched, not run: 'other' — Resource Timing L2)
+        J_LINK if detail & crate::link_resource::OBTAINS_MODULEPRELOAD != 0 => "other",
+        J_LINK => "link",
+        // (…an `@import`'s and a face's: the sheet's)
+        J_SHEET | J_FONT => "css",
+        J_FRAME if node.is_some_and(|n| n.is_html_named("frame")) => "frame",
+        J_FRAME => "iframe",
+        J_WORKER_SCRIPT if detail & WORKER_MODULE != 0 => "script",
+        J_WORKER_SCRIPT | J_EVENT_SOURCE => "other",
+        J_FETCH if detail & FETCH_BEACON != 0 => "beacon",
+        J_FETCH => "fetch",
+        J_XHR => "xmlhttprequest",
+        _ => return None,
+    })
+}
+// Whether an entry of `kind` is of a request the engine plans (subresource_plan.rs), whose no-cors-ness its plan says —
+// no fetch only an entry is filed for, whose own is a CORS request's or a navigation's.
+fn planned_kind(kind: u32) -> bool {
+    use crate::subresource_judge::{J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET};
+    matches!(kind & 0xff, J_IMAGE | J_CLASSIC_SCRIPT | crate::subresource_plan::J_MODULE_SCRIPT | J_LINK | J_SHEET | J_FONT | crate::subresource_plan::J_CSS_IMAGE | crate::subresource_plan::J_TIMED)
+}
+// Whether the page files the entry of `name` of `kind` now: an image's (but a failed load's, `failed`, each time) and an
+// `@import`'s once for the page, as its memory cache serves them after (`RealmArena::timed_resources`, Chrome:
+// cached-image-gets-single-entry); a `<link>`'s once per load of its URL — its load task can run twice for one element,
+// on connection and on the attribute change that completed it (`RealmArena::link_timings`, the URL it filed last); every
+// other each time.
+fn filed_once(realm: &mut crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>, name: &str, failed: bool) -> bool {
+    use crate::subresource_judge::{J_IMAGE, J_LINK, J_SHEET};
+    match kind & 0xff {
+        J_IMAGE => failed || realm.timed_resources.insert(("img", name.to_owned())),
+        J_SHEET if nid.is_none() => realm.timed_resources.insert(("css", name.to_owned())),
+        J_LINK => match nid {
+            Some(id) if realm.link_timings.get(&id).is_some_and(|last| **last == *name) => false,
+            Some(id) => {
+                realm.link_timings.insert(id, name.into());
+                true
+            }
+            None => true,
+        },
+        _ => true,
+    }
+}
 // __dom.resourceTimingEntry(desc, now) -> the fields of the entry a fetch files (`entry_fields`), its `name`, `startTime`
 // and `initiatorType` among them, `serverTiming` a flat [name, duration, description, …] list — or null for a resource
 // of no network scheme, or that the page files no more. `desc` what the fetch tells of it: `{ name, kind, nid,
@@ -316,27 +380,22 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let mut initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
     let mut no_cors = flag_of(scope, desc, "noCors");
     let cid = crate::dom::realm_id(scope, &args);
-    // (…of its consumer's `kind` — `J_*`, constants.js — and its element (`nid`): what says its initiator type, whether
-    // its request is a no-cors one, and whether the page files it at all: an image once for the page, as its memory
-    // cache serves it after (a broken one each time it loads: `broken`))
+    // (…of its consumer's `kind` — `J_*`, constants.js, `J_*` here for a fetch only an entry is filed for — its request's
+    // `plan`, else its element's (`nid`) now: what says its initiator type, whether its request is a no-cors one and
+    // whether the page files it at all — `filed_once`)
     if let Some(kind) = member(scope, desc, "kind").and_then(|v| v.uint32_value(scope)) {
         let nid = member(scope, desc, "nid").and_then(|v| v.integer_value(scope)).and_then(crate::dom::NodeId::from_i64);
+        let planned = member(scope, desc, "plan").and_then(|v| v.uint32_value(scope));
         let broken = flag_of(scope, desc, "broken");
         let realm = crate::dom::realm(scope, cid);
-        if kind & 0xff == crate::subresource_judge::J_IMAGE {
-            let node = nid.and_then(|id| realm.get(id));
-            initiator = (if node.is_some_and(|n| n.is_html_named("input")) {
-                "input"
-            } else if node.is_some_and(|n| &*n.local_name == "image") {
-                "image"
-            } else {
-                "img"
-            })
-            .to_owned();
-            no_cors = crate::subresource_plan::no_cors(crate::subresource_plan::plan_in(realm, kind, nid, None, None));
-            if !failed && !broken && !realm.timed_resources.insert(("img", name.clone())) {
-                return;
-            }
+        if let Some(by_kind) = initiator_of(realm, kind, nid) {
+            initiator = by_kind.to_owned();
+        }
+        if planned.is_some() || planned_kind(kind) {
+            no_cors = crate::subresource_plan::no_cors(planned.unwrap_or_else(|| crate::subresource_plan::plan_in(realm, kind, nid, None, None)));
+        }
+        if !filed_once(realm, kind, nid, &name, failed || broken) {
+            return;
         }
     }
     let response_type = string_of(scope, desc, "type", true).or_else(|| string_of(scope, resp, "type", true));

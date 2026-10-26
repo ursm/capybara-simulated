@@ -10,7 +10,9 @@ use web_atoms::ns;
 
 use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
 
-// The resources `timed_resources` (and `useReference`) handed out for the page, by initiator and URL.
+// The resources `timed_resources` (and `useReference`) handed out for the page, by initiator and URL — and the images
+// and `@import`s whose entries it filed (resource_timing.rs `filed_once`: "img", "css"), as its memory cache serves them
+// after. (An SVG `<use>`'s external document is a resource of another type, kept apart: `use`.)
 pub(crate) type TimedResources = HashSet<(&'static str, String)>;
 
 // What a resource's request carries of its element's `crossorigin`: none (a no-cors request), `anonymous` (cors, the
@@ -19,29 +21,13 @@ const NO_CORS: u32 = 0;
 const CORS: u32 = 1;
 const CORS_CREDENTIALS: u32 = 2;
 
-
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
     crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
     crate::dom::register(scope, ns, "setObjectFallback", set_object_fallback_op, context_id);
     crate::dom::register(scope, ns, "useReference", use_reference_op, context_id);
-    crate::dom::register(scope, ns, "timedOnce", timed_once_op, context_id);
 }
 
-// What a resource fetched once for the page — its Resource Timing entry recorded once, as the memory cache serves it
-// after (`timed_resources`) — is kept under: an image's (an `<img>`'s, an `<input type=image>`'s), an `@import`'s. (An
-// SVG `<use>`'s external document is a resource of another type, kept apart: `use`.)
-const TIMED_KINDS: [&str; 2] = ["img", "css"];
-
-// __dom.timedOnce(kind, url) -> whether the calling realm's page fetches the resource at `url` of `kind` (`TIMED_KINDS`'
-// place) the first time — none before since it began (`RealmArena::timed_resources`, cleared as it does) — now entered.
-// (…the caller's realm, not the one entered: an image's arrives on a host thread's task, whatever realm ran last)
-fn timed_once_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(&kind) = args.get(0).uint32_value(scope).and_then(|k| TIMED_KINDS.get(k as usize)) else { return rv.set_bool(false) };
-    let url = args.get(1).to_rust_string_lossy(scope);
-    let cid = crate::dom::realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).timed_resources.insert((kind, url)));
-}
 
 // The URL an SVG `<use>` element `id` references in another document — its `href`, else its XLink one, trimmed and
 // parsed against `doc`'s base URL, the fragment (which names the piece, not the resource) dropped — or None for a

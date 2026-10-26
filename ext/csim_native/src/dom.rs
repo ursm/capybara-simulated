@@ -990,6 +990,8 @@ pub(crate) struct RealmArena {
     // …and each style sheet's referrer policy, as its response's `Referrer-Policy` header set it, by its location: the
     // policy the requests it is responsible for are made under (url_ops.rs `note_sheet_policy`).
     pub(crate) sheet_policies: std::collections::HashMap<String, &'static str>,
+    // …and the URL each `<link>` filed its last Resource Timing entry for (resource_timing.rs `filed_once`).
+    pub(crate) link_timings: std::collections::HashMap<NodeId, Box<str>>,
     // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
     pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
     // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
@@ -1402,6 +1404,7 @@ impl RealmArena {
         self.pointerdown_targets.retain(|doc, _| live(slots, doc));
         self.referrer_policies.retain(|doc, _| live(slots, doc));
         self.request_policies.retain(|id, _| live(slots, id));
+        self.link_timings.retain(|id, _| live(slots, id));
         self.popovers_changing.retain(|id| live(slots, id));
         self.showing_popovers.retain(|doc, list| {
             list.retain(|(p, _)| live(slots, p));

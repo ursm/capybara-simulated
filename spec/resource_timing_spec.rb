@@ -246,7 +246,8 @@ RSpec.describe 'resource timing' do
       i.src = 'http://other.example.com/i.png?input';
       document.body.appendChild(i);
     JS
-    await_images(s)
+    # (…waited for by its entry: an input is none of `document.images`)
+    Timeout.timeout(5) { sleep 0.05 until s.evaluate_script("performance.getEntriesByType('resource').some(function (e) { return e.name.endsWith('?input'); })") }
     e = entry(s, 'other.example.com/i.png?input')
     expect([e['initiatorType'], e['responseStatus'], e['contentType']]).to eq(['input', 0, ''])
   end
