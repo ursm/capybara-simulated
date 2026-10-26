@@ -344,14 +344,18 @@ RSpec.describe 'Media element state' do
     expect(requests).to eq(['missing.mp3', 'm.webm?audio'])
   end
 
-  # …a `data:` or `blob:` one by its bytes too — the ladder for some, a failure for none — and one no route answers (a
-  # scheme no fetch has) a failure.
+  # …a `data:` or `blob:` one by its bytes too — a WAV of them the readiness ladder, none a failure — and one no route
+  # answers (a scheme no fetch has) a failure. Chrome: `["blob:canplaythrough", "data:canplaythrough", "empty:error",
+  # "none:error"]`. (Audio is not decoded: bytes that are no audio count as usable too, where Chrome errs — a gap.)
   it 'decides an audio load of a scheme by its bytes' do
+    samples = ("\x80" * 8).b
+    wav = 'RIFF'.b + [36 + samples.bytesize].pack('V') + 'WAVEfmt '.b + [16, 1, 1, 8000, 8000, 1, 8].pack('VvvVVvv') + 'data'.b + [samples.bytesize].pack('V') + samples
     s = media_session
-    s.execute_script(<<~'JS')
+    s.execute_script(<<~JS)
       window.log = [];
-      const blob = URL.createObjectURL(new Blob(['RIFF....WAVE'], { type: 'audio/wav' }));
-      for (const [id, src] of [['data', 'data:audio/wav;base64,UklGRg=='], ['blob', blob], ['empty', 'data:audio/wav,'], ['none', 'about:nothing']]) {
+      const wav = Uint8Array.from(atob('#{[wav].pack('m0')}'), (c) => c.charCodeAt(0));
+      const blob = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+      for (const [id, src] of [['data', 'data:audio/wav;base64,#{[wav].pack('m0')}'], ['blob', blob], ['empty', 'data:audio/wav,'], ['none', 'about:nothing']]) {
         const a = new Audio();
         for (const t of ['error', 'canplaythrough']) a.addEventListener(t, () => log.push(id + ':' + t));
         a.src = src;

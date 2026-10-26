@@ -60,10 +60,10 @@ fn client_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.realmWindowKey(realm) -> the window key of realm `realm` (the calling one's where none is given) — a window
-// `window.open` made — or undefined for a realm of none: a window's key its realm's id then (window.js `windowKey`).
+// __dom.realmWindowKey() -> the window key of the calling realm — a window `window.open` made — or undefined for a realm
+// of none: a window's key its realm's id then (window.js `windowKey`).
 fn window_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = if args.get(0).is_number() { args.get(0).int32_value(scope).unwrap_or(0) } else { crate::dom::realm_id(scope, &args) };
+    let cid = crate::dom::realm_id(scope, &args);
     if let Some(Some(key)) = of(scope, cid, |i| i.window_key) {
         rv.set_uint32(key);
     }

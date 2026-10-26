@@ -960,7 +960,8 @@ fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     crate::dom::realm(scope, cid).set_stepped_window(realm, on, opener, key);
 }
 
-// The ops below take a window by its key (`window_keys`): `__csimWindowKey` where the host set one, else the realm's id.
+// The ops below take a window by its key (`window_keys`): the one the host told its realm (realm_identity.rs
+// `realmIdentify('windowKey', …)`), else the realm's id.
 // __dom.closeWindow(key) -> whether the window, one a script opened, closed (`close_window`).
 fn close_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_bool(false) };

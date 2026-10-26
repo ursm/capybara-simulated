@@ -172,21 +172,28 @@ RSpec.describe 'map of preloaded resources' do
     ])
   end
 
-  # …an XHR alike — a CORS request of its `withCredentials`' credentials mode. Chrome: one request, the preload's entry.
+  # …an XHR alike — a CORS request of its `withCredentials`' credentials mode — but none of credentials open() gave
+  # (its URL's userinfo then: a URL no preload is of). Chrome: one request for the preload and the plain XHR.
   it 'hands an XHR the as=fetch preload its request matches' do
     page = '<!DOCTYPE html><meta charset=utf-8><link rel=preload as=fetch href="/d.json?xhr" crossorigin><body>'
     served = []
     s = simulated_session(preload_app(served, page)).tap {|session| session.visit '/' }
-    got = s.evaluate_async_script(<<~'JS')
-      const done = arguments[0];
-      const x = new XMLHttpRequest();
-      x.open('GET', '/d.json?xhr');
-      x.onload = () => done([x.status, x.responseText]);
-      x.send();
-    JS
-    expect(got).to eq([200, '{"a":1}'])
-    expect(served).to eq(['d.json?xhr'])
-    expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType)")).to eq(['d.json?xhr:link'])
+    xhr = lambda {|*credentials|
+      s.evaluate_async_script(<<~JS)
+        const done = arguments[0];
+        const x = new XMLHttpRequest();
+        x.open('GET', '/d.json?xhr', true#{credentials.map {|c| ", '#{c}'" }.join});
+        x.onload = () => done([x.status, x.responseText]);
+        x.send();
+      JS
+    }
+    expect(xhr.('user', 'pass')).to eq([200, '{"a":1}'])
+    expect(served).to eq(['d.json?xhr', 'd.json?xhr'])
+    expect(xhr.()).to eq([200, '{"a":1}'])
+    expect(served).to eq(['d.json?xhr', 'd.json?xhr'])
+    expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType)")).to eq([
+      'd.json?xhr:link', 'd.json?xhr:xmlhttprequest'
+    ])
   end
 
   # A video's poster and a default track — fetched for their Resource Timing entries — take theirs too, a track's by its
