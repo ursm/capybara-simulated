@@ -13,8 +13,10 @@ RSpec.describe 'Service Worker subresource verdict' do
   include PollUntil
 
   let(:hits) { [] }
+  let(:referers) { {} }
   let(:app) {
     hits = self.hits
+    referers = self.referers
     worker = <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
       self.addEventListener('fetch', e => {
@@ -27,6 +29,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
+        else if (u.pathname === '/scope/moved.css') e.respondWith(fetch('/other/x.css'));
         else if (u.pathname === '/scope/two.css') e.respondWith(fetch('/log?two=' + e.request.mode + ',' + (e.request.integrity || 'none')).then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname === '/scope/mod.css') e.respondWith(fetch('/log?mod').then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname.startsWith('/scope/rp-')) e.respondWith(fetch('/log?' + u.pathname.slice(10) + '=' + e.request.referrerPolicy + ',' + (e.request.referrer || 'none')).then(() => new Response('')));
@@ -35,11 +38,14 @@ RSpec.describe 'Service Worker subresource verdict' do
     Rack::Builder.new {
       run lambda {|env|
         hits << (env['PATH_INFO'] == '/log' ? "/log?#{env['QUERY_STRING']}" : env['PATH_INFO'])
+        referers[env['PATH_INFO']] = env['HTTP_REFERER']
         case Rack::Request.new(env).path_info
         when '/'                then [200, {'content-type' => 'text/html'}, ['<html><body>main</body></html>']]
         when '/sw.js'           then [200, {'content-type' => 'text/javascript'}, [worker]]
         when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<html><body>in-scope</body></html>']]
         when '/scope/parsed.html' then [200, {'content-type' => 'text/html'}, ['<html><body><script src="/scope/swerr.js"></script></body></html>']]
+        when '/other/x.css' then [200, {'content-type' => 'text/css'}, ['@import "y.css";']]
+        when '/other/y.css' then [200, {'content-type' => 'text/css'}, ['p {}']]
         when '/scope/refused.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
         when '/ran.js' then [200, {'content-type' => 'text/javascript'}, ['parent.__ran.push("ran")']]
         when '/sheet.css' then [200, {'content-type' => 'text/css'}, ['p { color: red }']]
@@ -326,6 +332,30 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?two=})).size >= 2 && logged.sort }).to eq(%w[/log?two=cors,sha256-x /log?two=no-cors,none])
     session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
     expect(hits.grep(%r{\A/log\?two=}).size).to eq(2)
+  end
+  # …and a sheet a worker answered with another URL's response (`fetch()` of it) is at that URL: its `@import`s resolve
+  # against it and are referred by it (Chrome, measured: `/scope/moved.css` answered with `/other/x.css`'s response
+  # fetches `/other/y.css`, referred by `/other/x.css`).
+  it "makes a worker's answer's sheet at the URL of the response it answered with" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const link = f.contentDocument.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = '/scope/moved.css';
+          f.contentDocument.head.appendChild(link);
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('1') && hits.include?('/other/y.css') }).to be(true)
+    expect(referers['/other/y.css']).to eq('http://www.example.com/other/x.css')
   end
 end
 

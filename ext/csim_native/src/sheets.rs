@@ -335,8 +335,9 @@ impl SheetStore {
             None => {
                 let url = UrlExtraData::from(url::Url::parse(&source.base).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap()));
                 let imports = if source.constructed { AllowImportRules::No } else { AllowImportRules::Yes };
-                // A sheet is the first link of its imports' chain, by its base: a fetched one's its location, a `<style>`'s its
-                // document's base URL.
+                // A sheet is the first link of its imports' chain, by its base: a fetched one's its location (a redirect's
+                // last URL, where its imports' links are the URLs they were requested at), a `<style>`'s its document's base
+                // URL.
                 let chain = if source.constructed { Vec::new() } else { vec![source.base.clone()] };
                 let media = Arc::new(lock.wrap(media_list(&source.media, &url, mode(quirks))));
                 let referrer = source.located.then(|| source.base.clone());

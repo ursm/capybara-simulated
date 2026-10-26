@@ -5347,12 +5347,13 @@ module Capybara
         bytes    = Base64.decode64(body_b64)
         # A binary consumer (a classic script / video / font / image bytes) takes the bytes as they are — the
         # utf8 text funnel would mangle non-UTF-8 byte sequences — with the status, the content type and the
-        # headers its checks and its Resource Timing entry read.
+        # headers its checks and its Resource Timing entry read; and the response's URL ('' for a constructed one's),
+        # a style sheet's location.
         if binary
           headers = r['headers'] || {}
-          return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers}
+          return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers, 'url' => r['url'].to_s}
         end
-        {'body' => RuntimeShared.utf8_text(bytes), 'type' => type, 'status' => status, 'contentType' => header_field(r['headers'] || {}, 'content-type').to_s}
+        {'body' => RuntimeShared.utf8_text(bytes), 'type' => type, 'status' => status, 'contentType' => header_field(r['headers'] || {}, 'content-type').to_s, 'url' => r['url'].to_s}
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)
