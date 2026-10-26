@@ -54,27 +54,47 @@ RSpec.describe 'an image a style sheet references', :https do
   # …and referred by the sheet that declared it (CSS Values 4 "fetch a style resource": its style resource's location) —
   # a linked sheet's and an imported one's by its own URL — or, declared by no located sheet (a `<style>`, an inline
   # `style`), by its document.
+  # (…a nested rule's declarations, a keyframe's and one under a media query that holds only later — the window
+  # resized — among them; its Sec-Fetch-Site its document's origin's all the same, which is its request's)
   it 'is referred by the sheet that declared it' do
     referers = {}
+    sites = {}
+    sheet = <<~CSS
+      @import url(/i.css);
+      #a { background-image: url(/a.png) }
+      #n { & span { color: red } background-image: url(/n.png) }
+      @keyframes k { from { background-image: url(/k.png) } }
+      #k { animation: k 100s }
+      @media (max-width: 600px) { #m { background-image: url(/m.png) } }
+    CSS
     s = simulated_session(lambda {|env|
       referers[env['PATH_INFO']] = env['HTTP_REFERER']
+      sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
       case env['PATH_INFO']
-      when '/l.css' then [200, {'content-type' => 'text/css'}, ['@import url(/i.css); #a { background-image: url(/a.png) }']]
+      when '/l.css' then [200, {'content-type' => 'text/css'}, [sheet]]
       when '/i.css' then [200, {'content-type' => 'text/css'}, ['#b { background-image: url(/b.png) }']]
-      when %r{\A/[a-d]\.png\z} then [200, {'content-type' => 'image/png'}, [File.binread(File.expand_path('wpt/common/square.png', __dir__))]]
+      when '/x.css' then [200, {'content-type' => 'text/css'}, ['#x { background-image: url(https://www.example.com/x.png) }']]
+      when %r{\A/[a-z]\.png\z} then [200, {'content-type' => 'image/png'}, [File.binread(File.expand_path('wpt/common/square.png', __dir__))]]
       else
+        boxes = %w[a b c n k m x].map {|id| %(<div id=#{id} style="width:9px;height:9px"></div>) }.join
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
-          <!DOCTYPE html><meta charset="utf-8"><link rel=stylesheet href="/l.css"><style>#c { background-image: url(/c.png) }</style>
-          <div id=a style="width:9px;height:9px"></div><div id=b style="width:9px;height:9px"></div><div id=c style="width:9px;height:9px"></div>
+          <!DOCTYPE html><meta charset="utf-8"><link rel=stylesheet href="/l.css"><link rel=stylesheet href="https://other.example.com/x.css">
+          <style>#c { background-image: url(/c.png) }</style>#{boxes}
           <div style="width:9px;height:9px;background-image:url(/d.png)"></div>
         HTML
       end
     })
     s.visit '/'
-    expect(poll_until { s.evaluate_script('document.body.offsetHeight') && (got = referers.slice('/a.png', '/b.png', '/c.png', '/d.png')).size == 4 && got }).to eq(
+    want = %w[/a.png /b.png /c.png /d.png /n.png /k.png /x.png]
+    expect(poll_until { s.evaluate_script('document.body.offsetHeight') && (got = referers.slice(*want)).size == want.size && got }).to eq(
       '/a.png' => 'https://www.example.com/l.css', '/b.png' => 'https://www.example.com/i.css',
-      '/c.png' => 'https://www.example.com/', '/d.png' => 'https://www.example.com/'
+      '/c.png' => 'https://www.example.com/', '/d.png' => 'https://www.example.com/',
+      '/n.png' => 'https://www.example.com/l.css', '/k.png' => 'https://www.example.com/l.css',
+      '/x.png' => 'https://other.example.com/'
     )
+    expect(sites['/x.png']).to eq('same-origin')
+    s.current_window.resize_to(500, 600)
+    expect(poll_until { s.evaluate_script('document.body.offsetHeight') && referers['/m.png'] }).to eq('https://www.example.com/l.css')
   end
 end
 

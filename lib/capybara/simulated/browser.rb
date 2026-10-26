@@ -8325,8 +8325,10 @@ module Capybara
           # on the async path this runs on a background thread, and a concurrent navigation
           # must not swing the CORS / SameSite / Referer verdicts to a document that never
           # issued this request.
+          # (…its initiator its client's origin where it is referred by another URL — a CSS image's sheet's — whose origin
+          # Sec-Fetch-Site does not compare)
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
-                              referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true,
+                              referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true, initiator: client[:initiator],
                               cookie_cross_site: client[:cookie_cross_site], client_origin: client[:origin], dest: 'image')
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right

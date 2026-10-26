@@ -273,9 +273,10 @@ fn sheet_font_faces<'a>(
     }
 }
 
-// The image URLs the declarations of `rules` resolve — a `background-image`'s, a `cursor`'s, a `list-style-image`'s, a
-// `content`'s, a `cross-fade()`'s inputs and an `image-set()`'s candidates among them — each by its identity, with the
-// location of the sheet it is in: `at`, that of the sheet they are the rules of — an `@import`ed sheet's its own.
+// The image URLs the declarations of `rules` resolve — a style rule's, a nested one's, a keyframe's; a
+// `background-image`'s, a `cursor`'s, a `list-style-image`'s, a `content`'s, a `cross-fade()`'s inputs and an
+// `image-set()`'s candidates among them — each by its identity, with the location of the sheet it is in: `at`, that of
+// the sheet they are the rules of — an `@import`ed sheet's its own.
 fn sheet_image_urls(
     mut rules: style::stylesheets::EffectiveRulesIterator<'_, '_, &style::stylesheets::CustomMediaMap>,
     at: &str,
@@ -309,23 +310,30 @@ fn sheet_image_urls(
             _ => {}
         }
     }
+    let block = |block: &style::properties::PropertyDeclarationBlock, out: &mut std::collections::HashMap<usize, (style::servo_arc::Arc<url::Url>, String)>| {
+        for decl in block.declarations() {
+            match decl {
+                PropertyDeclaration::BackgroundImage(v) => v.0.iter().for_each(|i| image(i, at, out)),
+                PropertyDeclaration::Cursor(c) => c.images.iter().for_each(|c| image(&c.image, at, out)),
+                PropertyDeclaration::ListStyleImage(i) => image(i, at, out),
+                PropertyDeclaration::Content(GenericContent::Items(items)) => {
+                    for item in items.items.iter() {
+                        if let GenericContentItem::Image(i) = item {
+                            image(i, at, out);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
     while let Some(rule) = rules.next() {
         match rule {
-            CssRule::Style(rule) => {
-                for decl in rule.read_with(guard).block.read_with(guard).declarations() {
-                    match decl {
-                        PropertyDeclaration::BackgroundImage(v) => v.0.iter().for_each(|i| image(i, at, out)),
-                        PropertyDeclaration::Cursor(c) => c.images.iter().for_each(|c| image(&c.image, at, out)),
-                        PropertyDeclaration::ListStyleImage(i) => image(i, at, out),
-                        PropertyDeclaration::Content(GenericContent::Items(items)) => {
-                            for item in items.items.iter() {
-                                if let GenericContentItem::Image(i) = item {
-                                    image(i, at, out);
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+            CssRule::Style(rule) => block(rule.read_with(guard).block.read_with(guard), out),
+            CssRule::NestedDeclarations(rule) => block(rule.read_with(guard).block.read_with(guard), out),
+            CssRule::Keyframes(rule) => {
+                for keyframe in rule.read_with(guard).keyframes.iter() {
+                    block(keyframe.read_with(guard).block.read_with(guard), out);
                 }
             }
             CssRule::Import(import) => {
@@ -592,6 +600,8 @@ impl StyleEngine {
                 engine.stylist.set_device(device(engine.faces.clone(), quirks, screen), &StylesheetGuards::same(&guard));
             drop(guard);
             engine.stylist.force_stylesheet_origins_dirty(changed);
+            // (…and the rules that hold now are others: the image URLs of the located sheets gathered anew)
+            engine.image_referrers = None;
             for shadow in engine.shadow_styles.values_mut() {
                 shadow.dirty = true;
             }
@@ -883,7 +893,8 @@ impl StyleEngine {
     // the one its computed value keeps (stylo `ComputedUrl::Valid` clones the specified `Arc`), so it is found by
     // identity. None for any other — a `<style>`'s, an inline style's, a presentational hint's, one a `var()` substituted
     // (parsed anew), a shadow tree's — whose request the document's is. The URLs are gathered when first asked after
-    // the sheets change, each pinned so no other takes its address.
+    // the sheets or the device change, each pinned so no other takes its address. (KNOWN LIMIT: the request is made
+    // under its document's referrer policy, not under the one its sheet's response set.)
     pub(crate) fn image_referrer(&mut self, url: &style::servo_arc::Arc<url::Url>) -> Option<&str> {
         if !self.author.iter().any(|a| a.located) {
             return None;
