@@ -60,37 +60,35 @@ pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> 
 }
 
 // The resources connecting element `id` (of document `doc`) fetches for no consumer, those the page has not fetched
-// yet, each `(initiator, destination, url, cors)` — its Resource Timing initiator type and its request's destination
-// (Fetch: what Fetch Metadata's `Sec-Fetch-Dest` reports) — none in a document with no browsing context, which loads
-// nothing:
+// yet, each `(initiator, url, code)` — its Resource Timing initiator type and its request's code (`TRACK` among its
+// bits for a track's: its request's destination, what Fetch Metadata's `Sec-Fetch-Dest` reports, else an image's) —
+// none in a document with no browsing context, which loads nothing:
 //   a `<video>`'s `poster` ('video', an image);
 //   each `<track default src>` child of a `<video>` / `<audio>` ('track': Chrome loads a track only when its mode shows,
 //     the `default` tracks standing in) — its media data the element's own fetch, its load algorithm's (media.js);
 //   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg), an image
 //     (whatwg/fetch#1012).
-fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, &'static str, String, u32)> {
+fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, String, u32)> {
     if !arena.document_states.has_browsing_context(doc) {
         return Vec::new();
     }
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return Vec::new() };
     // (…each by the element whose `crossorigin` its request takes, none for one of no CORS settings: a poster's)
-    let mut wanted: Vec<(&'static str, &'static str, Option<NodeId>, String)> = Vec::new();
-    let mut tracks = Vec::new();
+    let mut wanted: Vec<(&'static str, u32, Option<NodeId>, String)> = Vec::new();
     if n.ns == ns!(html) {
         let attr = |name: &str| n.plain_attr(name).filter(|v| !v.is_empty()).map(str::to_owned);
         match &*n.local_name {
             tag @ ("video" | "audio") => {
                 // (…a poster's a plain request, its credentials included: HTML's poster frame steps)
                 if let Some(poster) = attr("poster").filter(|_| tag == "video") {
-                    wanted.push(("video", "image", None, poster));
+                    wanted.push(("video", 0, None, poster));
                 }
                 // (…a track's request by its media element's `crossorigin`: HTML's track processing model, "the state of
                 // the parent media element's crossorigin content attribute")
                 for &c in &n.children {
                     let Some(track) = arena.get(c).filter(|c| c.is_html_named("track") && c.plain_attr("default").is_some()) else { continue };
                     if let Some(src) = track.plain_attr("src").filter(|v| !v.is_empty()) {
-                        wanted.push(("track", "track", Some(id), src.to_owned()));
-                        tracks.push(wanted.len() - 1);
+                        wanted.push(("track", TRACK, Some(id), src.to_owned()));
                     }
                 }
             }
@@ -98,20 +96,20 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
         }
     }
     let mut out = Vec::new();
-    for (i, (initiator, destination, el, raw)) in wanted.into_iter().enumerate() {
+    for (initiator, track, el, raw) in wanted {
         let Some(url) = arena.parse_document_url(doc, &raw) else { continue };
         let cors = match el.map_or(NO_CORS, |el| cors_of(arena, el)) {
-            NO_CORS if tracks.contains(&i) => same_origin(arena, url.origin()),
+            NO_CORS if track != 0 => same_origin(arena, url.origin()),
             cors => cors,
         };
-        out.push((initiator, destination, url.href().to_owned(), cors | if destination == "track" { TRACK } else { 0 }));
+        out.push((initiator, url.href().to_owned(), cors | track));
     }
     if let Some(url) = use_reference(arena, id, doc) {
         let cors = ada_url::Url::parse(&url, None).map_or(SAME_ORIGIN_REFUSED, |u| same_origin(arena, u.origin()));
-        out.push(("other", "image", url, cors));
+        out.push(("other", url, cors));
     }
     let seen = &mut arena.timed_resources;
-    out.retain(|(initiator, _, url, _)| seen.insert((initiator, url.clone())));
+    out.retain(|(initiator, url, _)| seen.insert((initiator, url.clone())));
     out
 }
 
@@ -149,7 +147,7 @@ fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         return;
     }
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 3);
-    for (initiator, _, url, cors) in &found {
+    for (initiator, url, cors) in &found {
         let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
         items.push(i.into());
         items.push(u.into());

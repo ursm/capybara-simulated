@@ -21,10 +21,10 @@ const OPAQUE: u32 = 1 << 8;
 // …bits 9-13 its destination (Fetch's request destination: what its Fetch Metadata reports, what a service worker's
 // fetch event reads), by its index in `DESTINATIONS` — a plan of none, the empty string.
 const DESTINATION_SHIFT: u32 = 9;
-const DESTINATIONS: [&str; 24] = [
+const DESTINATIONS: [&str; 23] = [
     "", "audio", "audioworklet", "document", "embed", "font", "frame", "iframe", "image", "json", "manifest", "object",
     "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "track", "video", "webidentity", "worker",
-    "xslt", "text",
+    "xslt",
 ];
 // …its request's fields alone, its mode and credentials mode: what tells two requests of one URL apart (a preload key's).
 pub(crate) const PLAN_REQUEST: u32 = 15;
