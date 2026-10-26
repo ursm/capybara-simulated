@@ -152,9 +152,9 @@ RSpec.describe 'Media element state' do
 
   # …and with every candidate failed it waits — NETWORK_NO_SOURCE, no error at the element — for a `<source>` inserted
   # past them, which ends the wait: NETWORK_LOADING as the stable state comes (the algorithm awaits one before it sets
-  # it — Chrome reads 3 right after the insertion, Firefox 2), and it loads. Firefox: `[3, null]`, then
-  # `loadstart,error@b1,loadedmetadata` and NETWORK_IDLE. (Chrome keeps waiting, NETWORK_NO_SOURCE: the resource
-  # selection algorithm's "wait until the node after pointer is a node other than the end of the list" says otherwise.)
+  # it — Firefox reads 2 right after the insertion), and it loads. Firefox: `[3, null]`, then
+  # `loadstart,error@b1,loadedmetadata` and NETWORK_IDLE. (Chrome keeps waiting: the algorithm's "wait until the node
+  # after pointer is a node other than the end of the list" says otherwise.)
   it 'waits for a <source> inserted past the candidates that failed' do
     s = media_session
     s.execute_script(<<~'JS')

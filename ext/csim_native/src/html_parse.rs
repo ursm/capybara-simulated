@@ -1013,12 +1013,12 @@ impl<'s> Build<'s> {
     #[allow(clippy::type_complexity)]
     pub(crate) fn named_attributes(&mut self, scope: &mut v8::PinScope<'s, '_>, id: crate::dom::NodeId, attrs: Vec<(String, String, Option<(String, String)>)>, existing: Vec<(String, String)>) {
         // (…a value holding a stand-in kept exactly beside its lossy text, as a page's write of one is: `attr_u16`)
-        let (mut namespaced, mut exact) =
-            crate::dom::realm(scope, self.cid).get(id).map_or_else(Default::default, |n| (n.attr_ns.clone(), n.attr_u16.clone()));
+        let el = crate::dom::realm(scope, self.cid).get(id);
+        let media = el.is_some_and(crate::media::is_media);
+        let (mut namespaced, mut exact) = el.map_or_else(Default::default, |n| (n.attr_ns.clone(), n.attr_u16.clone()));
         let mut list = existing;
         exact.retain(|(k, _)| list.iter().any(|(name, _)| name == k));
         let mut names = Vec::new();
-        let media = crate::dom::realm(scope, self.cid).get(id).is_some_and(crate::media::is_media);
         for (name, value, ns) in attrs {
             if list.iter().any(|(k, _)| *k == name) {
                 continue;

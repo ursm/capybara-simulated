@@ -111,7 +111,8 @@ pub(crate) fn clone_into(
     let arena = crate::dom::realm(scope, cid);
     let n = arena.get(src)?;
     let (data, state, value, bindings) = copy_of(n);
-    let names: Vec<String> = n.attributes.iter().map(|(k, _)| k).filter(|k| bindings_steps(k, crate::media::is_media(n))).cloned().collect();
+    let media = crate::media::is_media(n);
+    let names: Vec<String> = n.attributes.iter().map(|(k, _)| k).filter(|k| bindings_steps(k, media)).cloned().collect();
     let children = if deep { n.children.clone() } else { Vec::new() };
     let attributes = (n.kind == NodeKind::Element)
         .then(|| (n.attributes.clone(), n.attr_u16.clone(), (n.attr_ns.clone(), n.attr_ns_u16.clone())));
@@ -261,7 +262,8 @@ fn copy_of(n: &NodeData) -> (NodeData, u32, Option<Box<[u16]>>, bool) {
     // (…an image's data the bindings' to update — an `<img>`, an `<input>` (an image button is one by its type, which may
     // change), an SVG `<image>`: dom-nodes.js `isImageElement`)
     let image = n.is_html_named("img") || n.is_html_named("input") || (n.ns == ns!(svg) && &*n.local_name == "image");
+    let media = crate::media::is_media(n);
     let bindings = n.kind == NodeKind::Element
-        && (n.attributes.iter().any(|(k, _)| bindings_steps(k, crate::media::is_media(n))) || image || n.is_html_named("select"));
+        && (n.attributes.iter().any(|(k, _)| bindings_steps(k, media)) || image || n.is_html_named("select"));
     (data, state, if control { n.value.clone() } else { None }, bindings)
 }
