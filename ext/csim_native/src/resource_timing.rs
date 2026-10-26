@@ -315,29 +315,32 @@ fn planned_kind(kind: u32) -> bool {
 }
 // Whether the page files the entry of `name` of `kind` now: an image's (but a failed load's, `failed`, each time), an
 // `@import`'s and a module script's once for the page, as its memory cache (its module map) serves them after
-// (`RealmArena::timed_resources`, Chrome: cached-image-gets-single-entry) — a `<link>`'s sheet, a module preload's, the
-// fetch an `@import` or a graph of the same URL is served by — and a `<link>`'s once per load of its URL: its load task
-// can run twice for one element, on connection and on the attribute change that completed it
-// (`RealmArena::link_timings`, the URL it filed last); every other each time.
-fn filed_once(realm: &mut crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>, name: &str, failed: bool) -> bool {
+// (`RealmArena::timed_resources`, Chrome: cached-image-gets-single-entry) — a `<link>`'s sheet and a module preload's
+// the fetch an `@import` or a graph of the same URL is served by, where it loaded (`ok`, an ok status) in the same mode
+// (a no-cors sheet for a no-cors `@import`), which another fetches again, as a graph's failed module is — and a
+// `<link>`'s once per load of its URL: its load task can run twice for one element, on connection and on the attribute
+// change that completed it (`RealmArena::link_timings`, the URL it filed last); every other each time.
+fn filed_once(realm: &mut crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>, name: &str, failed: bool, ok: bool, no_cors: bool) -> bool {
     use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_STYLESHEET};
     use crate::subresource_judge::{J_IMAGE, J_LINK, J_SHEET};
+    let served = |realm: &mut crate::dom::RealmArena, set: &'static str| !realm.timed_resources.contains(&(set, name.to_owned()));
     match kind & 0xff {
         J_IMAGE => failed || realm.timed_resources.insert(("img", name.to_owned())),
+        // (…an `@import` the style engine asks for on every rebuild that feeds it, its fetch one for the page whatever came)
         J_SHEET if nid.is_none() => realm.timed_resources.insert(("css", name.to_owned())),
-        crate::subresource_plan::J_MODULE_SCRIPT => realm.timed_resources.insert(("script", name.to_owned())),
+        crate::subresource_plan::J_MODULE_SCRIPT => served(realm, "script") && (!ok || realm.timed_resources.insert(("script", name.to_owned()))),
         J_LINK => {
             let Some(id) = nid else { return true };
             if realm.link_timings.get(&id).is_some_and(|last| **last == *name) {
                 return false;
             }
             realm.link_timings.insert(id, name.into());
-            // (…what it obtains the memory cache's for the page's `@import`s and module graphs after)
+            // (…what it loaded the memory cache's for the page's `@import`s and module graphs after)
             let detail = kind >> 8;
-            if detail & OBTAINS_STYLESHEET != 0 {
+            if ok && no_cors && detail & OBTAINS_STYLESHEET != 0 {
                 realm.timed_resources.insert(("css", name.to_owned()));
             }
-            if detail & OBTAINS_MODULEPRELOAD != 0 {
+            if ok && detail & OBTAINS_MODULEPRELOAD != 0 {
                 realm.timed_resources.insert(("script", name.to_owned()));
             }
             true
@@ -403,6 +406,10 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             encoded = int_of(scope, sized[1], encoded_key).unwrap_or(decoded);
         }
     }
+    let status = match status_given {
+        Some(n) => n,
+        None => int_of(scope, resp, "status").unwrap_or(0.0),
+    };
     let redirected_resp = flag_of(scope, resp, "redirected");
     let final_url = if redirected_resp { string_of(scope, resp, "url", true) } else { None };
     let mut initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
@@ -427,7 +434,8 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             no_cors = crate::subresource_plan::no_cors(plan);
             navigation = crate::subresource_plan::navigation(plan);
         }
-        if !filed_once(realm, kind, nid, &name, failed || broken) {
+        let ok = !failed && (200.0..300.0).contains(&status);
+        if !filed_once(realm, kind, nid, &name, failed || broken, ok, no_cors) {
             return;
         }
     }
@@ -436,10 +444,6 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let cached = if cached_given.is_undefined() { string_of(scope, resp, "cached", true) } else { cached_given.boolean_value(scope).then(|| cached_given.to_rust_string_lossy(scope)) };
     let redirected_given = raw(scope, desc, "redirected");
     let redirected = if redirected_given.is_undefined() { redirected_resp } else { redirected_given.boolean_value(scope) };
-    let status = match status_given {
-        Some(n) => n,
-        None => int_of(scope, resp, "status").unwrap_or(0.0),
-    };
     let start = member(scope, desc, "startTime").and_then(|v| v.number_value(scope)).unwrap_or(now);
     let facts = Facts {
         final_url: final_url.unwrap_or_else(|| name.clone()),

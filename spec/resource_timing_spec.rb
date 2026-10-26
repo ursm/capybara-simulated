@@ -24,6 +24,7 @@ RSpec.describe 'resource timing' do
   GZIPPED = Zlib.gzip('var gz = 1;')
 
   def app
+    flips = 0
     ->(env) {
       host = env['HTTP_HOST'].to_s
       case env['PATH_INFO']
@@ -52,12 +53,14 @@ RSpec.describe 'resource timing' do
         HTML
         [200, {'content-type' => 'text/html'}, [page]]
       when '/hash.html' then [200, {'content-type' => 'text/html'}, ['<script>parent.__hashes = (parent.__hashes || []).concat([location.hash]); if (parent.__hashes.length < 2) setTimeout(function () { location.hash = "check"; location.reload(); }, 0);</script>']]
-      when '/missing', '/missing.js' then [404, {'content-type' => 'text/plain'}, ['no']]
+      when '/missing', '/missing.js', '/missing.css' then [404, {'content-type' => 'text/plain'}, ['no']]
       when '/xo'       then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['cross origin']]
       when '/xo-tao'   then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*', 'timing-allow-origin' => '*'}, ['cross origin with tao']]
       when '/beacon'   then [204, {}, ['']]
       when '/xo.js'    then [200, {'content-type' => 'text/javascript', 'access-control-allow-origin' => '*'}, ['']]
       when '/w.js'     then [200, {'content-type' => 'text/javascript'}, ['postMessage(1)']]
+      when '/cors.css' then [200, {'content-type' => 'text/css', 'access-control-allow-origin' => '*'}, ['p {}']]
+      when '/flip.js'  then (flips += 1) == 1 ? [404, {'content-type' => 'text/plain'}, ['no']] : [200, {'content-type' => 'text/javascript'}, ['']]
       when '/m.js'     then [200, {'content-type' => 'text/javascript'}, ['import "/m2.js";']]
       when '/m2.js'    then [200, {'content-type' => 'text/javascript'}, ['window.__m2 = 1;']]
       else
@@ -86,6 +89,16 @@ RSpec.describe 'resource timing' do
   # Wait for an image the page just added: its bytes arrive on a host thread.
   def await_images(s)
     Timeout.timeout(5) { sleep 0.05 until s.evaluate_script('Array.from(document.images).every(function (i) { return i.complete; })') }
+  end
+
+  # …the initiator types and statuses of the entries named so, once `count` are filed — those filed in 5 s where fewer.
+  def filed(s, filter, count)
+    list = []
+    Timeout.timeout(5) { sleep 0.05 until (list = entries(s, filter)).length >= count }
+  rescue Timeout::Error
+    list
+  ensure
+    return list.map {|e| "#{e['initiatorType']}:#{e['responseStatus']}" }
   end
 
   def entry(s, filter)
@@ -296,6 +309,27 @@ RSpec.describe 'resource timing' do
     expect(shown.call('other.example.com/xo.js')).to eq([200, 'text/javascript'])
     expect(shown.call('i.png?object')).to eq([0, ''])
     expect(shown.call('i.png?embed')).to eq([0, ''])
+  end
+
+  # A fetch a `<link>` made serves an `@import` or a module graph of its URL only where it is one the memory cache keeps
+  # for it: of the same mode, and loaded — a CORS sheet, a missing one and a failed module preload are fetched again,
+  # each fetch an entry (Chrome).
+  it "files the entry of a fetch a link's could not serve" do
+    s = session
+    s.execute_script(<<~JS)
+      document.head.insertAdjacentHTML('beforeend', '<link rel=stylesheet crossorigin href=/cors.css><link rel=stylesheet href=/missing.css>' +
+                                                    '<link rel=modulepreload href=/flip.js>');
+      setTimeout(function () {
+        document.head.insertAdjacentHTML('beforeend', '<style>@import "/cors.css"; @import "/missing.css";</style>');
+        var m = document.createElement('script');
+        m.type = 'module';
+        m.src = '/flip.js';
+        document.head.appendChild(m);
+      }, 200);
+    JS
+    expect(filed(s, '/cors.css', 2)).to eq(%w[link:200 css:200])
+    expect(filed(s, '/missing.css', 2)).to eq(%w[link:404 css:404])
+    expect(filed(s, '/flip.js', 2)).to eq(%w[other:404 script:200])
   end
 
   it 'serves a repeated fetch from the HTTP cache with no transfer' do
