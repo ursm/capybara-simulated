@@ -2090,6 +2090,9 @@ impl RealmArena {
         self.bases_moved(child);
         let Some(old) = self.get(child).and_then(|n| n.parent) else { return };
         self.edge_gen.bump();
+        if self.media.contains_key(&old) {
+            self.media_child_detached(old, child);
+        }
         let at = self.child_index(child);
         let (mut from, mut one) = (at, true);
         if let Some(o) = self.get_mut(old) {

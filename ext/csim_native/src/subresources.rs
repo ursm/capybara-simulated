@@ -57,11 +57,8 @@ pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> 
 // (Fetch: what Fetch Metadata's `Sec-Fetch-Dest` reports) — none in a document with no browsing context, which loads
 // nothing:
 //   a `<video>`'s `poster` ('video', an image);
-//   a `<video>` / `<audio>`'s media data — its `src` attribute's where it has one (an empty one is a failure, no fetch),
-//     else its first `<source src>` — unless `preload` says `none` (ASCII case-insensitively) and opts it out until it
-//     plays ('video' / 'audio', of their own destinations); and each `<track default src>` child ('track'). (Chrome
-//     picks the first PLAYABLE source and loads a track only when its mode shows: the first source and the `default`
-//     tracks stand in.)
+//   each `<track default src>` child of a `<video>` / `<audio>` ('track': Chrome loads a track only when its mode shows,
+//     the `default` tracks standing in) — its media data the element's own fetch, its load algorithm's (media.js);
 //   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg), an image
 //     (whatwg/fetch#1012).
 fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, &'static str, String, u32)> {
@@ -76,23 +73,9 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
         let attr = |name: &str| n.plain_attr(name).filter(|v| !v.is_empty()).map(str::to_owned);
         match &*n.local_name {
             tag @ ("video" | "audio") => {
-                let initiator = if tag == "video" { "video" } else { "audio" };
                 // (…a poster's a plain request, its credentials included: HTML's poster frame steps)
                 if let Some(poster) = attr("poster").filter(|_| tag == "video") {
                     wanted.push(("video", "image", None, poster));
-                }
-                let first_source = || {
-                    n.children.iter().find_map(|&c| {
-                        let c = arena.get(c).filter(|c| c.is_html_named("source"))?;
-                        c.plain_attr("src").filter(|v| !v.is_empty()).map(str::to_owned)
-                    })
-                };
-                if !n.plain_attr("preload").is_some_and(|p| p.eq_ignore_ascii_case("none")) {
-                    let src = match n.plain_attr("src") {
-                        Some(src) => Some(src.to_owned()).filter(|s| !s.is_empty()),
-                        None => first_source(),
-                    };
-                    wanted.extend(src.map(|src| (initiator, initiator, Some(id), src)));
                 }
                 // (…a track's request by its media element's `crossorigin`: HTML's track processing model, "the state of
                 // the parent media element's crossorigin content attribute")

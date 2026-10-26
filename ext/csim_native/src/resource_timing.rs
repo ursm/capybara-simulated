@@ -284,7 +284,7 @@ const FETCH_BEACON: u32 = 1;
 // "initiator type", resource-timing/initiator-type/*) — None where the caller names it: a timed resource's, a CSS
 // image's, which the engine handed it (subresources.rs `timed_resources`, rendered.rs `css_images_owed`).
 fn initiator_of(realm: &crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>) -> Option<&'static str> {
-    use crate::subresource_judge::{J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET};
+    use crate::subresource_judge::{J_AUDIO, J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET, J_VIDEO};
     let node = nid.and_then(|id| realm.get(id));
     let detail = kind >> 8;
     Some(match kind & 0xff {
@@ -292,6 +292,9 @@ fn initiator_of(realm: &crate::dom::RealmArena, kind: u32, nid: Option<crate::do
         J_IMAGE if node.is_some_and(|n| &*n.local_name == "image") => "image",
         J_IMAGE => "img",
         J_CLASSIC_SCRIPT | crate::subresource_plan::J_MODULE_SCRIPT => "script",
+        // (…a media element's data, the element's own fetch)
+        J_VIDEO => "video",
+        J_AUDIO => "audio",
         // (…a module preload's a script fetched, not run: 'other' — Resource Timing L2)
         J_LINK if detail & crate::link_resource::OBTAINS_MODULEPRELOAD != 0 => "other",
         J_LINK => "link",
@@ -310,8 +313,8 @@ fn initiator_of(realm: &crate::dom::RealmArena, kind: u32, nid: Option<crate::do
 // Whether an entry of `kind` is of a request the engine plans (subresource_plan.rs), whose no-cors-ness its plan says —
 // no fetch only an entry is filed for, whose own is a CORS request's or a navigation's.
 fn planned_kind(kind: u32) -> bool {
-    use crate::subresource_judge::{J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET};
-    matches!(kind & 0xff, J_IMAGE | J_CLASSIC_SCRIPT | crate::subresource_plan::J_MODULE_SCRIPT | J_LINK | J_SHEET | J_FONT | crate::subresource_plan::J_CSS_IMAGE | crate::subresource_plan::J_TIMED)
+    use crate::subresource_judge::{J_AUDIO, J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET, J_VIDEO};
+    matches!(kind & 0xff, J_IMAGE | J_VIDEO | J_AUDIO | J_CLASSIC_SCRIPT | crate::subresource_plan::J_MODULE_SCRIPT | J_LINK | J_SHEET | J_FONT | crate::subresource_plan::J_CSS_IMAGE | crate::subresource_plan::J_TIMED)
 }
 // Whether the page files the entry of `name` of `kind` now: an image's (but a failed load's, `failed`, each time), an
 // `@import`'s and a module script's once for the page, as its memory cache (its module map) serves them after

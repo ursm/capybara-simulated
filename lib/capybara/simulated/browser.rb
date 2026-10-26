@@ -8921,7 +8921,8 @@ module Capybara
 
       # Fetch a media resource (http / relative URL) and return its bytes, so a `<video
       # src>` pointing at a served file decodes the same way a blob: / data: source does.
-      # Returns {'bytes', 'tainted'}, or nil when the fetch fails.
+      # Returns {'bytes', 'tainted', 'meta'} — its Resource Timing facts — or {'meta'} when it fails (meta nil for a
+      # network error).
       def video_bytes(url, plan, realm: nil)
         # A `crossorigin` element runs the CORS check (an ACAO refusal fails the
         # load); a plain one is a no-cors fetch whose bytes TAINT a canvas they're
@@ -8932,10 +8933,11 @@ module Capybara
         result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
                             referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true,
                             cookie_cross_site: client[:cookie_cross_site], client_origin: client[:origin], dest: 'video')
-        return nil unless resource_loaded?(result) && result['status'].to_i < 400
-        bytes = result['body_raw'].to_s
-        return nil if bytes.empty?
-        {'bytes' => bytes, 'tainted' => result['tainted'] == true}
+        # (…and the response's facts, its Resource Timing entry's, whether its bytes load or not: none of a network error)
+        meta = result && resource_timing_meta(result)
+        bytes = result['body_raw'].to_s if resource_loaded?(result) && result['status'].to_i < 400
+        return {'meta' => meta} if bytes.nil? || bytes.empty?
+        {'bytes' => bytes, 'tainted' => result['tainted'] == true, 'meta' => meta}
       end
 
       def webauthn = (@webauthn ||= WebauthnState.new)

@@ -689,6 +689,65 @@ RSpec.describe 'resource timing' do
     )
   end
 
+  it 'fetches a media element\'s resource once, its entry its load\'s, through the controlling service worker' do
+    # The load algorithm's fetch is the resource's one request, its entry that fetch's: the worker's answer's where it
+    # answers — a video's and an audio's — and the network's where it lets the request through.
+    video = File.binread(File.expand_path('wpt/media/movie_5.webm', __dir__))
+    worker = <<~JS
+      self.addEventListener('install', () => self.skipWaiting());
+      self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+      const seen = [];
+      self.addEventListener('fetch', (e) => {
+        if (!['video', 'audio'].includes(e.request.destination)) return;
+        seen.push(e.request.destination + new URL(e.request.url).search);
+        if (e.request.url.endsWith('?answered')) e.respondWith(new Response('abcdef', { headers: { 'content-type': 'audio/ogg' } }));
+      });
+      self.onmessage = (e) => e.source.postMessage(seen.slice());
+    JS
+    doc = <<~HTML
+      <!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
+      <script>
+        navigator.serviceWorker.addEventListener('message', (e) => { window.seen = e.data; });
+        navigator.serviceWorker.register('/sw.js');
+        setInterval(() => {}, 50);
+      </script></body></html>
+    HTML
+    served = []
+    a = lambda {|env|
+      case env['PATH_INFO']
+      when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/m.webm' then served << env['QUERY_STRING']; [200, {'content-type' => 'video/webm'}, [video]]
+      else [200, {'content-type' => 'text/html'}, [doc]]
+      end
+    }
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+    begin
+      s = simulated_session(a)
+      s.visit '/'
+      s.execute_script(<<~JS)
+        document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?before' }));
+      JS
+      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      s.execute_script(<<~JS)
+        document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?through' }));
+        document.body.append(Object.assign(document.createElement('audio'), { src: '/m.webm?answered' }));
+      JS
+      entries = poll_until do
+        ns = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.includes('m.webm')).map((e) => [e.name.split('/').pop(), e.initiatorType, e.encodedBodySize])")
+        ns.length >= 3 ? ns.sort : nil
+      end
+      s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
+      expect([poll_until { s.evaluate_script('window.seen') }.sort, served, entries]).to eq([
+        ['audio?answered', 'video?through'],
+        ['before', 'through'],
+        [['m.webm?answered', 'audio', 6], ['m.webm?before', 'video', video.bytesize], ['m.webm?through', 'video', video.bytesize]]
+      ])
+    ensure
+      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    end
+  end
+
   it 'fetches no media data a src attribute or preload rules out, nor anything in a document with no browsing context' do
     # Media resource selection: a `src` attribute, even an empty one (a failure, no fetch), wins over the `<source>`
     # children; `preload` is an enumerated attribute, `NONE` is `none`; a `createHTMLDocument` document loads nothing.

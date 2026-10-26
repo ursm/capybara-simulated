@@ -111,6 +111,131 @@ RSpec.describe 'Media element state' do
     expect(s.evaluate_script('[sourcedSync, sourced.networkState, sourcedEvents.join()]')).to eq([3, 3, 'emptied,loadstart'])
   end
 
+  # A page that serves a video at `/m.webm` (any query) and a 404 elsewhere, `requests` the paths and queries it was
+  # asked for.
+  def media_session(requests = [])
+    video = File.binread(File.expand_path('wpt/media/movie_5.webm', __dir__))
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+      when '/m.webm' then requests << "m.webm?#{env['QUERY_STRING']}"; [200, {'content-type' => 'video/webm'}, [video]]
+      else requests << env['PATH_INFO'][1..]; [404, {'content-type' => 'text/plain'}, ['']]
+      end
+    }
+    simulated_session(app).tap {|s| s.visit '/' }
+  end
+
+  # The children mode tries the `<source>` children in tree order: one with no `src`, an empty one or a `type` the
+  # element cannot play fails at once, and one whose fetch fails fails too — each with an `error` at the `<source>`, none
+  # at the element — until one loads. Chrome and Firefox: `loadstart,error@a1,error@a2,error@a3,error@a4,loadedmetadata`
+  # (with `suspend`s of their buffering, which nothing here models), NETWORK_IDLE, the last candidate the current source.
+  it 'loads the first <source> child that does not fail, the ones before it failing' do
+    requests = []
+    s = media_session(requests)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const v = window.v = document.createElement('video');
+      v.innerHTML = '<source id=a1><source id=a2 src=""><source id=a3 src="m.webm?1" type="video/x-nope">' +
+        '<source id=a4 src="missing.webm"><source id=a5 src="m.webm?5"><source id=a6 src="m.webm?6">';
+      for (const el of [v, ...v.children]) {
+        for (const t of ['loadstart', 'error', 'loadedmetadata']) el.addEventListener(t, () => log.push(t + (el.id ? '@' + el.id : '')));
+      }
+      document.body.append(v);
+    JS
+    expect(s.evaluate_script('log.includes("loadedmetadata")')).to be true
+    expect(s.evaluate_script('[log.join(), v.networkState, v.error, v.currentSrc.split("/").pop()]')).to eq([
+      'loadstart,error@a1,error@a2,error@a3,error@a4,loadedmetadata', 1, nil, 'm.webm?5'
+    ])
+    expect(requests).to eq(['missing.webm', 'm.webm?5'])
+  end
+
+  # …and with every candidate failed it waits — NETWORK_NO_SOURCE, no error at the element — for a `<source>` inserted
+  # past them, which ends the wait at once (NETWORK_LOADING) and loads. Firefox: `[3, null]`, 2, then
+  # `loadstart,error@b1,loadedmetadata` and NETWORK_IDLE. (Chrome keeps waiting, NETWORK_NO_SOURCE: the resource
+  # selection algorithm's "wait until the node after pointer is a node other than the end of the list" says otherwise.)
+  it 'waits for a <source> inserted past the candidates that failed' do
+    s = media_session
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const v = window.v = document.createElement('video');
+      v.innerHTML = '<source id=b1 src="missing.webm">';
+      for (const el of [v, v.firstChild]) {
+        for (const t of ['loadstart', 'error', 'loadedmetadata']) el.addEventListener(t, () => log.push(t + (el.id ? '@' + el.id : '')));
+      }
+      document.body.append(v);
+    JS
+    expect(s.evaluate_script('log.join()')).to eq('loadstart,error@b1')
+    expect(s.evaluate_script('[v.networkState, v.error]')).to eq([3, nil])
+    expect(s.evaluate_script(<<~'JS')).to eq(2)
+      (() => {
+        const source = document.createElement('source');
+        source.src = 'm.webm?b';
+        v.append(source);
+        return v.networkState;
+      })()
+    JS
+    expect(s.evaluate_script('log.includes("loadedmetadata")')).to be true
+    expect(s.evaluate_script('[log.join(), v.networkState, v.currentSrc.split("/").pop()]')).to eq([
+      'loadstart,error@b1,loadedmetadata', 1, 'm.webm?b'
+    ])
+  end
+
+  # …past the pointer only: a `<source>` inserted BEFORE the last failed candidate — at an index past where that one
+  # stood when it failed — ends no wait; one inserted after it, that one removed first and the pointer where it was,
+  # does.
+  it 'ends the wait only for a <source> inserted past the pointer' do
+    s = media_session
+    s.execute_script(<<~'JS')
+      window.v = document.createElement('video');
+      v.innerHTML = '<source id=c1 src="missing.webm"><source id=c2 src="missing.webm?2">';
+      document.body.append(v);
+    JS
+    expect(s.evaluate_script('v.networkState')).to eq(3)
+    expect(s.evaluate_script(<<~'JS')).to eq([3, 2])
+      (() => {
+        v.prepend(Object.assign(document.createElement('source'), { src: 'm.webm?first' }));
+        v.insertBefore(Object.assign(document.createElement('source'), { src: 'm.webm?between' }), v.lastChild);
+        const early = v.networkState;
+        v.lastChild.remove();
+        v.append(Object.assign(document.createElement('source'), { src: 'm.webm?after' }));
+        return [early, v.networkState];
+      })()
+    JS
+    expect(s.evaluate_script('v.readyState')).to eq(4)
+    expect(s.evaluate_script('v.currentSrc.split("/").pop()')).to eq('m.webm?after')
+  end
+
+  # `preload` none puts the fetch off until the element plays: `loadstart` and `suspend`, NETWORK_IDLE with no media data
+  # and nothing fetched; `play()` fetches it. `autoplay` overrides it. Chrome and Firefox: `loadstart,suspend` and
+  # `[1, 0, "m.webm?c"]` — the `autoplay` one at HAVE_ENOUGH_DATA — then `play,waiting`, a `suspend` of their buffering
+  # and `loadedmetadata`, `[1, 4]`.
+  it 'fetches nothing for preload none until the element plays, unless it autoplays' do
+    requests = []
+    s = media_session(requests)
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const v = window.v = document.createElement('video');
+      v.preload = 'NONE';
+      for (const t of ['loadstart', 'suspend', 'play', 'waiting', 'loadedmetadata']) v.addEventListener(t, () => log.push(t));
+      v.src = 'm.webm?c';
+      const auto = window.auto = document.createElement('video');
+      auto.preload = 'none';
+      auto.autoplay = true;
+      auto.src = 'm.webm?e';
+    JS
+    expect(s.evaluate_script('auto.readyState')).to eq(4)
+    expect(s.evaluate_script('[log.join(), v.networkState, v.readyState, v.currentSrc.split("/").pop()]')).to eq([
+      'loadstart,suspend', 1, 0, 'm.webm?c'
+    ])
+    expect(requests).to eq(['m.webm?e'])
+    s.execute_script('v.play()')
+    expect(s.evaluate_script('log.includes("loadedmetadata")')).to be true
+    expect(s.evaluate_script('[log.slice(0, 5).join(), v.networkState, v.readyState]')).to eq([
+      'loadstart,suspend,play,waiting,loadedmetadata', 1, 4
+    ])
+    expect(requests).to eq(['m.webm?e', 'm.webm?c'])
+  end
+
   # The internal pause steps run only for a playing element: `pause()` on a paused one fires neither `timeupdate` nor
   # `pause`. Chrome: [true, ''].
   it 'fires nothing for a pause of a paused element' do
