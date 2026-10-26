@@ -470,10 +470,10 @@ fn timer_task_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.timerNext(limit) -> `[due, handler, args]`: the calling realm's next timer, where it falls due by `limit` —
-// taken from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none. A
-// page's is the timer task running from here, a platform task none. (A task a terminated handler never ended is ended
-// here first.)
+// __dom.timerNext(limit) -> `[due, handler, args, page]`: the calling realm's next timer, where it falls due by `limit`
+// — taken from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none.
+// A page's (`page`) is the timer task running from here, a platform task none. (A task a terminated handler never ended
+// is ended here first.)
 fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     let cid = realm_id(scope, &args);
@@ -502,7 +502,8 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let due = v8::Number::new(scope, due).into();
     let handler = v8::Local::new(scope, handler);
     let list = list.map_or_else(|| v8::undefined(scope).into(), |l| v8::Local::new(scope, l));
-    rv.set(v8::Array::new_with_elements(scope, &[due, handler, list]).into());
+    let page = v8::Boolean::new(scope, key > 0).into();
+    rv.set(v8::Array::new_with_elements(scope, &[due, handler, list, page]).into());
 }
 
 // __dom.realmPending(realm, subtree) -> whether realm `realm` (the calling one, for null) has work its event loop is to

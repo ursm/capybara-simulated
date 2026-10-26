@@ -166,10 +166,8 @@ RSpec.describe 'a task-fired event' do
     expect(worker).to eq(['w1 w2 w-end w-micro'])
   end
 
-  # KNOWN GAP: a timer's callback is not counted as script, the driver's own tasks being timers too — so a built-in one
-  # (a bound click()) has none of the page's frames beneath what it dispatches, and checkpoints.
-  it 'counts a built-in a timer calls as script on the stack' do
-    pending "a timer's callback is not counted as script running"
+  # …and a built-in a page's timer calls (a bound click()), none of the page's frames beneath what it dispatches.
+  it "counts a built-in a page's timer calls as script on the stack" do
     got = run(session_at_root, <<~JS)
       const b = document.getElementById('b');
       watch(b, 'click', 'click');
