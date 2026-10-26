@@ -4054,7 +4054,7 @@ module Capybara
       # Returns nil on a status that is not ok (not 200 to 299) / fetch failure, so the
       # JS caller fails the load.
       # A document starts loading — the page's, a frame's, an auxiliary window's (the bridge's `__csimLoadDocument` asks,
-      # and keeps the answer as `__csimDocToken`): a token of its own, naming its asset memo in `external_asset_response`.
+      # and keeps the answer: handles.js `docToken`): a token of its own, naming its asset memo in `external_asset_response`.
       # The last ASSET_DOCUMENTS documents' memos are kept, so a page's survives the frames it builds while it loads.
       ASSET_DOCUMENTS = 16
       def asset_document_started
