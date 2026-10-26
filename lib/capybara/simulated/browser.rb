@@ -3877,19 +3877,21 @@ module Capybara
       # `csim_asset_meta`) — collected so the bridge can file its 'script' Resource Timing entry.
       # One per URL, as the browser files it: the loader's handle cache already skips a re-import
       # before it fetches, and the dedup here keeps that true for any path that does not.
-      def note_module_fetch(url)
+      def note_module_fetch(url, started)
         meta = Thread.current[:csim_asset_meta]
         return unless meta
 
         url  = url.to_s
         list = (Thread.current[:csim_module_rt] ||= [])
-        list << {'url' => url, 'meta' => meta} unless list.any? {|m| m['url'] == url }
+        list << {'url' => url, 'meta' => meta, 'started' => started, 'ended' => Process.clock_gettime(Process::CLOCK_MONOTONIC)} unless list.any? {|m| m['url'] == url }
       end
-      # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read.
+      # The modules fetched since the last call, for the bridge to time as 'script' — cleared on read — each with how
+      # long ago, in ms, its fetch began and ended (`startAge`, `endAge`), which the bridge's clock places.
       def take_module_rt
         list = Thread.current[:csim_module_rt] || []
         Thread.current[:csim_module_rt] = []
-        list
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        list.map {|m| {'url' => m['url'], 'meta' => m['meta'], 'startAge' => (now - m['started']) * 1000, 'endAge' => (now - m['ended']) * 1000} }
       end
 
       # The `{url, meta}` for the worker main-script fetch the last `worker_spawn` made (or nil) —

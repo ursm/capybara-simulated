@@ -57,6 +57,9 @@ RSpec.describe 'resource timing' do
       when '/xo-tao'   then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*', 'timing-allow-origin' => '*'}, ['cross origin with tao']]
       when '/beacon'   then [204, {}, ['']]
       when '/xo.js'    then [200, {'content-type' => 'text/javascript', 'access-control-allow-origin' => '*'}, ['']]
+      when '/w.js'     then [200, {'content-type' => 'text/javascript'}, ['postMessage(1)']]
+      when '/m.js'     then [200, {'content-type' => 'text/javascript'}, ['import "/m2.js";']]
+      when '/m2.js'    then [200, {'content-type' => 'text/javascript'}, ['window.__m2 = 1;']]
       else
         body = host.start_with?('other.') ? '<p>other</p>' : <<~HTML
           <!DOCTYPE html><html><head><link rel="stylesheet" href="/a.css"><script src="/a.js"></script></head>
@@ -127,6 +130,24 @@ RSpec.describe 'resource timing' do
     t = simulated_session(app)
     t.visit 'http://www.example.com/frame-first.html'
     expect(poll_until { paths.(t, 'window').include?('/i.css') && paths.(t, 'window') }).to include('/i.png')
+  end
+
+  # A worker's script and a module graph's modules are fetched as the worker spawns and as the graph loads, their entries
+  # filed after: each spans its fetch, not the instant it was filed at.
+  it "times a worker's script and a module's imports over their fetches" do
+    s = session
+    s.execute_script(<<~JS)
+      new Worker('/w.js');
+      var m = document.createElement('script');
+      m.type = 'module';
+      m.src = '/m.js';
+      document.head.appendChild(m);
+    JS
+    spans = %w[/w.js /m.js /m2.js].to_h {|name|
+      e = Timeout.timeout(5) { sleep 0.05 until (list = entries(s, name)).any?; list.first }
+      [name, e['duration'].positive? && e['startTime'] <= e['responseEnd']]
+    }
+    expect(spans).to eq('/w.js' => true, '/m.js' => true, '/m2.js' => true)
   end
 
   it 'records fetch, XMLHttpRequest and sendBeacon entries' do

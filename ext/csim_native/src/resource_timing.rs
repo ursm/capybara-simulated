@@ -336,13 +336,12 @@ fn filed_once(realm: &mut crate::dom::RealmArena, kind: u32, nid: Option<crate::
 }
 // __dom.resourceTimingEntry(desc, now) -> the fields of the entry a fetch files (`entry_fields`), its `name`, `startTime`
 // and `initiatorType` among them, `serverTiming` a flat [name, duration, description, …] list — or null for a resource
-// of no network scheme, or that the page files no more. `desc` what the fetch tells of it: `{ name, kind, nid,
-// initiatorType, startTime, resp, body, renderBlocking, noCors, cached, encoded, decoded, status, headers, type,
-// redirected, broken }`, `resp` a response hash (status / headers /
-// bytes / encoded / cached / redirected / type / url / tao / contentEncoding / serverTiming) the rest defaults from —
-// none for a network error, an entry of its times alone, but where `status` is given — `body` a text body of the asset
-// cache's that sizes one with no hash; `now` its end, the clock the bindings keep. The document's origin is the calling
-// realm's.
+// of no network scheme, or that the page files no more. `desc` what the fetch tells of it: `{ name, kind, nid, plan,
+// initiatorType, startTime, endTime, resp, body, renderBlocking, noCors, cached, encoded, decoded, status, headers,
+// type, redirected, broken }`, `resp` a response hash (status / headers / bytes / encoded / cached / redirected / type /
+// url / tao / contentEncoding / serverTiming) the rest defaults from — none for a network error, an entry of its times
+// alone, but where `status` is given — `body` a text body of the asset cache's that sizes one with no hash; `now` its
+// end, where no `endTime` says, the clock the bindings keep. The document's origin is the calling realm's.
 fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Ok(desc) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
@@ -421,7 +420,7 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         document: navigation || matches!(initiator.as_str(), "iframe" | "frame"),
         no_cors,
         start,
-        end: now,
+        end: member(scope, desc, "endTime").and_then(|v| v.number_value(scope)).unwrap_or(now),
         cached,
         encoded,
         decoded,
