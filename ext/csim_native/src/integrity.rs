@@ -41,12 +41,13 @@ fn normalized(digest: &str) -> String {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "integrityMatches", matches_op, context_id);
 }
-// __dom.integrityMatches(bytes, metadata) -> `bytes_match`: `bytes` a body's bytes object, or a view (blob_data.rs
-// `bytes_arg`).
+// __dom.integrityMatches(bytes, metadata, opaque) -> `response_matches` of a response of `bytes` — a body's bytes object,
+// or a view (blob_data.rs `bytes_arg`) — opaque or not.
 fn matches_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let metadata = args.get(1).to_rust_string_lossy(scope);
     let bytes = crate::blob_data::bytes_arg(scope, args.get(0));
-    rv.set_bool(bytes_match(&bytes, &metadata));
+    let opaque = args.get(2).boolean_value(scope);
+    rv.set_bool(response_matches(&bytes, &metadata, !opaque));
 }
 
 #[cfg(test)]

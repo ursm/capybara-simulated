@@ -398,5 +398,8 @@ mod tests {
         assert_eq!([sheet(sha) & V_OK, sheet("sha256-AAAA")], [V_OK, 0]);
         let image = Consumer { integrity: "sha256-AAAA", body: b"x", ..Consumer::of(J_IMAGE) };
         assert_eq!(judge(&image, SRC_NETWORK, &resp("basic", Some(200))), 0);
+        // (…an opaque response fails any metadata of an algorithm known; metadata of none known is no check at all)
+        let opaque = |integrity| judge(&Consumer { integrity, body: b"x", ..Consumer::of(J_IMAGE) }, SRC_NETWORK, &resp("opaque", Some(0)));
+        assert_eq!([opaque(sha), opaque("md5-xx") & V_OK], [0, V_OK]);
     }
 }

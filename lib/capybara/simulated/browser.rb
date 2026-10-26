@@ -5359,6 +5359,9 @@ module Capybara
         return {'bytes' => bytes, **response, 'url' => r['url'].to_s} if binary
         {
           'body'           => RuntimeShared.utf8_text(bytes),
+          # (…and, under integrity metadata, the bytes its digest is of: the text's UTF-8 is not them where they are no
+          # UTF-8)
+          'body_bytes'     => (bytes unless integrity.to_s.empty?),
           **response,
           'url'            => r['url'].to_s,
           'referrerPolicy' => (policy = header_field(headers, 'referrer-policy')) && Array(policy).join(',')
