@@ -160,9 +160,12 @@ RSpec.describe 'map of preloaded resources' do
     s = simulated_session(preload_app(served, page)).tap {|session| session.visit '/' }
     got = s.evaluate_async_script(<<~'JS')
       const done = arguments[0];
-      (async () => [await (await fetch('/d.json?cors')).json(), await (await fetch('/d.json?nocors')).json()])().then(done);
+      (async () => {
+        const taken = await fetch('/d.json?cors');
+        return [taken.statusText, await taken.json(), await (await fetch('/d.json?nocors')).json()];
+      })().then(done);
     JS
-    expect(got).to eq([{'a' => 1}, {'a' => 1}])
+    expect(got).to eq(['OK', {'a' => 1}, {'a' => 1}])
     expect(served.sort).to eq(['d.json?cors', 'd.json?nocors', 'd.json?nocors'])
     expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType).sort()")).to eq([
       'd.json?cors:link', 'd.json?nocors:fetch', 'd.json?nocors:link'

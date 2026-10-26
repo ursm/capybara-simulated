@@ -54,7 +54,7 @@ RSpec.describe 'link integrity' do
 
       page = <<~HTML
         <!DOCTYPE html><meta charset=utf-8>
-        <script type=importmap>{"integrity": {"/m.js": "#{bad}"}}</script><body><p>p</p>
+        <script type=importmap>{"integrity": {"/m.js": "#{bad}", "/m.js?empty": "#{bad}"}}</script><body><p>p</p>
       HTML
       [200, {'content-type' => 'text/html'}, [page]]
     }).tap {|session| session.visit '/' }
@@ -64,8 +64,9 @@ RSpec.describe 'link integrity' do
       const data = 'data:text/css,' + encodeURIComponent(#{css.to_json});
       for (const [rel, as, href, integrity] of [['preload', 'style', '/s.css?pre', '#{bad}'], ['stylesheet', '', '/s.css?pre', '#{bad}'],
                                                 ['stylesheet', '', data, '#{bad}'], ['stylesheet', '', blob, '#{bad}'],
-                                                ['stylesheet', '', '/s.css?changed', '#{bad}'], ['modulepreload', '', '/m.js', '']]) {
-        const link = Object.assign(document.createElement('link'), { rel, href, integrity });
+                                                ['stylesheet', '', '/s.css?changed', '#{bad}'], ['modulepreload', '', '/m.js', null]]) {
+        const link = Object.assign(document.createElement('link'), { rel, href });
+        if (integrity !== null) link.integrity = integrity;
         if (as) link.as = as;
         const name = rel + ':' + href.split(/[,?]/)[0].slice(0, 9) + (href.includes('?') ? '?' + href.split('?')[1] : '');
         link.onload = () => events.push(name + ':load');
@@ -76,6 +77,14 @@ RSpec.describe 'link integrity' do
     JS
     expect(poll_until { s.evaluate_script('events.length === 6') }).to be true
     expect(s.evaluate_script("[events.every((e) => e.endsWith(':error')), getComputedStyle(document.querySelector('p')).color]")).to eq([true, 'rgb(0, 0, 0)'])
+    # (…an `integrity` attribute of none, an empty one, no import map's: HTML "if el does not have an integrity attribute")
+    s.execute_script(<<~'JS')
+      const link = Object.assign(document.createElement('link'), { rel: 'modulepreload', href: '/m.js?empty', integrity: '' });
+      link.onload = () => { window.empty = 'load'; };
+      link.onerror = () => { window.empty = 'error'; };
+      document.head.append(link);
+    JS
+    expect(poll_until { s.evaluate_script('window.empty') }).to eq('load')
   end
 
   # A service worker's answer is hashed as the bytes it is, not as its text: a sheet of Latin-1 bytes under a digest of

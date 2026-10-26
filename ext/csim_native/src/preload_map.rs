@@ -31,6 +31,7 @@ enum Had {
 // The response a preload had, as its consumer reads it.
 pub(crate) struct Response {
     status: u32,
+    status_text: String,
     kind: String,
     url: String,
     redirected: bool,
@@ -127,7 +128,7 @@ fn withdraw_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 // __dom.preloadCommit(doc, url, destination, plan, integrity, resp): a preload's entry committed to `doc`'s map — the
-// response it had, `resp` (its `status`, `type`, `url`, `redirected`, `tainted`, `headers` and its body's bytes — a
+// response it had, `resp` (its `status`, `statusText`, `type`, `url`, `redirected`, `tainted`, `headers` and its body's bytes — a
 // service worker's answer's `bytes`, the network's `body_bytes`, else its text `body`), a network error where it is none
 // or `blocked`.
 fn commit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -156,6 +157,7 @@ fn commit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         };
         Some(Response {
             status: member(scope, resp, "status").and_then(|v| v.uint32_value(scope)).unwrap_or(200),
+            status_text: text(scope, "statusText").unwrap_or_default(),
             kind: text(scope, "type").unwrap_or_else(|| "basic".to_owned()),
             url: text(scope, "url").unwrap_or_default(),
             redirected: flag(scope, "redirected"),
@@ -168,8 +170,8 @@ fn commit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 }
 
 // __dom.preloadConsume(doc, url, destination, plan, integrity) -> what "consume a preloaded resource" takes for a
-// consumer's request of `integrity`: the response the preload had — `{status, type, url, redirected, tainted, headers,
-// body_bytes}` — null for a network error, undefined where no preload matches; the token of its fetch where that is yet
+// consumer's request of `integrity`: the response the preload had — `{status, statusText, type, url, redirected, tainted,
+// headers, body_bytes}` — null for a network error, undefined where no preload matches; the token of its fetch where that is yet
 // to run (`preloadBegin`), its entry left for the consumer to take once it has.
 fn consume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(key) = key_arg(scope, &args) else { return };
@@ -186,8 +188,9 @@ fn consume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         let (Some(name), Some(value)) = (v8::String::new(scope, name), v8::String::new(scope, value)) else { continue };
         headers.set(scope, name.into(), value.into());
     }
-    let fields: [(&str, v8::Local<'_, v8::Value>); 7] = [
+    let fields: [(&str, v8::Local<'_, v8::Value>); 8] = [
         ("status", v8::Integer::new_from_unsigned(scope, r.status).into()),
+        ("statusText", v8::String::new(scope, &r.status_text).map_or_else(|| v8::undefined(scope).into(), Into::into)),
         ("type", v8::String::new(scope, &r.kind).map_or_else(|| v8::undefined(scope).into(), Into::into)),
         ("url", v8::String::new(scope, &r.url).map_or_else(|| v8::undefined(scope).into(), Into::into)),
         ("redirected", v8::Boolean::new(scope, r.redirected).into()),
