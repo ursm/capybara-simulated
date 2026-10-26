@@ -122,6 +122,7 @@ mod legacy;
 mod link_resource;
 mod media;
 mod media_query_lists;
+mod preload_map;
 mod message_ports;
 mod mime;
 mod multipart;

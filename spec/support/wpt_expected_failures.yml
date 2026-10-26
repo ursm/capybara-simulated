@@ -5844,9 +5844,6 @@ service-workers/service-worker/no-dynamic-import.any.js:
 - Another module URL
 - Module URL
 - 'Module data: URL'
-service-workers/service-worker/opaque-response-preloaded.https.html:
-- Opaque responses should not be reused for XHRs, done case
-- Opaque responses should not be reused for XHRs, loading case
 service-workers/service-worker/performance-timeline.https.html:
 - Resource Timing
 service-workers/service-worker/postmessage-blob-url.https.html:

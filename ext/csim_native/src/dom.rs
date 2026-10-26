@@ -906,6 +906,8 @@ pub(crate) struct RealmArena {
     pub(crate) dialog_requests: std::collections::HashMap<NodeId, crate::dialogs::RequestClose>,
     // Each media element's state, from its first use (media.rs).
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
+    // Each document's map of preloaded resources, by preload key (preload_map.rs).
+    pub(crate) preloads: std::collections::HashMap<crate::preload_map::Key, crate::preload_map::Preloaded>,
     // Each image element's current request, from its first load (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
@@ -1398,6 +1400,7 @@ impl RealmArena {
         self.dialog_return_values.retain(|id, _| live(slots, id));
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
+        self.preloads.retain(|key, _| live(slots, &key.doc()));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
@@ -2993,6 +2996,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas_text::install(scope, ns, context_id);
     crate::canvas_paint::install(scope, ns, context_id);
     crate::media::install(scope, ns, context_id);
+    crate::preload_map::install(scope, ns, context_id);
     crate::subresources::install(scope, ns, context_id);
     crate::select_options::install(scope, ns, context_id);
     crate::text_setters::install(scope, ns, context_id);
