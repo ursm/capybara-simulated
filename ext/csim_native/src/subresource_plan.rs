@@ -18,6 +18,14 @@ const MODES: [&str; 4] = ["no-cors", "cors", "same-origin", "navigate"];
 // (…a plan of nothing a request's defaults: no-cors, same-origin — Fetch "request")
 const CREDENTIALS: [&str; 3] = ["same-origin", "include", "omit"];
 const OPAQUE: u32 = 1 << 8;
+// …bits 9-13 its destination (Fetch's request destination: what its Fetch Metadata reports, what a service worker's
+// fetch event reads), by its index in `DESTINATIONS` — a plan of none, the empty string.
+const DESTINATION_SHIFT: u32 = 9;
+const DESTINATIONS: [&str; 24] = [
+    "", "audio", "audioworklet", "document", "embed", "font", "frame", "iframe", "image", "json", "manifest", "object",
+    "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "track", "video", "webidentity", "worker",
+    "xslt", "text",
+];
 // …its request's fields alone, its mode and credentials mode: what tells two requests of one URL apart (a preload key's).
 pub(crate) const PLAN_REQUEST: u32 = 15;
 
@@ -73,10 +81,10 @@ pub(crate) fn fields(plan: u32) -> (&'static str, &'static str, &'static str, bo
         plan & OPAQUE != 0,
     )
 }
-// Capybara::Simulated::Native.subresource_plan_fields(plan) -> `fields`, for the host's request.
-pub(crate) fn fields_for_ruby(plan: u32) -> (String, String, String, bool) {
+// Capybara::Simulated::Native.subresource_plan_fields(plan) -> `fields`, for the host's request, and its destination.
+pub(crate) fn fields_for_ruby(plan: u32) -> (String, String, String, bool, String) {
     let (mode, credentials, policy, opaque) = fields(plan);
-    (mode.to_owned(), credentials.to_owned(), policy.to_owned(), opaque)
+    (mode.to_owned(), credentials.to_owned(), policy.to_owned(), opaque, destination(plan).to_owned())
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -98,10 +106,13 @@ fn request_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
         rv.set(s.into());
     }
 }
-// __dom.subresourcePlanFields(plan) -> [mode, credentials, referrer policy] of `plan` (`fields`).
+// __dom.subresourcePlanFields(plan) -> [mode, credentials, referrer policy, destination] of `plan` (`fields`,
+// `destination`).
 fn fields_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (mode, credentials, policy, _) = fields(args.get(0).uint32_value(scope).unwrap_or(0));
-    let items: Vec<v8::Local<v8::Value>> = [mode, credentials, policy].iter().filter_map(|t| v8::String::new(scope, t)).map(Into::into).collect();
+    let plan = args.get(0).uint32_value(scope).unwrap_or(0);
+    let (mode, credentials, policy, _) = fields(plan);
+    let items: Vec<v8::Local<v8::Value>> =
+        [mode, credentials, policy, destination(plan)].iter().filter_map(|t| v8::String::new(scope, t)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.requestPlanOf(mode, credentials) -> the plan of a request of `mode` and `credentials` mode alone — a `fetch()`'s,
@@ -144,7 +155,36 @@ pub(crate) fn plan_in(realm: &crate::dom::RealmArena, kind: u32, el: Option<crat
     let noted = el.and_then(|id| realm.request_policies.get(&id).copied());
     let document = doc.map_or("", |d| realm.document_referrer_policy(d));
     let opaque = realm.location.origin() == "null";
-    plan(kind, crossorigin, worker, attr, noted, document, opaque)
+    let destination = destination_of(kind, node.and_then(|n| n.plain_attr("as")).unwrap_or(""));
+    plan(kind, crossorigin, worker, attr, noted, document, opaque) | destination_bits(destination)
+}
+// …and the destination of it, by its consumer's `kind` — a link's by what it obtains (its `kind`'s high bits) of the
+// destinations its `as` names, a timed resource's by its code (subresources.rs `timed_code`) — and its index in a plan.
+pub(crate) fn destination_of(kind: u32, as_value: &str) -> &'static str {
+    let (low, high) = (kind & 0xff, kind >> 8);
+    match low {
+        J_IMAGE | J_CSS_IMAGE => "image",
+        J_VIDEO => "video",
+        J_AUDIO => "audio",
+        J_CLASSIC_SCRIPT | J_MODULE_SCRIPT => "script",
+        J_SHEET | J_CSS_MODULE => "style",
+        J_FONT => "font",
+        J_OBJECT => "object",
+        J_EMBED => "embed",
+        J_TIMED => crate::subresources::timed_destination(high),
+        J_LINK => {
+            let module = crate::script::modulepreload_destination(as_value);
+            crate::link_resource::link_destination(high, module, crate::script::preload_destination(as_value))
+        }
+        _ => "",
+    }
+}
+pub(crate) fn destination_bits(destination: &str) -> u32 {
+    (DESTINATIONS.iter().position(|d| *d == destination).unwrap_or(0) as u32) << DESTINATION_SHIFT
+}
+// …and the destination a plan names.
+pub(crate) fn destination(plan: u32) -> &'static str {
+    DESTINATIONS.get((plan >> DESTINATION_SHIFT & 31) as usize).copied().unwrap_or("")
 }
 // …and whether a plan is of a `no-cors` request (its mode's bits: `MODES`), of a `navigate` one.
 pub(crate) fn no_cors(plan: u32) -> bool {
@@ -157,6 +197,19 @@ pub(crate) fn navigation(plan: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plan_names_its_consumers_destination() {
+        use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_PRELOAD, OBTAINS_STYLESHEET};
+        let of = |kind, as_value| destination(destination_bits(destination_of(kind, as_value)));
+        assert_eq!([of(J_IMAGE, ""), of(J_CSS_IMAGE, ""), of(J_FONT, ""), of(J_CSS_MODULE, ""), of(J_PREFETCH, "")], ["image", "image", "font", "style", ""]);
+        assert_eq!([of(J_LINK | OBTAINS_STYLESHEET << 8, "font"), of(J_LINK | OBTAINS_PRELOAD << 8, "FONT"), of(J_LINK | OBTAINS_PRELOAD << 8, "fetch")], ["style", "font", ""]);
+        assert_eq!([of(J_LINK | OBTAINS_MODULEPRELOAD << 8, ""), of(J_LINK | OBTAINS_MODULEPRELOAD << 8, "worker")], ["script", "worker"]);
+        assert_eq!([of(J_TIMED, ""), of(J_TIMED | crate::subresources::TRACK << 8, "")], ["image", "track"]);
+        // (…beside the request's fields, which it moves none of)
+        let plan = plan(J_IMAGE, Some(""), false, "", None, "origin", true) | destination_bits("image");
+        assert_eq!((fields(plan), destination(plan)), (("cors", "same-origin", "origin", true), "image"));
+    }
 
     #[test]
     fn a_plan_is_what_its_fields_say() {

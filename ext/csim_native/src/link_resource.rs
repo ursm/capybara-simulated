@@ -28,18 +28,18 @@ pub(crate) struct Plan {
     pub(crate) module_destination: Option<&'static str>,
     pub(crate) preload_destination: Option<&'static str>,
 }
-impl Plan {
-    // …and its request's destination, which its Fetch Metadata reports (HTML "fetch and process the linked resource"): a
-    // sheet's `style`, a module preload's its `as`'s module type's (a JavaScript module's `script`), a preload's its
-    // `as`'s, a hint's none.
-    pub(crate) fn destination(&self) -> &'static str {
-        if self.obtains & OBTAINS_STYLESHEET != 0 {
-            "style"
-        } else if self.obtains & OBTAINS_MODULEPRELOAD != 0 {
-            self.module_destination.map_or("", |d| if d == "text" { "script" } else { d })
-        } else {
-            self.preload_destination.unwrap_or("")
-        }
+// A link's request's destination, which its Fetch Metadata reports (HTML "fetch and process the linked resource"): a
+// sheet's `style`, a module preload's its `as`'s module type's (a JavaScript module's `script`), a preload's its `as`'s,
+// a hint's none — of a link that `obtains` those, of those destinations its `as` names.
+pub(crate) fn link_destination(obtains: u32, module: Option<&'static str>, preload: Option<&'static str>) -> &'static str {
+    if obtains & OBTAINS_STYLESHEET != 0 {
+        "style"
+    } else if obtains & OBTAINS_MODULEPRELOAD != 0 {
+        module.map_or("", |d| if d == "text" { "script" } else { d })
+    } else if obtains & OBTAINS_PRELOAD != 0 {
+        preload.unwrap_or("")
+    } else {
+        ""
     }
 }
 
@@ -109,8 +109,8 @@ pub(crate) fn link_response_accepted(
     !(obtains & OBTAINS_PRELOAD != 0 && crate::fetch_rules::blocked_by_nosniff(preload_destination, content_type, nosniff))
 }
 
-// __dom.linkPlan(nid) -> [verdict, obtains, moduleDestination | null, preloadDestination | null, destination] (`link_plan`, its media
-// matched on this realm's viewport).
+// __dom.linkPlan(nid) -> [verdict, obtains, moduleDestination | null, preloadDestination | null] (`link_plan`, its media
+// matched on this realm's viewport; its request's destination its request plan's: subresource_plan.rs `destination_of`).
 fn link_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
@@ -123,7 +123,6 @@ fn link_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         v8::Integer::new_from_unsigned(scope, plan.obtains).into(),
         text(scope, plan.module_destination),
         text(scope, plan.preload_destination),
-        text(scope, Some(plan.destination())),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

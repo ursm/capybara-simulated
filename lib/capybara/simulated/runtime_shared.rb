@@ -36,8 +36,8 @@ module Capybara
       # `(browser, *js_args)` and return whatever the JS caller expects.
       BROWSER_HOST_FNS = {
         '__rackFetch'                => ->(b, *a) { b.rack_fetch(a[0], a[1], a[2], a[3], a[4], a[5], credentials: a[6] || 'same-origin', referrer_policy: a[7], referrer: a[8], cache_mode: a[9] || 'default', initiator: a[10], site_seed: a[11], origin_null: a[12], client_url: a[13], cookie_cross_site: a[14] == true, nav_dest: a[15], client_origin: a[16], client_realm: a[17], navigation: a[18] == true, dest: a[19], user_activated: a[20] == true) },
-        '__csimExternalAsset'        => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4], a[5]) },
-        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2], a[3]) },
+        '__csimExternalAsset'        => ->(b, *a) { b.planned_external_asset(a[0], a[1], a[2], a[3], a[4]) },
+        '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
         # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.
         '__csim_keepaliveStart'      => ->(b, *a) { b.keepalive_start(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11]) },
@@ -45,8 +45,8 @@ module Capybara
         # A controlled document's external classic script → its controller's fetch
         # event, synchronously (destination 'script'). See sw_script_subresource_fetch.
         '__csim_swScriptFetch'       => lambda {|b, *a|
-          mode, credentials, = Native.subresource_plan_fields(a[5].to_i)
-          b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], a[4] || 'script', mode, credentials, binary: a[6] == true, integrity: a[7] || '', referrer_policy: a[8])
+          mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
+          b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
         '__locationAssign'           => ->(b, *a) { b.location_assign(a[0], replace: a[1] == true, initiator_realm: a[2], policy: a[3].to_s, user_activated: a[4] == true); nil },
         '__locationReload'           => ->(b, *a) { b.location_reload(user_activated: a[0] == true); nil },
@@ -210,7 +210,7 @@ module Capybara
         '__csim_fontFile'            => ->(b, *a) { b.font_file(a[0], a[1]) },
         '__csim_webFontFetch'        => ->(b, *a) { b.web_font_fetch(a[0], a[1].to_i, a[2], a[3]) },
         '__csim_localFontFile'       => ->(b, *a) { b.local_font_file(a[0], a[1] || '') },
-        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2], a[3]) },
+        '__csim_resourceTimingFetch' => ->(b, *a) { b.resource_timing_fetch(a[0], a[1].to_i, a[2]) },
         '__csim_takeModuleRt'        => ->(b, *a) { b.take_module_rt },
         '__csim_takeWorkerRt'        => ->(b, *a) { b.take_worker_rt },
         '__csim_fontFileFromBytes'   => ->(b, *a) { b.font_file_from_bytes(a[0]) },

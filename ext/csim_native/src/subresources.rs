@@ -26,6 +26,13 @@ const SAME_ORIGIN: u32 = 3;
 // …and such a request of another origin's URL than its document's: a network error before any worker could answer it
 // (Fetch "main fetch": a same-origin request's to another origin), no request made.
 const SAME_ORIGIN_REFUSED: u32 = 4;
+// A timed resource's code, which its consumer's kind carries (J_TIMED's high bits, subresource_plan.rs): its `crossorigin`
+// code above, and over it whether its request's destination is `track` — else `image` (a poster, an SVG `<use>`'s
+// document).
+pub(crate) const TRACK: u32 = 1 << 4;
+pub(crate) fn timed_destination(code: u32) -> &'static str {
+    if code & TRACK != 0 { "track" } else { "image" }
+}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
@@ -97,7 +104,7 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
             NO_CORS if tracks.contains(&i) => same_origin(arena, url.origin()),
             cors => cors,
         };
-        out.push((initiator, destination, url.href().to_owned(), cors));
+        out.push((initiator, destination, url.href().to_owned(), cors | if destination == "track" { TRACK } else { 0 }));
     }
     if let Some(url) = use_reference(arena, id, doc) {
         let cors = ada_url::Url::parse(&url, None).map_or(SAME_ORIGIN_REFUSED, |u| same_origin(arena, u.origin()));
@@ -122,8 +129,8 @@ fn cors_of(arena: &RealmArena, id: NodeId) -> u32 {
 fn same_origin(arena: &RealmArena, origin: String) -> u32 {
     if origin == arena.location.origin() { SAME_ORIGIN } else { SAME_ORIGIN_REFUSED }
 }
-pub(crate) fn timed_cors_request(cors: u32) -> (&'static str, &'static str) {
-    match cors {
+pub(crate) fn timed_cors_request(code: u32) -> (&'static str, &'static str) {
+    match code & !TRACK {
         NO_CORS => ("no-cors", "include"),
         CORS_CREDENTIALS => ("cors", "include"),
         SAME_ORIGIN | SAME_ORIGIN_REFUSED => ("same-origin", "include"),
@@ -131,9 +138,9 @@ pub(crate) fn timed_cors_request(cors: u32) -> (&'static str, &'static str) {
     }
 }
 
-// __dom.timedResources(el, docNid) -> `[initiator, destination, url, cors, …]`: the resources connecting `el` fetches
-// for no consumer (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS / SAME_ORIGIN / SAME_ORIGIN_REFUSED (a
-// network error, no request made); undefined for none.
+// __dom.timedResources(el, docNid) -> `[initiator, url, code, …]`: the resources connecting `el` fetches
+// for no consumer (`timed_resources`), `code` its consumer kind's (`timed_destination`), its low bits NO_CORS / CORS /
+// CORS_CREDENTIALS / SAME_ORIGIN / SAME_ORIGIN_REFUSED (a network error, no request made); undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let cid = crate::dom::realm_id(scope, &args);
@@ -141,11 +148,10 @@ fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     if found.is_empty() {
         return;
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 4);
-    for (initiator, destination, url, cors) in &found {
-        let (Some(i), Some(d), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, destination), v8::String::new(scope, url)) else { continue };
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 3);
+    for (initiator, _, url, cors) in &found {
+        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
         items.push(i.into());
-        items.push(d.into());
         items.push(u.into());
         items.push(v8::Integer::new_from_unsigned(scope, *cors).into());
     }

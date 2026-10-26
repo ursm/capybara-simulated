@@ -9,11 +9,8 @@ use crate::webcrypto::Hash;
 // The algorithms SRI knows, weakest first.
 const ALGORITHMS: [(&str, Hash); 3] = [("sha256", Hash::Sha256), ("sha384", Hash::Sha384), ("sha512", Hash::Sha512)];
 
-// "Do bytes match metadataList?"
-pub(crate) fn bytes_match(bytes: &[u8], metadata: &str) -> bool {
-    response_matches(bytes, metadata, true)
-}
-// …and SRI §3.3.5 "Does response match metadataList?": metadata with no entry it knows matches whatever the response;
+// SRI §3.3.5 "Does response match metadataList?" (its "do bytes match metadataList?" for an eligible one): metadata with
+// no entry it knows matches whatever the response;
 // otherwise a response not eligible for integrity validation (an opaque one) never does, and an eligible one's bytes
 // are matched.
 pub(crate) fn response_matches(bytes: &[u8], metadata: &str, eligible: bool) -> bool {
@@ -60,12 +57,12 @@ mod tests {
         let body = b"alert('Hello, world.');";
         let sha256 = "sha256-qznLcsROx4GACP2dm0UCKCzCG+HiZ1guq6ZZDob/Tng=";
         let sha384 = "sha384-H8BRh8j48O9oYatfu5AZzq6A9RINhZO5H16dQZngK7T62em8MUt1FLm52t+eX6xO";
-        assert!(bytes_match(body, sha256));
-        assert!(bytes_match(body, "SHA256-qznLcsROx4GACP2dm0UCKCzCG-HiZ1guq6ZZDob_Tng?opt"));
-        assert!(bytes_match(body, &format!("{sha256} {sha384}")));
-        assert!(!bytes_match(body, &format!("{sha256} sha384-AAAA")));
-        assert!(bytes_match(body, "md5-AAAA sha1-AAAA"));
-        assert!(bytes_match(body, ""));
-        assert!(!bytes_match(b"other", sha256));
+        assert!(response_matches(body, sha256, true));
+        assert!(response_matches(body, "SHA256-qznLcsROx4GACP2dm0UCKCzCG-HiZ1guq6ZZDob_Tng?opt", true));
+        assert!(response_matches(body, &format!("{sha256} {sha384}"), true));
+        assert!(!response_matches(body, &format!("{sha256} sha384-AAAA"), true));
+        assert!(response_matches(body, "md5-AAAA sha1-AAAA", true));
+        assert!(response_matches(body, "", true));
+        assert!(!response_matches(b"other", sha256, true));
     }
 }

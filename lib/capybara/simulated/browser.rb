@@ -3837,10 +3837,10 @@ module Capybara
       # An element's GET of `url` (a script inserted, a `<link>` that is no sheet, a hint) as its node document — realm
       # `realm` — requests it, as the engine's `plan` of it says (`request_of_plan`): `rack_fetch`'s answer — a CORS
       # request where its `crossorigin` makes it one.
-      def subresource_fetch(url, realm, plan, dest = nil)
+      def subresource_fetch(url, realm, plan)
         mode, credentials, policy = request_of_plan(plan)
         client = client_for(realm, policy)
-        rack_fetch('GET', url, '', nil, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
+        rack_fetch('GET', url, '', nil, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: plan_destination(plan),
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
       def rack_fetch_body(url, cors_mode: nil, credentials: 'same-origin', client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil,
@@ -3928,7 +3928,8 @@ module Capybara
       # facts so the entry records, as a browser files one for a failed media load.
       # (…an element's of the document of realm `realm`, its request of destination `dest` the engine's `plan` of it —
       # subresource_plan.rs — its mode as it says, no-cors too)
-      def resource_timing_fetch(url, realm, plan, dest = nil)
+      def resource_timing_fetch(url, realm, plan)
+        dest = plan_destination(plan)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         mode, credentials, policy = Native.subresource_plan_fields(plan.to_i)
@@ -4074,10 +4075,10 @@ module Capybara
       # …a page's request of one — its client realm `realm`'s, of destination `dest`, as the engine's `plan` of it says;
       # `referrer` where it names one of its own (an `@import`'s, its importing sheet's location) — answered as
       # `external_asset_response` answers it.
-      def planned_external_asset(url, document, realm, plan, dest, referrer = nil)
+      def planned_external_asset(url, document, realm, plan, referrer = nil)
         mode, credentials, policy = request_of_plan(plan)
         referrer = nil if referrer.to_s.empty?
-        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
+        external_asset_response(url, document, realm, policy, referrer: referrer, dest: plan_destination(plan), mode: mode, credentials: credentials)
       end
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
@@ -13107,6 +13108,10 @@ module Capybara
       private def request_of_plan(plan)
         mode, credentials, policy = Native.subresource_plan_fields(plan.to_i)
         mode == 'no-cors' ? [nil, 'same-origin', policy] : [mode, credentials, policy]
+      end
+      # …and its destination (subresource_plan.rs `destination`), '' for the empty one (a prefetch's, a `fetch()`'s).
+      private def plan_destination(plan)
+        Native.subresource_plan_fields(plan.to_i)[4]
       end
       # …and the request a load the host makes for a subresource's `plan` (subresource_plan.rs) is, to `target_url`: whether
       # it is a CORS one, its credentials mode, its client — pinned, as it is fetched off the main thread, its opacity the
