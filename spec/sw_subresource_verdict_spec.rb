@@ -24,7 +24,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         if (u.pathname === '/scope/missing') e.respondWith(new Response('no', {status: 404}));
         else if (u.pathname === '/scope/found') e.respondWith(new Response('yes'));
         else if (u.pathname === '/scope/unmodified') e.respondWith(new Response(null, {status: 304}));
-        else if (u.pathname === '/scope/swerr.js') e.respondWith(Response.error());
+        else if (u.pathname === '/scope/swerr.js' || u.pathname === '/scope/swerr.png') e.respondWith(Response.error());
         else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
@@ -148,6 +148,39 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq([['script:0'], ['script:0']])
   end
+  # …and each answer a worker gives is its request's entry's response, as the network's would be: a sheet's content type
+  # its answer's, a refused sheet's status the answer's, a CSS image's network error an entry of its times, an opaque
+  # font answer's sizes hidden.
+  it "files the entry of a worker's answer as its response's" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = async () => {
+          const d = f.contentDocument, W = f.contentWindow;
+          d.head.insertAdjacentHTML('beforeend', '<link rel=stylesheet href=/scope/two.css><link rel=stylesheet href=/scope/refused.css>' +
+                                                 '<style>@font-face{font-family:A;src:url(/scope/away-f.woff2)} #i{background-image:url(/scope/swerr.png)}</style>');
+          d.body.insertAdjacentHTML('beforeend', '<div id=i style="width:9px;height:9px"></div>');
+          await W.document.fonts.load('16px A').catch(() => {});
+          const find = (path) => W.performance.getEntriesByType('resource').find((e) => e.name.endsWith(path));
+          const poll = () => {
+            const [two, refused, image, font] = ['/two.css', '/refused.css', '/swerr.png', '/away-f.woff2'].map(find);
+            if (!(two && refused && image && font)) return setTimeout(poll, 20);
+            globalThis.__seen = [two.contentType, refused.responseStatus, image.responseStatus, font.encodedBodySize];
+          };
+          poll();
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['text/css', 404, 0, 0])
+  end
+
   # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
   # rules, and the network never asked for it — the cascade's and the getter's one answer. And a response is judged by
   # the mode its request was made in: an audio whose `crossorigin` is set while its no-cors request is in flight takes

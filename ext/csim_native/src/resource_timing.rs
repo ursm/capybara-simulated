@@ -337,10 +337,12 @@ fn filed_once(realm: &mut crate::dom::RealmArena, kind: u32, nid: Option<crate::
 // __dom.resourceTimingEntry(desc, now) -> the fields of the entry a fetch files (`entry_fields`), its `name`, `startTime`
 // and `initiatorType` among them, `serverTiming` a flat [name, duration, description, …] list — or null for a resource
 // of no network scheme, or that the page files no more. `desc` what the fetch tells of it: `{ name, kind, nid, plan,
-// initiatorType, startTime, endTime, resp, body, renderBlocking, noCors, cached, encoded, decoded, status, headers,
-// type, redirected, broken }`, `resp` a response hash (status / headers / bytes / encoded / cached / redirected / type /
+// initiatorType, startTime, endTime, resp, answer, body, renderBlocking, noCors, cached, encoded, decoded, status,
+// headers, type, redirected, broken }`, `resp` a response hash (status / headers / bytes / encoded / cached / redirected / type /
 // url / tao / contentEncoding / serverTiming) the rest defaults from — none for a network error, an entry of its times
-// alone, but where `status` is given — `body` a text body of the asset cache's that sizes one with no hash; `now` its
+// alone, but where `status` is given — `answer` a controlling service worker's (`{bytes | body, status, type,
+// contentType, headers}`, `{blocked[, status]}` for none that is a response, sw-client.js), `body` a text body of the
+// asset cache's that sizes one with no hash; `now` its
 // end, where no `endTime` says, the clock the bindings keep. The document's origin is the calling realm's.
 fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
@@ -355,16 +357,32 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     if !name.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("http:")) && !name.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("https:")) {
         return;
     }
-    let status_given = member(scope, desc, "status").map(|v| v.number_value(scope).unwrap_or(0.0));
+    // (…a controlling service worker's answer to it, `answer`, made its entry's facts: its status — none of an answer
+    // that is no response — its body's size, its content type, whether it is opaque)
+    let answer = member(scope, desc, "answer").and_then(|v| v8::Local::<v8::Object>::try_from(v).ok());
+    let blocked = flag_of(scope, answer, "blocked");
+    let status_given = match answer {
+        Some(_) if blocked => member(scope, answer, "status").map(|v| v.number_value(scope).unwrap_or(0.0)),
+        Some(_) => Some(member(scope, answer, "status").and_then(|v| v.number_value(scope)).unwrap_or(200.0)),
+        None => member(scope, desc, "status").map(|v| v.number_value(scope).unwrap_or(0.0)),
+    };
     let failed = resp.is_none() && status_given.is_none();
-    let headers = member(scope, desc, "headers").or_else(|| member(scope, resp, "headers")).and_then(|h| v8::Local::<v8::Object>::try_from(h).ok());
+    let headers = member(scope, desc, "headers").or_else(|| member(scope, resp.or(answer), "headers")).and_then(|h| v8::Local::<v8::Object>::try_from(h).ok());
     let [tao_header, content_type, encoding_header, timing_header] = match headers {
         Some(h) => crate::fetch_rules::response_headers(scope, h, ["timing-allow-origin", "content-type", "content-encoding", "server-timing"]),
         None => [None, None, None, None],
     };
+    let content_type = content_type.or_else(|| string_of(scope, answer, "contentType", true));
     // (…its sizes a text body's, its response's, or as given; none of a network error)
     let (mut encoded, mut decoded) = (0.0, 0.0);
-    if !failed {
+    if answer.is_some() && !blocked {
+        let bytes = member(scope, answer, "bytes").and_then(|v| v8::Local::<v8::ArrayBufferView>::try_from(v).ok());
+        let size = match bytes {
+            Some(b) => b.byte_length() as f64,
+            None => string_of(scope, answer, "body", false).map_or(0.0, |b| b.len() as f64),
+        };
+        (encoded, decoded) = (size, size);
+    } else if answer.is_none() && !failed {
         if let Some(body) = string_of(scope, desc, "body", false) {
             (encoded, decoded) = (body.len() as f64, body.len() as f64);
         } else {
@@ -402,7 +420,7 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             return;
         }
     }
-    let response_type = string_of(scope, desc, "type", true).or_else(|| string_of(scope, resp, "type", true));
+    let response_type = string_of(scope, desc, "type", true).or_else(|| string_of(scope, resp.or(answer), "type", true));
     let cached_given = raw(scope, desc, "cached");
     let cached = if cached_given.is_undefined() { string_of(scope, resp, "cached", true) } else { cached_given.boolean_value(scope).then(|| cached_given.to_rust_string_lossy(scope)) };
     let redirected_given = raw(scope, desc, "redirected");
