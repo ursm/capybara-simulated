@@ -233,8 +233,9 @@ pub(crate) struct StyleEngine {
     poisoned: bool,
 }
 
-// A sheet of the page's, as `set_sheets` keeps it: its parse, and the parse's `version` (sheets.rs `StoredSheet`: two
-// sheets of one text share a parse, and a sheet whose text is set again is another parse).
+// A sheet of the page's, as `set_sheets` keeps it (and `set_shadow_sheets` a shadow root's): its parse, the parse's
+// `version` (sheets.rs `StoredSheet`: two sheets of one text share a parse, and a sheet whose text is set again is
+// another parse), and whether it has a location — a fetched one's, which its images are referred by.
 struct AuthorSheet {
     sheet: DocumentStyleSheet,
     version: u32,
@@ -390,8 +391,7 @@ fn all_face_rules(
 
 // One shadow root's sheets, as the page last gave them, and the cascade data stylo built of them.
 struct ShadowStyles {
-    // (…each with its parse's version, as `AuthorSheet`)
-    sheets: Vec<(DocumentStyleSheet, u32)>,
+    sheets: Vec<AuthorSheet>,
     styles: AuthorStyles<DocumentStyleSheet>,
     dirty: bool,
     // Whether a sheet reads the host's light DESCENDANTS through `:host(:has(…))` (`host_reads_descendants`), which the
@@ -812,16 +812,17 @@ impl StyleEngine {
             }
         }
         let device = self.stylist.device();
-        for shadow in self.shadow_styles.values_mut().filter(|sh| sh.sheets.iter().any(|(s, v)| owned(s, *v))) {
-            for (sheet, v) in std::mem::take(&mut shadow.sheets) {
-                shadow.styles.stylesheets.remove_stylesheet(Some(device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
-                let sheet = if owned(&sheet, v) { new.clone() } else { sheet };
+        for shadow in self.shadow_styles.values_mut().filter(|sh| sh.sheets.iter().any(|a| owned(&a.sheet, a.version))) {
+            for a in std::mem::take(&mut shadow.sheets) {
+                shadow.styles.stylesheets.remove_stylesheet(Some(device), &NO_CUSTOM_MEDIA, a.sheet.clone(), &guard);
+                let sheet = if owned(&a.sheet, a.version) { new.clone() } else { a.sheet };
                 shadow.styles.stylesheets.append_stylesheet(Some(device), &NO_CUSTOM_MEDIA, sheet.clone(), &guard);
-                shadow.sheets.push((sheet, v));
+                shadow.sheets.push(AuthorSheet { sheet, ..a });
             }
             shadow.dirty = true;
             self.styled = None;
             self.rules_changed = true;
+            self.image_referrers = None;
         }
         drop(guard);
         if in_document {
@@ -832,7 +833,7 @@ impl StyleEngine {
     // Whether `sheet` is one the engine cascades — the document's, or a shadow root's.
     pub(crate) fn uses_sheet(&self, sheet: &DocumentStyleSheet) -> bool {
         self.author.iter().any(|a| Arc::ptr_eq(&a.sheet.0, &sheet.0))
-            || self.shadow_styles.values().any(|shadow| shadow.sheets.iter().any(|(s, _)| Arc::ptr_eq(&s.0, &sheet.0)))
+            || self.shadow_styles.values().any(|shadow| shadow.sheets.iter().any(|a| Arc::ptr_eq(&a.sheet.0, &sheet.0)))
     }
 
     // A sheet's rules moved under the engine — an `@import`ed one arrived, CSSOM edited one — so everything is styled
@@ -905,8 +906,9 @@ impl StyleEngine {
     // by (CSS Values 4 "fetch a style resource": its style resource's location) — where that is a located sheet of the
     // document's (a `<link>`'s, an `<?xml-stylesheet?>`'s, an `@import`ed one's own): the URL a declaration resolves is
     // the one its computed value keeps (stylo `ComputedUrl::Valid` clones the specified `Arc`), so it is found by
-    // identity. None for any other — a `<style>`'s own (an `@import` of one's is located), an inline style's, a
-    // presentational hint's, one a `var()` substituted (parsed anew), a shadow tree's — whose request the document's is.
+    // identity — the document's sheets' and its shadow trees' alike. None for any other — a `<style>`'s own (an `@import`
+    // of one's is located), an inline style's, a presentational hint's, one a `var()` substituted (parsed anew) — whose
+    // request the document's is.
     // The URLs are gathered when first asked after the sheets or the device change, each pinned so no other takes its
     // address; the request is made under the policy its sheet's response set (url_ops.rs `note_sheet_policy`).
     pub(crate) fn image_referrer(&mut self, url: &style::servo_arc::Arc<url::Url>) -> Option<&str> {
@@ -915,7 +917,7 @@ impl StyleEngine {
             let guard = self.lock.read();
             let device = self.stylist.device();
             let mut map = std::collections::HashMap::new();
-            for a in &self.author {
+            for a in self.author.iter().chain(self.shadow_styles.values().flat_map(|shadow| &shadow.sheets)) {
                 let contents = a.sheet.contents(&guard);
                 let at = a.located.then(|| contents.url_data.as_str());
                 sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), at, device, &guard, &mut map);
@@ -931,17 +933,18 @@ impl StyleEngine {
     pub(crate) fn set_shadow_sheets(&mut self, arena: &RealmArena, root: NodeId, sheets: &[&crate::sheets::StoredSheet]) {
         let mut shadow = self.shadow_styles.remove(&root).unwrap_or_default();
         let guard = self.lock.read();
-        for (sheet, _) in std::mem::take(&mut shadow.sheets) {
-            shadow.styles.stylesheets.remove_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, sheet, &guard);
+        for a in std::mem::take(&mut shadow.sheets) {
+            shadow.styles.stylesheets.remove_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, a.sheet, &guard);
         }
         shadow.host_has = sheets.iter().any(|s| s.host_has);
         for s in sheets {
             shadow.styles.stylesheets.append_stylesheet(Some(self.stylist.device()), &NO_CUSTOM_MEDIA, s.sheet.clone(), &guard);
-            shadow.sheets.push((s.sheet.clone(), s.version));
+            shadow.sheets.push(AuthorSheet { sheet: s.sheet.clone(), version: s.version, located: s.located });
         }
         drop(guard);
         shadow.dirty = true;
         self.shadow_styles.insert(root, shadow);
+        self.image_referrers = None;
         self.styled = None;
         self.rules_changed = true;
         if let Some(host) = arena.get(root).and_then(|r| r.host) {
