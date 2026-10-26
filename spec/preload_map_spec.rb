@@ -19,6 +19,8 @@ RSpec.describe 'map of preloaded resources' do
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/i.png' then served << "i.png?#{env['QUERY_STRING']}"; [200, {'content-type' => 'image/png'}, [PRELOAD_PNG]]
       when '/f.ttf' then served << 'f.ttf'; [200, {'content-type' => 'font/ttf', 'access-control-allow-origin' => '*'}, [PRELOAD_FONT]]
+      when '/s.css' then served << 's.css'; [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+      when '/a.js' then served << 'a.js'; [200, {'content-type' => 'text/javascript'}, ['window.ran = (window.ran || 0) + 1']]
       else [200, {'content-type' => 'text/html'}, [page]]
       end
     }
@@ -49,6 +51,35 @@ RSpec.describe 'map of preloaded resources' do
     expect(entries(s)).to eq(['i.png?pre:link', 'f.ttf:link'])
   end
 
+  # A style sheet's and a classic script's request take theirs too — the sheet's every reader (its load, the cascade,
+  # `.sheet`) the one response. Chrome: `[1, "rgb(255, 0, 0)"]`, one request each, the preloads' entries alone.
+  it 'hands a preloaded style sheet and script to their consumers, one request each' do
+    page = '<!DOCTYPE html><meta charset=utf-8><link rel=preload as=style href="/s.css"><link rel=preload as=script href="/a.js"><body><p>p</p>'
+    served = []
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/s.css' then served << 's.css'; [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+      when '/a.js' then served << 'a.js'; [200, {'content-type' => 'text/javascript'}, ['window.ran = (window.ran || 0) + 1']]
+      else [200, {'content-type' => 'text/html'}, [page]]
+      end
+    }
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    s.execute_script(<<~'JS')
+      window.loaded = [];
+      const sheet = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/s.css' });
+      sheet.onload = () => loaded.push('sheet');
+      const script = Object.assign(document.createElement('script'), { src: '/a.js' });
+      script.onload = () => loaded.push('script');
+      document.head.append(sheet, script);
+    JS
+    expect(poll_until { s.evaluate_script('loaded.length === 2') }).to be true
+    expect(s.evaluate_script("[window.ran, getComputedStyle(document.querySelector('p')).color, document.styleSheets.length]")).to eq([1, 'rgb(255, 0, 0)', 1])
+    expect(served).to eq(['s.css', 'a.js'])
+    expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType)")).to eq([
+      's.css:link', 'a.js:link'
+    ])
+  end
+
   # …one consumer alone: a request of another mode (a `crossorigin` image) takes none and fetches; the first that
   # matches takes it; the next fetches again.
   it 'hands a preload to the first consumer that matches it alone' do
@@ -73,9 +104,9 @@ RSpec.describe 'map of preloaded resources' do
       const seen = [];
       self.addEventListener('fetch', (e) => {
         const url = new URL(e.request.url);
-        if (url.pathname !== '/i.png') return;
+        if (!['/i.png', '/s.css', '/a.js'].includes(url.pathname)) return;
         seen.push(e.request.destination + url.search);
-        e.respondWith(fetch('/i.png?from-worker'));
+        if (url.pathname === '/i.png') e.respondWith(fetch('/i.png?from-worker'));
       });
       self.onmessage = (e) => e.source.postMessage(seen.slice());
     JS
@@ -93,17 +124,24 @@ RSpec.describe 'map of preloaded resources' do
       s = simulated_session(preload_app(served, page, worker)).tap {|session| session.visit '/' }
       expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
       s.execute_script(<<~'JS')
-        const link = Object.assign(document.createElement('link'), { rel: 'preload', as: 'image', href: '/i.png?pre' });
-        link.onload = () => {
-          window.img = Object.assign(new Image(), { src: '/i.png?pre' });
-          document.body.append(img);
-        };
-        document.head.append(link);
+        window.preloads = 0;
+        for (const [as, href] of [['image', '/i.png?pre'], ['style', '/s.css'], ['script', '/a.js']]) {
+          const link = Object.assign(document.createElement('link'), { rel: 'preload', as, href });
+          link.onload = () => { window.preloads++; };
+          document.head.append(link);
+        }
       JS
-      expect(poll_until { s.evaluate_script('window.img && img.complete') }).to be true
+      expect(poll_until { s.evaluate_script('preloads === 3') }).to be true
+      s.execute_script(<<~'JS')
+        window.img = Object.assign(new Image(), { src: '/i.png?pre' });
+        document.body.append(img);
+        document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/s.css' }));
+        document.head.append(Object.assign(document.createElement('script'), { src: '/a.js' }));
+      JS
+      expect(poll_until { s.evaluate_script('img.complete && window.ran === 1') }).to be true
       s.execute_script("navigator.serviceWorker.controller.postMessage('seen')")
       expect([poll_until { s.evaluate_script('window.seen') }, s.evaluate_script('img.naturalWidth > 0'), served]).to eq([
-        ['image?pre'], true, ['i.png?from-worker']
+        ['image?pre', 'style', 'script'], true, ['i.png?from-worker', 's.css', 'a.js']
       ])
     ensure
       ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
