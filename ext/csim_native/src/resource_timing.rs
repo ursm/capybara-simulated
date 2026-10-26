@@ -313,24 +313,35 @@ fn planned_kind(kind: u32) -> bool {
     use crate::subresource_judge::{J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET};
     matches!(kind & 0xff, J_IMAGE | J_CLASSIC_SCRIPT | crate::subresource_plan::J_MODULE_SCRIPT | J_LINK | J_SHEET | J_FONT | crate::subresource_plan::J_CSS_IMAGE | crate::subresource_plan::J_TIMED)
 }
-// Whether the page files the entry of `name` of `kind` now: an image's (but a failed load's, `failed`, each time) and an
-// `@import`'s once for the page, as its memory cache serves them after (`RealmArena::timed_resources`, Chrome:
-// cached-image-gets-single-entry); a `<link>`'s once per load of its URL — its load task can run twice for one element,
-// on connection and on the attribute change that completed it (`RealmArena::link_timings`, the URL it filed last); every
-// other each time.
+// Whether the page files the entry of `name` of `kind` now: an image's (but a failed load's, `failed`, each time), an
+// `@import`'s and a module script's once for the page, as its memory cache (its module map) serves them after
+// (`RealmArena::timed_resources`, Chrome: cached-image-gets-single-entry) — a `<link>`'s sheet, a module preload's, the
+// fetch an `@import` or a graph of the same URL is served by — and a `<link>`'s once per load of its URL: its load task
+// can run twice for one element, on connection and on the attribute change that completed it
+// (`RealmArena::link_timings`, the URL it filed last); every other each time.
 fn filed_once(realm: &mut crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>, name: &str, failed: bool) -> bool {
+    use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_STYLESHEET};
     use crate::subresource_judge::{J_IMAGE, J_LINK, J_SHEET};
     match kind & 0xff {
         J_IMAGE => failed || realm.timed_resources.insert(("img", name.to_owned())),
         J_SHEET if nid.is_none() => realm.timed_resources.insert(("css", name.to_owned())),
-        J_LINK => match nid {
-            Some(id) if realm.link_timings.get(&id).is_some_and(|last| **last == *name) => false,
-            Some(id) => {
-                realm.link_timings.insert(id, name.into());
-                true
+        crate::subresource_plan::J_MODULE_SCRIPT => realm.timed_resources.insert(("script", name.to_owned())),
+        J_LINK => {
+            let Some(id) = nid else { return true };
+            if realm.link_timings.get(&id).is_some_and(|last| **last == *name) {
+                return false;
             }
-            None => true,
-        },
+            realm.link_timings.insert(id, name.into());
+            // (…what it obtains the memory cache's for the page's `@import`s and module graphs after)
+            let detail = kind >> 8;
+            if detail & OBTAINS_STYLESHEET != 0 {
+                realm.timed_resources.insert(("css", name.to_owned()));
+            }
+            if detail & OBTAINS_MODULEPRELOAD != 0 {
+                realm.timed_resources.insert(("script", name.to_owned()));
+            }
+            true
+        }
         _ => true,
     }
 }
