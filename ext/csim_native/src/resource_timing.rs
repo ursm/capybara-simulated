@@ -413,7 +413,8 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         Some(n) => n,
         None => int_of(scope, resp, "status").unwrap_or(0.0),
     };
-    // (…a response's, or a worker's answer the client followed redirects to: sw-client.js `workerAnswerFacts`)
+    // (…a response's, or a worker's answer the client followed redirects to: sw-client.js `workerAnswerFacts`, the one
+    // answer that says it — a redirect a worker followed inside its answer none of the entry's, so no other answer may)
     let redirected_resp = flag_of(scope, resp.or(answer), "redirected");
     let final_url = if redirected_resp { string_of(scope, resp.or(answer), "url", true) } else { None };
     let mut initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
