@@ -3113,9 +3113,6 @@ html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-rotation.html:
 - "== html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-rotation-expected.html"
 html/canvas/element/manual/fill-and-stroke-styles/conic-gradient.html:
 - "== html/canvas/element/manual/fill-and-stroke-styles/conic-gradient-expected.html"
-html/canvas/element/manual/fill-and-stroke-styles/pattern-from-video-cross-origin-taint.https.sub.html:
-- Tainting check for cross origin video in canvas pattern
-- "[harness] TIMEOUT"
 html/canvas/element/manual/filters/canvas-fillStyle-opacity.html:
 - "== html/canvas/element/manual/filters/canvas-opacity-expected.html"
 html/canvas/element/manual/filters/canvas-filter-opacity-alpha-and-fillStyle.html:

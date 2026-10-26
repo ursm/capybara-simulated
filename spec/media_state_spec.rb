@@ -75,6 +75,22 @@ RSpec.describe 'Media element state' do
   # The resource selection's first step is NO_SOURCE at once; its mode is decided once the script has run: none — no
   # `src`, no `<source>` — EMPTY; a `<source>` child the children mode, `loadstart` and NO_SOURCE still (its resource is
   # not modelled), whatever `src` the load began with. Chrome: [3, 0, ""] and [3, 3, "emptied,loadstart"].
+  # The parser's media element, its `src` set as it is made — no attribute change steps run there — loads as it is
+  # inserted into the document (its network state EMPTY: HTML's resource selection on insertion): a resource that cannot
+  # be fetched fails it (MEDIA_ERR_SRC_NOT_SUPPORTED, NETWORK_NO_SOURCE); one of no `src` stays EMPTY.
+  it "loads the parser's media element as it is inserted" do
+    page = '<!DOCTYPE html><meta charset=utf-8><body><video id=v src="/missing.webm"></video><video id=e></video>'
+    s = simulated_session(lambda {|env|
+      env['PATH_INFO'] == '/' ? [200, {'content-type' => 'text/html'}, [page]] : [404, {'content-type' => 'text/plain'}, ['no']]
+    }).tap {|session| session.visit '/' }
+    got = s.evaluate_async_script(<<~'JS')
+      const done = arguments[0], v = document.getElementById('v'), e = document.getElementById('e');
+      const report = () => done([v.error && v.error.code, v.networkState, e.networkState]);
+      if (v.error) report(); else v.addEventListener('error', report);
+    JS
+    expect(got).to eq([4, 3, 0])
+  end
+
   it 'decides the resource selection mode as the stable state comes' do
     s = session
     s.execute_script(<<~'JS')

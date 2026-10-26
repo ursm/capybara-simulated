@@ -111,6 +111,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mediaFrame", media_frame, context_id);
     crate::dom::register(scope, ns, "mediaCurrent", media_current, context_id);
     crate::dom::register(scope, ns, "mediaSourceInserted", media_source_inserted, context_id);
+    crate::dom::register(scope, ns, "mediaInserted", media_inserted, context_id);
     crate::dom::register(scope, ns, "canPlayType", can_play_type_op, context_id);
 }
 
@@ -306,6 +307,20 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     m.network = NETWORK_NO_SOURCE;
     let load = m.load;
     rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, load).into(), v8::Integer::new_from_unsigned(scope, owed).into()]).into());
+}
+
+// __dom.mediaInserted(media) -> the media element's insertion into a document (HTML §4.8.11.5): one whose network state
+// is EMPTY invokes the resource selection algorithm — its first step, NO_SOURCE, its rest once the stable state comes
+// (`mediaSelect`) — under its current load, which this returns; null for one that has a state already (a load ran: its
+// `src` set before it was inserted, or a `<source>` inserted into it).
+fn media_inserted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
+    let m = crate::dom::dom(scope).arena.media_mut(id);
+    if m.network != NETWORK_EMPTY {
+        return rv.set_null();
+    }
+    m.network = NETWORK_NO_SOURCE;
+    rv.set_uint32(m.load);
 }
 
 // __dom.mediaCurrent(media, load) -> whether `load` is still the element's current load.
