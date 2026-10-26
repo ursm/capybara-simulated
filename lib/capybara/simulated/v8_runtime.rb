@@ -1460,6 +1460,7 @@ module Capybara
           integ = url_s == sw[:root] ? sw[:integrity].to_s : ''
           integ = @browser.importmap_integrity(url_s, realm_key(target)) if integ.empty?
           # (…its destination its module type's, a JSON module's `json`, as the network's below)
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           r = @browser.sw_script_subresource_fetch(
             sw[:handle],
             url_s,
@@ -1471,6 +1472,7 @@ module Capybara
             integrity: integ,
             referrer_policy: sw[:referrer_policy]
           )
+          @browser.note_module_fetch(url_s, started, answer: r) if r   # its Resource Timing entry ('script'), the answer's
           return handles[url] = nil if r && r['blocked']   # respondWith failed the load
           src = r && r['body']
           content_type = r && r['contentType']

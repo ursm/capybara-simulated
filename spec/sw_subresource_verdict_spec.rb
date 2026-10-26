@@ -32,6 +32,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/moved.css') e.respondWith(fetch('/other/x.css'));
         else if (u.pathname === '/scope/two.css') e.respondWith(fetch('/log?two=' + e.request.mode + ',' + (e.request.integrity || 'none')).then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname === '/scope/mod.css') e.respondWith(fetch('/log?mod').then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
+        else if (u.pathname === '/scope/sw-mod.js') e.respondWith(new Response('', {headers: {'content-type': 'text/javascript'}}));
         else if (u.pathname.startsWith('/scope/rp-')) e.respondWith(fetch('/log?' + u.pathname.slice(10) + '=' + e.request.referrerPolicy + ',' + (e.request.referrer || 'none')).then(() => new Response('')));
       });
     JS
@@ -150,7 +151,8 @@ RSpec.describe 'Service Worker subresource verdict' do
   end
   # …and each answer a worker gives is its request's entry's response, as the network's would be: a sheet's content type
   # its answer's, a refused sheet's status and type the answer's, a CSS image's network error an entry of its times, an
-  # opaque font answer's sizes hidden, and an opaque answer refused a script its timings.
+  # opaque font answer's sizes hidden, and an opaque answer refused a script its timings — and an image's, an
+  # `@import`'s, a module script's and a prefetch's entries filed of their answers, as of the network's responses.
   it "files the entry of a worker's answer as its response's" do
     session = simulated_session(app)
     session.visit '/'
@@ -169,20 +171,28 @@ RSpec.describe 'Service Worker subresource verdict' do
           const s = d.createElement('script');
           s.src = '/scope/away-gone.js';
           d.head.appendChild(s);
+          d.head.insertAdjacentHTML('beforeend', '<style>@import "/scope/mod.css";</style><link rel=prefetch href="/scope/found?prefetch">');
+          d.body.insertAdjacentHTML('beforeend', '<img src="/scope/found">');
+          const m = d.createElement('script');
+          m.type = 'module';
+          m.src = '/scope/sw-mod.js';
+          d.head.appendChild(m);
           await W.document.fonts.load('16px A').catch(() => {});
           const find = (path) => W.performance.getEntriesByType('resource').find((e) => e.name.endsWith(path));
           const poll = () => {
-            const [two, refused, image, font, script] = ['/two.css', '/refused.css', '/swerr.png', '/away-f.woff2', '/away-gone.js'].map(find);
-            if (!(two && refused && image && font && script)) return setTimeout(poll, 20);
+            const [two, refused, image, font, script, imported, img, mod, prefetch] =
+              ['/two.css', '/refused.css', '/swerr.png', '/away-f.woff2', '/away-gone.js', '/mod.css', '/found', '/sw-mod.js', '?prefetch'].map(find);
+            if (!(two && refused && image && font && script && imported && img && mod && prefetch)) return setTimeout(poll, 20);
             globalThis.__seen = [two.contentType, refused.responseStatus, refused.contentType, image.responseStatus, font.encodedBodySize,
-                                 script.responseStatus, script.domainLookupStart];
+                                 script.responseStatus, script.domainLookupStart,
+                                 ...[imported, img, mod, prefetch].map((e) => e.initiatorType + ':' + e.responseStatus)];
           };
           poll();
         };
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['text/css', 404, 'text/plain', 0, 0, 0, 0])
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['text/css', 404, 'text/plain', 0, 0, 0, 0, 'css:200', 'img:200', 'script:200', 'link:200'])
   end
 
   # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
