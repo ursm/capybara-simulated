@@ -120,7 +120,9 @@ const PARSED_LIMIT: usize = 64;
 
 // An `@import` whose sheet has not arrived: the rule, the absolute URL it asked for, the location of the sheet that
 // imports it — its request's referrer (CSS Values 4 "fetch a style resource"); none for a `<style>`'s, whose document's
-// it is — and the media list its sheet will be made with.
+// it is — and the media list its sheet will be made with. (KNOWN LIMITS: a sheet's location is the URL it was requested
+// at, not the one a redirect left it at; and its request is made under its document's referrer policy, not under the
+// one the importing sheet's response set.)
 struct PendingImport {
     url: String,
     referrer: Option<String>,
@@ -332,7 +334,8 @@ impl SheetStore {
             None => {
                 let url = UrlExtraData::from(url::Url::parse(&source.base).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap()));
                 let imports = if source.constructed { AllowImportRules::No } else { AllowImportRules::Yes };
-                // A sheet reached by URL is the first link of its imports' chain; an inline one names none.
+                // A sheet is the first link of its imports' chain, by its base: a fetched one's its location, a `<style>`'s its
+                // document's base URL.
                 let chain = if source.constructed { Vec::new() } else { vec![source.base.clone()] };
                 let media = Arc::new(lock.wrap(media_list(&source.media, &url, mode(quirks))));
                 let referrer = source.located.then(|| source.base.clone());
