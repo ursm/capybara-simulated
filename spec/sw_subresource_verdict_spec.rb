@@ -216,7 +216,8 @@ RSpec.describe 'Service Worker subresource verdict' do
   # A media element's poster and tracks and an SVG `<use>`'s external document are requests a controlling worker answers
   # too (Handle Fetch answers any but a plugin's): its answer their entries' response — a streamed one's sized once read
   # — the network asked for none. A track's request of a media element of no `crossorigin` is a same-origin one (its
-  # potential-CORS request's same-origin fallback), a `<use>`'s too (Chrome).
+  # potential-CORS request's same-origin fallback), a `<use>`'s too (Chrome) — of another origin's URL a network error the
+  # worker never sees.
   it "has a worker answer a poster's, a track's and a use's request" do
     session = simulated_session(app)
     session.visit '/'
@@ -230,9 +231,11 @@ RSpec.describe 'Service Worker subresource verdict' do
         f.onload = () => {
           const d = f.contentDocument, W = f.contentWindow;
           d.body.insertAdjacentHTML('beforeend', '<video poster="/scope/timed-poster.png" preload=none><track default src="/scope/timed-track.vtt"></video>' +
-                                                 '<video poster="/scope/timed-stream.png" preload=none></video><svg><use href="/scope/timed-use.svg#x"></use></svg>');
+                                                 '<video poster="/scope/timed-stream.png" preload=none></video><svg><use href="/scope/timed-use.svg#x"></use></svg>' +
+                                                 '<video preload=none><track default src="http://other.test/scope/timed-away.vtt"></video>' +
+                                                 '<svg><use href="http://other.test/scope/timed-away.svg#x"></use></svg>');
           const poll = () => {
-            const entries = ['poster.png', 'track.vtt', 'use.svg', 'stream.png'].map((n) => W.performance.getEntriesByType('resource').find((e) => e.name.endsWith(n)));
+            const entries = ['poster.png', 'track.vtt', 'use.svg', 'stream.png', 'away.vtt', 'away.svg'].map((n) => W.performance.getEntriesByType('resource').find((e) => e.name.endsWith(n)));
             if (entries.some((e) => !e)) return setTimeout(poll, 20);
             globalThis.__seen = entries.map((e) => e.initiatorType + ':' + e.responseStatus + ':' + e.encodedBodySize);
           };
@@ -241,7 +244,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(%w[video:200:13 track:200:17 other:200:17 video:200:7])
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(%w[video:200:13 track:200:17 other:200:17 video:200:7 track:0:0 other:0:0])
     expect(hits.grep(/timed-/)).to eq([])
   end
 
