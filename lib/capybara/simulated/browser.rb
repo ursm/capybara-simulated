@@ -3851,9 +3851,9 @@ module Capybara
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
         # What the asset's Resource Timing entry reports — kept beside the cached body (see
-        # `external_asset_source`), since the body alone is what the loader hands back.
+        # `external_asset_response`), since the body alone is what the loader hands back.
         Thread.current[:csim_asset_meta] = result && resource_timing_meta(result)
-        # …and whether it forbids being stored at all, which `external_asset_source`'s per-document memo honours.
+        # …and whether it forbids being stored at all, which `external_asset_response`'s per-document memo honours.
         Thread.current[:csim_asset_no_store] = result && result['headers']&.any? {|k, v|
           k.to_s.casecmp?('cache-control') && Array(v).join(',').match?(/(?:\A|,)\s*no-store\s*(?:,|\z)/i)
         }
@@ -3975,7 +3975,7 @@ module Capybara
       # `clear_volatile` (at `reset!`) drops a non-immutable body from the asset
       # cache, but a content-hashed asset's source is content-stable while fresh,
       # so a loader's own cross-session cache can hold it for `fresh_until`. Used by
-      # the external-asset cache (`external_asset_source`, scripts +
+      # the external-asset cache (`external_asset_response`, scripts +
       # stylesheets); name is generic.
       # (…`mode` its request's: a module script's "cors", none a classic one's — with its `credentials` mode; `client`
       # its request client where the caller has it already)
@@ -4050,7 +4050,7 @@ module Capybara
       # Returns nil on a status that is not ok (not 200 to 299) / fetch failure, so the
       # JS caller fails the load.
       # A document starts loading — the page's, a frame's, an auxiliary window's (the bridge's `__csimLoadDocument` asks,
-      # and keeps the answer as `__csimDocToken`): a token of its own, naming its asset memo in `external_asset_source`.
+      # and keeps the answer as `__csimDocToken`): a token of its own, naming its asset memo in `external_asset_response`.
       # The last ASSET_DOCUMENTS documents' memos are kept, so a page's survives the frames it builds while it loads.
       ASSET_DOCUMENTS = 16
       def asset_document_started
@@ -4074,8 +4074,6 @@ module Capybara
         mode, credentials, policy = request_of_plan(plan)
         external_asset_response(url, document, realm, policy, dest: dest, mode: mode, credentials: credentials)
       end
-      # …and its text alone, nil where it failed.
-      def external_asset_source(...) = external_asset_response(...)&.first
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
       # one URL two responses — or nil where the URL resolves to none.
@@ -9966,7 +9964,7 @@ module Capybara
         crossed          = false
         # (…and, whatever the mode, whether a hop left the client's origin: what a no-mode caller's response is tainted by —
         # an element's no-cors load through the asset cache, whose resource is not CORS-same-origin then: a sheet's
-        # origin-clean flag unset, `styleSheetOriginClean`)
+        # origin-clean flag unset, css-utils.js `fetchStyleSheet`)
         tainted          = false
         marked           = ->(out) { out['tainted'] = true if out && tainted && !crossed; out }
         # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain

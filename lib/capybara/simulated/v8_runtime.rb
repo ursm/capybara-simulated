@@ -1433,7 +1433,7 @@ module Capybara
       end
 
       # The document a realm has loading, as its bridge holds it (`__csimDocToken`): whose asset memo a module fetch
-      # reads (`Browser#external_asset_source`).
+      # reads (`Browser#external_asset_response`).
       def asset_document_of(target)
         target.eval('globalThis.__csimDocToken')
       rescue StandardError
