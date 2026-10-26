@@ -74,11 +74,12 @@ RSpec.describe 'scheme fetch' do
   end
 
   # …and the microtasks its handlers queued run before that too (Chrome): the parser waits for an external script a
-  # script's `document.write` inserted and runs it from a task, the stack empty. KNOWN GAP: the driver fetches and runs
-  # it inside the `document.write`, the writing script still on the stack, so no checkpoint follows its `load` (one
-  # did while each parser-run script checkpointed whatever ran beneath it — the writer's own microtasks, mid-script).
+  # script's `document.write` inserted and runs it from a task, the stack empty. KNOWN GAP, for a document the write
+  # opened (`document.open`, the page loaded — one still parsing does wait): the driver fetches and runs it inside the
+  # `document.write`, the writing script still on the stack, so no checkpoint follows its `load` (one did while each
+  # parser-run script checkpointed whatever ran beneath it — the writer's own microtasks, mid-script).
   it 'runs the microtasks a document.write-inserted script\'s load queued before the parser goes on' do
-    pending 'a script-inserted parser-blocking script runs inside the document.write that wrote it'
+    pending 'a parser-blocking script runs inside the document.write that opened its document'
     session.execute_script(<<~JS)
       window.order = [];
       const queued = URL.createObjectURL(new Blob([''], { type: 'text/javascript' }));

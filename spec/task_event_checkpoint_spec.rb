@@ -135,7 +135,7 @@ RSpec.describe 'a task-fired event' do
     expect(got).to eq(%w[user1 micro user2 | script1 script2 | micro script1 script2 micro])
   end
 
-  it 'counts a built-in the UA calls, and every script of the page, as script on the stack' do
+  it "counts a script's dispatchEvent, a bound built-in listener, and every script of the page as script on the stack" do
     s = simulated_session(APP_CHECKPOINT)
     s.visit '/scripts'
     got = s.evaluate_async_script(<<~JS)
@@ -143,12 +143,40 @@ RSpec.describe 'a task-fired event' do
       // (…a built-in a timer calls: its own execution context on the stack, though no frame of the page's is)
       watch(document.body, 'x', 'bound');
       setTimeout(EventTarget.prototype.dispatchEvent.bind(document.body, new Event('x')), 0);
-      const poll = () => log.some((l) => l.startsWith('w')) && log.includes('bound-micro') ? done(log) : setTimeout(poll, 10);
+      // (…and a listener that is one, of this realm's, clicking a frame's button: the agent's stack, whichever realm)
+      const frame = document.createElement('iframe');
+      frame.srcdoc = '<button>b</button>';
+      frame.onload = () => {
+        const button = frame.contentDocument.querySelector('button');
+        watch(button, 'click', 'listener');
+        const ch = new MessageChannel();
+        ch.port1.addEventListener('message', HTMLElement.prototype.click.bind(button));
+        ch.port1.start();
+        ch.port2.postMessage(1);
+      };
+      document.body.append(frame);
+      const poll = () => log.some((l) => l.startsWith('w')) && log.includes('listener-micro') ? done(log) : setTimeout(poll, 10);
       poll();
     JS
     worker, page = got.partition {|l| l.start_with?('w') }
-    expect(page).to eq(%w[classic1 classic2 classic-end classic-micro module1 module2 module-end module-micro bound1 bound2 bound-micro])
+    expect(page).to eq(%w[
+      classic1 classic2 classic-end classic-micro module1 module2 module-end module-micro
+      bound1 bound2 bound-micro listener1 listener2 listener-micro
+    ])
     expect(worker).to eq(['w1 w2 w-end w-micro'])
+  end
+
+  # KNOWN GAP: a timer's callback is not counted as script, the driver's own tasks being timers too — so a built-in one
+  # (a bound click()) has none of the page's frames beneath what it dispatches, and checkpoints.
+  it 'counts a built-in a timer calls as script on the stack' do
+    pending "a timer's callback is not counted as script running"
+    got = run(session_at_root, <<~JS)
+      const b = document.getElementById('b');
+      watch(b, 'click', 'click');
+      setTimeout(HTMLElement.prototype.click.bind(b), 0);
+      setTimeout(() => done(log), 50);
+    JS
+    expect(got).to eq(%w[click1 click2 click-micro])
   end
 
   # KNOWN GAP: both are fired from a microtask of the driver's (a frame's load after its build, the scroll events' flush
