@@ -419,6 +419,10 @@ impl RealmArena {
             realm = parent;
         }
     }
+    // …realm `cid`'s document, where it has one (a worker's none).
+    pub(crate) fn realm_document(&self, cid: i32) -> Option<NodeId> {
+        self.navigables.documents.get(&cid).copied()
+    }
     pub(crate) fn set_realm_document(&mut self, cid: i32, doc: NodeId) {
         self.navigables.documents.insert(cid, doc);
     }

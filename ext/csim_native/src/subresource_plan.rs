@@ -76,6 +76,20 @@ pub(crate) fn fields_for_ruby(plan: u32) -> (String, String, String, bool) {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "subresourcePlan", plan_op, context_id);
     crate::dom::register(scope, ns, "subresourcePlanFields", fields_op, context_id);
+    crate::dom::register(scope, ns, "requestReferrerPolicy", request_referrer_policy_op, context_id);
+}
+// __dom.requestReferrerPolicy(plan) -> the referrer policy a request of `plan` (0: a request's defaults, which name none)
+// is made under: its own, else its policy container's — the calling realm's document's (its `<meta name="referrer">`'s,
+// url_ops.rs `document_referrer_policy`), none for a worker's — else the default (Fetch "main fetch", Referrer Policy §3).
+fn request_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (_, _, own, _) = fields(args.get(0).uint32_value(scope).unwrap_or(0));
+    let cid = crate::dom::realm_id(scope, &args);
+    let realm = crate::dom::realm(scope, cid);
+    let container = realm.realm_document(cid).map_or("", |doc| realm.document_referrer_policy(doc));
+    let policy = [own, container].into_iter().find(|p| !p.is_empty()).unwrap_or(crate::url_ops::DEFAULT_POLICY);
+    if let Some(s) = v8::String::new(scope, policy) {
+        rv.set(s.into());
+    }
 }
 // __dom.subresourcePlanFields(plan) -> [mode, credentials, referrer policy] of `plan` (`fields`).
 fn fields_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

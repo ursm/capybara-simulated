@@ -28,6 +28,20 @@ pub(crate) struct Plan {
     pub(crate) module_destination: Option<&'static str>,
     pub(crate) preload_destination: Option<&'static str>,
 }
+impl Plan {
+    // …and its request's destination, which its Fetch Metadata reports (HTML "fetch and process the linked resource"): a
+    // sheet's `style`, a module preload's its `as`'s module type's (a JavaScript module's `script`), a preload's its
+    // `as`'s, a hint's none.
+    pub(crate) fn destination(&self) -> &'static str {
+        if self.obtains & OBTAINS_STYLESHEET != 0 {
+            "style"
+        } else if self.obtains & OBTAINS_MODULEPRELOAD != 0 {
+            self.module_destination.map_or("", |d| if d == "text" { "script" } else { d })
+        } else {
+            self.preload_destination.unwrap_or("")
+        }
+    }
+}
 
 // A link's plan, `media_matches` asked of its `media` where that decides it: a disabled one obtains nothing; a
 // modulepreload or a preload — one that is no style sheet — whose `media` does not match obtains nothing until a change
@@ -95,7 +109,7 @@ pub(crate) fn link_response_accepted(
     !(obtains & OBTAINS_PRELOAD != 0 && crate::fetch_rules::blocked_by_nosniff(preload_destination, content_type, nosniff))
 }
 
-// __dom.linkPlan(nid) -> [verdict, obtains, moduleDestination | null, preloadDestination | null] (`link_plan`, its media
+// __dom.linkPlan(nid) -> [verdict, obtains, moduleDestination | null, preloadDestination | null, destination] (`link_plan`, its media
 // matched on this realm's viewport).
 fn link_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = nid_arg(scope, &args, 0) else { return };
@@ -109,6 +123,7 @@ fn link_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         v8::Integer::new_from_unsigned(scope, plan.obtains).into(),
         text(scope, plan.module_destination),
         text(scope, plan.preload_destination),
+        text(scope, Some(plan.destination())),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
