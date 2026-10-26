@@ -6799,7 +6799,7 @@ module Capybara
       # A realm's service-worker Client id, in this window's space (`@client_space`: none for the
       # session's first window). The MAIN realm (id 0) is 'client-window'; a realm that ADOPTED
       # a navigation's reserved client id reports that id; every other realm is `client-<realm>`. The same spellings are produced JS-side by sw-client.js's clientId()
-      # (which prefers the injected `__csimClientId`) and the FetchEvent clientKey
+      # (which prefers the adopted client id, realm_identity.rs) and the FetchEvent clientKey
       # (js/src/workers.js), and read back by the client-message router below — so they must
       # be minted in exactly one place.
       def sw_client_id(realm_id)
@@ -7101,7 +7101,7 @@ module Capybara
           body ||= read_rack_body(resp_body)
           out = response_hash(status, headers, body, target, redirected)
           # The final reserved client id — the JS frame builder hands it to the new realm
-          # (create_frame_realm injects `__csimClientId` + records the adoption).
+          # (create_frame_realm tells the realm its client id + records the adoption).
           out['resulting_client_id'] = rid if out
           out['referrer'] = sent_referrer if out && sent_referrer
           return out
@@ -9111,27 +9111,27 @@ module Capybara
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
         # This worker's handle — the JS keys cross-isolate MessagePort channel ids on it so they
         # never collide with another isolate's (see __csim_installWorkerScope's allocator).
-        rt.eval_void("globalThis.__csimWorkerHandle = #{handle.to_i};")
+        rt.eval_void("globalThis.__dom.realmIdentify('workerHandle', #{handle.to_i});")
         # …and the token its realm's agent of the engine's registries is made with (agents.rs), whose locks and
         # connections go as it is reaped — not only once its isolate is gone, which a terminated one may outlive.
         if record
           record[:agent_owner] = Native.agent_owner_new
-          rt.eval_void("globalThis.__csimAgentOwner = #{record[:agent_owner]};")
+          rt.eval_void("globalThis.__dom.realmIdentify('agentOwner', #{record[:agent_owner]});")
         end
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
-        # the SAME id as this isolate's client identity (clientId() prefers __csimClientId), so
+        # the SAME id as this isolate's client identity (clientId() prefers the adopted one), so
         # a worker's own `ServiceWorker.postMessage` names itself correctly as the source and an
         # SW's `client.postMessage` reply routes back to THIS isolate (sw_client_worker) instead
         # of falling back to 'client-window' → the main realm. (Subresource interception FROM a
         # worker isolate would also want this id, but no controller is ever installed into a
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
-        rt.eval_void("globalThis.__csimClientId = #{JSON.generate(sw_worker_client_id(handle))};") unless service
+        rt.eval_void("globalThis.__dom.realmIdentify('clientId', #{JSON.generate(sw_worker_client_id(handle))});") unless service
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError); its script evaluates as a real module graph
         # below (eval_module_graph).
-        rt.eval_void('globalThis.__csimWorkerModule = true;') if module_worker
+        rt.eval_void("globalThis.__dom.realmIdentify('moduleWorker', true);") if module_worker
         # THIS worker is a controlled CLIENT: install its controller into the isolate BEFORE
         # the script runs, so `navigator.serviceWorker.controller` exists and its fetch()/XHR
         # route through the SW (__csimSWControllerHandle > 0) — the same pre-load wiring a

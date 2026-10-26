@@ -116,15 +116,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "agentsDrop", drop_all, context_id);
 }
 
-// __dom.agentJoin(partition, owner): this realm an agent of session `partition`'s — of worker `owner`, 0 for none —
-// where it is not yet one.
+// __dom.agentJoin(partition): this realm an agent of session `partition`'s — of the owner token its worker was given
+// (realm_identity.rs), 0 for none — where it is not yet one.
 fn join(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     if agent_of(scope, &args).is_some() {
         return;
     }
     let partition = args.get(0).integer_value(scope).unwrap_or(0) as u64;
-    let owner = args.get(1).integer_value(scope).unwrap_or(0) as u64;
     let realm = realm_id(scope, &args);
+    let owner = crate::dom::realm(scope, realm).realm_state(realm).map_or(0, |s| s.identity.agent_owner());
     let agent = new_agent(partition, owner);
     if scope.get_slot::<RealmAgents>().is_none() {
         scope.set_slot(RealmAgents::default());

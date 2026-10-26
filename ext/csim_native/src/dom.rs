@@ -1056,6 +1056,8 @@ pub(crate) struct RealmState {
     pub(crate) script_resources: std::collections::HashMap<String, (Vec<u16>, bool)>,
     // …and, a service worker's realm, what its spawn gave it (service_worker.rs `swGlobalInit`).
     pub(crate) service_worker: Option<crate::service_worker::ServiceWorkerGlobal>,
+    // …and who it is to the host: its client id, its window key, a worker's handle (realm_identity.rs).
+    pub(crate) identity: crate::realm_identity::RealmIdentity,
     // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
     // load owed to the parent after it (frame_navigation.rs `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`).
     pub(crate) load_delay: u8,
@@ -2999,6 +3001,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::canvas_paint::install(scope, ns, context_id);
     crate::media::install(scope, ns, context_id);
     crate::preload_map::install(scope, ns, context_id);
+    crate::realm_identity::install(scope, ns, context_id);
     crate::subresources::install(scope, ns, context_id);
     crate::select_options::install(scope, ns, context_id);
     crate::text_setters::install(scope, ns, context_id);

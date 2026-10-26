@@ -514,7 +514,7 @@ module Capybara
       def adopt_client_id(realm, client_id)
         return if client_id.to_s.empty?
 
-        realm.eval_void("globalThis.__csimClientId = #{JSON.generate(client_id.to_s)};")
+        realm.eval_void("globalThis.__dom.realmIdentify('clientId', #{JSON.generate(client_id.to_s)});")
         @browser.sw_adopt_client_id(realm.id, client_id.to_s)
       end
       # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
@@ -1260,7 +1260,7 @@ module Capybara
         # realm that opened it (its `window.opener`), are the engine's (`setSteppedWindow` below), by the window's key:
         # the realm of its first document, which a document it navigates to keeps (window.js `windowKey`).
         window_key ||= realm.id
-        realm.eval_void("globalThis.__csimIsWindowRealm = true; globalThis.__csimWindowKey = #{window_key.to_i};")
+        realm.eval_void("globalThis.__dom.realmIdentify('windowKey', #{window_key.to_i});")
         # `window.open()` with no URL opens about:blank — that IS the new document's URL, and a
         # realm built from the snapshot would otherwise keep reporting the OPENER's (making the
         # popup a phantom duplicate of its opener everywhere a document URL is read, the service-
