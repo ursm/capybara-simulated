@@ -5342,7 +5342,11 @@ module Capybara
         # (…a non-ok answer is still a response, whose status a Resource Timing entry reports; judged by the status an
         # opaque one hides, the one a classic script's fetch reads)
         unsafe = type == 'opaque' ? (r['render_status'] || 200).to_i : status
-        return {'blocked' => true, 'status' => status} unless Native.sw_subresource_usable(destination.to_s, mode.to_s, type, r['redirected'] == true, unsafe)
+        # (…its type, its content type and its headers kept, which its Resource Timing entry reads: an opaque one's
+        # timings hidden, a refused sheet's type its answer's)
+        headers  = r['headers'] || {}
+        response = {'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers}
+        return {'blocked' => true, **response} unless Native.sw_subresource_usable(destination.to_s, mode.to_s, type, r['redirected'] == true, unsafe)
 
         body_b64 = r['body_b64'].to_s
         body_b64 = r['render_b64'].to_s if body_b64.empty? && r['render_b64']
@@ -5351,13 +5355,10 @@ module Capybara
         # utf8 text funnel would mangle non-UTF-8 byte sequences — with the status, the content type and the
         # headers its checks and its Resource Timing entry read; and the response's URL ('' for a constructed one's),
         # a style sheet's location, and its `Referrer-Policy` header, a style sheet's policy.
-        headers = r['headers'] || {}
-        return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers, 'url' => r['url'].to_s} if binary
+        return {'bytes' => bytes, **response, 'url' => r['url'].to_s} if binary
         {
           'body'           => RuntimeShared.utf8_text(bytes),
-          'type'           => type,
-          'status'         => status,
-          'contentType'    => header_field(headers, 'content-type').to_s,
+          **response,
           'url'            => r['url'].to_s,
           'referrerPolicy' => (policy = header_field(headers, 'referrer-policy')) && Array(policy).join(',')
         }

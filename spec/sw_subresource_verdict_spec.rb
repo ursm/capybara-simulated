@@ -149,8 +149,8 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq([['script:0'], ['script:0']])
   end
   # …and each answer a worker gives is its request's entry's response, as the network's would be: a sheet's content type
-  # its answer's, a refused sheet's status the answer's, a CSS image's network error an entry of its times, an opaque
-  # font answer's sizes hidden.
+  # its answer's, a refused sheet's status and type the answer's, a CSS image's network error an entry of its times, an
+  # opaque font answer's sizes hidden, and an opaque answer refused a script its timings.
   it "files the entry of a worker's answer as its response's" do
     session = simulated_session(app)
     session.visit '/'
@@ -166,19 +166,23 @@ RSpec.describe 'Service Worker subresource verdict' do
           d.head.insertAdjacentHTML('beforeend', '<link rel=stylesheet href=/scope/two.css><link rel=stylesheet href=/scope/refused.css>' +
                                                  '<style>@font-face{font-family:A;src:url(/scope/away-f.woff2)} #i{background-image:url(/scope/swerr.png)}</style>');
           d.body.insertAdjacentHTML('beforeend', '<div id=i style="width:9px;height:9px"></div>');
+          const s = d.createElement('script');
+          s.src = '/scope/away-gone.js';
+          d.head.appendChild(s);
           await W.document.fonts.load('16px A').catch(() => {});
           const find = (path) => W.performance.getEntriesByType('resource').find((e) => e.name.endsWith(path));
           const poll = () => {
-            const [two, refused, image, font] = ['/two.css', '/refused.css', '/swerr.png', '/away-f.woff2'].map(find);
-            if (!(two && refused && image && font)) return setTimeout(poll, 20);
-            globalThis.__seen = [two.contentType, refused.responseStatus, image.responseStatus, font.encodedBodySize];
+            const [two, refused, image, font, script] = ['/two.css', '/refused.css', '/swerr.png', '/away-f.woff2', '/away-gone.js'].map(find);
+            if (!(two && refused && image && font && script)) return setTimeout(poll, 20);
+            globalThis.__seen = [two.contentType, refused.responseStatus, refused.contentType, image.responseStatus, font.encodedBodySize,
+                                 script.responseStatus, script.domainLookupStart];
           };
           poll();
         };
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['text/css', 404, 0, 0])
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['text/css', 404, 'text/plain', 0, 0, 0, 0])
   end
 
   # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
