@@ -133,6 +133,23 @@ RSpec.describe 'map of preloaded resources' do
     ])
   end
 
+  # A preload link's plan changed before its load task ran — its `crossorigin` set as it is inserted — is fetched once,
+  # by its latest plan, and fires one `load`. Chrome: `["load"]`, one request.
+  it 'fires one load for a preload whose request changed before its task ran' do
+    served = []
+    s = simulated_session(preload_app(served, '<!DOCTYPE html><meta charset=utf-8><body>')).tap {|session| session.visit '/' }
+    s.execute_script(<<~'JS')
+      window.events = [];
+      const link = Object.assign(document.createElement('link'), { rel: 'preload', as: 'image', href: '/i.png?co' });
+      link.onload = () => events.push('load');
+      link.onerror = () => events.push('error');
+      document.head.append(link);
+      link.crossOrigin = 'anonymous';
+    JS
+    s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 100))')
+    expect([s.evaluate_script('events'), served]).to eq([['load'], ['i.png?co']])
+  end
+
   # …one consumer alone: a request of another mode (a `crossorigin` image) takes none and fetches; the first that
   # matches takes it; the next fetches again.
   it 'hands a preload to the first consumer that matches it alone' do

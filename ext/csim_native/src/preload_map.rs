@@ -1,8 +1,9 @@
 // A document's map of preloaded resources (HTML §4.6.7 `preload`): what a `<link rel=preload>` fetched, kept by its
 // preload key — its URL, destination, mode and credentials mode — for the first fetch that matches it to take ("consume
 // a preloaded resource", which Fetch's "fetch" runs before its main fetch: the consumer's request then reaches no
-// service worker and no network, and files no Resource Timing entry). Kept in the arena (`RealmArena::preloads`) until
-// it is consumed or its document goes.
+// service worker and no network, and files no Resource Timing entry). An entry is in the map from the moment the
+// preload's fetch is planned, its response pending until that fetch has run — which a consumer that finds it runs then.
+// Kept in the arena (`RealmArena::preloads`) until it is consumed or its document goes.
 
 use crate::dom::{NodeId, RealmArena};
 use crate::subresource_plan::PLAN_REQUEST;
