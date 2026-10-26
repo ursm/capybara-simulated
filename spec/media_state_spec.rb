@@ -2,10 +2,13 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # A media element's state, the engine's (media.rs): what its members read back, and the network state its load
 # algorithm and resource selection leave — each figure Chrome's.
 RSpec.describe 'Media element state' do
+  include PollUntil
+
   def session
     simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] }).tap {|s| s.visit '/' }
   end
@@ -339,6 +342,23 @@ RSpec.describe 'Media element state' do
       'error@a1,canplaythrough', 1, 'm.webm?audio'
     ])
     expect(requests).to eq(['missing.mp3', 'm.webm?audio'])
+  end
+
+  # …a `data:` or `blob:` one by its bytes too — the ladder for some, a failure for none — and one no route answers (a
+  # scheme no fetch has) a failure.
+  it 'decides an audio load of a scheme by its bytes' do
+    s = media_session
+    s.execute_script(<<~'JS')
+      window.log = [];
+      const blob = URL.createObjectURL(new Blob(['RIFF....WAVE'], { type: 'audio/wav' }));
+      for (const [id, src] of [['data', 'data:audio/wav;base64,UklGRg=='], ['blob', blob], ['empty', 'data:audio/wav,'], ['none', 'about:nothing']]) {
+        const a = new Audio();
+        for (const t of ['error', 'canplaythrough']) a.addEventListener(t, () => log.push(id + ':' + t));
+        a.src = src;
+      }
+    JS
+    expect(poll_until { s.evaluate_script('log.length === 4') }).to be true
+    expect(s.evaluate_script('log.sort()')).to eq(['blob:canplaythrough', 'data:canplaythrough', 'empty:error', 'none:error'])
   end
 
   # The internal pause steps run only for a playing element: `pause()` on a paused one fires neither `timeupdate` nor
