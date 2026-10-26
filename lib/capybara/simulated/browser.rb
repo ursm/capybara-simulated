@@ -8353,10 +8353,7 @@ module Capybara
           # "origin-clean"), whatever origin its URL is of — a CORS one that got here passed the check.
           # (…the facts its Resource Timing entry reads, as every other kind's: `resource_timing_meta`)
           if result
-            Thread.current[:csim_image_meta] = resource_timing_meta(result).merge(
-              'contentType' => result['headers'].find {|k, _| k.to_s.casecmp?('content-type') }&.last,
-              'delayMs'     => server_delay_ms_of(result['headers'])
-            )
+            Thread.current[:csim_image_meta] = resource_timing_meta(result).merge('delayMs' => server_delay_ms_of(result['headers']))
           end
           # (…its status no part of whether it is an image: HTML "update the image data" — an image an error response
           # carries is shown, Chrome's too; a body that decodes to none is a broken one)

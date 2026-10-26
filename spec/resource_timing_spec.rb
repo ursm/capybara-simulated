@@ -397,6 +397,39 @@ RSpec.describe 'resource timing' do
     end
   end
 
+  # …and where the client followed redirects the worker answered with (its own chain of hops), the entry is
+  # redirected, of the URL it ended at: a same-origin chain's timings shown, one through another origin answering no
+  # Timing-Allow-Origin hidden. (A redirect the worker followed inside its answer is none of the entry's.)
+  it "reports the redirects a client followed through its worker's answers" do
+    worker = <<~JS
+      self.addEventListener('install', () => self.skipWaiting());
+      self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+      self.addEventListener('fetch', (e) => {
+        const path = new URL(e.request.url).pathname;
+        if (path === '/hop') e.respondWith(Response.redirect('/final'));
+        if (path === '/final') e.respondWith(new Response('final'));
+        if (path === '/xhop') e.respondWith(Response.redirect('http://other.test/xfinal'));
+      });
+    JS
+    page = '<!DOCTYPE html><meta charset=utf-8><body><script>navigator.serviceWorker.register("/sw.js"); setInterval(() => {}, 50);</script>'
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+    begin
+      s = simulated_session(lambda {|env|
+        next [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['xfinal']] if env['PATH_INFO'] == '/xfinal'
+        next [200, {'content-type' => 'text/javascript'}, [worker]] if env['PATH_INFO'] == '/sw.js'
+
+        [200, {'content-type' => 'text/html'}, [page]]
+      }).tap {|session| session.visit '/' }
+      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      s.evaluate_async_script("const d = arguments[0]; Promise.all([fetch('/hop').then((r) => r.text()), fetch('/xhop').then((r) => r.text())]).then(() => d())")
+      entries = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => /hop$/.test(e.name)).map((e) => [e.name.split('/').pop(), e.redirectStart > 0, e.encodedBodySize])")
+      expect(entries.sort).to eq([['hop', true, 5], ['xhop', false, 0]])
+    ensure
+      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    end
+  end
+
   it 'gives an image the document already holds no second entry' do
     s = session
     s.execute_script("var i = new Image(); i.src = '/i.png'; document.body.appendChild(i);")

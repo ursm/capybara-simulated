@@ -413,8 +413,9 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         Some(n) => n,
         None => int_of(scope, resp, "status").unwrap_or(0.0),
     };
-    let redirected_resp = flag_of(scope, resp, "redirected");
-    let final_url = if redirected_resp { string_of(scope, resp, "url", true) } else { None };
+    // (…a response's, or a worker's answer the client followed redirects to: sw-client.js `workerAnswerFacts`)
+    let redirected_resp = flag_of(scope, resp.or(answer), "redirected");
+    let final_url = if redirected_resp { string_of(scope, resp.or(answer), "url", true) } else { None };
     let mut initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
     let mut no_cors = flag_of(scope, desc, "noCors");
     // (…a navigation's request — a frame's document's, a plugin's resource's — whose status and type a cross-origin
