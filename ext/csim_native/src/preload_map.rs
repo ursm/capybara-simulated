@@ -66,6 +66,30 @@ impl RealmArena {
     }
 }
 
+// …for a consumer the engine fetches for itself (subresource_obtain.rs), the request `url` of `doc` its `destination`
+// and its `plan`'s mode and credentials mode: the response, None for a network error — a preload whose fetch is yet to
+// run running it first (`run`, the bindings' by its token), the response the consumer waits for — or None where none
+// matches.
+pub(crate) fn consume(
+    scope: &mut v8::PinScope<'_, '_>,
+    cid: i32,
+    (doc, url, destination, plan): (NodeId, &str, &str, u32),
+    integrity: &str,
+    run: impl FnOnce(&mut v8::PinScope<'_, '_>, u32) -> Result<(), crate::font_files::Terminated>,
+) -> Result<Option<Option<Response>>, crate::font_files::Terminated> {
+    let key = Key { doc, url: url.to_owned(), destination: destination.to_owned(), request: plan & PLAN_REQUEST };
+    let token = match crate::dom::realm(scope, cid).preload_consume(&key, integrity) {
+        None => return Ok(None),
+        Some(Had::Response(r)) => return Ok(Some(r)),
+        Some(Had::Pending(token)) => token,
+    };
+    run(scope, token)?;
+    Ok(match crate::dom::realm(scope, cid).preload_consume(&key, integrity) {
+        Some(Had::Response(r)) => Some(r),
+        _ => None,
+    })
+}
+
 // Whether a consumer of `consumer` integrity metadata takes a preload of `preload`'s: one of no metadata any, else one
 // of the same metadata (SRI "parse metadata": the set of its hash expressions of a valid algorithm, their options
 // dropped — an empty value one too).

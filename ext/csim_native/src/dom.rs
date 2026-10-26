@@ -2802,6 +2802,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::selected_coordinates::install(scope, ns, context_id);
     crate::realm_location::install(scope, ns, context_id);
     crate::font_resolve::install(scope, ns, context_id);
+    crate::subresource_obtain::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);

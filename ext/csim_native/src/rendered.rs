@@ -718,7 +718,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "visibleText", visible_text_op, context_id);
     crate::dom::register(scope, ns, "innerText", inner_text_op, context_id);
     crate::dom::register(scope, ns, "boxKind", box_kind_op, context_id);
-    crate::dom::register(scope, ns, "cssImagesOwed", css_images_owed_op, context_id);
     crate::dom::register(scope, ns, "cssImagesWaiting", css_images_waiting_op, context_id);
     crate::dom::register(scope, ns, "transparent", transparent_op, context_id);
 }
@@ -833,36 +832,32 @@ pub(crate) fn note_css_images(arena: &RealmArena, id: NodeId, style: &ComputedVa
     }
 }
 
-// __dom.cssImagesOwed() -> `[initiator, url, referrer, …]`: the images the rendering update fetches — the page styled as
-// it stands, what its restyles left owed (`note_css_images`), in the order the restyles reached them — each its Resource
-// Timing initiator (`body` for a `<body background>` attribute's, which the style engine folds into `background-image`
-// as a presentational hint, `css` for every other) and the location of the sheet that declared it, which it is referred
-// by ('' for its document: `StyleEngine::image_referrer`). Undefined where the realm has no engine.
-fn css_images_owed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(owed) = with_engine(scope, &args, |engine, arena, now| {
+// The images the rendering update fetches — the page styled as it stands, what its restyles left owed
+// (`note_css_images`), in the order the restyles reached them — each `(initiator, url, referrer)`: its Resource Timing
+// initiator (`body` for a `<body background>` attribute's, which the style engine folds into `background-image` as a
+// presentational hint, `css` for every other) and the location of the sheet that declared it, which it is referred by
+// (None for its document: `StyleEngine::image_referrer`). Taken: none is owed after (subresource_obtain.rs
+// `fetchCssImages`).
+pub(crate) fn take_owed_css_images(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Vec<(&'static str, String, Option<String>)> {
+    let owed = with_engine(scope, args, |engine, arena, now| {
         engine.flush(arena, now);
         let owed = std::mem::take(&mut arena.css_images.borrow_mut().owed);
         owed.into_iter()
             .map(|(id, url)| {
                 let attr = arena.get(id).filter(|n| n.is_html_named("body")).and_then(|n| n.plain_attr("background"));
                 let body = attr.and_then(|bg| engine.resolve_url(bg.trim())).is_some_and(|bg| bg == url.as_str());
-                let referrer = engine.image_referrer(&url).unwrap_or("").to_owned();
+                let referrer = engine.image_referrer(&url).filter(|r| !r.is_empty()).map(str::to_owned);
                 (if body { "body" } else { "css" }, url.as_str().to_owned(), referrer)
             })
             .collect::<Vec<_>>()
-    }) else {
-        // (…none fetched where the realm has no engine to say which: let go of all the same — owed for ever, they would
-        // keep its event loop stepping, `realmPending`)
-        let cid = crate::dom::realm_id(scope, &args);
+    });
+    // (…none where the realm has no engine to say which: let go of all the same — owed for ever, they would keep its
+    // event loop stepping, `realmPending`)
+    owed.unwrap_or_else(|| {
+        let cid = crate::dom::realm_id(scope, args);
         crate::dom::realm(scope, cid).css_images.get_mut().owed.clear();
-        return;
-    };
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(owed.len() * 3);
-    for (initiator, url, referrer) in &owed {
-        let (Some(i), Some(u), Some(r)) = (v8::String::new(scope, initiator), v8::String::new(scope, url), v8::String::new(scope, referrer)) else { continue };
-        items.extend::<[v8::Local<v8::Value>; 3]>([i.into(), u.into(), r.into()]);
-    }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+        Vec::new()
+    })
 }
 
 // __dom.cssImagesWaiting() -> whether the calling realm's restyles left images owed their fetch (`CssImages::owed`):

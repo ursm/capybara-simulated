@@ -163,6 +163,7 @@ mod slots;
 mod style;
 mod style_fonts;
 mod subresource_judge;
+mod subresource_obtain;
 mod subresource_plan;
 mod subresources;
 mod svg_geometry;
