@@ -5118,10 +5118,7 @@ module Capybara
       # `swack`) so settle waits for the SW to process it and any client.postMessage reply.
       def service_worker_post_message(handle, data, client_id = nil, client_url = nil)
         w = @workers[handle.to_i]
-        return unless w
-        # Run Service Worker fails for a redundant worker, and the message is dropped. Its isolate is ended only after
-        # the realms are told (sw_retire), and a `statechange` listener of theirs can post to it in between.
-        return if sw_worker(handle)&.dig(2) == 'redundant'
+        return if !w || sw_redundant?(handle)
 
         @sw_message_pending += 1
         # A message the worker hasn't finished dispatching is a PENDING functional
@@ -5443,7 +5440,7 @@ module Capybara
 
       def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
         w = @workers[handle.to_i]
-        return false unless w
+        return false if !w || sw_redundant?(handle)
         # Resolve BEFORE bumping the pending counter: a raise here must not strand @sw_fetch_pending
         # (settle would then block for the full round-trip budget with no fetch ever queued to answer).
         req = resolve_sw_fetch_referrer(req_json.to_s)
@@ -5766,6 +5763,11 @@ module Capybara
       # The service worker `handle`, `[script URL, type, state, registration]` (the registration's number, 0 before one
       # holds it), nil for none.
       def sw_worker(handle) = Native.sw_worker(@sw_partition, handle.to_i)&.to_a
+
+      # Whether the service worker `handle` is redundant, which Run Service Worker fails for: no message, port message or
+      # fetch reaches it — a fetch goes to the network. Its isolate is ended only after the realms are told (sw_retire,
+      # try_clear_uninstalls), and a `statechange` listener of theirs can reach it in between.
+      private def sw_redundant?(handle) = sw_worker(handle)&.dig(2) == 'redundant'
 
       # Update Worker State: the worker `handle` in `state`, which every realm's ServiceWorker of it takes, its
       # `statechange` fired (and, activated, a client it now controls has its `ready`).
@@ -6909,7 +6911,9 @@ module Capybara
       # counted like an sw_message, which the worker acks once its handler ran, so a settle waits out its reply.
       private def deliver_port_message((kind, id), end_id, data)
         if kind == :worker
-          w = @workers[id] or return
+          w = @workers[id]
+          return if !w || sw_redundant?(id)
+
           @sw_message_pending += 1
           w[:inbox] << {kind: 'port_msg', end: end_id, data: data}
         elsif id.zero?
