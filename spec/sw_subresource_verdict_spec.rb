@@ -27,6 +27,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
+        else if (u.pathname === '/scope/two.css') e.respondWith(fetch('/log?two=' + e.request.mode + ',' + (e.request.integrity || 'none')).then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname === '/scope/mod.css') e.respondWith(fetch('/log?mod').then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname.startsWith('/scope/rp-')) e.respondWith(fetch('/log?' + u.pathname.slice(10) + '=' + e.request.referrerPolicy + ',' + (e.request.referrer || 'none')).then(() => new Response('')));
       });
@@ -295,6 +296,36 @@ RSpec.describe 'Service Worker subresource verdict' do
       document.body.appendChild(f);
     JS
     expect(poll_until { session.evaluate_script('1') && hits.include?('/log?mod') }).to be(true)
+  end
+  # …a style sheet request its link's own: two links of one URL — one `crossorigin` and of an `integrity`, one neither —
+  # two requests, two fetch events, each of its link's mode and integrity (one dispatch per request however many
+  # consumers read it: the cascade, `.sheet`, its load task).
+  it "hands the worker each link's own sheet request" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument;
+          for (const cors of [true, false]) {
+            const link = d.createElement('link');
+            link.rel = 'stylesheet';
+            if (cors) { link.crossOrigin = 'anonymous'; link.integrity = 'sha256-x'; }
+            link.href = '/scope/two.css';
+            d.head.appendChild(link);
+            void link.sheet;
+          }
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?two=})).size >= 2 && logged.sort }).to eq(%w[/log?two=cors,sha256-x /log?two=no-cors,none])
+    session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
+    expect(hits.grep(%r{\A/log\?two=}).size).to eq(2)
   end
 end
 
