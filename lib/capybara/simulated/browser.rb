@@ -5119,6 +5119,10 @@ module Capybara
       def service_worker_post_message(handle, data, client_id = nil, client_url = nil)
         w = @workers[handle.to_i]
         return unless w
+        # Run Service Worker fails for a redundant worker, and the message is dropped. Its isolate is ended only after
+        # the realms are told (sw_retire), and a `statechange` listener of theirs can post to it in between.
+        return if sw_worker(handle)&.dig(2) == 'redundant'
+
         @sw_message_pending += 1
         # A message the worker hasn't finished dispatching is a PENDING functional
         # event — it must hold a successor's activation exactly like an unsettled
