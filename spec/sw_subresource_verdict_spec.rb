@@ -32,6 +32,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/moved.css') e.respondWith(fetch('/other/x.css'));
         else if (u.pathname === '/scope/two.css') e.respondWith(fetch('/log?two=' + e.request.mode + ',' + (e.request.integrity || 'none')).then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
         else if (u.pathname === '/scope/mod.css') e.respondWith(fetch('/log?mod').then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
+        else if (u.pathname.startsWith('/scope/timed-')) e.respondWith(new Response('timed ' + e.request.destination));
         else if (u.pathname === '/scope/sw-mod.js') e.respondWith(new Response('', {headers: {'content-type': 'text/javascript'}}));
         else if (u.pathname === '/scope/stream.png') e.respondWith(new Response(new ReadableStream({start(c) { c.enqueue(new Uint8Array(7)); c.close(); }})));
         else if (u.pathname.startsWith('/scope/rp-')) e.respondWith(fetch('/log?' + u.pathname.slice(10) + '=' + e.request.referrerPolicy + ',' + (e.request.referrer || 'none')).then(() => new Response('')));
@@ -209,6 +210,36 @@ RSpec.describe 'Service Worker subresource verdict' do
       });
     JS
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['text/css', 404, 'text/plain', 0, 0, 0, 0, 'css:200', 'img:200', 'script:200', 'link:200', 7, 'link', 'other'])
+  end
+
+  # A media element's poster and tracks and an SVG `<use>`'s external document are requests a controlling worker answers
+  # too (Handle Fetch answers any but a plugin's): its answer their entries' response, the network asked for none.
+  it "has a worker answer a poster's, a track's and a use's request" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument, W = f.contentWindow;
+          d.body.insertAdjacentHTML('beforeend', '<video poster="/scope/timed-poster.png" preload=none><track default src="/scope/timed-track.vtt"></video>' +
+                                                 '<svg><use href="/scope/timed-use.svg#x"></use></svg>');
+          const poll = () => {
+            const entries = ['poster.png', 'track.vtt', 'use.svg'].map((n) => W.performance.getEntriesByType('resource').find((e) => e.name.endsWith(n)));
+            if (entries.some((e) => !e)) return setTimeout(poll, 20);
+            globalThis.__seen = entries.map((e) => e.initiatorType + ':' + e.responseStatus + ':' + e.encodedBodySize);
+          };
+          poll();
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(%w[video:200:11 track:200:11 other:200:11])
+    expect(hits.grep(/timed-/)).to eq([])
   end
 
   # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
