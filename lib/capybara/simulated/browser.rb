@@ -8300,7 +8300,7 @@ module Capybara
       # CORS load's success is origin-dependent (a response's ACAO may allow one origin and
       # not another) — fetching per load is what keeps the verdict the requesting document's
       # own; only the origin-free decode result is shared.
-      private def cached_image(key, cors = false, credentials = 'same-origin', client: pinned_client(client_for(0), key))
+      private def cached_image(key, cors = false, credentials = 'same-origin', client:)
         bytes = image_source_bytes(key, cors, credentials, client: client)
         return bytes if bytes == :unsupported
         return nil unless bytes
@@ -8330,7 +8330,7 @@ module Capybara
       # fetch, so rack_fetch's Access-Control enforcement rejects (→ nil) a cross-origin
       # response with no matching ACAO. :unsupported for a scheme with no host-side reader,
       # nil for a missing / failed / CORS-rejected / empty resource.
-      private def image_source_bytes(key, cors = false, credentials = 'same-origin', client: pinned_client(client_for(0), key))
+      private def image_source_bytes(key, cors = false, credentials = 'same-origin', client:)
         if key.start_with?('data:')
           bytes = decode_data_url_body(key)
           bytes.empty? ? nil : bytes
@@ -8535,7 +8535,7 @@ module Capybara
         client = client_for(realm, referrer: referrer)
         # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
         # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
-        cached = [client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url).to_s, key]
+        cached = [client_origin_of(client).to_s, key]
         @@font_file_lock.synchronize do
           if @@font_file_cache.key?(cached)
             path, meta = @@font_file_cache[cached]
@@ -11240,15 +11240,16 @@ module Capybara
           return {url: url, policy: element_policy.to_s, origin: nil, realm: nil, referrer: referrer || url, initiator: referrer && url_origin(url)}
         end
         own = realm.zero? ? @current_url : frame_realm_url(realm)
-        realm, own = 0, @current_url if own.nil?
         if opaque.nil?
           source, policy = realm_referrer_initiator(realm)
-          url, opaque = realm_request_initiator(realm)
+          url, opaque = realm_creator_url(realm, own), document_origin_opaque?(realm)
         else
           # (…told by the bindings, its document is not asked — every image of a page asks this: its URLs alone, and a
-          # srcdoc one's policy its container's where the element and its document name none)
-          source, policy = own.match?(/\Aabout:srcdoc\z/i) ? realm_referrer_initiator(@runtime.frame_realm_parent(realm).to_i) : [own, '']
-          url = http_url?(own) ? own : realm_creator_url(realm)
+          # srcdoc one's policy its container's where the element and its document name none; a frame gone, the page's)
+          realm, own = 0, @current_url if own.nil?
+          srcdoc = realm.positive? && own.match?(/\Aabout:srcdoc\z/i)
+          source, policy = srcdoc ? realm_referrer_initiator(@runtime.frame_realm_parent(realm).to_i) : [own, '']
+          url = realm_creator_url(realm, own)
         end
         # (…which no element lifts for an opaque origin's document: it refers as none, as its navigations do)
         policy = opaque ? 'no-referrer' : (element_policy.to_s.empty? ? policy : element_policy)
@@ -11266,13 +11267,19 @@ module Capybara
         client.merge(cookie_cross_site: cross, realm: nil)
       end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
-      # and whose origin an Origin header carries — a local document's (about:blank, srcdoc) its creator's, the nearest
-      # ancestor's of a fetchable URL — and whether that document's own origin is opaque (a sandbox's)].
+      # and whose origin an Origin header carries (`realm_creator_url`) and whether that document's own origin is opaque
+      # (a sandbox's)].
       def realm_request_initiator(realm) = [realm_creator_url(realm), document_origin_opaque?(realm)]
-      # …its URL alone.
-      def realm_creator_url(realm)
-        url = realm.zero? ? @current_url : frame_realm_url(realm)
+      # …that URL alone — `url` the realm's own where the caller has it: a document of a fetchable URL's own, a blob: one's
+      # its blob URL's origin's, a local one's (about:blank, srcdoc) its parent's, the nearest ancestor's of a fetchable
+      # URL. (KNOWN LIMIT: a popup's about:blank the page's, not its opener's; a frame another document navigated to
+      # about:blank its parent's, not that document's.)
+      def realm_creator_url(realm, url = realm.zero? ? @current_url : frame_realm_url(realm))
         until realm.zero? || http_url?(url)
+          if url.to_s.match?(/\Ablob:/i)
+            inner = url_origin(url.to_s.sub(/\Ablob:/i, ''))
+            return "#{inner}/" if inner && inner != 'null'
+          end
           realm = @runtime.frame_realm_parent(realm).to_i
           url   = realm.zero? ? @current_url : frame_realm_url(realm)
         end
@@ -12127,7 +12134,7 @@ module Capybara
       # document's: `realm_request_initiator` — one of an opaque origin, a sandboxed frame's, cross-site to every URL)
       def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil, user_activated: false)
         source, policy = initiator
-        site           = realm_request_initiator(realm).first
+        site           = realm_creator_url(realm)
         opaque         = opaque_initiator(realm)
         from_document(realm) do
           if post
@@ -12142,7 +12149,7 @@ module Capybara
       # creator's (`realm_request_initiator`) — none for a realm gone since (its referrer source then the request's).
       private def initiating_url(realm)
         realm = realm.to_i
-        realm_request_initiator(realm).first if realm.zero? || @runtime.frame_realm_alive?(realm)
+        realm_creator_url(realm) if realm.zero? || @runtime.frame_realm_alive?(realm)
       end
       # What a navigation the document of realm `realm` initiates carries of its origin where that is opaque (a sandboxed
       # document's): cross-site to every URL (Fetch Metadata, `site_seed`), its Origin `null` — none for a tuple one's.

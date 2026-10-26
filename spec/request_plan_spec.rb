@@ -102,5 +102,10 @@ RSpec.describe 'a subresource request plan' do
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
+  # An image loaded before any page is: its client the page that is none yet, its request made all the same.
+  it 'fetches an image before any visit' do
+    session.execute_script("new Image().src = 'http://www.example.com/pre.png'")
+    expect(poll_until { session.evaluate_script('1') && seen.assoc('/pre.png') }).to be_truthy
+  end
 end
 

@@ -195,5 +195,25 @@ RSpec.describe 'a subresource request', :https do
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
+  # …and a blob: document's its blob URL's origin's — the frame of another origin that made it navigated to it — not its
+  # parent's.
+  it "judges a blob: document's sheets by its own origin" do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin's frame served in-process
+    sites = {}
+    blob = '<link rel=stylesheet href="https://other.test/own.css"><link rel=stylesheet href="https://www.example.com/page.css">'
+    s = simulated_session(lambda {|env|
+      sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
+      case env['PATH_INFO']
+      when '/own.css', '/page.css' then [200, {'content-type' => 'text/css'}, ['p {}']]
+      when '/frame.html' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><script>location = URL.createObjectURL(new Blob([#{blob.to_json}], {type: 'text/html'}));</script>"]]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><iframe src="https://other.test/frame.html"></iframe>']]
+      end
+    })
+    s.visit '/'
+    expect(poll_until { s.evaluate_script('1') && sites.slice('/own.css', '/page.css').then {|got| got.size == 2 && got } }).to eq('/own.css' => 'same-origin', '/page.css' => 'cross-site')
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
 end
 
