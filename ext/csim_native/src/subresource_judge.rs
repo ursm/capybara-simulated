@@ -44,8 +44,8 @@ pub(crate) struct Consumer<'a> {
     pub(crate) obtains: u32,
     pub(crate) module_destination: &'a str,
     pub(crate) preload_destination: &'a str,
-    // (…a classic script's `integrity` as its request was made, and its response's bytes, which a digest is of: none
-    // asked for where it has none)
+    // (…its request's `integrity` metadata as it was made, and its response's bytes, which a digest is of: none asked
+    // for where it has none)
     pub(crate) integrity: &'a str,
     pub(crate) body: &'a [u8],
     pub(crate) mode: &'a str,
@@ -86,8 +86,10 @@ pub(crate) struct Facts {
 //   an answer the host judged already, nor of an opaque answer to a fetch event, whose status a no-cors consumer cannot
 //   read, nor of a scheme's;
 // - a body cut short is none to use, nor one with no body or (for a decoded one) an empty one;
-// - a classic script's must be none Fetch refuses it for (script.rs `script_response_refused`: its MIME type, `nosniff`,
-//   its integrity, which an opaque response fails); a worker-imported script's from the network must be of a
+// - one whose request has `integrity` metadata must match it (Fetch "main fetch": SRI's "does response match
+//   metadataList?", which an opaque response fails) — else it is a network error, whatever its consumer;
+// - a classic script's must be none Fetch refuses it for (script.rs `script_response_refused`: its MIME type,
+//   `nosniff`); a worker-imported script's from the network must be of a
 //   JavaScript MIME type; a style sheet's must be one
 //   (sheet_owners.rs `sheet_response_accepted`, a quirks document's CORS-same-origin one of any type) — a service
 //   worker's answer whatever its type; a CSS module script's must be `text/css`; a link's what it obtains
@@ -132,9 +134,12 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
     if source & S_EMPTY != 0 && matches!(kind, J_IMAGE | J_VIDEO | J_AUDIO | J_FONT) {
         return 0;
     }
+    if !crate::integrity::response_matches(consumer.body, consumer.integrity, !cross) {
+        return 0;
+    }
     let essence = || crate::mime::extract(&facts.content_type).map(|m| m.essence);
     let content = match kind {
-        J_CLASSIC_SCRIPT => !crate::script::script_response_refused(&facts.content_type, &facts.nosniff, consumer.integrity, consumer.body, cross),
+        J_CLASSIC_SCRIPT => !crate::script::script_response_refused(&facts.content_type, &facts.nosniff),
         J_WORKER_IMPORT => from == SRC_SCHEME || essence().as_deref().is_some_and(crate::script::is_javascript_mime),
         J_SHEET => worker || crate::sheet_owners::sheet_response_accepted(&facts.content_type, &facts.nosniff, consumer.quirks, || !cross),
         J_CSS_MODULE => essence().as_deref() == Some("text/css"),
@@ -160,13 +165,13 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
     let k = v8::String::new_from_one_byte(scope, key.as_bytes(), v8::NewStringType::Internalized)?;
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
-// __dom.subresourceJudge(kind, mode, resp, source, doc, a, b) -> `judge` of `resp` — the
+// __dom.subresourceJudge(kind, mode, resp, source, doc, a, b, integrity, bytes) -> `judge` of `resp` — the
 // response as the host, a service worker or a scheme's processor gives it (its `status`, `type`, `redirected`, `tainted`,
 // `body_error`, its `headers`' Content-Type — else its `contentType` — and `X-Content-Type-Options`; `blocked` or
 // `__networkError` a network error, as no response at all is, but for an asset's, whose facts the host may not have
 // kept), its request made in `mode` (null for no-cors), in the document `doc`; `a` and `b` a link's destinations its
-// `as` named as it planned the fetch, a classic script's `integrity` and its response's bytes (a Uint8Array, or a string
-// whose UTF-8 they are; none where it has no integrity) — as its verdict bits.
+// `as` named as it planned the fetch; `integrity` its request's metadata and `bytes` its response's (a Uint8Array, or a
+// string whose UTF-8 they are; none where it has no integrity) — as its verdict bits.
 fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let packed = args.get(0).uint32_value(scope).unwrap_or(0);
     let (kind, obtains) = (packed & 0xff, packed >> 8);
@@ -218,17 +223,17 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         if v.is_null_or_undefined() { String::new() } else { v.to_rust_string_lossy(scope) }
     };
     let (module_destination, preload_destination) = if kind == J_LINK { (destination(scope, 5), destination(scope, 6)) } else { Default::default() };
-    let integrity = if kind == J_CLASSIC_SCRIPT { destination(scope, 5) } else { String::new() };
+    let integrity = destination(scope, 7);
     let body = if integrity.is_empty() {
         Vec::new()
     } else {
-        match v8::Local::<v8::ArrayBufferView>::try_from(args.get(6)) {
+        match v8::Local::<v8::ArrayBufferView>::try_from(args.get(8)) {
             Ok(view) => {
                 let mut bytes = vec![0u8; view.byte_length()];
                 view.copy_contents(&mut bytes);
                 bytes
             }
-            Err(_) => args.get(6).to_rust_string_lossy(scope).into_bytes(),
+            Err(_) => args.get(8).to_rust_string_lossy(scope).into_bytes(),
         }
     };
     let consumer = Consumer {
@@ -381,5 +386,17 @@ mod tests {
         assert_eq!(script("text/javascript", "opaque", sha, SRC_ASSET), 0);
         assert_eq!(script("text/javascript", "opaque", "", SRC_ASSET), OK | V_CROSS_ORIGIN);
         assert_eq!(judge(&Consumer::of(J_CLASSIC_SCRIPT), SRC_NETWORK, &resp("basic", Some(404))), 0);
+    }
+
+    #[test]
+    fn a_response_failing_its_integrity_is_a_network_error_whatever_its_consumer() {
+        let sha = "sha256-LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIE=";
+        let sheet = |integrity| {
+            let consumer = Consumer { integrity, body: b"x", ..Consumer::of(J_SHEET) };
+            judge(&consumer, SRC_ASSET, &Facts { content_type: "text/css".to_owned(), ..resp("basic", Some(200)) })
+        };
+        assert_eq!([sheet(sha) & V_OK, sheet("sha256-AAAA")], [V_OK, 0]);
+        let image = Consumer { integrity: "sha256-AAAA", body: b"x", ..Consumer::of(J_IMAGE) };
+        assert_eq!(judge(&image, SRC_NETWORK, &resp("basic", Some(200))), 0);
     }
 }

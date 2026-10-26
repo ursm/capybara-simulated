@@ -560,16 +560,14 @@ fn modulepreload_destination_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Func
 // Whether a script's response is refused before it runs, its fetch a network error (Fetch "main fetch"): its MIME type
 // one a script never is — "should response to request be blocked due to its MIME type?": `audio/*`, `image/*`,
 // `video/*`, `text/csv` — or, with `X-Content-Type-Options: nosniff` (`nosniff`, the header's value), one that is no
-// JavaScript MIME type; or it failing the request's `integrity` metadata (SRI), as an opaque response — a cross-origin
-// no-cors one — fails any it knows an algorithm of.
-pub(crate) fn script_response_refused(content_type: &str, nosniff: &str, integrity: &str, body: &[u8], opaque: bool) -> bool {
+// JavaScript MIME type. (Its `integrity`, any request's, is the judge's: subresource_judge.rs `judge`.)
+pub(crate) fn script_response_refused(content_type: &str, nosniff: &str) -> bool {
     let essence = crate::mime::extract(content_type).map(|m| m.essence);
     let never = essence.as_deref().is_some_and(|e| {
         ["audio/", "image/", "video/"].iter().any(|p| e.starts_with(p)) || e == "text/csv"
     });
     let sniffed = crate::fetch_rules::blocked_by_nosniff("script", content_type, nosniff);
-    let integrity_fails = !crate::integrity::response_matches(body, integrity, !opaque);
-    never || sniffed || integrity_fails
+    never || sniffed
 }
 // The encoding a classic script's response decodes with (HTML "fetch a classic script"): its `Content-Type`'s charset
 // where that names one ("legacy extract an encoding": a label of none as good as none), else its document's.
@@ -746,15 +744,9 @@ mod tests {
 
     #[test]
     fn a_script_response_is_refused_as_fetch_says() {
-        let ok = |ct: &str, nosniff: &str| !script_response_refused(ct, nosniff, "", b"", false);
+        let ok = |ct: &str, nosniff: &str| !script_response_refused(ct, nosniff);
         assert!(ok("text/javascript", "") && ok("text/plain", "") && ok("", ""));
         assert!(!ok("image/png", "") && !ok("text/csv", "") && !ok("video/mp4; codecs=x", ""));
         assert!(!ok("text/plain", "nosniff") && !ok("", "NoSniff, x") && ok("application/javascript", "nosniff"));
-        let body = b"alert(1)";
-        let sha = "sha256-bhHHL3z2vDgxUt0W3dWQOrprscmda2Y5pLsLg4GF+pI=";
-        assert!(!script_response_refused("text/javascript", "", sha, body, false));
-        assert!(script_response_refused("text/javascript", "", "sha256-AAAA", body, false));
-        assert!(script_response_refused("text/javascript", "", sha, body, true));
-        assert!(!script_response_refused("text/javascript", "", "md5-xx", body, true));
     }
 }
