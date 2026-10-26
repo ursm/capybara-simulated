@@ -113,13 +113,15 @@ pub(crate) fn claims(href: &str, scope: &str, scopes: &[String]) -> bool {
 // What a service worker's realm is spawned with (the host's, `run_worker`): its registration's scope, its updateViaCache
 // mode, the version active beside it as it installs (its script URL and handle), and the Update probe's responses of
 // the scripts it imports (its script resource map's — Service Workers §3.1.4 "Update", each a JSON record), which its
-// `importScripts` take, each once, in place of a fetch.
+// `importScripts` take, each once, in place of a fetch — and whether it is past installing (`swInstalled`), after which
+// it imports what its script resource map holds alone.
 #[derive(Default)]
 pub(crate) struct ServiceWorkerGlobal {
     scope: String,
     update_via_cache: String,
     previous_active: Option<(String, u32)>,
     probed_imports: std::collections::HashMap<String, String>,
+    installed: bool,
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -127,6 +129,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
     crate::dom::register(scope, ns, "swProbedImport", probed_import_op, context_id);
     crate::dom::register(scope, ns, "swImportCacheMode", import_cache_mode_op, context_id);
+    crate::dom::register(scope, ns, "swInstalled", installed_op, context_id);
+    crate::dom::register(scope, ns, "swImportsFetched", imports_fetched_op, context_id);
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
     crate::dom::register(scope, ns, "swScriptResource", script_resource_op, context_id);
     crate::dom::register(scope, ns, "swScriptResourceSet", script_resource_set_op, context_id);
@@ -160,7 +164,7 @@ fn global_init_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         .map(|map| map.into_iter().map(|(url, record)| (url, record.to_string())).collect())
         .unwrap_or_default();
     let previous_active = text(scope, 3).map(|url| (url, args.get(4).uint32_value(scope).unwrap_or(0)));
-    let global = ServiceWorkerGlobal { scope: text(scope, 0).unwrap_or_default(), update_via_cache: text(scope, 1).unwrap_or_default(), previous_active, probed_imports };
+    let global = ServiceWorkerGlobal { scope: text(scope, 0).unwrap_or_default(), update_via_cache: text(scope, 1).unwrap_or_default(), previous_active, probed_imports, ..Default::default() };
     let cid = crate::dom::realm_id(scope, &args);
     if let Some(s) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
         s.service_worker = Some(global);
@@ -205,6 +209,23 @@ fn import_cache_mode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     if let Some(s) = v8::String::new(scope, "no-cache").filter(|_| none) {
         rv.set(s.into());
     }
+}
+
+// __dom.swInstalled(): the calling service worker past installing — its install event's lifetime promises settled,
+// whatever came of them.
+fn installed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some(g) = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.service_worker.as_mut()) {
+        g.installed = true;
+    }
+}
+// __dom.swImportsFetched() -> whether an `importScripts` of a URL its script resource map does not hold is fetched — the
+// worker's state `parsed` or `installing` — or a NetworkError (Service Workers §4.3 "importScripts(urls)": its state
+// past those); true for any other realm's.
+fn imports_fetched_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let installed = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).is_some_and(|g| g.installed);
+    rv.set_bool(!installed);
 }
 
 // __dom.swClaims(href, scope, scopes) -> `claims`.

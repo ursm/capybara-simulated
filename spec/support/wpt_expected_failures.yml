@@ -5790,8 +5790,6 @@ service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
-service-workers/service-worker/import-scripts-updated-flag.https.html:
-- import script not previously imported
 service-workers/service-worker/local-url-inherit-controller.https.html:
 - Data URL worker should not inherit service worker controller.
 - Data URL worker should not intercept fetch().
@@ -5905,7 +5903,6 @@ service-workers/service-worker/resource-timing-fetch-variants.https.html:
   through `responseStart`
 - Delay from within service-worker (before internal fetching) should be measured before
   responseStart in the client ResourceTiming entry
-- Redirects done from within a service-worker should not be exposed to client ResourceTiming
 service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
 service-workers/service-worker/service-worker-csp-connect.https.html:

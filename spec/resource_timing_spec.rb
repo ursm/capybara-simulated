@@ -352,6 +352,51 @@ RSpec.describe 'resource timing' do
     expect(second['decodedBodySize']).to eq('var gz = 1;'.bytesize)
   end
 
+  # An image's entry reads its response's facts as every other kind's does: its Server-Timing among them.
+  it "reports an image response's Server-Timing" do
+    png = File.binread(Dir.glob('spec/wpt/resource-timing/resources/blue.png').first)
+    a = lambda {|env|
+      next [200, {'content-type' => 'image/png', 'server-timing' => 'decode;dur=3'}, [png]] if env['PATH_INFO'] == '/st.png'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><img src="/st.png">']]
+    }
+    s = simulated_session(a).tap {|session| session.visit '/' }
+    timing = poll_until do
+      e = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.endsWith('/st.png')).map((e) => e.serverTiming.map((t) => [t.name, t.duration]))")
+      e.empty? ? nil : e
+    end
+    expect(timing).to eq([[['decode', 3]]])
+  end
+
+  # A `fetch()` and an XHR a controlling service worker answers file its answer as their entry, as every
+  # worker-answered request does: its body's size.
+  it "sizes a worker-answered fetch() and XHR by the answer" do
+    worker = <<~JS
+      self.addEventListener('install', () => self.skipWaiting());
+      self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+      self.addEventListener('fetch', (e) => { if (e.request.url.includes('/answered')) e.respondWith(new Response('abcdef')); });
+    JS
+    page = '<!DOCTYPE html><meta charset=utf-8><body><script>navigator.serviceWorker.register("/sw.js"); setInterval(() => {}, 50);</script>'
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+    begin
+      s = simulated_session(lambda {|env|
+        env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
+      }).tap {|session| session.visit '/' }
+      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      s.evaluate_async_script(<<~'JS')
+        const done = arguments[0];
+        const xhr = new Promise((resolve) => { const x = new XMLHttpRequest(); x.open('GET', '/answered?xhr'); x.onload = resolve; x.send(); });
+        Promise.all([fetch('/answered?fetch').then((r) => r.text()), xhr]).then(() => done());
+      JS
+      expect(s.evaluate_script("performance.getEntriesByType('resource').filter((e) => e.name.includes('answered')).map((e) => [e.initiatorType, e.encodedBodySize, e.responseStatus]).sort()")).to eq([
+        ['fetch', 6, 200], ['xmlhttprequest', 6, 200]
+      ])
+    ensure
+      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    end
+  end
+
   it 'gives an image the document already holds no second entry' do
     s = session
     s.execute_script("var i = new Image(); i.src = '/i.png'; document.body.appendChild(i);")

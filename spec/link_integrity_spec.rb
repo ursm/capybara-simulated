@@ -121,4 +121,22 @@ RSpec.describe 'link integrity' do
       ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
     end
   end
+
+  # …a shadow tree's `<link>` too, each under its own: two of one URL, one of a bad digest and one of a good one, the
+  # first not applied in its tree and the second applied in its own.
+  it "judges each shadow tree's link of one URL by its own integrity" do
+    s = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/css'}, [css]] if env['PATH_INFO'] == '/s.css'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><div id=a></div><div id=b></div>']]
+    }).tap {|session| session.visit '/' }
+    s.execute_script(<<~JS)
+      for (const [id, integrity] of [['a', '#{bad}'], ['b', '#{good}']]) {
+        const root = document.getElementById(id).attachShadow({ mode: 'open' });
+        root.innerHTML = '<link rel=stylesheet href="/s.css" integrity="' + integrity + '"><p>p</p>';
+      }
+    JS
+    expect(poll_until { s.evaluate_script("getComputedStyle(b.shadowRoot.querySelector('p')).color") }).to eq('rgb(255, 0, 0)')
+    expect(s.evaluate_script("getComputedStyle(a.shadowRoot.querySelector('p')).color")).to eq('rgb(0, 0, 0)')
+  end
 end
