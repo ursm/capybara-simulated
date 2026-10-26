@@ -3859,7 +3859,7 @@ module Capybara
         }
         # …and its bytes where its text is not them (a byte-order mark taken off, an encoding other than UTF-8 decoded) —
         # elsewhere they are its text's UTF-8: what a script's integrity is a digest of and its source is decoded from
-        # (`external_asset_bytes`).
+        # (`external_asset_response`).
         raw = result && result['body_bytes']
         Thread.current[:csim_asset_bytes] = raw if raw && raw.b != result['body'].to_s.b
         # (…a script's or a style sheet's resource loads with an ok status alone, 200 to 299: HTML "fetch a classic script",
@@ -3965,13 +3965,6 @@ module Capybara
         }
       end
 
-      # The metadata of the asset `external_asset_source` last served for `url` (nil when it
-      # never loaded).
-      def external_asset_meta(url)
-        needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
-        key = resolve_against_current(url.to_s, use_base: needs_base)
-        key.is_a?(String) ? (@asset_meta ||= {})[key] : nil
-      end
 
       # Fetch a source body and report how long it stays safely reusable per its
       # OWN response headers — an absolute freshness deadline (Time), or nil when
@@ -4075,12 +4068,18 @@ module Capybara
       # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports, and `mode` its mode — a module
       # script's "cors", with its `credentials` mode, which its response is checked by: a body either memo keeps answers
       # only a request of the same mode, credentials and client origin, which the CORS check it passed was of)
-      # …a page's request of one — its client realm `realm`'s, of destination `dest`, as the engine's `plan` of it says.
+      # …a page's request of one — its client realm `realm`'s, of destination `dest`, as the engine's `plan` of it says —
+      # answered as `external_asset_response` answers it.
       def planned_external_asset(url, document, realm, plan, dest)
         mode, credentials, policy = request_of_plan(plan)
-        external_asset_source(url, document, realm, policy, dest: dest, mode: mode, credentials: credentials)
+        external_asset_response(url, document, realm, policy, dest: dest, mode: mode, credentials: credentials)
       end
-      def external_asset_source(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
+      # …and its text alone, nil where it failed.
+      def external_asset_source(...) = external_asset_response(...)&.first
+      # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
+      # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of
+      # one URL two responses — or nil where the URL resolves to none.
+      def external_asset_response(url, document = nil, realm = nil, policy = nil, referrer: nil, dest: nil, mode: nil, credentials: 'same-origin')
         # A blob:/data:/about: document's location can't anchor an absolute-path
         # `src=/common/…` (URI.join on a `blob:` URL yields nothing usable), but its
         # `<base href>` points at a real http(s) origin — so for THOSE documents
@@ -4105,18 +4104,16 @@ module Capybara
         # Timing entry — `note_module_fetch` reads them where `rack_fetch_body` would have left them.)
         memo = document && @page_asset_src&.[](document.to_i)
         if memo && (e = memo[memo_key])
-          (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[1]
-          (@asset_bytes ||= {})[key] = e[2]
-          return e[0]
+          Thread.current[:csim_asset_meta] = e[1]
+          return e
         end
         client     = client_for(realm.to_i, policy, referrer: referrer)
         shared_key = "#{memo_key} #{client_origin_of(client)}"
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[shared_key])
             if e[1].nil? || Time.now < e[1]
-              (@asset_meta ||= {})[key] = Thread.current[:csim_asset_meta] = e[2]
-              (@asset_bytes ||= {})[key] = e[3]
-              return e[0]
+              Thread.current[:csim_asset_meta] = e[2]
+              return [e[0], e[2], e[3]]
             end
             @@asset_src.delete(shared_key)
           end
@@ -4127,14 +4124,12 @@ module Capybara
         Thread.current[:csim_asset_meta] = Thread.current[:csim_asset_bytes] = nil
         body, fresh_until = durable_source(key, realm.to_i, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials, client: client)
         meta = Thread.current[:csim_asset_meta]
-        (@asset_meta ||= {})[key] = meta
-        return nil unless body
+        return [nil, meta, nil] unless body
         # Script / stylesheet source is TEXT, but the raw Rack / binread body
         # arrives BINARY-tagged (see `RuntimeShared.utf8_text`). (…its bytes kept beside it where the text is not them:
         # `rack_fetch_body`)
         text  = RuntimeShared.utf8_text(body)
         bytes = Thread.current[:csim_asset_bytes] || (body.b if text.b != body.b)
-        (@asset_bytes ||= {})[key] = bytes
         memo[memo_key] = [text, meta, bytes] if memo && !Thread.current[:csim_asset_no_store]
         if fresh_until
           @@asset_src_lock.synchronize do
@@ -4142,15 +4137,7 @@ module Capybara
             @@asset_src[shared_key] = [text, fresh_until, meta, bytes]
           end
         end
-        text
-      end
-
-      # The bytes of the asset `external_asset_source` last served for `url` where its text is not them (nil where they
-      # are its text's UTF-8): what a script's integrity check hashes and its source is decoded from.
-      def external_asset_bytes(url)
-        needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
-        key = resolve_against_current(url.to_s, use_base: needs_base)
-        key.is_a?(String) ? @asset_bytes&.[](key) : nil
+        [text, meta, bytes]
       end
 
       # Native ESM entry point: `Context#compile_module` +
