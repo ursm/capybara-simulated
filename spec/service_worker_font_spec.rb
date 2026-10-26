@@ -63,4 +63,53 @@ RSpec.describe 'a web font a service worker answers' do
     JS
     expect(poll_until { session.evaluate_script('window.got') }).to eq([80, 'loaded'])
   end
+
+  # …and the request its fetch event carries is the one a sheet's face makes: referred by the sheet, under the policy its
+  # response's `Referrer-Policy` sets (Referrer Policy §7), else its document's — the referrer and the policy already
+  # determined as the worker sees them (Fetch "main fetch").
+  it "carries its sheet's referrer and policy" do
+    worker = <<~JS
+      self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
+      const seen = {};
+      self.addEventListener('fetch', (e) => {
+        const path = new URL(e.request.url).pathname;
+        if (path.endsWith('.ttf')) { seen[path] = [e.request.referrer, e.request.referrerPolicy]; e.respondWith(fetch('/ahem.ttf')); }
+        if (path === '/scope/seen') e.respondWith(new Response(JSON.stringify(seen)));
+      });
+    JS
+    page = <<~HTML
+      <!doctype html><meta charset="utf-8">
+      <link rel=stylesheet href=n.css><link rel=stylesheet href=d.css>
+    HTML
+    session = simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/ahem.ttf' then [200, {'content-type' => 'font/ttf'}, [ahem]]
+      when '/scope/n.css' then [200, {'content-type' => 'text/css', 'referrer-policy' => 'no-referrer'}, ['@font-face{font-family:N;src:url(n.ttf)}']]
+      when '/scope/d.css' then [200, {'content-type' => 'text/css'}, ['@font-face{font-family:D;src:url(d.ttf)}']]
+      when '/scope/page.html' then [200, {'content-type' => 'text/html'}, [page]]
+      else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><body>main']]
+      end
+    })
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.got = null;
+      navigator.serviceWorker.register('/sw.js', { scope: '/scope/' }).then(async (reg) => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const frame = document.body.appendChild(document.createElement('iframe'));
+        frame.src = '/scope/page.html';
+        frame.onload = async () => {
+          const W = frame.contentWindow;
+          await Promise.all(['N', 'D'].map((f) => W.document.fonts.load(`16px ${f}`)));
+          window.got = await (await W.fetch('/scope/seen')).json();
+        };
+      });
+    JS
+    got = poll_until { session.evaluate_script('window.got') }
+    expect(got).to eq(
+      '/scope/n.ttf' => ['', 'no-referrer'],
+      '/scope/d.ttf' => ['http://www.example.com/scope/d.css', 'strict-origin-when-cross-origin']
+    )
+  end
 end
