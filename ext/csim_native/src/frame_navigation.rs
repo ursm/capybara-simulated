@@ -68,6 +68,8 @@ struct FrameNavigation {
 
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
 const NAV_PENDING: u32 = 1 << 1;
+// Its build parked on a still-activating service worker (frame-nav.js `FN_DEFERRED_SW`): `takeSwDeferredFrames`.
+const DEFERRED_SW: u32 = 1 << 3;
 // The navigation is a reload (frame-nav.js `FN_RELOAD_NAV`).
 const RELOAD_NAV: u32 = 1 << 5;
 // Its post-insertion step ran: its navigable exists (frame-nav.js `FN_CONTEXT_READY`).
@@ -144,6 +146,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameBuildsEagerly", frame_builds_eagerly, context_id);
     crate::dom::register(scope, ns, "frameNavigatesToBlank", frame_navigates_to_blank, context_id);
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
+    crate::dom::register(scope, ns, "takeSwDeferredFrames", take_sw_deferred_frames, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
     crate::dom::register(scope, ns, "loadDelay", load_delay, context_id);
     crate::dom::register(scope, ns, "setLoadDelay", set_load_delay, context_id);
@@ -448,6 +451,24 @@ fn frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.flags));
+}
+
+// __dom.takeSwDeferredFrames() -> the containers of the calling realm whose builds are parked on a service worker still
+// activating (`DEFERRED_SW`), in the order they were made, the flag cleared: what an activation's change replays.
+fn take_sw_deferred_frames(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let mut parked: Vec<NodeId> = Vec::new();
+    for (&container, nav) in arena.frame_navigations.0.iter_mut() {
+        if nav.flags & DEFERRED_SW != 0 {
+            nav.flags &= !DEFERRED_SW;
+            parked.push(container);
+        }
+    }
+    parked.retain(|&c| arena.get(c).is_some_and(|n| n.realm == cid));
+    parked.sort_unstable_by(|a, b| a.to_f64().total_cmp(&b.to_f64()));
+    let items: Vec<v8::Local<v8::Value>> = parked.iter().map(|id| v8::Number::new(scope, id.to_f64()).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // Whether a connected container of realm `cid`'s documents owes its element's `load`: HTML's iframe, which delays its

@@ -26,6 +26,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "inheritReferrerPolicy", inherit_referrer_policy_op, context_id);
     register(scope, ns, "requestPolicy", request_policy_op, context_id);
     register(scope, ns, "noteSheetPolicy", note_sheet_policy_op, context_id);
+    register(scope, ns, "trickleDelay", trickle_delay_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
     register(scope, ns, "referrerPolicyAttribute", referrer_policy_attribute_op, context_id);
     register(scope, ns, "elementTarget", element_target_op, context_id);
@@ -306,6 +307,39 @@ fn note_request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     crate::dom::realm(scope, cid).note_request_policy(id);
+}
+// wptserve's `?pipe=trickle(dN[:dM…])`: the response held back the sum of its `dN` seconds, in ms — what a resource of the
+// URL `url` waits before it loads, the driver's fetches being synchronous (the pipe's other steps, its byte counts,
+// read nowhere); 0 for none. The first `pipe=` value (up to the next `&`) that names `trickle(`, its steps up to `)`, each
+// `d` and the longest number after it (as `parseFloat` reads one) — ASCII case-insensitively.
+pub(crate) fn trickle_delay_ms(url: &str) -> f64 {
+    let lower = url.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find("pipe=").map(|i| from + i + 5) {
+        from = at;
+        let value = &lower[at..lower[at..].find('&').map_or(lower.len(), |i| at + i)];
+        let Some(open) = value.find("trickle(").map(|i| at + i + 8) else { continue };
+        let Some(close) = lower[open..].find(')').map(|i| open + i) else { continue };
+        return lower[open..close].split(':').filter_map(|step| step.trim_start().strip_prefix('d')).map(|n| leading_number(n) * 1000.0).sum();
+    }
+    0.0
+}
+// …the longest decimal number `s` begins with (`[\d.]+` as `parseFloat` takes it: digits, one point, digits), 0 for none.
+fn leading_number(s: &str) -> f64 {
+    let mut end = 0;
+    let mut point = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '0'..='9' => end = i + 1,
+            '.' if !point => point = true,
+            _ => break,
+        }
+    }
+    s[..end].parse().unwrap_or(0.0)
+}
+fn trickle_delay_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    rv.set_double(trickle_delay_ms(&url));
 }
 // __dom.noteSheetPolicy(location, header): `note_sheet_policy`, `header` null for a response with none.
 fn note_sheet_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -642,6 +676,16 @@ fn javascript_url_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_trickle_pipe_delays_by_its_steps() {
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(d1)"), 1000.0);
+        assert_eq!(trickle_delay_ms("/a.css?x=1&PIPE=Trickle(d0.5:5:d2)&y"), 2500.0);
+        assert_eq!(trickle_delay_ms("/a.css?pipe=status(200)&pipe=trickle(d1.5.2)"), 1500.0);
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(5)"), 0.0);
+        assert_eq!(trickle_delay_ms("/a.css"), 0.0);
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(d1"), 0.0);
+    }
 
     #[test]
     fn a_referrer_policy_header_is_its_last_policy_token() {
