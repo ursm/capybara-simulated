@@ -9588,7 +9588,7 @@ module Capybara
       # exception": workers.js __csimReportWorkerScriptError) — its message and the place of its top frame, what the
       # host's evaluation keeps of it — and the worker runs on.
       private def run_worker_script(rt, body, url)
-        rt.eval_void("#{body}\n//# sourceURL=#{url.tr("\n", ' ')}")
+        rt.eval_void("#{body}\n//# sourceURL=#{url.tr("\n", ' ')}", filename: url)
       rescue RustyRacer::ParseError => e
         message, line = e.message.match(/\A(.*) at \S+?:(\d+)\z/m)&.captures
         rt.call('__csimReportWorkerScriptError', message || e.message, url, line.to_i, 0)

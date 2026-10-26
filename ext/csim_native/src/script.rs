@@ -406,21 +406,24 @@ const RUNNING_SCRIPT_FRAMES: usize = 16;
 
 // __dom.scriptOnStack() -> whether script runs beneath the caller — HTML's JavaScript execution context stack not empty,
 // as "clean up after running script" asks after a callback: a microtask running (its realm's queue: a checkpoint inside
-// one does nothing), or a frame of the page's on the stack (`page_script`) — code the page made with `eval` or
+// one does nothing), or a frame of the page's on the stack (`driver_frame`'s other) — code the page made with `eval` or
 // `new Function` included, as a handler attribute's is. The driver's own frames are no script's: an event the host fires
-// through the bindings has an empty stack beneath its listeners, one a page's `dispatchEvent` fires the page's.
+// through the bindings has an empty stack beneath its listeners, one a page's `dispatchEvent` fires the page's. Where no
+// stack can be had, script is taken to be running: no checkpoint is the one that cannot run a page's microtasks early.
+// (…every realm's frames in the trace, as every realm of the isolate shares one security token — rusty_racer's; a trace
+// leaves out the frames of another's, which would read as no script)
 fn script_on_stack_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     if scope.get_current_context().get_microtask_queue().is_running_microtasks() {
         return rv.set_bool(true);
     }
-    // (…asked of as many frames as the bindings' own may go beneath a callback, and of more where they all were)
+    // (…asked of as many frames as the bindings' own go beneath a callback, and of more where they all were)
     let mut limit = STACK_FRAMES;
     loop {
-        let Some(trace) = v8::StackTrace::current_stack_trace(scope, limit) else { return rv.set_bool(false) };
+        let Some(trace) = v8::StackTrace::current_stack_trace(scope, limit) else { return rv.set_bool(true) };
         let count = trace.get_frame_count();
         for i in 0..count {
             let Some(frame) = trace.get_frame(scope, i) else { continue };
-            if frame.is_eval() || frame.get_script_name_or_source_url(scope).is_some_and(|n| page_script(&n.to_rust_string_lossy(scope)).is_some()) {
+            if !driver_frame(scope, &frame) {
                 return rv.set_bool(true);
             }
         }
@@ -430,7 +433,22 @@ fn script_on_stack_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallb
         limit *= 4;
     }
 }
-const STACK_FRAMES: usize = 32;
+const STACK_FRAMES: usize = 16;
+// Whether `frame` is the driver's own code: the snapshot's (`<snapshot>`), the host's script runners' (`<eval>`), or of
+// no script name — never code evaluated, which is the page's. Any other name is a page's script, whatever it holds (a
+// `data:` URL's spaces: `page_script` reads names out of a stack's text, which these come from V8 apart from).
+fn driver_frame(scope: &mut v8::PinScope<'_, '_>, frame: &v8::StackFrame) -> bool {
+    if frame.is_eval() {
+        return false;
+    }
+    let Some(name) = frame.get_script_name_or_source_url(scope) else { return true };
+    // (…told by its length before its text, which the page's are seldom of)
+    match name.length() {
+        0 => true,
+        6 | 10 => matches!(name.to_rust_string_lossy(scope).as_str(), "<eval>" | "<snapshot>"),
+        _ => false,
+    }
+}
 
 // __dom.scriptMuted(url[, muted]) -> whether the classic script fetched from `url` has its errors muted (`muted_scripts`,
 // the isolate's: a script of one realm calls another's); with `muted`, that set for it, as its fetch found.

@@ -12,7 +12,7 @@ module Capybara
         @ctx = ctx
       end
 
-      def eval_void(src)    = @ctx.eval_void(src.to_s)
+      def eval_void(src, **kw) = @ctx.eval_void(src.to_s, **kw)
       def call(name, *args) = @ctx.call(name.to_s, *args)
       # (…the bridge's checkpoint, with the steps HTML runs after it: V8Runtime#drain_microtasks)
       def drain_microtasks  = @ctx.call('__csim_yield')

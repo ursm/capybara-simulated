@@ -9,10 +9,29 @@ require_relative 'support/session_teardown'
 # event a script dispatches does not: its frame stays on the stack until the dispatch returns, through a listener of a
 # task's event too. (Chrome, measured: each order below.)
 RSpec.describe 'a task-fired event' do
+  WATCH_CHECKPOINT = <<~JS
+    window.log = [];
+    window.watch = (target, type, name) => {
+      target.addEventListener(type, () => { log.push(name + '1'); Promise.resolve().then(() => log.push(name + '-micro')); });
+      target.addEventListener(type, () => log.push(name + '2'));
+    };
+  JS
+  # (…scripts from `data:` URLs, whose names hold spaces, and a worker's: script all the same)
+  SCRIPTS_CHECKPOINT = <<~HTML
+    <!DOCTYPE html><meta charset=utf-8><body><script>#{WATCH_CHECKPOINT}</script>
+    <script src="data:text/javascript,'use strict'; const c = new AbortController(); watch(c.signal, 'abort', 'classic'); c.abort(); log.push('classic-end')"></script>
+    <script type=module src="data:text/javascript,const c = new AbortController(); watch(c.signal, 'abort', 'module'); c.abort(); log.push('module-end')"></script>
+    <script>
+      const worker = new Worker("data:text/javascript,'use strict'; const l = []; const c = new AbortController(); c.signal.addEventListener('abort', () => { l.push('w1'); Promise.resolve().then(() => l.push('w-micro')) }); c.signal.addEventListener('abort', () => l.push('w2')); c.abort(); l.push('w-end'); setTimeout(() => postMessage(l.join(' ')), 0)");
+      worker.onmessage = (e) => log.push(e.data);
+    </script>
+  HTML
   APP_CHECKPOINT = lambda {|env|
     case env['PATH_INFO']
     when '/data' then [200, {'content-type' => 'text/plain'}, ['x']]
     when '/s.js' then [200, {'content-type' => 'text/javascript'}, ['']]
+    when '/scripts' then [200, {'content-type' => 'text/html'}, [SCRIPTS_CHECKPOINT]]
+    when '/child' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><script>parent.log.push("child")</script>']]
     else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><button id=b>b</button>']]
     end
   }
@@ -114,5 +133,57 @@ RSpec.describe 'a task-fired event' do
     s.execute_script('log.push("|"); document.getElementById("b").click(); log.push("|"); clickFromTask()')
     got = s.evaluate_async_script('const done = arguments[0]; setTimeout(() => done(log), 50)')
     expect(got).to eq(%w[user1 micro user2 | script1 script2 | micro script1 script2 micro])
+  end
+
+  it 'counts a built-in the UA calls, and every script of the page, as script on the stack' do
+    s = simulated_session(APP_CHECKPOINT)
+    s.visit '/scripts'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      // (…a built-in a timer calls: its own execution context on the stack, though no frame of the page's is)
+      watch(document.body, 'x', 'bound');
+      setTimeout(EventTarget.prototype.dispatchEvent.bind(document.body, new Event('x')), 0);
+      const poll = () => log.some((l) => l.startsWith('w')) && log.includes('bound-micro') ? done(log) : setTimeout(poll, 10);
+      poll();
+    JS
+    worker, page = got.partition {|l| l.start_with?('w') }
+    expect(page).to eq(%w[classic1 classic2 classic-end classic-micro module1 module2 module-end module-micro bound1 bound2 bound-micro])
+    expect(worker).to eq(['w1 w2 w-end w-micro'])
+  end
+
+  # KNOWN GAP: both are fired from a microtask of the driver's (a frame's load after its build, the scroll events' flush
+  # after the script that scrolled), where a checkpoint does nothing. Fired by their task itself instead, the frame's
+  # teardown in its `load` handler (TreeWalker-acceptNode-filter-cross-realm-null-browsing-context, Blob-methods-from-
+  # detached-frame) and a scrollend after a scroll its handler's microtask made
+  # (scrollend-event-fired-after-instant-scroll-in-microtask) stop holding.
+  it "checkpoints between a frame's load's listeners, and a scroll's" do
+    pending "a frame's load and the scroll events are fired from a microtask of the driver's"
+    got = run(session_at_root, <<~JS)
+      document.body.style.height = '5000px';
+      const f = document.createElement('iframe');
+      watch(f, 'load', 'frame');
+      f.addEventListener('load', () => setTimeout(() => {
+        watch(window, 'scroll', 'scroll');
+        scrollTo(0, 100);
+        log.push('scrolled');
+        setTimeout(() => done(log), 50);
+      }, 10));
+      f.src = '/child';
+      document.body.append(f);
+    JS
+    expect(got - %w[child]).to eq(%w[frame1 frame-micro frame2 scrolled scroll1 scroll-micro scroll2])
+  end
+
+  it "checkpoints after a frame's script built under its parent's only once the parent's is done" do
+    got = run(session_at_root, <<~JS)
+      Promise.resolve().then(() => log.push('parent-micro'));
+      const f = document.createElement('iframe');
+      f.src = '/child';
+      document.body.append(f);
+      f.contentWindow.document;
+      log.push('parent-end');
+      setTimeout(() => done(log), 50);
+    JS
+    expect(got.index('parent-end')).to be < got.index('parent-micro')
   end
 end
