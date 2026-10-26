@@ -4549,7 +4549,7 @@ fn rule_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     }
     rv.set_bool(took);
 }
-// __dom.ruleInsert(sheetId, parentHandle, css, index) -> [handle, interface, …the URLs an `@import` in it waits for], or
+// __dom.ruleInsert(sheetId, parentHandle, css, index) -> [handle, interface, …what an `@import` in it waits for: `waiting_items`], or
 // the name of the DOMException the insertion is refused with. `parentHandle` -1: the sheet's own list.
 fn rule_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let parent = handle_arg(scope, &args, 1);
@@ -4562,7 +4562,7 @@ fn rule_insert(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             rules_moved(scope, &args, Some(sheet));
             let mut items: Vec<v8::Local<v8::Value>> =
                 vec![v8::Integer::new_from_unsigned(scope, handle).into(), v8::String::new(scope, kind).unwrap().into()];
-            items.extend(pending.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
+            items.extend(waiting_items(scope, &pending));
             rv.set(v8::Array::new_with_elements(scope, &items).into());
         }
         Err(name) => set_str(scope, &mut rv, name),
@@ -4970,9 +4970,17 @@ fn xpath_evaluate(
 
 
 // A JS array of `urls`.
-fn url_array<'s>(scope: &mut v8::PinScope<'s, '_>, urls: &[String]) -> v8::Local<'s, v8::Value> {
-    let items: Vec<v8::Local<v8::Value>> =
-        urls.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::into).collect();
+// The `@import`s a sheet waits for as the bindings take them: [url, referrer, …], the referrer '' for its document.
+fn waiting_items<'s>(scope: &mut v8::PinScope<'s, '_>, waiting: &[(String, Option<String>)]) -> Vec<v8::Local<'s, v8::Value>> {
+    waiting
+        .iter()
+        .flat_map(|(url, referrer)| [url.as_str(), referrer.as_deref().unwrap_or("")])
+        .filter_map(|t| v8::String::new(scope, t))
+        .map(Into::into)
+        .collect()
+}
+fn waiting_array<'s>(scope: &mut v8::PinScope<'s, '_>, waiting: &[(String, Option<String>)]) -> v8::Local<'s, v8::Value> {
+    let items = waiting_items(scope, waiting);
     v8::Array::new_with_elements(scope, &items).into()
 }
 
@@ -5024,7 +5032,7 @@ fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
         if v.is_string() { v.to_rust_string_lossy(scope) } else { String::new() }
     };
     let (css, base, media) = (text(scope, 0), text(scope, 1), text(scope, 2));
-    crate::sheets::SheetSource { css, base, media, constructed: args.get(at + 3).is_true() }
+    crate::sheets::SheetSource { css, base, media, constructed: args.get(at + 3).is_true(), located: false }
 }
 
 // __dom.styleSheets(docNid, baseUrl, [sheetId, …]): the realm document's sheets (the realm's,
@@ -5142,8 +5150,9 @@ fn style_font_faces_unguarded(
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleImport(url, css, docNid, clean) -> the URLs the imported sheet's own `@import`s wait for. The sheet at `url`
-// arrived (`css` null: it could not be fetched), for every realm sheet whose `@import` waits for it — its response a
+// __dom.styleImport(url, referrer, css, docNid, clean) -> what the imported sheet's own `@import`s wait for
+// (`waiting_items`). The sheet at `url` arrived (`css` null: it could not be fetched) for the requests referred by
+// `referrer` ('' its document), for every realm sheet whose `@import` of it waits for it — its response a
 // CORS-same-origin one where `clean`.
 fn style_import(
     scope: &mut v8::PinScope<'_, '_>,
@@ -5159,22 +5168,23 @@ fn style_import_unguarded(
     mut rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let url = args.get(0).to_rust_string_lossy(scope);
-    let css = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
-    let quirks = quirks_arg(scope, &args, 2);
-    let clean = args.get(3).boolean_value(scope);
+    let referrer = Some(args.get(1).to_rust_string_lossy(scope)).filter(|r| !r.is_empty());
+    let css = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
+    let quirks = quirks_arg(scope, &args, 3);
+    let clean = args.get(4).boolean_value(scope);
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let arena = d.arena.enter(cid);
     let lock = arena.style_lock.0.clone();
-    let pending = arena.sheets.import(&lock, &url, css.as_deref(), quirks, clean);
+    let pending = arena.sheets.import(&lock, &url, referrer.as_deref(), css.as_deref(), quirks, clean);
     if let Some(engine) = d.styles.get_mut(&cid) {
         engine.sheets_changed();
     }
-    let urls = url_array(scope, &pending);
+    let urls = waiting_array(scope, &pending);
     rv.set(urls);
 }
 
-// __dom.sheetMake(css, baseUrl, media, constructed, docNid) -> [sheetId, …the URLs its `@import`s wait for]: a new sheet
+// __dom.sheetMake(css, baseUrl, media, constructed, docNid) -> [sheetId, …what its `@import`s wait for: `waiting_items`]: a new sheet
 // of the realm's (sheets.rs), for a `<style>` / `<link>` or a constructed sheet, in the document's mode (`quirks_arg`).
 fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let source = sheet_source(scope, &args, 0);
@@ -5184,10 +5194,10 @@ fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let lock = arena.style_lock.0.clone();
     let (id, pending) = arena.sheets.make(&lock, &source, quirks);
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into()];
-    items.extend(pending.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
+    items.extend(waiting_items(scope, &pending));
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.ownerSheet(ownerNid, css, baseUrl, media, docNid) -> [sheetId, rev, …the URLs its `@import`s wait for]: the
+// __dom.ownerSheet(ownerNid, css, baseUrl, media, docNid) -> [sheetId, rev, …what its `@import`s wait for: `waiting_items`]: the
 // style engine's sheet of a `<style>` / `<link>` / `<?xml-stylesheet?>`, made of `css` — a `<style>`'s, null: its block,
 // the data of its child Text nodes — at `baseUrl` under `media` in the document. ONE per owner
 // (`RealmArena::made_sheets`): made again of other text, of the same text once the owner obtained another sheet (its
@@ -5237,7 +5247,7 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         (Some(m), _) => (m.id, m.rev, m.shown, Vec::new()),
         (None, old) => {
             let css = css.unwrap_or_else(|| String::from_utf16_lossy(&arena.child_text(owner)));
-            let source = crate::sheets::SheetSource { css, base: base.clone(), media: media.clone(), constructed: false };
+            let source = crate::sheets::SheetSource { css, base: base.clone(), media: media.clone(), constructed: false, located };
             let lock = arena.style_lock.0.clone();
             match old {
                 Some(m) if !m.shown => (m.id, m.rev + 1, false, arena.sheets.replace(&lock, m.id, &source, quirks)),
@@ -5268,10 +5278,10 @@ fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         rules_moved(scope, &args, Some(id));
     }
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into(), v8::Integer::new_from_unsigned(scope, rev).into()];
-    items.extend(waiting.iter().filter_map(|u| v8::String::new(scope, u)).map(Into::<v8::Local<v8::Value>>::into));
+    items.extend(waiting_items(scope, &waiting));
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, docNid) -> the URLs its `@import`s wait for: the sheet
+// __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, docNid) -> what its `@import`s wait for (`waiting_items`): the sheet
 // made of other text (or under another base or media). The engine takes it as the new sheet it is at its next set.
 fn sheet_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = args.get(0).uint32_value(scope) else { return };
@@ -5281,7 +5291,7 @@ fn sheet_replace(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let arena = realm(scope, cid);
     let lock = arena.style_lock.0.clone();
     let pending = arena.sheets.replace(&lock, id, &source, quirks);
-    let urls = url_array(scope, &pending);
+    let urls = waiting_array(scope, &pending);
     rv.set(urls);
 }
 // __dom.sheetDrop(sheetId): the page let go of the sheet.

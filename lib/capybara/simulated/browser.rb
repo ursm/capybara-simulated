@@ -4068,11 +4068,13 @@ module Capybara
       # (…`dest` its destination — `script`, `style` — which its Fetch Metadata reports, and `mode` its mode — a module
       # script's "cors", with its `credentials` mode, which its response is checked by: a body either memo keeps answers
       # only a request of the same mode, credentials and client origin, which the CORS check it passed was of)
-      # …a page's request of one — its client realm `realm`'s, of destination `dest`, as the engine's `plan` of it says —
-      # answered as `external_asset_response` answers it.
-      def planned_external_asset(url, document, realm, plan, dest)
+      # …a page's request of one — its client realm `realm`'s, of destination `dest`, as the engine's `plan` of it says;
+      # `referrer` where it names one of its own (an `@import`'s, its importing sheet's location) — answered as
+      # `external_asset_response` answers it.
+      def planned_external_asset(url, document, realm, plan, dest, referrer = nil)
         mode, credentials, policy = request_of_plan(plan)
-        external_asset_response(url, document, realm, policy, dest: dest, mode: mode, credentials: credentials)
+        referrer = nil if referrer.to_s.empty?
+        external_asset_response(url, document, realm, policy, referrer: referrer, dest: dest, mode: mode, credentials: credentials)
       end
       # …answered as [its text, nil where the load failed; the facts of the response it came from (`resource_timing_meta`,
       # nil for none: a network error); its bytes where its text is not them] — each request's its own, two requests of

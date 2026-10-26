@@ -55,7 +55,8 @@ RSpec.describe 'an image a style sheet references', :https do
   # a linked sheet's and an imported one's by its own URL — or, declared by no located sheet (a `<style>`, an inline
   # `style`), by its document.
   # (…a nested rule's declarations, a keyframe's and one under a media query that holds only later — the window
-  # resized — among them; its Sec-Fetch-Site its document's origin's all the same, which is its request's)
+  # resized — among them; its Sec-Fetch-Site its document's origin's all the same, which is its request's; and an
+  # `@import`'s own request is referred alike)
   it 'is referred by the sheet that declared it' do
     referers = {}
     sites = {}
@@ -72,14 +73,15 @@ RSpec.describe 'an image a style sheet references', :https do
       sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
       case env['PATH_INFO']
       when '/l.css' then [200, {'content-type' => 'text/css'}, [sheet]]
-      when '/i.css' then [200, {'content-type' => 'text/css'}, ['#b { background-image: url(/b.png) }']]
+      when '/i.css' then [200, {'content-type' => 'text/css'}, ['@import url(/j.css); #b { background-image: url(/b.png) }']]
+      when '/j.css', '/s.css' then [200, {'content-type' => 'text/css'}, ['p {}']]
       when '/x.css' then [200, {'content-type' => 'text/css'}, ['#x { background-image: url(https://www.example.com/x.png) }']]
       when %r{\A/[a-z]\.png\z} then [200, {'content-type' => 'image/png'}, [File.binread(File.expand_path('wpt/common/square.png', __dir__))]]
       else
         boxes = %w[a b c n k m x].map {|id| %(<div id=#{id} style="width:9px;height:9px"></div>) }.join
         [200, {'content-type' => 'text/html'}, [<<~HTML]]
           <!DOCTYPE html><meta charset="utf-8"><link rel=stylesheet href="/l.css"><link rel=stylesheet href="https://other.example.com/x.css">
-          <style>#c { background-image: url(/c.png) }</style>#{boxes}
+          <style>@import url(/s.css); #c { background-image: url(/c.png) }</style>#{boxes}
           <div style="width:9px;height:9px;background-image:url(/d.png)"></div>
         HTML
       end
@@ -93,6 +95,10 @@ RSpec.describe 'an image a style sheet references', :https do
       '/x.png' => 'https://other.example.com/'
     )
     expect(sites['/x.png']).to eq('same-origin')
+    # (…an `@import` itself as much: its importing sheet's location, a `<style>`'s its document)
+    expect(referers.slice('/i.css', '/j.css', '/s.css')).to eq(
+      '/i.css' => 'https://www.example.com/l.css', '/j.css' => 'https://www.example.com/i.css', '/s.css' => 'https://www.example.com/'
+    )
     s.current_window.resize_to(500, 600)
     expect(poll_until { s.evaluate_script('document.body.offsetHeight') && referers['/m.png'] }).to eq('https://www.example.com/l.css')
   end

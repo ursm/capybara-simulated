@@ -28,6 +28,9 @@ pub(crate) struct SheetSource {
     pub(crate) base: String,
     pub(crate) media: String,
     pub(crate) constructed: bool,
+    // (…fetched by URL — a `<link>`'s, an `<?xml-stylesheet?>`'s — whose `base` is its location, which its `@import`s are
+    // referred by; a `<style>`'s none)
+    pub(crate) located: bool,
 }
 
 // A sheet of the realm's, and what the engine asks of its text without walking its rules: whether it reads a shadow
@@ -115,10 +118,12 @@ struct ParseKey {
 }
 const PARSED_LIMIT: usize = 64;
 
-// An `@import` whose sheet has not arrived: the rule, the absolute URL it asked for, and the media list its sheet
-// will be made with.
+// An `@import` whose sheet has not arrived: the rule, the absolute URL it asked for, the location of the sheet that
+// imports it — its request's referrer (CSS Values 4 "fetch a style resource"); none for a `<style>`'s, whose document's
+// it is — and the media list its sheet will be made with.
 struct PendingImport {
     url: String,
+    referrer: Option<String>,
     rule: Arc<Locked<ImportRule>>,
     media: Arc<Locked<MediaList>>,
     // The URLs of the sheets that import it, outermost first: one already among them is a cycle.
@@ -131,6 +136,7 @@ struct PendingImport {
 struct Loader<'a> {
     pending: &'a RefCell<Vec<PendingImport>>,
     chain: Vec<String>,
+    referrer: Option<String>,
 }
 
 impl StylesheetLoader for Loader<'_> {
@@ -149,7 +155,7 @@ impl StylesheetLoader for Loader<'_> {
         let sheet = if refused || href.is_none() { ImportSheet::new_refused() } else { ImportSheet::new_pending() };
         let rule = Arc::new(lock.wrap(ImportRule { url, stylesheet: sheet, supports, layer, source_location: location }));
         if let (false, Some(url)) = (refused, href) {
-            self.pending.borrow_mut().push(PendingImport { url, rule: rule.clone(), media, chain: self.chain.clone() });
+            self.pending.borrow_mut().push(PendingImport { url, referrer: self.referrer.clone(), rule: rule.clone(), media, chain: self.chain.clone() });
         }
         rule
     }
@@ -201,19 +207,21 @@ impl SheetStore {
         self.rules.remove(&handle);
     }
 
-    // What `@import`s a rule inserted into the sheet asked for (sheet's loader): the URLs, as `make` returns them.
-    pub(crate) fn loader(&self, chain: Vec<String>) -> impl StylesheetLoader + '_ {
-        Loader { pending: &self.pending, chain }
+    // What `@import`s a rule inserted into the sheet asked for (sheet's loader): the URLs, as `make` returns them —
+    // referred by `referrer`, the sheet's location where it has one.
+    pub(crate) fn loader(&self, chain: Vec<String>, referrer: Option<String>) -> impl StylesheetLoader + '_ {
+        Loader { pending: &self.pending, chain, referrer }
     }
     pub(crate) fn pending_count(&self) -> usize {
         self.pending.borrow().len()
     }
-    pub(crate) fn waiting_after(&self, before: usize) -> Vec<String> {
+    pub(crate) fn waiting_after(&self, before: usize) -> Vec<(String, Option<String>)> {
         self.waiting_since(before)
     }
 
-    // A new sheet of `source` (in a document of `quirks` mode): its id, and the URLs its `@import`s wait for.
-    pub(crate) fn make(&mut self, lock: &SharedRwLock, source: &SheetSource, quirks: bool) -> (u32, Vec<String>) {
+    // A new sheet of `source` (in a document of `quirks` mode): its id, and the URLs its `@import`s wait for (each with
+    // its referrer: `waiting_since`).
+    pub(crate) fn make(&mut self, lock: &SharedRwLock, source: &SheetSource, quirks: bool) -> (u32, Vec<(String, Option<String>)>) {
         let before = self.pending.borrow().len();
         let id = self.next_id;
         self.next_id += 1;
@@ -224,7 +232,7 @@ impl SheetStore {
 
     // The sheet `id` made of `source` instead: the URLs its `@import`s wait for. (A new `Stylesheet`, so the engine,
     // which keeps a sheet by identity, takes it as the new sheet it is.)
-    pub(crate) fn replace(&mut self, lock: &SharedRwLock, id: u32, source: &SheetSource, quirks: bool) -> Vec<String> {
+    pub(crate) fn replace(&mut self, lock: &SharedRwLock, id: u32, source: &SheetSource, quirks: bool) -> Vec<(String, Option<String>)> {
         let before = self.pending.borrow().len();
         let version = self.next_id;
         self.next_id += 1;
@@ -274,9 +282,10 @@ impl SheetStore {
         self.dirty_imports.contains(url)
     }
 
-    // The sheet at `url` arrived as `css` (None: it could not be fetched), of a CORS-same-origin response where `clean`:
-    // every `@import` waiting for it takes it, and the URLs its own `@import`s wait for are returned.
-    pub(crate) fn import(&mut self, lock: &SharedRwLock, url: &str, css: Option<&str>, quirks: bool, clean: bool) -> Vec<String> {
+    // The sheet at `url` arrived as `css` (None: it could not be fetched) for the requests referred by `referrer` (None
+    // its document), of a CORS-same-origin response where `clean`: every `@import` waiting for it takes it, and the URLs
+    // its own `@import`s wait for are returned — referred by it, a sheet of its own location.
+    pub(crate) fn import(&mut self, lock: &SharedRwLock, url: &str, referrer: Option<&str>, css: Option<&str>, quirks: bool, clean: bool) -> Vec<(String, Option<String>)> {
         if clean {
             self.dirty_imports.remove(url);
         } else {
@@ -284,7 +293,7 @@ impl SheetStore {
         }
         let waiting: Vec<PendingImport> = {
             let mut pending = self.pending.borrow_mut();
-            let (hit, rest) = std::mem::take(&mut *pending).into_iter().partition(|p| p.url == url);
+            let (hit, rest) = std::mem::take(&mut *pending).into_iter().partition(|p| p.url == url && p.referrer.as_deref() == referrer);
             *pending = rest;
             hit
         };
@@ -293,7 +302,7 @@ impl SheetStore {
             let sheet = match (css, url::Url::parse(url)) {
                 (Some(css), Ok(base)) => {
                     let chain = [&p.chain[..], &[url.to_owned()]].concat();
-                    let loader = Loader { pending: &self.pending, chain };
+                    let loader = Loader { pending: &self.pending, chain, referrer: Some(url.to_owned()) };
                     let url = UrlExtraData::from(base);
                     let sheet = parse_sheet(lock, css, url, Origin::Author, p.media.clone(), AllowImportRules::Yes, Some(&loader), mode(quirks));
                     ImportSheet::new(Arc::new(sheet))
@@ -326,7 +335,8 @@ impl SheetStore {
                 // A sheet reached by URL is the first link of its imports' chain; an inline one names none.
                 let chain = if source.constructed { Vec::new() } else { vec![source.base.clone()] };
                 let media = Arc::new(lock.wrap(media_list(&source.media, &url, mode(quirks))));
-                let loader = Loader { pending: &self.pending, chain };
+                let referrer = source.located.then(|| source.base.clone());
+                let loader = Loader { pending: &self.pending, chain, referrer };
                 let sheet = parse_sheet(lock, &source.css, url, Origin::Author, media, imports, Some(&loader), mode(quirks));
                 let sheet = DocumentStyleSheet(Arc::new(sheet));
                 let keep = !source.css.to_ascii_lowercase().contains("@import");
@@ -367,8 +377,9 @@ impl SheetStore {
         Some((std::mem::replace(&mut stored.sheet, copy.clone()), copy, stored.version))
     }
 
-    fn waiting_since(&self, before: usize) -> Vec<String> {
-        self.pending.borrow()[before..].iter().map(|p| p.url.clone()).collect()
+    // (…each with the location of the sheet that imports it, its request's referrer: none for its document)
+    fn waiting_since(&self, before: usize) -> Vec<(String, Option<String>)> {
+        self.pending.borrow()[before..].iter().map(|p| (p.url.clone(), p.referrer.clone())).collect()
     }
 }
 
@@ -385,7 +396,7 @@ pub(crate) fn import_urls(css: &str, base: &str, quirks: bool) -> Vec<String> {
     let url = UrlExtraData::from(url::Url::parse(base).unwrap_or_else(|_| url::Url::parse("about:blank").unwrap()));
     let media = Arc::new(lock.wrap(MediaList::empty()));
     let pending = RefCell::new(Vec::new());
-    let loader = Loader { pending: &pending, chain: Vec::new() };
+    let loader = Loader { pending: &pending, chain: Vec::new(), referrer: None };
     parse_sheet(&lock, css, url, Origin::Author, media, AllowImportRules::Yes, Some(&loader), mode(quirks));
     pending.into_inner().into_iter().map(|p| p.url).collect()
 }

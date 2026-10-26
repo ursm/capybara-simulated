@@ -125,7 +125,8 @@ RSpec.describe 'a subresource request' do
 
   # A font a sheet's `@font-face` names is a `cors` fetch referred by the rule's style resource base URL (CSS Values 4
   # "fetch a style resource"): an external sheet's location, an `@import`ed one's own — another origin's stripped to its
-  # origin by the document's policy — while the `@import` (`no-cors`) is referred by its client, the document.
+  # origin by the document's policy — and the `@import` (`no-cors`) by the sheet importing it, as "fetch an @import"
+  # makes it a style resource of that sheet's.
   it "is referred by the sheet a font's rule is in", :https do
     refs  = referers
     sites = {}
@@ -152,7 +153,7 @@ RSpec.describe 'a subresource request' do
     session.evaluate_script('[...document.fonts].find((f) => f.family === "C").load().then(() => 1, () => 1)')
     session.evaluate_script('1')
     expect(referers.slice('/imp/i.css', '/fa.woff2', '/fc.woff2', '/fi.woff2', '/fo.woff2', '/fs.woff2')).to eq(
-      '/imp/i.css' => 'https://www.example.com/p',
+      '/imp/i.css' => 'https://www.example.com/css/a.css',
       '/fa.woff2'  => 'https://www.example.com/css/a.css',
       '/fc.woff2'  => 'https://www.example.com/css/a.css',
       '/fi.woff2'  => 'https://www.example.com/imp/i.css',

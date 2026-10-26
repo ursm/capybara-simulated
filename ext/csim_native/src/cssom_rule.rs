@@ -340,7 +340,7 @@ pub(crate) fn insert(
     parent: Option<u32>,
     css: &str,
     index: usize,
-) -> Result<(u32, &'static str, Vec<String>), &'static str> {
+) -> Result<(u32, &'static str, Vec<(String, Option<String>)>), &'static str> {
     // (…an `@charset` is no rule — CSS Syntax drops it as it parses a sheet — so it parses as none: a SyntaxError)
     let mut input = ParserInput::new(css);
     if Parser::new(&mut input).next().is_ok_and(|t| matches!(t, cssparser::Token::AtKeyword(k) if k.eq_ignore_ascii_case("charset"))) {
@@ -348,12 +348,13 @@ pub(crate) fn insert(
     }
     let (rules, containing) = target_list(store, lock, sheet, parent).ok_or("NotFoundError")?;
     let stored = store.get(sheet).ok_or("NotFoundError")?;
-    let (doc_sheet, constructed) = (stored.sheet.clone(), stored.constructed);
+    let (doc_sheet, constructed, located) = (stored.sheet.clone(), stored.constructed, stored.located || stored.imported);
     let before = store.pending_count();
     let rule = {
         let guard = lock.read();
         let contents = doc_sheet.contents(&guard);
-        let loader = store.loader(vec![contents.url_data.as_str().to_owned()]);
+        let at = contents.url_data.as_str().to_owned();
+        let loader = store.loader(vec![at.clone()], located.then_some(at));
         let relative = containing.contains(CssRuleType::Style).then_some(CssRuleType::Style);
         let imports = if constructed { AllowImportRules::No } else { AllowImportRules::Yes };
         rules
