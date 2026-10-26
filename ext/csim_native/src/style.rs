@@ -191,7 +191,8 @@ pub(crate) struct StyleEngine {
     author: Vec<AuthorSheet>,
     // The identity of each `@font-face` rule they hold, which `document.fonts` connects a face by (`font_faces`).
     face_ids: FaceIds,
-    // The image URLs of the located ones, by identity (`image_referrer`), worked out when first asked after they change.
+    // The image URLs of the located ones and of those the sheets import, by identity (`image_referrer`), worked out when
+    // first asked after they change.
     image_referrers: Option<std::collections::HashMap<usize, (style::servo_arc::Arc<url::Url>, String)>>,
     // The arena's `mutations` when it was last styled; None while it has to be styled again whatever they are.
     styled: Option<u64>,
@@ -253,20 +254,20 @@ pub(crate) struct SheetFace {
 // Values 4): `base`, that of the sheet they are the rules of — an `@import`ed sheet's rules its own location's.
 fn sheet_font_faces<'a>(
     mut rules: style::stylesheets::EffectiveRulesIterator<'a, '_, &'a style::stylesheets::CustomMediaMap>,
-    base: &'a str,
+    at: Option<&'a str>,
     device: &'a Device,
     guard: &'a style::shared_lock::SharedRwLockReadGuard<'_>,
-    out: &mut Vec<(&'a style::servo_arc::Arc<style::shared_lock::Locked<style::stylesheets::FontFaceRule>>, &'a str)>,
+    out: &mut Vec<(&'a style::servo_arc::Arc<style::shared_lock::Locked<style::stylesheets::FontFaceRule>>, Option<&'a str>)>,
 ) {
     use style::stylesheets::{CssRule, StylesheetInDocument};
     while let Some(rule) = rules.next() {
         match rule {
-            CssRule::FontFace(face) => out.push((face, base)),
+            CssRule::FontFace(face) => out.push((face, at)),
             CssRule::Import(import) => {
                 let Some(sheet) = import.read_with(guard).stylesheet.as_sheet() else { continue };
                 rules.skip_children();
                 let contents = sheet.contents(guard);
-                sheet_font_faces(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, guard), contents.url_data.as_str(), device, guard, out);
+                sheet_font_faces(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, guard), Some(contents.url_data.as_str()), device, guard, out);
             }
             _ => {}
         }
@@ -276,10 +277,11 @@ fn sheet_font_faces<'a>(
 // The image URLs the declarations of `rules` resolve — a style rule's, a nested one's, a keyframe's; a
 // `background-image`'s, a `cursor`'s, a `list-style-image`'s, a `content`'s, a `cross-fade()`'s inputs and an
 // `image-set()`'s candidates among them — each by its identity, with the location of the sheet it is in: `at`, that of
-// the sheet they are the rules of — an `@import`ed sheet's its own.
+// the sheet they are the rules of — an `@import`ed sheet's its own; none of a sheet of none (a `<style>`'s), whose
+// `@import`s alone are walked.
 fn sheet_image_urls(
     mut rules: style::stylesheets::EffectiveRulesIterator<'_, '_, &style::stylesheets::CustomMediaMap>,
-    at: &str,
+    location: Option<&str>,
     device: &Device,
     guard: &style::shared_lock::SharedRwLockReadGuard<'_>,
     out: &mut std::collections::HashMap<usize, (style::servo_arc::Arc<url::Url>, String)>,
@@ -310,7 +312,7 @@ fn sheet_image_urls(
             _ => {}
         }
     }
-    let block = |block: &style::properties::PropertyDeclarationBlock, out: &mut std::collections::HashMap<usize, (style::servo_arc::Arc<url::Url>, String)>| {
+    let block = |block: &style::properties::PropertyDeclarationBlock, at: &str, out: &mut std::collections::HashMap<usize, (style::servo_arc::Arc<url::Url>, String)>| {
         for decl in block.declarations() {
             match decl {
                 PropertyDeclaration::BackgroundImage(v) => v.0.iter().for_each(|i| image(i, at, out)),
@@ -328,19 +330,29 @@ fn sheet_image_urls(
         }
     };
     while let Some(rule) = rules.next() {
+        // (…a sheet of no location's own declarations none: its document's — its `@import`s' theirs)
+        let Some(at) = location else {
+            if let CssRule::Import(import) = rule {
+                let Some(sheet) = import.read_with(guard).stylesheet.as_sheet() else { continue };
+                let contents = sheet.contents(guard);
+                sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, guard), Some(contents.url_data.as_str()), device, guard, out);
+            }
+            rules.skip_children();
+            continue;
+        };
         match rule {
-            CssRule::Style(rule) => block(rule.read_with(guard).block.read_with(guard), out),
-            CssRule::NestedDeclarations(rule) => block(rule.read_with(guard).block.read_with(guard), out),
+            CssRule::Style(rule) => block(rule.read_with(guard).block.read_with(guard), at, out),
+            CssRule::NestedDeclarations(rule) => block(rule.read_with(guard).block.read_with(guard), at, out),
             CssRule::Keyframes(rule) => {
                 for keyframe in rule.read_with(guard).keyframes.iter() {
-                    block(keyframe.read_with(guard).block.read_with(guard), out);
+                    block(keyframe.read_with(guard).block.read_with(guard), at, out);
                 }
             }
             CssRule::Import(import) => {
                 let Some(sheet) = import.read_with(guard).stylesheet.as_sheet() else { continue };
                 rules.skip_children();
                 let contents = sheet.contents(guard);
-                sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, guard), contents.url_data.as_str(), device, guard, out);
+                sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, guard), Some(contents.url_data.as_str()), device, guard, out);
             }
             _ => {}
         }
@@ -863,8 +875,10 @@ impl StyleEngine {
             seen.push(a.version);
             let contents = a.sheet.contents(&guard);
             let mut rules = Vec::new();
-            sheet_font_faces(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), contents.url_data.as_str(), device, &guard, &mut rules);
-            for (rule, base) in rules {
+            // (…referred by its location — a `<style>`'s faces by their document: its base URL is no style resource's)
+            let at = a.located.then(|| contents.url_data.as_str());
+            sheet_font_faces(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), at, device, &guard, &mut rules);
+            for (rule, at) in rules {
                 let (_, id) = *ids.by_rule.entry((a.version, face_address(rule))).or_insert_with(|| {
                     store.last_face.set(store.last_face.get() + 1);
                     (rule.clone(), store.last_face.get())
@@ -881,7 +895,7 @@ impl StyleEngine {
                 if let Some(src) = &d.src {
                     declared.push(("src", font_face_src(src)));
                 }
-                faces.push(SheetFace { id, record: crate::font_faces::record(d, Some(base)), declared });
+                faces.push(SheetFace { id, record: crate::font_faces::record(d, at), declared });
             }
         }
         faces
@@ -891,22 +905,20 @@ impl StyleEngine {
     // by (CSS Values 4 "fetch a style resource": its style resource's location) — where that is a located sheet of the
     // document's (a `<link>`'s, an `<?xml-stylesheet?>`'s, an `@import`ed one's own): the URL a declaration resolves is
     // the one its computed value keeps (stylo `ComputedUrl::Valid` clones the specified `Arc`), so it is found by
-    // identity. None for any other — a `<style>`'s, an inline style's, a presentational hint's, one a `var()` substituted
-    // (parsed anew), a shadow tree's — whose request the document's is. The URLs are gathered when first asked after
-    // the sheets or the device change, each pinned so no other takes its address. (KNOWN LIMIT: the request is made
-    // under its document's referrer policy, not under the one its sheet's response set.)
+    // identity. None for any other — a `<style>`'s own (an `@import` of one's is located), an inline style's, a
+    // presentational hint's, one a `var()` substituted (parsed anew), a shadow tree's — whose request the document's is.
+    // The URLs are gathered when first asked after the sheets or the device change, each pinned so no other takes its
+    // address; the request is made under the policy its sheet's response set (url_ops.rs `note_sheet_policy`).
     pub(crate) fn image_referrer(&mut self, url: &style::servo_arc::Arc<url::Url>) -> Option<&str> {
-        if !self.author.iter().any(|a| a.located) {
-            return None;
-        }
         if self.image_referrers.is_none() {
             use style::stylesheets::StylesheetInDocument;
             let guard = self.lock.read();
             let device = self.stylist.device();
             let mut map = std::collections::HashMap::new();
-            for a in self.author.iter().filter(|a| a.located) {
+            for a in &self.author {
                 let contents = a.sheet.contents(&guard);
-                sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), contents.url_data.as_str(), device, &guard, &mut map);
+                let at = a.located.then(|| contents.url_data.as_str());
+                sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), at, device, &guard, &mut map);
             }
             self.image_referrers = Some(map);
         }

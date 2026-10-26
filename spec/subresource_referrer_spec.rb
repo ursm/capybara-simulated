@@ -178,24 +178,31 @@ RSpec.describe 'a subresource request' do
         '/n.css' => [{'referrer-policy' => 'no-referrer'}, '@import "/ni.css"; @font-face{font-family:N;src:url(/fn.woff2)} #n{background-image:url(/bn.png)}'],
         '/o.css' => [{'referrer-policy' => 'unsafe-url, bogus, origin'}, '@font-face{font-family:O;src:url(/fo.woff2)} #o{background-image:url(/bo.png)}'],
         '/d.css' => [{}, '#d{background-image:url(/bd.png)}'],
-        '/ni.css' => [{}, '']
+        '/ni.css' => [{}, ''],
+        '/si.css' => [{'referrer-policy' => 'no-referrer'}, '#si{background-image:url(/bsi.png)}']
       }[path]
       next [200, {'content-type' => 'text/css', **css[0]}, [css[1]]] if css
 
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><link rel=stylesheet href=/n.css>' \
-                                              '<link rel=stylesheet href=/o.css><link rel=stylesheet href=/d.css>' \
-                                              '<div id=n>n</div><div id=o>o</div><div id=d>d</div>']]
+      # (…a `<style>`'s `@import`ed sheet's images under the imported sheet's; a `<style>`'s own face by its document,
+      # not its base URL)
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><base href=/sub/dir/>' \
+                                              '<link rel=stylesheet href=/n.css><link rel=stylesheet href=/o.css>' \
+                                              '<link rel=stylesheet href=/d.css>' \
+                                              '<style>@import "/si.css"; @font-face{font-family:S;src:url(/fs.woff2)}</style>' \
+                                              '<div id=n>n</div><div id=o>o</div><div id=d>d</div><div id=si>si</div>']]
     })
     session.visit '/p'
-    session.evaluate_script('Promise.all(["N", "O"].map((f) => document.fonts.load(`16px ${f}`)))')
+    session.evaluate_script('Promise.all(["N", "O", "S"].map((f) => document.fonts.load(`16px ${f}`)))')
     session.evaluate_script('1')
-    expect(referers.slice('/ni.css', '/fn.woff2', '/bn.png', '/fo.woff2', '/bo.png', '/bd.png')).to eq(
+    expect(referers.slice('/ni.css', '/fn.woff2', '/bn.png', '/fo.woff2', '/bo.png', '/bd.png', '/bsi.png', '/fs.woff2')).to eq(
       '/ni.css'   => nil,
       '/fn.woff2' => nil,
       '/bn.png'   => nil,
       '/fo.woff2' => 'https://www.example.com/',
       '/bo.png'   => 'https://www.example.com/',
-      '/bd.png'   => 'https://www.example.com/d.css'
+      '/bd.png'   => 'https://www.example.com/d.css',
+      '/bsi.png'  => nil,
+      '/fs.woff2' => 'https://www.example.com/p'
     )
   end
 

@@ -267,7 +267,8 @@ impl crate::dom::RealmArena {
     }
 }
 // Fetch "parse a referrer policy from a `Referrer-Policy` header": the last of its comma-separated tokens that is a
-// policy — matched as it is, case and all (`No-Referrer` none) — None where none is.
+// policy — matched as it is, case and all (`No-Referrer` none: a token "is a referrer policy" as the string it is,
+// though Chrome and Firefox take it whatever its case, as the host's parse of a document's does) — None where none is.
 pub(crate) fn policy_of_header(header: &str) -> Option<&'static str> {
     header.split(',').rev().find_map(|token| POLICIES.iter().find(|&&p| !p.is_empty() && p == token.trim_matches([' ', '\t'])).copied())
 }
