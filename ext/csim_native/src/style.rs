@@ -917,7 +917,12 @@ impl StyleEngine {
             let guard = self.lock.read();
             let device = self.stylist.device();
             let mut map = std::collections::HashMap::new();
+            // (…a parse many shadow roots share walked once)
+            let mut walked = std::collections::HashSet::new();
             for a in self.author.iter().chain(self.shadow_styles.values().flat_map(|shadow| &shadow.sheets)) {
+                if !walked.insert(&*a.sheet.0 as *const _ as usize) {
+                    continue;
+                }
                 let contents = a.sheet.contents(&guard);
                 let at = a.located.then(|| contents.url_data.as_str());
                 sheet_image_urls(contents.effective_rules(device, &*NO_CUSTOM_MEDIA, &guard), at, device, &guard, &mut map);

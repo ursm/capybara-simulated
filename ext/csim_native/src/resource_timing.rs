@@ -379,6 +379,9 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let final_url = if redirected_resp { string_of(scope, resp, "url", true) } else { None };
     let mut initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
     let mut no_cors = flag_of(scope, desc, "noCors");
+    // (…a navigation's request — a frame's document's, a plugin's resource's — whose status and type a cross-origin
+    // response exposes none of: Resource Timing "mark resource timing", the response's origin not the request's)
+    let mut navigation = false;
     let cid = crate::dom::realm_id(scope, &args);
     // (…of its consumer's `kind` — `J_*`, constants.js, `J_*` here for a fetch only an entry is filed for — its request's
     // `plan`, else its element's (`nid`) now: what says its initiator type, whether its request is a no-cors one and
@@ -392,7 +395,9 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             initiator = by_kind.to_owned();
         }
         if planned.is_some() || planned_kind(kind) {
-            no_cors = crate::subresource_plan::no_cors(planned.unwrap_or_else(|| crate::subresource_plan::plan_in(realm, kind, nid, None, None)));
+            let plan = planned.unwrap_or_else(|| crate::subresource_plan::plan_in(realm, kind, nid, None, None));
+            no_cors = crate::subresource_plan::no_cors(plan);
+            navigation = crate::subresource_plan::navigation(plan);
         }
         if !filed_once(realm, kind, nid, &name, failed || broken) {
             return;
@@ -413,7 +418,7 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         document_origin: crate::dom::realm(scope, cid).location.origin().to_owned(),
         tao: string_of(scope, resp, "tao", false).or(tao_header),
         opaque: response_type.as_deref() == Some("opaque"),
-        document: matches!(initiator.as_str(), "iframe" | "frame"),
+        document: navigation || matches!(initiator.as_str(), "iframe" | "frame"),
         no_cors,
         start,
         end: now,

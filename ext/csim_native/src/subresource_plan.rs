@@ -119,9 +119,12 @@ pub(crate) fn plan_in(realm: &crate::dom::RealmArena, kind: u32, el: Option<crat
     let opaque = realm.location.origin() == "null";
     plan(kind, crossorigin, worker, attr, noted, document, opaque)
 }
-// …and whether a plan is of a `no-cors` request (its mode's bits: `MODES`).
+// …and whether a plan is of a `no-cors` request (its mode's bits: `MODES`), of a `navigate` one.
 pub(crate) fn no_cors(plan: u32) -> bool {
     plan & 3 == 0
+}
+pub(crate) fn navigation(plan: u32) -> bool {
+    plan & 3 == 3
 }
 
 #[cfg(test)]

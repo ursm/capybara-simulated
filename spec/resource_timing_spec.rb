@@ -56,6 +56,7 @@ RSpec.describe 'resource timing' do
       when '/xo'       then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['cross origin']]
       when '/xo-tao'   then [200, {'content-type' => 'text/plain', 'access-control-allow-origin' => '*', 'timing-allow-origin' => '*'}, ['cross origin with tao']]
       when '/beacon'   then [204, {}, ['']]
+      when '/xo.js'    then [200, {'content-type' => 'text/javascript', 'access-control-allow-origin' => '*'}, ['']]
       else
         body = host.start_with?('other.') ? '<p>other</p>' : <<~HTML
           <!DOCTYPE html><html><head><link rel="stylesheet" href="/a.css"><script src="/a.js"></script></head>
@@ -250,6 +251,30 @@ RSpec.describe 'resource timing' do
     Timeout.timeout(5) { sleep 0.05 until s.evaluate_script("performance.getEntriesByType('resource').some(function (e) { return e.name.endsWith('?input'); })") }
     e = entry(s, 'other.example.com/i.png?input')
     expect([e['initiatorType'], e['responseStatus'], e['contentType']]).to eq(['input', 0, ''])
+  end
+
+  # Whether a cross-origin response's status and type show is the request's mode's: an `@import`'s is a no-cors one
+  # (CSS "fetch an @import"), a module preload's a CORS one whatever its `crossorigin`, an `<object>`'s and an
+  # `<embed>`'s a navigation, whose cross-origin response's are hidden as a frame's are (Chrome: 0 / '', 200 /
+  # text/javascript, 0 / '').
+  it "shows a cross-origin response's status and type by its request's mode" do
+    s = session
+    s.execute_script(<<~JS)
+      var style = document.createElement('style');
+      style.textContent = '@import url("http://other.example.com/i.css");';
+      document.head.appendChild(style);
+      document.head.insertAdjacentHTML('beforeend', '<link rel="modulepreload" href="http://other.example.com/xo.js">');
+      document.body.insertAdjacentHTML('beforeend', '<object data="http://other.example.com/i.png?object"></object>' +
+                                                    '<embed src="http://other.example.com/i.png?embed">');
+    JS
+    shown = lambda {|name|
+      e = Timeout.timeout(5) { sleep 0.05 until (list = entries(s, name)).any?; list.first }
+      [e['responseStatus'], e['contentType']]
+    }
+    expect(shown.call('other.example.com/i.css')).to eq([0, ''])
+    expect(shown.call('other.example.com/xo.js')).to eq([200, 'text/javascript'])
+    expect(shown.call('i.png?object')).to eq([0, ''])
+    expect(shown.call('i.png?embed')).to eq([0, ''])
   end
 
   it 'serves a repeated fetch from the HTTP cache with no transfer' do

@@ -5592,6 +5592,37 @@ resource-timing/resource_subframe_self_navigation.html:
 - Subsequent <embed> navigations don't appear in the resource-timing buffer.
 - Subsequent <object> navigations don't appear in the resource-timing buffer.
 - "[harness] TIMEOUT"
+resource-timing/response-status-code.html:
+- This test validates the response status of resources. 290
+- This test validates the response status of resources. 291
+- This test validates the response status of resources. 292
+- This test validates the response status of resources. 293
+- This test validates the response status of resources. 294
+- This test validates the response status of resources. 295
+- This test validates the response status of resources. 296
+- This test validates the response status of resources. 297
+- This test validates the response status of resources. 298
+- This test validates the response status of resources. 299
+- This test validates the response status of resources. 300
+- This test validates the response status of resources. 301
+- This test validates the response status of resources. 302
+- This test validates the response status of resources. 303
+- This test validates the response status of resources. 304
+- This test validates the response status of resources. 305
+- This test validates the response status of resources. 306
+- This test validates the response status of resources. 307
+- This test validates the response status of resources. 308
+- This test validates the response status of resources. 309
+- This test validates the response status of resources. 310
+- This test validates the response status of resources. 311
+- This test validates the response status of resources. 312
+- This test validates the response status of resources. 313
+- This test validates the response status of resources. 314
+- This test validates the response status of resources. 315
+- This test validates the response status of resources. 316
+- This test validates the response status of resources. 317
+- This test validates the response status of resources. 318
+- This test validates the response status of resources. 319
 resource-timing/same-origin-from-cross-origin-redirect.html:
 - Verify that cross origin resources' timings are exposed when the final resource
   at the end of an HTTP redirect chain is same-origin.
