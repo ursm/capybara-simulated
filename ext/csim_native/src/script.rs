@@ -404,6 +404,34 @@ fn running_script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 // (…as deep as the driver's own frames go beneath a promise rejected: the rejection tracker's call into the bindings)
 const RUNNING_SCRIPT_FRAMES: usize = 16;
 
+// __dom.scriptOnStack() -> whether script runs beneath the caller — HTML's JavaScript execution context stack not empty,
+// as "clean up after running script" asks after a callback: a microtask running (its realm's queue: a checkpoint inside
+// one does nothing), or a frame of the page's on the stack (`page_script`) — code the page made with `eval` or
+// `new Function` included, as a handler attribute's is. The driver's own frames are no script's: an event the host fires
+// through the bindings has an empty stack beneath its listeners, one a page's `dispatchEvent` fires the page's.
+fn script_on_stack_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if scope.get_current_context().get_microtask_queue().is_running_microtasks() {
+        return rv.set_bool(true);
+    }
+    // (…asked of as many frames as the bindings' own may go beneath a callback, and of more where they all were)
+    let mut limit = STACK_FRAMES;
+    loop {
+        let Some(trace) = v8::StackTrace::current_stack_trace(scope, limit) else { return rv.set_bool(false) };
+        let count = trace.get_frame_count();
+        for i in 0..count {
+            let Some(frame) = trace.get_frame(scope, i) else { continue };
+            if frame.is_eval() || frame.get_script_name_or_source_url(scope).is_some_and(|n| page_script(&n.to_rust_string_lossy(scope)).is_some()) {
+                return rv.set_bool(true);
+            }
+        }
+        if count < limit {
+            return rv.set_bool(false);
+        }
+        limit *= 4;
+    }
+}
+const STACK_FRAMES: usize = 32;
+
 // __dom.scriptMuted(url[, muted]) -> whether the classic script fetched from `url` has its errors muted (`muted_scripts`,
 // the isolate's: a script of one realm calls another's); with `muted`, that set for it, as its fetch found.
 fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -428,6 +456,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeScriptLine", take_script_line_op, context_id);
     crate::dom::register(scope, ns, "runningScriptMuted", running_script_muted_op, context_id);
     crate::dom::register(scope, ns, "scriptMuted", script_muted_op, context_id);
+    crate::dom::register(scope, ns, "scriptOnStack", script_on_stack_op, context_id);
     crate::dom::register(scope, ns, "parserScripts", parser_scripts_op, context_id);
     crate::dom::register(scope, ns, "listParserScript", list_parser_script_op, context_id);
     crate::dom::register(scope, ns, "takeParserList", take_parser_list_op, context_id);

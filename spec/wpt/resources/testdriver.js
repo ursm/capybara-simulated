@@ -260,7 +260,7 @@
       // Arrow-key default on a focused radio (group navigation) / single-line select.
       // (…as a step of the test's script, on the stack: no microtask checkpoint between a picked radio's listeners)
       var t = D() && D().activeElement;
-      if (t) W.__csimAsScriptSteps(function () { W.__csimArrowKeyDefault(t, name); });
+      if (t) W.__csimArrowKeyDefault(t, name);
     }
   }
 
@@ -371,7 +371,7 @@
       // up from the node pressed that can take it — its editing host, a link around it, a delegatesFocus host — and
       // where none can, the focused element loses it.
       if (mType === 'mousedown' && !ev.defaultPrevented) {
-        try { W.__csimAsScriptSteps(function () { W.__csimFocusOnPress(target); }); } catch (e) {}
+        try { W.__csimFocusOnPress(target); } catch (e) {}
       }
     }
   }
