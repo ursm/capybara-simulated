@@ -908,6 +908,10 @@ pub(crate) struct RealmArena {
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
     // Each document's map of preloaded resources, by preload key (preload_map.rs).
     pub(crate) preloads: std::collections::HashMap<crate::preload_map::Key, crate::preload_map::Preloaded>,
+    // The requests the engine made whose service worker's `fetch` event is yet to answer, by the token the bindings name
+    // each with (subresource_obtain.rs), and the last token.
+    pub(crate) obtains: std::collections::HashMap<u32, crate::subresource_obtain::Request>,
+    pub(crate) obtain_tokens: u32,
     // Each image element's current request, from its first load (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
@@ -1312,6 +1316,7 @@ impl RealmArena {
         self.forget_foreign_observations(Some(cid));
         self.forget_reactions_of(cid);
         self.blob_urls.forget_realm(cid);
+        self.obtains.retain(|_, request| !request.of_realm(cid));
     }
     // The custom element reactions owed to realm `cid`'s elements — or to a node already freed — let go of
     // (ce_reactions.rs `forget`).
@@ -1405,6 +1410,7 @@ impl RealmArena {
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
         self.preloads.retain(|key, _| live(slots, &key.doc()));
+        self.obtains.retain(|_, request| live(slots, &request.doc()));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));

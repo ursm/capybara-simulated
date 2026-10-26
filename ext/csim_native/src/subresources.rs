@@ -25,7 +25,7 @@ const CORS_CREDENTIALS: u32 = 2;
 const SAME_ORIGIN: u32 = 3;
 // …and such a request of another origin's URL than its document's: a network error before any worker could answer it
 // (Fetch "main fetch": a same-origin request's to another origin), no request made.
-const SAME_ORIGIN_REFUSED: u32 = 4;
+pub(crate) const SAME_ORIGIN_REFUSED: u32 = 4;
 // A timed resource's code, which its consumer's kind carries (J_TIMED's high bits, subresource_plan.rs): its `crossorigin`
 // code above, and over it whether its request's destination is `track` — else `image` (a poster, an SVG `<use>`'s
 // document).
@@ -35,7 +35,6 @@ pub(crate) fn timed_destination(code: u32) -> &'static str {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
     crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
     crate::dom::register(scope, ns, "setObjectFallback", set_object_fallback_op, context_id);
 }
@@ -68,7 +67,7 @@ pub(crate) fn use_reference(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> 
 //     the `default` tracks standing in) — its media data the element's own fetch, its load algorithm's (media.js);
 //   an SVG `<use>`'s external document (`use_reference`), 'other' (resource-timing/initiator-type/svg), an image
 //     (whatwg/fetch#1012).
-fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, String, u32)> {
+pub(crate) fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'static str, String, u32)> {
     if !arena.document_states.has_browsing_context(doc) {
         return Vec::new();
     }
@@ -136,25 +135,6 @@ pub(crate) fn timed_cors_request(code: u32) -> (&'static str, &'static str) {
     }
 }
 
-// __dom.timedResources(el, docNid) -> `[initiator, url, code, …]`: the resources connecting `el` fetches
-// for no consumer (`timed_resources`), `code` its consumer kind's (`timed_destination`), its low bits NO_CORS / CORS /
-// CORS_CREDENTIALS / SAME_ORIGIN / SAME_ORIGIN_REFUSED (a network error, no request made); undefined for none.
-fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let cid = crate::dom::realm_id(scope, &args);
-    let found = timed_resources(crate::dom::realm(scope, cid), id, doc);
-    if found.is_empty() {
-        return;
-    }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(found.len() * 3);
-    for (initiator, url, cors) in &found {
-        let (Some(i), Some(u)) = (v8::String::new(scope, initiator), v8::String::new(scope, url)) else { continue };
-        items.push(i.into());
-        items.push(u.into());
-        items.push(v8::Integer::new_from_unsigned(scope, *cors).into());
-    }
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
 
 
 // The resource a connected `<embed>` or `<object>` element `id` (of document `doc`) is to fetch as its processing runs

@@ -1,23 +1,54 @@
-// The fetches the engine makes for a consumer of its own — the images a rendering update owes (rendered.rs) — in the
-// order of Fetch "fetch": the request planned (subresource_plan.rs), a preload of it taken first (preload_map.rs: no
-// fetch then, and no entry of its own), else a controlling service worker's answer, else the network's, and the Resource
-// Timing entry of what answered filed. What reaches past the engine the bindings do, through one host function
-// `host(step, …)` (subresource-host.js): the clock, a pending preload's fetch, a service worker's answer, the network's
-// and the filing of an entry.
+// The fetches the engine makes for a consumer of its own — the images a rendering update owes (rendered.rs), the
+// resources connecting an element fetches for no consumer (subresources.rs `timed_resources`) — in the order of Fetch
+// "fetch": the request planned (subresource_plan.rs), a preload of it taken first (preload_map.rs: no fetch then, and no
+// entry of its own), a same-origin request of another origin's URL a network error, else a controlling service worker's
+// answer, else the network's, and the Resource Timing entry of what answered filed. What reaches past the engine the
+// bindings do, through one host function `host(step, …)` (subresource-host.js): the clock, a pending preload's fetch, a
+// service worker's answer — at once, or as a `fetch` event's, later (`obtainResume`) — the network's and the filing of an
+// entry.
 
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
-use crate::subresource_plan::{plan_in, J_CSS_IMAGE};
+use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_TIMED};
 
 // The host's steps (subresource-host.js `H_*`).
 const H_NOW: u32 = 0;
 const H_RUN_PRELOAD: u32 = 1;
 const H_SW_ANSWER: u32 = 2;
-const H_NETWORK: u32 = 3;
-const H_FILE: u32 = 4;
+const H_SW_DISPATCH: u32 = 3;
+const H_NETWORK: u32 = 4;
+const H_FILE: u32 = 5;
+
+// A request as the engine made it — its consumer `kind` (`J_*`), its element and document, its `plan`, the realm it is
+// made as (its client: its element's node document's) and the sheet that refers it — with its entry's initiator type and
+// its start time; kept while a service worker's `fetch` event is to answer it (`RealmArena::obtains`), by the realm
+// that made it (`cid`).
+pub(crate) struct Request {
+    cid: i32,
+    kind: u32,
+    url: String,
+    el: Option<NodeId>,
+    doc: NodeId,
+    plan: u32,
+    client: Option<i32>,
+    referrer: Option<String>,
+    initiator: &'static str,
+    started: f64,
+}
+impl Request {
+    // (…which the realm `cid`'s discarding, or its document's going, lets go of: it is answered by no one then)
+    pub(crate) fn of_realm(&self, cid: i32) -> bool {
+        self.cid == cid
+    }
+    pub(crate) fn doc(&self) -> NodeId {
+        self.doc
+    }
+}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "fetchCssImages", fetch_css_images_op, context_id);
+    register(scope, ns, "fetchTimedResources", fetch_timed_resources_op, context_id);
+    register(scope, ns, "obtainResume", resume_op, context_id);
 }
 
 // `host(step, …args)` on the page side: what it answers, none for null or undefined, or where it throws — Terminated
@@ -34,6 +65,11 @@ fn call(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, ste
     }
     Ok(answer.filter(|v| !v.is_null_or_undefined()).map(|v| v8::Global::new(tc, v)))
 }
+// …the clock the bindings keep.
+fn now(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> Result<f64, Terminated> {
+    let t = call(scope, host, H_NOW, &[])?;
+    Ok(t.and_then(|t| v8::Local::new(scope, t).number_value(scope)).unwrap_or(0.0))
+}
 
 fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
@@ -43,6 +79,71 @@ fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, s: Option<&str>) -> v8::Lo
         Some(s) => text(scope, s),
         None => v8::null(scope).into(),
     }
+}
+fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
+    let k = v8::String::new(scope, k)?;
+    obj.get(scope, k.into()).filter(|v| !v.is_undefined())
+}
+
+// "Consume a preloaded resource" for `request`: whether a preload answered it, its fetch run first where it was yet to.
+fn preloaded(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<bool, Terminated> {
+    let run = |scope: &mut v8::PinScope<'_, '_>, token: u32| {
+        let token = v8::Integer::new_from_unsigned(scope, token).into();
+        call(scope, host, H_RUN_PRELOAD, &[token]).map(drop)
+    };
+    Ok(crate::preload_map::consume(scope, r.cid, (r.doc, &r.url, destination(r.plan), r.plan), "", run)?.is_some())
+}
+
+// The request's `url`, `plan`, referrer and client, as the host's steps take a request.
+fn request_args<'s>(scope: &mut v8::PinScope<'s, '_>, r: &Request) -> [v8::Local<'s, v8::Value>; 4] {
+    let client = match r.client {
+        Some(c) => v8::Integer::new(scope, c).into(),
+        None => v8::undefined(scope).into(),
+    };
+    [text(scope, &r.url), v8::Integer::new_from_unsigned(scope, r.plan).into(), text_or_null(scope, r.referrer.as_deref()), client]
+}
+
+// What answered a request, as its entry tells it: the network's facts of its response (`resp`, none for a network
+// error), or a service worker's answer (`answer`: `{bytes, status, type, headers}`, `{blocked}` for none that is a
+// response).
+enum Answered {
+    Network(Option<v8::Global<v8::Value>>),
+    Worker(v8::Global<v8::Value>),
+}
+
+// The network's answer to `request`, and its entry filed.
+fn from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<(), Terminated> {
+    let args = request_args(scope, r);
+    let resp = call(scope, host, H_NETWORK, &args)?;
+    file(scope, host, r, Answered::Network(resp))
+}
+
+// The entry of `request` filed (performance.js `recordResourceTiming`).
+fn file(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answered: Answered) -> Result<(), Terminated> {
+    let (field, value) = match answered {
+        Answered::Network(Some(resp)) => ("resp", v8::Local::new(scope, resp)),
+        Answered::Network(None) => ("resp", v8::null(scope).into()),
+        Answered::Worker(answer) => ("answer", v8::Local::new(scope, answer)),
+    };
+    let nid = match r.el {
+        Some(id) => v8::Number::new(scope, id.to_f64()).into(),
+        None => v8::undefined(scope).into(),
+    };
+    let fields = [
+        ("name", text(scope, &r.url)),
+        ("kind", v8::Integer::new_from_unsigned(scope, r.kind).into()),
+        ("nid", nid),
+        ("plan", v8::Integer::new_from_unsigned(scope, r.plan).into()),
+        ("initiatorType", text(scope, r.initiator)),
+        ("startTime", v8::Number::new(scope, r.started).into()),
+        (field, value),
+    ];
+    let desc = v8::Object::new(scope);
+    for (k, v) in fields {
+        let k = text(scope, k);
+        desc.set(scope, k, v);
+    }
+    call(scope, host, H_FILE, &[desc.into()]).map(drop)
 }
 
 // __dom.fetchCssImages(doc, host): the images the rendering update owes (rendered.rs `take_owed_css_images`) fetched for
@@ -57,7 +158,7 @@ fn fetch_css_images_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let Some(doc) = doc else { return };
     let cid = realm_id(scope, &args);
     for (initiator, url, referrer) in owed {
-        if fetch_css_image(scope, cid, doc, host, initiator, &url, referrer.as_deref()).is_err() {
+        if fetch_css_image(scope, cid, doc, host, initiator, url, referrer).is_err() {
             return;
         }
     }
@@ -68,41 +169,101 @@ fn fetch_css_images_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // Referrer Policy §7). Its answer is a controlling service worker's first, whose network error is no image and whose
 // fall-through goes to the network; the network's is fetched for its entry alone: nothing paints it, so nothing decodes
 // it.
-fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host: v8::Local<'_, v8::Function>, initiator: &str, url: &str, referrer: Option<&str>) -> Result<(), Terminated> {
-    let started = call(scope, host, H_NOW, &[])?;
-    let plan = plan_in(realm(scope, cid), J_CSS_IMAGE, None, Some(doc), referrer);
-    let run = |scope: &mut v8::PinScope<'_, '_>, token: u32| {
-        let token = v8::Integer::new_from_unsigned(scope, token).into();
-        call(scope, host, H_RUN_PRELOAD, &[token]).map(drop)
-    };
-    if crate::preload_map::consume(scope, cid, (doc, url, "image", plan), "", run)?.is_some() {
+fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host: v8::Local<'_, v8::Function>, initiator: &'static str, url: String, referrer: Option<String>) -> Result<(), Terminated> {
+    let started = now(scope, host)?;
+    let plan = plan_in(realm(scope, cid), J_CSS_IMAGE, None, Some(doc), referrer.as_deref());
+    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc, plan, client: None, referrer, initiator, started };
+    if preloaded(scope, host, &r)? {
         return Ok(());
     }
-    let request = [text(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), text_or_null(scope, referrer)];
-    let (field, answered) = match call(scope, host, H_SW_ANSWER, &request)? {
-        Some(answer) => ("answer", Some(answer)),
-        None => ("resp", call(scope, host, H_NETWORK, &request)?),
-    };
-    let desc = v8::Object::new(scope);
-    let answered = match answered {
-        Some(a) => v8::Local::new(scope, a),
-        None => v8::null(scope).into(),
-    };
-    let started = match started {
-        Some(t) => v8::Local::new(scope, t),
-        None => v8::undefined(scope).into(),
-    };
-    let fields = [
-        ("name", text(scope, url)),
-        ("kind", v8::Integer::new_from_unsigned(scope, J_CSS_IMAGE).into()),
-        ("plan", v8::Integer::new_from_unsigned(scope, plan).into()),
-        ("initiatorType", text(scope, initiator)),
-        ("startTime", started),
-        (field, answered),
-    ];
-    for (k, v) in fields {
-        let k = text(scope, k);
-        desc.set(scope, k, v);
+    let args = request_args(scope, &r);
+    match call(scope, host, H_SW_ANSWER, &args)? {
+        Some(answer) => file(scope, host, &r, Answered::Worker(answer)),
+        None => from_network(scope, host, &r),
     }
-    call(scope, host, H_FILE, &[desc.into()]).map(drop)
+}
+
+// __dom.fetchTimedResources(el, doc, host): the resources connecting `el` (of document `doc`) fetches for no consumer —
+// a video's poster and a media element's shown tracks, an SVG `<use>`'s external document — each once for the page
+// (subresources.rs `timed_resources`), fetched for its Resource Timing entry, each its own destination's request (Fetch
+// Metadata) planned by its `cors` code (subresource_plan.rs, J_TIMED). (A media element's own data is its load
+// algorithm's fetch: media.rs.) A controlling service worker answers each, as any request but a plugin's (Handle
+// Fetch), its `fetch` event's answer later (`obtainResume`).
+fn fetch_timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return };
+    let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
+    let cid = realm_id(scope, &args);
+    let found = crate::subresources::timed_resources(realm(scope, cid), el, doc);
+    for (initiator, url, code) in found {
+        if fetch_timed(scope, cid, el, doc, host, initiator, url, code).is_err() {
+            return;
+        }
+    }
+}
+
+// …one of them: `code` its request's (`timed_resources`), a preload of it taken first, and a same-origin one of
+// another origin's URL a network error before any service worker or network (Fetch "main fetch" step 12), filed as one.
+#[allow(clippy::too_many_arguments)]
+fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: NodeId, host: v8::Local<'_, v8::Function>, initiator: &'static str, url: String, code: u32) -> Result<(), Terminated> {
+    let started = now(scope, host)?;
+    let kind = J_TIMED | code << 8;
+    let arena = realm(scope, cid);
+    let plan = plan_in(arena, kind, Some(el), Some(doc), None);
+    let client = arena.get(el).map(|n| n.realm);
+    let r = Request { cid, kind, url, el: Some(el), doc, plan, client, referrer: None, initiator, started };
+    if preloaded(scope, host, &r)? {
+        return Ok(());
+    }
+    if code & 15 == crate::subresources::SAME_ORIGIN_REFUSED {
+        return file(scope, host, &r, Answered::Network(None));
+    }
+    let token = {
+        let arena = realm(scope, cid);
+        arena.obtain_tokens += 1;
+        arena.obtain_tokens
+    };
+    let mut args = request_args(scope, &r).to_vec();
+    args.push(v8::Integer::new_from_unsigned(scope, token).into());
+    if call(scope, host, H_SW_DISPATCH, &args)?.is_some_and(|d| v8::Local::new(scope, d).is_true()) {
+        realm(scope, cid).obtains.insert(token, r);
+        return Ok(());
+    }
+    from_network(scope, host, &r)
+}
+
+// __dom.obtainResume(token, resp, bytes, host): a service worker's `fetch` event's answer to the request `token` named
+// (`fetch_timed`): `resp` the response it answered with — its body's `bytes`, a streamed one's read — `{__networkError}`
+// for a network error, null where it let the request through, which the network answers then: the request as it was
+// made, whatever its element is now. An answer Fetch "HTTP fetch" step 5.5 does not let answer it is a network error.
+fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return };
+    let token = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let Some(r) = realm(scope, cid).obtains.remove(&token) else { return };
+    let Ok(resp) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
+        let _ = from_network(scope, host, &r);
+        return;
+    };
+    let kind = member(scope, resp, "type").map_or_else(|| "default".to_owned(), |t| t.to_rust_string_lossy(scope));
+    let redirected = member(scope, resp, "redirected").is_some_and(|v| v.is_true());
+    let error = member(scope, resp, "__networkError").is_some_and(|v| v.is_true());
+    let answer = v8::Object::new(scope);
+    let set = |scope: &mut v8::PinScope<'_, '_>, k: &str, v: v8::Local<'_, v8::Value>| {
+        let k = text(scope, k);
+        answer.set(scope, k, v);
+    };
+    if error || !crate::fetch_rules::service_worker_response_allowed(fields(r.plan).0, "follow", &kind, redirected) {
+        let yes = v8::Boolean::new(scope, true).into();
+        set(scope, "blocked", yes);
+    } else {
+        for k in ["status", "type", "headers"] {
+            if let Some(v) = member(scope, resp, k) {
+                set(scope, k, v);
+            }
+        }
+        let bytes = args.get(2);
+        set(scope, "bytes", bytes);
+    }
+    let answer = v8::Global::new(scope, v8::Local::<v8::Value>::from(answer));
+    let _ = file(scope, host, &r, Answered::Worker(answer));
 }
