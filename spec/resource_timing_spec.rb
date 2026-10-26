@@ -235,6 +235,22 @@ RSpec.describe 'resource timing' do
     expect(e['encodedBodySize']).to eq(0)
   end
 
+  # …an image input's too, whatever `crossorigin` it carries: it has no CORS settings attribute, its request a no-cors
+  # one (HTML: an image button's image is fetched as `<img>` with no `crossorigin` is).
+  it 'exposes neither status nor type of a cross-origin image input, a crossorigin attribute and all' do
+    s = session
+    s.execute_script(<<~JS)
+      var i = document.createElement('input');
+      i.type = 'image';
+      i.setAttribute('crossorigin', '');
+      i.src = 'http://other.example.com/i.png?input';
+      document.body.appendChild(i);
+    JS
+    await_images(s)
+    e = entry(s, 'other.example.com/i.png?input')
+    expect([e['initiatorType'], e['responseStatus'], e['contentType']]).to eq(['input', 0, ''])
+  end
+
   it 'serves a repeated fetch from the HTTP cache with no transfer' do
     s = session
     s.execute_script("fetch('/cached').then(function () { return fetch('/cached'); })")

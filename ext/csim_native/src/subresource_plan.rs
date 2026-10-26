@@ -94,7 +94,10 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let (el, doc) = (crate::dom::nid_arg(scope, &args, 1), crate::dom::nid_arg(scope, &args, 2));
     let sheet = args.get(3).is_string().then(|| args.get(3).to_rust_string_lossy(scope));
     let cid = crate::dom::realm_id(scope, &args);
-    let realm = crate::dom::realm(scope, cid);
+    rv.set_uint32(plan_in(crate::dom::realm(scope, cid), kind, el, doc, sheet.as_deref()));
+}
+// …the plan of it in `realm`: what of the element, its document and the sheet `plan` takes.
+pub(crate) fn plan_in(realm: &crate::dom::RealmArena, kind: u32, el: Option<crate::dom::NodeId>, doc: Option<crate::dom::NodeId>, sheet: Option<&str>) -> u32 {
     let node = el.and_then(|id| realm.get(id));
     // (…an `<input type=image>`'s request no potential-CORS one: it has no CORS settings attribute)
     let crossorigin = node.filter(|n| !n.is_html_named("input")).and_then(|n| n.plain_attr("crossorigin"));
@@ -104,7 +107,7 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         J_IMAGE => node.is_some_and(|n| n.is_html_named("img")),
         k => matches!(k, J_CLASSIC_SCRIPT | J_MODULE_SCRIPT | J_SHEET | J_LINK | J_PREFETCH),
     };
-    let attr = match sheet.and_then(|s| realm.sheet_referrer_policy(&s)) {
+    let attr = match sheet.and_then(|s| realm.sheet_referrer_policy(s)) {
         Some(policy) => policy,
         None => node.filter(|_| referring).map_or("", crate::url_ops::referrer_policy_attribute),
     };
@@ -114,7 +117,11 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let noted = el.and_then(|id| realm.request_policies.get(&id).copied());
     let document = doc.map_or("", |d| realm.document_referrer_policy(d));
     let opaque = realm.location.origin() == "null";
-    rv.set_uint32(plan(kind, crossorigin, worker, attr, noted, document, opaque));
+    plan(kind, crossorigin, worker, attr, noted, document, opaque)
+}
+// …and whether a plan is of a `no-cors` request (its mode's bits: `MODES`).
+pub(crate) fn no_cors(plan: u32) -> bool {
+    plan & 3 == 0
 }
 
 #[cfg(test)]

@@ -272,8 +272,9 @@ fn flag_of(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Objec
 }
 // __dom.resourceTimingEntry(desc, now) -> the fields of the entry a fetch files (`entry_fields`), its `name`, `startTime`
 // and `initiatorType` among them, `serverTiming` a flat [name, duration, description, …] list — or null for a resource
-// of no network scheme. `desc` what the fetch tells of it: `{ name, initiatorType, startTime, resp, body, renderBlocking,
-// noCors, cached, encoded, decoded, status, headers, type, redirected }`, `resp` a response hash (status / headers /
+// of no network scheme, or that the page files no more. `desc` what the fetch tells of it: `{ name, kind, nid,
+// initiatorType, startTime, resp, body, renderBlocking, noCors, cached, encoded, decoded, status, headers, type,
+// redirected, broken }`, `resp` a response hash (status / headers /
 // bytes / encoded / cached / redirected / type / url / tao / contentEncoding / serverTiming) the rest defaults from —
 // none for a network error, an entry of its times alone, but where `status` is given — `body` a text body of the asset
 // cache's that sizes one with no hash; `now` its end, the clock the bindings keep. The document's origin is the calling
@@ -312,7 +313,32 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     }
     let redirected_resp = flag_of(scope, resp, "redirected");
     let final_url = if redirected_resp { string_of(scope, resp, "url", true) } else { None };
-    let initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
+    let mut initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
+    let mut no_cors = flag_of(scope, desc, "noCors");
+    let cid = crate::dom::realm_id(scope, &args);
+    // (…of its consumer's `kind` — `J_*`, constants.js — and its element (`nid`): what says its initiator type, whether
+    // its request is a no-cors one, and whether the page files it at all: an image once for the page, as its memory
+    // cache serves it after (a broken one each time it loads: `broken`))
+    if let Some(kind) = member(scope, desc, "kind").and_then(|v| v.uint32_value(scope)) {
+        let nid = member(scope, desc, "nid").and_then(|v| v.integer_value(scope)).and_then(crate::dom::NodeId::from_i64);
+        let broken = flag_of(scope, desc, "broken");
+        let realm = crate::dom::realm(scope, cid);
+        if kind & 0xff == crate::subresource_judge::J_IMAGE {
+            let node = nid.and_then(|id| realm.get(id));
+            initiator = (if node.is_some_and(|n| n.is_html_named("input")) {
+                "input"
+            } else if node.is_some_and(|n| &*n.local_name == "image") {
+                "image"
+            } else {
+                "img"
+            })
+            .to_owned();
+            no_cors = crate::subresource_plan::no_cors(crate::subresource_plan::plan_in(realm, kind, nid, None, None));
+            if !failed && !broken && !realm.timed_resources.insert(("img", name.clone())) {
+                return;
+            }
+        }
+    }
     let response_type = string_of(scope, desc, "type", true).or_else(|| string_of(scope, resp, "type", true));
     let cached_given = raw(scope, desc, "cached");
     let cached = if cached_given.is_undefined() { string_of(scope, resp, "cached", true) } else { cached_given.boolean_value(scope).then(|| cached_given.to_rust_string_lossy(scope)) };
@@ -323,14 +349,13 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         None => int_of(scope, resp, "status").unwrap_or(0.0),
     };
     let start = member(scope, desc, "startTime").and_then(|v| v.number_value(scope)).unwrap_or(now);
-    let cid = crate::dom::realm_id(scope, &args);
     let facts = Facts {
         final_url: final_url.unwrap_or_else(|| name.clone()),
         document_origin: crate::dom::realm(scope, cid).location.origin().to_owned(),
         tao: string_of(scope, resp, "tao", false).or(tao_header),
         opaque: response_type.as_deref() == Some("opaque"),
         document: matches!(initiator.as_str(), "iframe" | "frame"),
-        no_cors: flag_of(scope, desc, "noCors"),
+        no_cors,
         start,
         end: now,
         cached,
