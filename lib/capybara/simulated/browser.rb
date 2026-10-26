@@ -3927,15 +3927,16 @@ module Capybara
       # facts (`resource_timing_meta`), or nil when the URL can't resolve; a 4xx/5xx still returns
       # facts so the entry records, as a browser files one for a failed media load.
       # (…an element's of the document of realm `realm`, its request the engine's `plan` of it — subresource_plan.rs — its
-      # mode as it says, no-cors too, and its destination)
-      def resource_timing_fetch(url, realm, plan)
+      # mode as it says, no-cors too, and its destination — referred by `referrer` where it names one of its own: a CSS
+      # image's, its sheet's location)
+      def resource_timing_fetch(url, realm, plan, referrer = nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         mode, credentials, policy, _, dest = Native.subresource_plan_fields(plan.to_i)
-        client = client_for(realm, policy)
+        client = client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer)
         result = rack_fetch('GET', key, '', {}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
-                            client_origin: client[:origin], client_realm: client[:realm], dest: dest)
+                            initiator: client[:initiator], client_origin: client[:origin], client_realm: client[:realm], dest: dest)
         # (…and a plugin's its body, which may be an image its element takes its natural size from)
         meta = result && resource_timing_meta(result)
         meta['body'] = document_payload(result['body']) if meta && %w[embed object].include?(dest.to_s) && image_response?(meta)

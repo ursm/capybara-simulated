@@ -197,11 +197,12 @@ fn probed_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     }
 }
 // __dom.swImportCacheMode() -> the cache mode a service worker's `importScripts` fetches in: `no-cache` under an
-// updateViaCache of `none` (every import revalidated), else none ('': the HTTP cache read) — and none for another realm.
+// updateViaCache of `none` (every import revalidated), else undefined (the HTTP cache read) — and undefined for another
+// realm.
 fn import_cache_mode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let none = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).is_some_and(|g| g.update_via_cache == "none");
-    if let Some(s) = v8::String::new(scope, if none { "no-cache" } else { "" }) {
+    if let Some(s) = v8::String::new(scope, "no-cache").filter(|_| none) {
         rv.set(s.into());
     }
 }
