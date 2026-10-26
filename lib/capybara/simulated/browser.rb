@@ -6128,7 +6128,7 @@ module Capybara
       end
 
       # Re-run every frame navigation a realm parked on an activating registration
-      # (bridge.entry.js keeps the frame elements; the retry rebuilds each frame through
+      # (the engine keeps the frames, frame_navigation.rs `takeSwDeferredFrames`; the retry rebuilds each frame through
       # the normal path, which re-consults the — now settled — registration state).
       private def retry_deferred_navigations
         return unless @sw_navs_deferred

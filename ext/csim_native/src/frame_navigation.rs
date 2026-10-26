@@ -39,6 +39,8 @@ struct Content {
 #[derive(Default)]
 struct FrameNavigation {
     flags: u32,
+    // …the turn its build was parked in (`DEFERRED_SW`), its replay's place among the others'.
+    deferred_at: u32,
     generation: u32,
     // The URL the navigation started with — the `src` attribute's value then, none where it had none (`Some(None)`):
     // what a beforeunload handler rewriting the attribute does not change.
@@ -68,8 +70,10 @@ struct FrameNavigation {
 
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
 const NAV_PENDING: u32 = 1 << 1;
-// Its build parked on a still-activating service worker (frame-nav.js `FN_DEFERRED_SW`): `takeSwDeferredFrames`.
+// Its build parked on a still-activating service worker (frame-nav.js `FN_DEFERRED_SW`) — set until the replay that
+// `takeSwDeferredFrames` hands it to runs — and (the engine's own bit) handed to one already.
 const DEFERRED_SW: u32 = 1 << 3;
+const DEFERRED_LISTED: u32 = 1 << 16;
 // The navigation is a reload (frame-nav.js `FN_RELOAD_NAV`).
 const RELOAD_NAV: u32 = 1 << 5;
 // Its post-insertion step ran: its navigable exists (frame-nav.js `FN_CONTEXT_READY`).
@@ -87,6 +91,8 @@ pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>, Plans);
 #[derive(Default)]
 struct Plans {
     next: u32,
+    // (…and the parked builds', `FrameNavigation::deferred_at`)
+    deferrals: u32,
     last: HashMap<NodeId, (u32, NodeId)>,
 }
 
@@ -450,24 +456,26 @@ fn set_frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
-    rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.flags));
+    rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.flags & !DEFERRED_LISTED));
 }
 
 // __dom.takeSwDeferredFrames() -> the containers of the calling realm whose builds are parked on a service worker still
-// activating (`DEFERRED_SW`), in the order they were made, the flag cleared: what an activation's change replays.
+// activating (`DEFERRED_SW`) and not yet handed to a replay — handed now — in the order they were parked: what an
+// activation's change replays, each parked until its replay runs (its `FN_DEFERRED_SW` cleared then, the bindings').
 fn take_sw_deferred_frames(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let mut parked: Vec<NodeId> = Vec::new();
-    for (&container, nav) in arena.frame_navigations.0.iter_mut() {
-        if nav.flags & DEFERRED_SW != 0 {
-            nav.flags &= !DEFERRED_SW;
-            parked.push(container);
+    let ours: Vec<NodeId> = arena.frame_navigations.0.keys().copied().filter(|&c| arena.get(c).is_some_and(|n| n.realm == cid)).collect();
+    let mut parked: Vec<(u32, NodeId)> = Vec::new();
+    for container in ours {
+        let Some(nav) = arena.frame_navigations.0.get_mut(&container) else { continue };
+        if nav.flags & (DEFERRED_SW | DEFERRED_LISTED) == DEFERRED_SW {
+            nav.flags |= DEFERRED_LISTED;
+            parked.push((nav.deferred_at, container));
         }
     }
-    parked.retain(|&c| arena.get(c).is_some_and(|n| n.realm == cid));
-    parked.sort_unstable_by(|a, b| a.to_f64().total_cmp(&b.to_f64()));
-    let items: Vec<v8::Local<v8::Value>> = parked.iter().map(|id| v8::Number::new(scope, id.to_f64()).into()).collect();
+    parked.sort_unstable_by_key(|&(at, _)| at);
+    let items: Vec<v8::Local<v8::Value>> = parked.iter().map(|(_, id)| v8::Number::new(scope, id.to_f64()).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
@@ -540,8 +548,18 @@ fn set_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     if on {
+        let parked = flags & DEFERRED_SW != 0 && arena.frame_navigation(container).flags & DEFERRED_SW == 0;
+        if parked {
+            arena.frame_navigations.1.deferrals += 1;
+            let at = arena.frame_navigations.1.deferrals;
+            let nav = arena.frame_navigation(container);
+            nav.deferred_at = at;
+            nav.flags &= !DEFERRED_LISTED;
+        }
         arena.frame_navigation(container).flags |= flags;
     } else if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
+        // (…a build parked no more no replay's either)
+        let flags = if flags & DEFERRED_SW != 0 { flags | DEFERRED_LISTED } else { flags };
         nav.flags &= !flags;
         // (…its navigable destroyed with its post-insertion step undone — the container removed — and what the window
         // of its initial about:blank document had with it: one inserted again is a new one's)

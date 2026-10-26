@@ -310,8 +310,9 @@ fn note_request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 }
 // wptserve's `?pipe=trickle(dN[:dM…])`: the response held back the sum of its `dN` seconds, in ms — what a resource of the
 // URL `url` waits before it loads, the driver's fetches being synchronous (the pipe's other steps, its byte counts,
-// read nowhere); 0 for none. The first `pipe=` value (up to the next `&`) that names `trickle(`, its steps up to `)`, each
-// `d` and the longest number after it (as `parseFloat` reads one) — ASCII case-insensitively.
+// read nowhere); 0 for none — and for one a step of which is a `d` of no number after it (NaN to the bindings' regular
+// expression it was, a delay of none). The first `pipe=` value (up to the next `&`) that names `trickle(`, its steps up
+// to `)`, each a `d` (past white space, JavaScript's) and the longest number after it — ASCII case-insensitively.
 pub(crate) fn trickle_delay_ms(url: &str) -> f64 {
     let lower = url.to_ascii_lowercase();
     let mut from = 0;
@@ -320,12 +321,20 @@ pub(crate) fn trickle_delay_ms(url: &str) -> f64 {
         let value = &lower[at..lower[at..].find('&').map_or(lower.len(), |i| at + i)];
         let Some(open) = value.find("trickle(").map(|i| at + i + 8) else { continue };
         let Some(close) = lower[open..].find(')').map(|i| open + i) else { continue };
-        return lower[open..close].split(':').filter_map(|step| step.trim_start().strip_prefix('d')).map(|n| leading_number(n) * 1000.0).sum();
+        let mut ms = 0.0;
+        for step in lower[open..close].split(':') {
+            // (…a step of no `d` and a digit or a point after it none)
+            let Some(n) = step.trim_start_matches(js_space).strip_prefix('d').filter(|n| n.starts_with(|c: char| c.is_ascii_digit() || c == '.')) else { continue };
+            let Some(seconds) = leading_number(n) else { return 0.0 };
+            ms += seconds * 1000.0;
+        }
+        return ms;
     }
     0.0
 }
-// …the longest decimal number `s` begins with (`[\d.]+` as `parseFloat` takes it: digits, one point, digits), 0 for none.
-fn leading_number(s: &str) -> f64 {
+// …the longest decimal number `s` begins with (`[\d.]+` as `parseFloat` takes it: digits, one point, digits) — none where
+// it begins with none — and JavaScript's white space (`\s`: its WhiteSpace and LineTerminator).
+fn leading_number(s: &str) -> Option<f64> {
     let mut end = 0;
     let mut point = false;
     for (i, c) in s.char_indices() {
@@ -335,7 +344,10 @@ fn leading_number(s: &str) -> f64 {
             _ => break,
         }
     }
-    s[..end].parse().unwrap_or(0.0)
+    s[..end].parse().ok()
+}
+fn js_space(c: char) -> bool {
+    matches!(c, '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
 }
 fn trickle_delay_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
@@ -685,6 +697,12 @@ mod tests {
         assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(5)"), 0.0);
         assert_eq!(trickle_delay_ms("/a.css"), 0.0);
         assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(d1"), 0.0);
+        // (…a `d` of no number none at all, as NaN was; white space JavaScript's)
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(d.:d1)"), 0.0);
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(d:d1)"), 1000.0);
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(\u{feff}d1)"), 1000.0);
+        assert_eq!(trickle_delay_ms("/a.css?pipe=trickle(\u{85}d1)"), 0.0);
+        assert!(trickle_delay_ms("/a.css?pipe=trickle()").is_sign_positive());
     }
 
     #[test]
