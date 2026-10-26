@@ -102,5 +102,24 @@ RSpec.describe 'an image a style sheet references', :https do
     s.current_window.resize_to(500, 600)
     expect(poll_until { s.evaluate_script('document.body.offsetHeight') && referers['/m.png'] }).to eq('https://www.example.com/l.css')
   end
+  # …its location the URL its response came from — a redirect's last — which its URLs resolve against and its imports
+  # and images are referred by (Chrome: `/r.css` redirected to `/sub/t.css` fetches `/sub/u.css`, referred by it).
+  it 'is a redirected sheet\'s, at the URL it was redirected to' do
+    referers = {}
+    s = simulated_session(lambda {|env|
+      referers[env['PATH_INFO']] = env['HTTP_REFERER']
+      case env['PATH_INFO']
+      when '/r.css' then [302, {'location' => '/sub/t.css'}, []]
+      when '/sub/t.css' then [200, {'content-type' => 'text/css'}, ['@import "u.css"; #a { background-image: url(a.png) }']]
+      when '/sub/u.css' then [200, {'content-type' => 'text/css'}, ['p {}']]
+      when '/sub/a.png' then [200, {'content-type' => 'image/png'}, [File.binread(File.expand_path('wpt/common/square.png', __dir__))]]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><link rel=stylesheet href="/r.css"><div id=a style="width:9px;height:9px"></div>']]
+      end
+    })
+    s.visit '/'
+    expect(poll_until { s.evaluate_script('document.body.offsetHeight') && (got = referers.slice('/sub/u.css', '/sub/a.png')).size == 2 && got }).to eq(
+      '/sub/u.css' => 'https://www.example.com/sub/t.css', '/sub/a.png' => 'https://www.example.com/sub/t.css'
+    )
+  end
 end
 

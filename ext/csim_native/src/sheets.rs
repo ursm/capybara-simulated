@@ -120,9 +120,8 @@ const PARSED_LIMIT: usize = 64;
 
 // An `@import` whose sheet has not arrived: the rule, the absolute URL it asked for, the location of the sheet that
 // imports it — its request's referrer (CSS Values 4 "fetch a style resource"); none for a `<style>`'s, whose document's
-// it is — and the media list its sheet will be made with. (KNOWN LIMITS: a sheet's location is the URL it was requested
-// at, not the one a redirect left it at; and its request is made under its document's referrer policy, not under the
-// one the importing sheet's response set.)
+// it is — and the media list its sheet will be made with. (KNOWN LIMIT: its request is made under its document's
+// referrer policy, not under the one the importing sheet's response set.)
 struct PendingImport {
     url: String,
     referrer: Option<String>,
@@ -285,9 +284,11 @@ impl SheetStore {
     }
 
     // The sheet at `url` arrived as `css` (None: it could not be fetched) for the requests referred by `referrer` (None
-    // its document), of a CORS-same-origin response where `clean`: every `@import` waiting for it takes it, and the URLs
-    // its own `@import`s wait for are returned — referred by it, a sheet of its own location.
-    pub(crate) fn import(&mut self, lock: &SharedRwLock, url: &str, referrer: Option<&str>, css: Option<&str>, quirks: bool, clean: bool) -> Vec<(String, Option<String>)> {
+    // its document), of a CORS-same-origin response where `clean`, at `location` — the URL its response came from, a
+    // redirect's last — which its URLs resolve against: every `@import` waiting for it takes it, and the URLs its own
+    // `@import`s wait for are returned, referred by that location.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn import(&mut self, lock: &SharedRwLock, url: &str, referrer: Option<&str>, location: &str, css: Option<&str>, quirks: bool, clean: bool) -> Vec<(String, Option<String>)> {
         if clean {
             self.dirty_imports.remove(url);
         } else {
@@ -301,10 +302,10 @@ impl SheetStore {
         };
         let before = self.pending.borrow().len();
         for p in waiting {
-            let sheet = match (css, url::Url::parse(url)) {
+            let sheet = match (css, url::Url::parse(location)) {
                 (Some(css), Ok(base)) => {
                     let chain = [&p.chain[..], &[url.to_owned()]].concat();
-                    let loader = Loader { pending: &self.pending, chain, referrer: Some(url.to_owned()) };
+                    let loader = Loader { pending: &self.pending, chain, referrer: Some(location.to_owned()) };
                     let url = UrlExtraData::from(base);
                     let sheet = parse_sheet(lock, css, url, Origin::Author, p.media.clone(), AllowImportRules::Yes, Some(&loader), mode(quirks));
                     ImportSheet::new(Arc::new(sheet))
