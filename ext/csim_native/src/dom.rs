@@ -1054,6 +1054,8 @@ pub(crate) struct RealmState {
     // and whether its errors are muted), which a repeated `importScripts` of one runs again from, before any fetch
     // (service_worker.rs `swScriptResource`).
     pub(crate) script_resources: std::collections::HashMap<String, (Vec<u16>, bool)>,
+    // …and, a service worker's realm, what its spawn gave it (service_worker.rs `swGlobalInit`).
+    pub(crate) service_worker: Option<crate::service_worker::ServiceWorkerGlobal>,
     // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
     // load owed to the parent after it (frame_navigation.rs `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`).
     pub(crate) load_delay: u8,

@@ -9170,16 +9170,13 @@ module Capybara
         # script are distinct registrations; anything keyed on the scope, e.g. a
         # per-registration cache name, must not collide).
         if service
-          rt.eval_void("globalThis.__csimSwScope = #{JSON.generate(sw_scope.to_s)};") unless sw_scope.to_s.empty?
-          # The registration's updateViaCache mode — importScripts' cache decision
-          # ('none' revalidates every import; 'imports'/'all' read the HTTP cache).
-          rt.eval_void("globalThis.__csimSwUvc = #{JSON.generate(sw_uvc)};") if sw_uvc
-          # The Update probe's import responses — this version's script resource map
-          # (importScripts consume them one-shot instead of re-fetching).
-          rt.eval_void("globalThis.__csimSwImportMap = #{JSON.generate(sw_imports_map)};") if sw_imports_map
-          # The registration's active version at spawn — `self.registration.active`
-          # while THIS version installs (registration-attribute's newer worker).
-          rt.eval_void("globalThis.__csimSwPrevActive = #{JSON.generate(sw_prev_active)};") if sw_prev_active
+          # …with its registration's updateViaCache mode (importScripts' cache decision: 'none' revalidates every
+          # import, 'imports' / 'all' read the HTTP cache), the Update probe's import responses (this version's script
+          # resource map, which importScripts take each once instead of fetching again) and its registration's active
+          # version at spawn (`self.registration.active` while THIS version installs) — the engine's
+          # (service_worker.rs `swGlobalInit`).
+          args = [sw_scope.to_s, sw_uvc, sw_imports_map && JSON.generate(sw_imports_map), sw_prev_active&.dig(:url), sw_prev_active&.dig(:handle).to_i]
+          rt.eval_void("globalThis.__dom.swGlobalInit(#{args.map { JSON.generate(_1) }.join(', ')});")
           rt.eval_void('__csim_installServiceWorkerScope();')
         end
         # A DEFERRED main script (worker_spawn found a controlling, fetch-handling SW for the

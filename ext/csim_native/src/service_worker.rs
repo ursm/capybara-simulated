@@ -110,7 +110,23 @@ pub(crate) fn claims(href: &str, scope: &str, scopes: &[String]) -> bool {
     !scope.is_empty() && href.starts_with(scope) && !scopes.iter().any(|s| s.len() > scope.len() && href.starts_with(s.as_str()))
 }
 
+// What a service worker's realm is spawned with (the host's, `run_worker`): its registration's scope, its updateViaCache
+// mode, the version active beside it as it installs (its script URL and handle), and the Update probe's responses of
+// the scripts it imports (its script resource map's — Service Workers §3.1.4 "Update", each a JSON record), which its
+// `importScripts` take, each once, in place of a fetch.
+#[derive(Default)]
+pub(crate) struct ServiceWorkerGlobal {
+    scope: String,
+    update_via_cache: String,
+    previous_active: Option<(String, u32)>,
+    probed_imports: std::collections::HashMap<String, String>,
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "swGlobalInit", global_init_op, context_id);
+    crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
+    crate::dom::register(scope, ns, "swProbedImport", probed_import_op, context_id);
+    crate::dom::register(scope, ns, "swImportCacheMode", import_cache_mode_op, context_id);
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
     crate::dom::register(scope, ns, "swScriptResource", script_resource_op, context_id);
     crate::dom::register(scope, ns, "swScriptResourceSet", script_resource_set_op, context_id);
@@ -132,6 +148,61 @@ fn script_resource_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = crate::dom::realm_id(scope, &args);
     if let Some(s) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
         s.script_resources.insert(url, (source, muted));
+    }
+}
+
+// __dom.swGlobalInit(scope, updateViaCache, importsJson, previousUrl, previousHandle): the calling realm a service worker's,
+// spawned with these (`ServiceWorkerGlobal`) — `importsJson` an object of the probe's records by URL, or null.
+fn global_init_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let text = |scope: &mut v8::PinScope<'_, '_>, i| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope));
+    let probed_imports = text(scope, 2)
+        .and_then(|json| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&json).ok())
+        .map(|map| map.into_iter().map(|(url, record)| (url, record.to_string())).collect())
+        .unwrap_or_default();
+    let previous_active = text(scope, 3).map(|url| (url, args.get(4).uint32_value(scope).unwrap_or(0)));
+    let global = ServiceWorkerGlobal { scope: text(scope, 0).unwrap_or_default(), update_via_cache: text(scope, 1).unwrap_or_default(), previous_active, probed_imports };
+    let cid = crate::dom::realm_id(scope, &args);
+    if let Some(s) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
+        s.service_worker = Some(global);
+    }
+}
+// __dom.swGlobal() -> `[scope, updateViaCache, previousUrl, previousHandle]` of the calling service worker's realm
+// ('' for a scope or a mode it was given none of, nulls for no previous version), or undefined for another realm.
+fn global_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(g) = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()) else { return };
+    let (sw_scope, uvc, previous) = (g.scope.clone(), g.update_via_cache.clone(), g.previous_active.clone());
+    fn string<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
+        v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
+    }
+    let items: [v8::Local<'_, v8::Value>; 4] = [
+        string(scope, &sw_scope),
+        string(scope, &uvc),
+        match &previous { Some((url, _)) => string(scope, url), None => v8::null(scope).into() },
+        match previous { Some((_, handle)) => v8::Integer::new_from_unsigned(scope, handle).into(), None => v8::null(scope).into() },
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.swProbedImport(url) -> the Update probe's record of the script at `url`, as JSON — taken: a second import of it
+// fetches — or undefined for none.
+fn probed_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let url = args.get(0).to_rust_string_lossy(scope);
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(record) = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.service_worker.as_mut()).and_then(|g| g.probed_imports.remove(&url))
+    else {
+        return;
+    };
+    if let Some(s) = v8::String::new(scope, &record) {
+        rv.set(s.into());
+    }
+}
+// __dom.swImportCacheMode() -> the cache mode a service worker's `importScripts` fetches in: `no-cache` under an
+// updateViaCache of `none` (every import revalidated), else none ('': the HTTP cache read) — and none for another realm.
+fn import_cache_mode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let none = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).is_some_and(|g| g.update_via_cache == "none");
+    if let Some(s) = v8::String::new(scope, if none { "no-cache" } else { "" }) {
+        rv.set(s.into());
     }
 }
 
