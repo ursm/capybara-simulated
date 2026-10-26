@@ -15,9 +15,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeCloneException", take_clone_exception, context_id);
 }
 
-// The attributes whose steps are the bindings' (`appendedAttributeSteps`, an event handler's content attribute).
-pub(crate) fn bindings_steps(name: &str) -> bool {
-    matches!(name, "open" | "id" | "name") || name.starts_with("on")
+// The attributes whose steps are the bindings' (`appendedAttributeSteps`, an event handler's content attribute) — a
+// `media` element's `src` among them: one created with it invokes its resource selection algorithm (HTML §4.8.11.5).
+pub(crate) fn bindings_steps(name: &str, media: bool) -> bool {
+    matches!(name, "open" | "id" | "name") || name.starts_with("on") || (media && name == "src")
 }
 
 // __dom.cloneTree(node, deep) -> [copy, source, copy, names, …], or undefined where the engine declines: DOM "clone a node"
@@ -110,7 +111,7 @@ pub(crate) fn clone_into(
     let arena = crate::dom::realm(scope, cid);
     let n = arena.get(src)?;
     let (data, state, value, bindings) = copy_of(n);
-    let names: Vec<String> = n.attributes.iter().map(|(k, _)| k).filter(|k| bindings_steps(k)).cloned().collect();
+    let names: Vec<String> = n.attributes.iter().map(|(k, _)| k).filter(|k| bindings_steps(k, crate::media::is_media(n))).cloned().collect();
     let children = if deep { n.children.clone() } else { Vec::new() };
     let attributes = (n.kind == NodeKind::Element)
         .then(|| (n.attributes.clone(), n.attr_u16.clone(), (n.attr_ns.clone(), n.attr_ns_u16.clone())));
@@ -261,6 +262,6 @@ fn copy_of(n: &NodeData) -> (NodeData, u32, Option<Box<[u16]>>, bool) {
     // change), an SVG `<image>`: dom-nodes.js `isImageElement`)
     let image = n.is_html_named("img") || n.is_html_named("input") || (n.ns == ns!(svg) && &*n.local_name == "image");
     let bindings = n.kind == NodeKind::Element
-        && (n.attributes.iter().any(|(k, _)| bindings_steps(k)) || image || n.is_html_named("select"));
+        && (n.attributes.iter().any(|(k, _)| bindings_steps(k, crate::media::is_media(n))) || image || n.is_html_named("select"));
     (data, state, if control { n.value.clone() } else { None }, bindings)
 }

@@ -46,15 +46,17 @@ pub(crate) struct Media {
     tainted: bool,
     // Which load is the current one: a later load supersedes what an earlier one had queued.
     load: u32,
-    // Whether the current load's resource fetch waits for its trigger — `preload` none: the element's playing
-    // (`mediaFetch`, `mediaResume`).
+    // Whether the current load's resource fetch waits for its trigger — `preload` none — and whether that trigger came:
+    // the page asked it to play, which no fetch of the load waits for after (`mediaFetch`, `mediaResume`).
     deferred: bool,
+    play_requested: bool,
     // Whether the current load selects among the `<source>` children — the children mode, whose candidate's failure is
-    // the candidate's, not the element's (`mediaCandidateFailed`) — and its pointer: the child it follows, none before
-    // the first (the child last made a candidate, or the one before a child it followed that was removed:
-    // `media_child_detached`); `waiting` where every candidate failed, the algorithm awaiting a `<source>` inserted past
-    // it (`source_inserted`).
+    // the candidate's, not the element's (`mediaCandidateFailed`) — its candidate, none once it is removed from the
+    // element, and its pointer: the child it follows, none before the first (the candidate, or the one before a child it
+    // followed that was removed: `media_child_detached`); `waiting` where every candidate failed, the algorithm awaiting
+    // a `<source>` inserted past it (`source_inserted`).
     children: bool,
+    candidate: Option<NodeId>,
     pointer: Option<NodeId>,
     waiting: bool,
 }
@@ -79,7 +81,9 @@ static INITIAL: Media = Media {
     tainted: false,
     load: 0,
     deferred: false,
+    play_requested: false,
     children: false,
+    candidate: None,
     pointer: None,
     waiting: false,
 };
@@ -104,21 +108,28 @@ impl RealmArena {
     fn media_mut(&mut self, id: NodeId) -> &mut Media {
         self.media.entry(id).or_default()
     }
-    // A child taken out of a media element: a pointer that followed it now follows the child before it, the pointer
-    // sitting between nodes (§4.8.11.5).
+    // A child taken out of a media element (§4.8.11.5): the candidate it was no longer one — its failure no `error` at
+    // it — and a pointer that followed it now follows the child before it, the pointer sitting between nodes.
     pub(crate) fn media_child_detached(&mut self, media: NodeId, child: NodeId) {
         let Some(n) = self.get(media) else { return };
-        if self.media(media).pointer != Some(child) {
+        let m = self.media(media);
+        if m.candidate != Some(child) && m.pointer != Some(child) {
             return;
         }
         let before = n.children.iter().position(|&c| c == child).and_then(|at| at.checked_sub(1)).map(|at| n.children[at]);
-        self.media_mut(media).pointer = before;
+        let m = self.media_mut(media);
+        if m.candidate == Some(child) {
+            m.candidate = None;
+        }
+        if m.pointer == Some(child) {
+            m.pointer = before;
+        }
     }
     // HTMLSourceElement's insertion steps (HTML §4.8.11.2 `source`): into a media element with no `src` whose network
     // state is EMPTY, the resource selection algorithm invoked — its first step, NO_SOURCE, its rest as the stable
     // state comes (`mediaSelect`) — `Some((load, false))`; into one whose children mode waits for a candidate, past its
-    // pointer, the wait over — the network state LOADING, the next candidate tried as the stable state comes
-    // (`mediaCandidate`) — `Some((load, true))`.
+    // pointer, the wait over — the next candidate tried as the stable state comes, LOADING then (`mediaCandidate`) —
+    // `Some((load, true))`.
     pub(crate) fn source_inserted(&mut self, media: NodeId, source: NodeId) -> Option<(u32, bool)> {
         let n = self.get(media).filter(|n| is_media(n))?;
         let at = |node: NodeId| n.children.iter().position(|&c| c == node);
@@ -134,12 +145,11 @@ impl RealmArena {
         }
         let m = self.media_mut(media);
         m.waiting = false;
-        m.network = NETWORK_LOADING;
         Some((m.load, true))
     }
 }
 
-fn is_media(n: &crate::dom::NodeData) -> bool {
+pub(crate) fn is_media(n: &crate::dom::NodeData) -> bool {
     n.is_html_named("video") || n.is_html_named("audio")
 }
 
@@ -156,7 +166,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mediaFrame", media_frame, context_id);
     crate::dom::register(scope, ns, "mediaCurrent", media_current, context_id);
     crate::dom::register(scope, ns, "mediaSourceInserted", media_source_inserted, context_id);
-    crate::dom::register(scope, ns, "mediaInserted", media_inserted, context_id);
+    crate::dom::register(scope, ns, "mediaInvoke", media_invoke, context_id);
     crate::dom::register(scope, ns, "canPlayType", can_play_type_op, context_id);
 }
 
@@ -352,7 +362,9 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     m.error = 0;
     m.deferred = false;
+    m.play_requested = false;
     m.children = false;
+    m.candidate = None;
     m.pointer = None;
     m.waiting = false;
     m.network = NETWORK_NO_SOURCE;
@@ -360,11 +372,11 @@ fn media_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, load).into(), v8::Integer::new_from_unsigned(scope, owed).into()]).into());
 }
 
-// __dom.mediaInserted(media) -> the media element's insertion into a document (HTML §4.8.11.5): one whose network state
-// is EMPTY invokes the resource selection algorithm — its first step, NO_SOURCE, its rest once the stable state comes
-// (`mediaSelect`) — under its current load, which this returns; null for one that has a state already (a load ran: its
-// `src` set before it was inserted, or a `<source>` inserted into it).
-fn media_inserted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.mediaInvoke(media) -> the resource selection algorithm invoked on an element whose network state is EMPTY — one
+// created with a `src`, one asked to play or pause (HTML §4.8.11.5, §4.8.11.8): its first step, NO_SOURCE, its rest once
+// the stable state comes (`mediaSelect`) — under its current load, which this returns; null for one that has a state
+// already (a load ran, or a `<source>` inserted into it invoked it).
+fn media_invoke(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
     let m = crate::dom::dom(scope).arena.media_mut(id);
     if m.network != NETWORK_EMPTY {
@@ -414,15 +426,16 @@ fn media_select(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     }
 }
 
-// __dom.mediaCandidate(media, load) -> `[source, src]`: the children mode's next candidate (§4.8.11.5), the `<source>`
-// child past its pointer, which it moves to it — `src` null where it fails at once (no `src`, an empty one, or a `type`
-// we cannot play: `can_play_type`), its `error` owed and the next one tried; else none left — null, the network state
-// NO_SOURCE, the algorithm waiting for a `<source>` inserted past the pointer. Null too where a later load superseded
-// `load`.
+// __dom.mediaCandidate(media, load) -> `[source, src]`: the children mode's next candidate (§4.8.11.5), as the stable
+// state comes — the network state LOADING — the `<source>` child past its pointer, which it moves to it: `src` null where
+// it fails at once (no `src`, an empty one, a `type` we cannot play — `can_play_type`, an empty one none — or a `media`
+// that does not match this realm's viewport), its `error` owed and the next one tried; else none left — null, the
+// network state NO_SOURCE, the algorithm waiting for a `<source>` inserted past the pointer. Null too where a later
+// load superseded `load`.
 fn media_candidate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
     let load = args.get(1).uint32_value(scope).unwrap_or(0);
-    let arena = &mut crate::dom::dom(scope).arena;
+    let arena = &crate::dom::dom(scope).arena;
     let (Some(n), m) = (arena.get(id), arena.media(id)) else { return rv.set_null() };
     if m.load != load || !m.children || m.waiting {
         return rv.set_null();
@@ -430,15 +443,26 @@ fn media_candidate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let start = m.pointer.map_or(0, |node| n.children.iter().position(|&c| c == node).map_or(n.children.len(), |at| at + 1));
     let candidate = n.children.iter().skip(start).find_map(|&c| {
         let source = arena.get(c).filter(|c| c.is_html_named("source"))?;
-        let playable = source.plain_attr("type").is_none_or(|ty| !can_play_type(ty).is_empty());
-        Some((c, source.plain_attr_units("src").filter(|src| !src.is_empty() && playable)))
+        let playable = source.plain_attr("type").is_none_or(|ty| ty.is_empty() || !can_play_type(ty).is_empty());
+        let src = source.plain_attr_units("src").filter(|src| !src.is_empty() && playable);
+        Some((c, src, source.plain_attr("media").map(str::to_owned)))
     });
-    let m = arena.media_mut(id);
-    let Some((source, src)) = candidate else {
+    let Some((source, mut src, media)) = candidate else {
+        let m = crate::dom::dom(scope).arena.media_mut(id);
         m.waiting = true;
         m.network = NETWORK_NO_SOURCE;
         return rv.set_null();
     };
+    if let Some(media) = media.filter(|_| src.is_some()) {
+        let viewport = crate::media_query_lists::viewport_here(scope, &args);
+        let cid = crate::dom::realm_id(scope, &args);
+        if !crate::media_query_lists::matches(scope, cid, &media, viewport) {
+            src = None;
+        }
+    }
+    let m = crate::dom::dom(scope).arena.media_mut(id);
+    m.network = NETWORK_LOADING;
+    m.candidate = Some(source);
     m.pointer = Some(source);
     let src = match src {
         Some(src) => crate::dom::utf16_value(scope, &src),
@@ -451,25 +475,31 @@ fn media_candidate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Array::new_with_elements(scope, &[source, src]).into());
 }
 
-// __dom.mediaCandidateFailed(media) -> the candidate whose fetch failed, the children mode's — its `error` owed, the next
-// one tried — or null for the attribute mode's, the element's own failure (`mediaResource`).
+// __dom.mediaCandidateFailed(media) -> where the selected resource's fetch failed in the children mode, its candidate —
+// its `error` owed, the next one tried — or null where it was removed since (no `error` owed, the next one tried all
+// the same); false in the attribute mode, the element's own failure (`mediaResource`).
 fn media_candidate_failed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_bool(false) };
     let m = crate::dom::dom(scope).arena.media(id);
-    let source = m.pointer.filter(|_| m.children);
-    rv.set(crate::dom::node_value(scope, source));
+    if !m.children {
+        return rv.set_bool(false);
+    }
+    let candidate = m.candidate;
+    rv.set(crate::dom::node_value(scope, candidate));
 }
 
 // __dom.mediaFetch(media) -> whether the resource fetch algorithm (§4.8.11.5) fetches the selected resource now: not
 // where `preload` says `none` (ASCII case-insensitively) — the fetch the algorithm may put off until the user asks for
-// playback — unless `autoplay` overrides it (an element that will play must buffer: HTML's note on `preload`); the
-// network state IDLE then, its `suspend` owed, the fetch waiting for `mediaResume`.
+// playback — unless `autoplay` overrides it (an element that will play must buffer: HTML's note on `preload`) or the
+// page asked it to play already (`mediaResume`); the network state IDLE then, its `suspend` owed, the fetch waiting for
+// `mediaResume`.
 fn media_fetch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_bool(false) };
     let arena = &mut crate::dom::dom(scope).arena;
-    let deferred = arena.get(id).is_some_and(|n| {
-        n.plain_attr("preload").is_some_and(|p| p.eq_ignore_ascii_case("none")) && n.plain_attr("autoplay").is_none()
-    });
+    let deferred = !arena.media(id).play_requested
+        && arena.get(id).is_some_and(|n| {
+            n.plain_attr("preload").is_some_and(|p| p.eq_ignore_ascii_case("none")) && n.plain_attr("autoplay").is_none()
+        });
     if deferred {
         let m = arena.media_mut(id);
         m.network = NETWORK_IDLE;
@@ -478,11 +508,13 @@ fn media_fetch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set_bool(!deferred);
 }
 
-// __dom.mediaResume(media) -> the load whose put-off fetch the element's playing triggers — the network state LOADING
-// again, the fetch to run — or null where none waits.
+// __dom.mediaResume(media) -> the page asked the element to play, the trigger the current load's fetches wait for no
+// more: the load whose put-off fetch it triggers — the network state LOADING again, the fetch to run — or null where
+// none waits.
 fn media_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_null() };
     let m = crate::dom::dom(scope).arena.media_mut(id);
+    m.play_requested = true;
     if !std::mem::take(&mut m.deferred) {
         return rv.set_null();
     }

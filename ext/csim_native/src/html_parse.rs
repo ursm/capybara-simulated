@@ -1018,6 +1018,7 @@ impl<'s> Build<'s> {
         let mut list = existing;
         exact.retain(|(k, _)| list.iter().any(|(name, _)| name == k));
         let mut names = Vec::new();
+        let media = crate::dom::realm(scope, self.cid).get(id).is_some_and(crate::media::is_media);
         for (name, value, ns) in attrs {
             if list.iter().any(|(k, _)| *k == name) {
                 continue;
@@ -1025,7 +1026,7 @@ impl<'s> Build<'s> {
             if let Some((ns, local)) = ns {
                 namespaced.push((name.clone(), ns, local));
             }
-            if crate::cloning::bindings_steps(&name) || matches!(name.as_str(), "autofocus") {
+            if crate::cloning::bindings_steps(&name, media) || matches!(name.as_str(), "autofocus") {
                 names.push(name.clone());
             }
             let value = if self.standins.in_text(&value) {
