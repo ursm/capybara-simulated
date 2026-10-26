@@ -215,5 +215,23 @@ RSpec.describe 'a subresource request', :https do
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
+  # …the page's own a blob: document too, its subresources its blob URL's origin's requests.
+  it "judges a top-level blob: document's sheets by its own origin" do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+    sites = {}
+    blob = '<link rel=stylesheet href="https://www.example.com/own.css"><link rel=stylesheet href="https://other.test/away.css">'
+    s = simulated_session(lambda {|env|
+      sites[env['PATH_INFO']] = env['HTTP_SEC_FETCH_SITE']
+      case env['PATH_INFO']
+      when '/own.css', '/away.css' then [200, {'content-type' => 'text/css'}, ['p {}']]
+      else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><script>location = URL.createObjectURL(new Blob([#{blob.to_json}], {type: 'text/html'}));</script>"]]
+      end
+    })
+    s.visit '/'
+    expect(poll_until { s.evaluate_script('1') && sites.slice('/own.css', '/away.css').then {|got| got.size == 2 && got } }).to eq('/own.css' => 'same-origin', '/away.css' => 'cross-site')
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
 end
 

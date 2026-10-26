@@ -11239,11 +11239,12 @@ module Capybara
           url = nil unless http_url?(url)
           return {url: url, policy: element_policy.to_s, origin: nil, realm: nil, referrer: referrer || url, initiator: referrer && url_origin(url)}
         end
-        own = realm.zero? ? @current_url : frame_realm_url(realm)
         if opaque.nil?
+          # (…the creator walk from the URL it refers by: its own, a srcdoc one's container's — the frame asked once)
           source, policy = realm_referrer_initiator(realm)
-          url, opaque = realm_creator_url(realm, own), document_origin_opaque?(realm)
+          url, opaque = realm_creator_url(realm, source), document_origin_opaque?(realm)
         else
+          own = realm.zero? ? @current_url : frame_realm_url(realm)
           # (…told by the bindings, its document is not asked — every image of a page asks this: its URLs alone, and a
           # srcdoc one's policy its container's where the element and its document name none; a frame gone, the page's)
           realm, own = 0, @current_url if own.nil?
@@ -11275,11 +11276,13 @@ module Capybara
       # URL. (KNOWN LIMIT: a popup's about:blank the page's, not its opener's; a frame another document navigated to
       # about:blank its parent's, not that document's.)
       def realm_creator_url(realm, url = realm.zero? ? @current_url : frame_realm_url(realm))
-        until realm.zero? || http_url?(url)
+        loop do
           if url.to_s.match?(/\Ablob:/i)
             inner = url_origin(url.to_s.sub(/\Ablob:/i, ''))
             return "#{inner}/" if inner && inner != 'null'
           end
+          break if realm.zero? || http_url?(url)
+
           realm = @runtime.frame_realm_parent(realm).to_i
           url   = realm.zero? ? @current_url : frame_realm_url(realm)
         end
