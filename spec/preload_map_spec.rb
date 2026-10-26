@@ -22,6 +22,7 @@ RSpec.describe 'map of preloaded resources' do
       when '/f.ttf' then served << 'f.ttf'; [200, {'content-type' => 'font/ttf', 'access-control-allow-origin' => '*'}, [PRELOAD_FONT]]
       when '/s.css' then served << 's.css'; [200, {'content-type' => 'text/css'}, ['p { color: red }']]
       when '/imp.css' then served << 'imp.css'; [200, {'content-type' => 'text/css'}, ['p { color: green }']]
+      when '/d.json' then served << "d.json?#{env['QUERY_STRING']}"; [200, {'content-type' => 'application/json'}, ['{"a":1}']]
       when '/a.js' then served << 'a.js'; [200, {'content-type' => 'text/javascript'}, ['window.ran = (window.ran || 0) + 1']]
       else [200, {'content-type' => 'text/html'}, [page]]
       end
@@ -148,6 +149,49 @@ RSpec.describe 'map of preloaded resources' do
     JS
     s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 100))')
     expect([s.evaluate_script('events'), served]).to eq([['load'], ['i.png?co']])
+  end
+
+  # A `fetch()` takes a preload of `as=fetch` its request matches — a CORS one of credentials same-origin, the preload's
+  # `crossorigin` — and one of another mode none. Chrome: `[{"a":1}, {"a":1}]`, the `crossorigin` one requested once,
+  # the other twice, a `fetch` entry for it alone.
+  it 'hands a fetch() the as=fetch preload its request matches' do
+    page = '<!DOCTYPE html><meta charset=utf-8><link rel=preload as=fetch href="/d.json?cors" crossorigin><link rel=preload as=fetch href="/d.json?nocors"><body>'
+    served = []
+    s = simulated_session(preload_app(served, page)).tap {|session| session.visit '/' }
+    got = s.evaluate_async_script(<<~'JS')
+      const done = arguments[0];
+      (async () => [await (await fetch('/d.json?cors')).json(), await (await fetch('/d.json?nocors')).json()])().then(done);
+    JS
+    expect(got).to eq([{'a' => 1}, {'a' => 1}])
+    expect(served.sort).to eq(['d.json?cors', 'd.json?nocors', 'd.json?nocors'])
+    expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType).sort()")).to eq([
+      'd.json?cors:link', 'd.json?nocors:fetch', 'd.json?nocors:link'
+    ])
+  end
+
+  # A video's poster and a default track — fetched for their Resource Timing entries — take theirs too, a track's by its
+  # video's `crossorigin` (a CORS request, as the preload's `crossorigin` makes its: one with none is a same-origin
+  # request, which no preload's no-cors one matches). (Chrome loads a track only when its mode shows; the poster's case
+  # is the image's.)
+  it "hands a poster and a track the preloads of them" do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8><link rel=preload as=image href="/i.png?poster"><link rel=preload as=track href="/t.vtt" crossorigin>
+      <body><script>setTimeout(() => {
+        const v = document.createElement('video');
+        v.poster = '/i.png?poster';
+        v.crossOrigin = 'anonymous';
+        v.innerHTML = '<track default src="/t.vtt">';
+        document.body.append(v);
+      }, 200)</script>
+    HTML
+    served = []
+    app = preload_app(served, page)
+    s = simulated_session(->(env) { env['PATH_INFO'] == '/t.vtt' ? (served << 't.vtt'; [200, {'content-type' => 'text/vtt'}, ["WEBVTT\n"]]) : app.call(env) }).tap {|session| session.visit '/' }
+    s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 400))')
+    expect(served.sort).to eq(['i.png?poster', 't.vtt'])
+    expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType).sort()")).to eq([
+      'i.png?poster:link', 't.vtt:link'
+    ])
   end
 
   # …one consumer alone: a request of another mode (a `crossorigin` image) takes none and fetches; the first that
