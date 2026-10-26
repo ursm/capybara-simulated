@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'capybara/simulated'
+require 'digest'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
@@ -20,6 +21,7 @@ RSpec.describe 'map of preloaded resources' do
       when '/i.png' then served << "i.png?#{env['QUERY_STRING']}"; [200, {'content-type' => 'image/png'}, [PRELOAD_PNG]]
       when '/f.ttf' then served << 'f.ttf'; [200, {'content-type' => 'font/ttf', 'access-control-allow-origin' => '*'}, [PRELOAD_FONT]]
       when '/s.css' then served << 's.css'; [200, {'content-type' => 'text/css'}, ['p { color: red }']]
+      when '/imp.css' then served << 'imp.css'; [200, {'content-type' => 'text/css'}, ['p { color: green }']]
       when '/a.js' then served << 'a.js'; [200, {'content-type' => 'text/javascript'}, ['window.ran = (window.ran || 0) + 1']]
       else [200, {'content-type' => 'text/html'}, [page]]
       end
@@ -56,14 +58,7 @@ RSpec.describe 'map of preloaded resources' do
   it 'hands a preloaded style sheet and script to their consumers, one request each' do
     page = '<!DOCTYPE html><meta charset=utf-8><link rel=preload as=style href="/s.css"><link rel=preload as=script href="/a.js"><body><p>p</p>'
     served = []
-    app = lambda {|env|
-      case env['PATH_INFO']
-      when '/s.css' then served << 's.css'; [200, {'content-type' => 'text/css'}, ['p { color: red }']]
-      when '/a.js' then served << 'a.js'; [200, {'content-type' => 'text/javascript'}, ['window.ran = (window.ran || 0) + 1']]
-      else [200, {'content-type' => 'text/html'}, [page]]
-      end
-    }
-    s = simulated_session(app).tap {|session| session.visit '/' }
+    s = simulated_session(preload_app(served, page)).tap {|session| session.visit '/' }
     s.execute_script(<<~'JS')
       window.loaded = [];
       const sheet = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/s.css' });
@@ -77,6 +72,64 @@ RSpec.describe 'map of preloaded resources' do
     expect(served).to eq(['s.css', 'a.js'])
     expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType)")).to eq([
       's.css:link', 'a.js:link'
+    ])
+  end
+
+  # The response as it came, its bytes: a style sheet's and a script's in an encoding other than UTF-8, or behind a
+  # byte-order mark, decode and verify as their consumers' own fetch would have them. Chrome: "é" for both, the BOM'd
+  # script run under its integrity.
+  it 'hands a consumer the bytes the preload had, not their text' do
+    bom = "\xEF\xBB\xBFwindow.bom = 1".b
+    digest = "sha256-#{Digest::SHA256.base64digest(bom)}"
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8>
+      <link rel=preload as=script href="/latin.js"><link rel=preload as=style href="/latin.css">
+      <link rel=preload as=script href="/bom.js" integrity="#{digest}"><body><p>p</p>
+    HTML
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/latin.js' then [200, {'content-type' => 'text/javascript; charset=windows-1252'}, ["window.x = '\xE9'".b]]
+      when '/latin.css' then [200, {'content-type' => 'text/css; charset=windows-1252'}, ["p::before { content: '\xE9' }".b]]
+      when '/bom.js' then [200, {'content-type' => 'text/javascript'}, [bom]]
+      else [200, {'content-type' => 'text/html'}, [page]]
+      end
+    }
+    s = simulated_session(app).tap {|session| session.visit '/' }
+    s.execute_script(<<~JS)
+      window.loaded = [];
+      for (const [tag, attrs] of [['script', { src: '/latin.js' }], ['link', { rel: 'stylesheet', href: '/latin.css' }],
+                                  ['script', { src: '/bom.js', integrity: '#{digest}' }]]) {
+        const el = Object.assign(document.createElement(tag), attrs);
+        el.onload = () => loaded.push(tag);
+        el.onerror = () => loaded.push(tag + ':error');
+        document.head.append(el);
+      }
+    JS
+    expect(poll_until { s.evaluate_script('loaded.length === 3') }).to be true
+    expect(s.evaluate_script("[window.x, getComputedStyle(document.querySelector('p'), '::before').content, window.bom, loaded.includes('script:error')]")).to eq([
+      'é', '"é"', 1, false
+    ])
+  end
+
+  # A preload's entry is in its document's map from the moment its fetch is planned: a consumer the parser makes before
+  # the preload's load task has run takes it too, running its fetch then — an image, a script, a CSS image, an `@import`.
+  # Chrome: one request each, the preloads' entries alone.
+  it 'hands a preload to a consumer that comes before its load task' do
+    page = <<~HTML
+      <!DOCTYPE html><meta charset=utf-8>
+      <link rel=preload as=image href="/i.png?early"><link rel=preload as=script href="/a.js">
+      <link rel=preload as=style href="/imp.css"><style>@import url(/imp.css);</style>
+      <style>.bg { background-image: url(/i.png?bg); width: 10px; height: 10px }</style>
+      <link rel=preload as=image href="/i.png?bg">
+      <body><p>p</p><img src="/i.png?early"><div class=bg></div><script src="/a.js"></script>
+    HTML
+    served = []
+    s = simulated_session(preload_app(served, page)).tap {|session| session.visit '/' }
+    expect(poll_until { s.evaluate_script('document.images[0].complete && window.ran === 1') }).to be true
+    expect(s.evaluate_script("[document.images[0].naturalWidth > 0, getComputedStyle(document.querySelector('p')).color]")).to eq([true, 'rgb(0, 128, 0)'])
+    expect(served.sort).to eq(['a.js', 'i.png?bg', 'i.png?early', 'imp.css'])
+    expect(s.evaluate_script("performance.getEntriesByType('resource').map((e) => e.name.split('/').pop() + ':' + e.initiatorType).sort()")).to eq([
+      'a.js:link', 'i.png?bg:link', 'i.png?early:link', 'imp.css:link'
     ])
   end
 

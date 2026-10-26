@@ -18,6 +18,8 @@ const MODES: [&str; 4] = ["no-cors", "cors", "same-origin", "navigate"];
 // (…a plan of nothing a request's defaults: no-cors, same-origin — Fetch "request")
 const CREDENTIALS: [&str; 3] = ["same-origin", "include", "omit"];
 const OPAQUE: u32 = 1 << 8;
+// …its request's fields alone, its mode and credentials mode: what tells two requests of one URL apart (a preload key's).
+pub(crate) const PLAN_REQUEST: u32 = 15;
 
 // The plan of a `kind` consumer's request:
 // - its mode and credentials mode: an image's, a video's, an audio's, a classic script's, a style sheet's, a link's and a
