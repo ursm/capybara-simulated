@@ -10,7 +10,7 @@ use web_atoms::ns;
 
 use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
 
-// The resources `timed_resources` (and `useReference`) handed out for the page, by initiator and URL — and the images
+// The resources `timed_resources` handed out for the page, by initiator and URL — and the images
 // and `@import`s whose entries it filed (resource_timing.rs `filed_once`: "img", "css"), as its memory cache serves them
 // after. (An SVG `<use>`'s external document is a resource of another type, kept apart: `use`.)
 pub(crate) type TimedResources = HashSet<(&'static str, String)>;
@@ -20,12 +20,14 @@ pub(crate) type TimedResources = HashSet<(&'static str, String)>;
 const NO_CORS: u32 = 0;
 const CORS: u32 = 1;
 const CORS_CREDENTIALS: u32 = 2;
+// …or none of another origin's (a same-origin request): a track's of a media element of no `crossorigin` (HTML's track
+// processing model, its potential-CORS request's "same-origin fallback flag"), an SVG `<use>`'s external document.
+const SAME_ORIGIN: u32 = 3;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "timedResources", timed_resources_op, context_id);
     crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
     crate::dom::register(scope, ns, "setObjectFallback", set_object_fallback_op, context_id);
-    crate::dom::register(scope, ns, "useReference", use_reference_op, context_id);
 }
 
 
@@ -66,6 +68,7 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return Vec::new() };
     // (…each by the element whose `crossorigin` its request takes, none for one of no CORS settings: a poster's)
     let mut wanted: Vec<(&'static str, &'static str, Option<NodeId>, String)> = Vec::new();
+    let mut tracks = Vec::new();
     if n.ns == ns!(html) {
         let attr = |name: &str| n.plain_attr(name).filter(|v| !v.is_empty()).map(str::to_owned);
         match &*n.local_name {
@@ -94,6 +97,7 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
                     let Some(track) = arena.get(c).filter(|c| c.is_html_named("track") && c.plain_attr("default").is_some()) else { continue };
                     if let Some(src) = track.plain_attr("src").filter(|v| !v.is_empty()) {
                         wanted.push(("track", "track", Some(id), src.to_owned()));
+                        tracks.push(wanted.len() - 1);
                     }
                 }
             }
@@ -101,12 +105,16 @@ fn timed_resources(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Vec<(&'st
         }
     }
     let mut out = Vec::new();
-    for (initiator, destination, el, raw) in wanted {
+    for (i, (initiator, destination, el, raw)) in wanted.into_iter().enumerate() {
         let Some(url) = arena.parse_document_url(doc, &raw) else { continue };
-        out.push((initiator, destination, url.href().to_owned(), el.map_or(NO_CORS, |el| cors_of(arena, el))));
+        let cors = match el.map_or(NO_CORS, |el| cors_of(arena, el)) {
+            NO_CORS if tracks.contains(&i) => SAME_ORIGIN,
+            cors => cors,
+        };
+        out.push((initiator, destination, url.href().to_owned(), cors));
     }
     if let Some(url) = use_reference(arena, id, doc) {
-        out.push(("other", "image", url, NO_CORS));
+        out.push(("other", "image", url, SAME_ORIGIN));
     }
     let seen = &mut arena.timed_resources;
     out.retain(|(initiator, _, url, _)| seen.insert((initiator, url.clone())));
@@ -127,12 +135,13 @@ pub(crate) fn timed_cors_request(cors: u32) -> (&'static str, &'static str) {
     match cors {
         NO_CORS => ("no-cors", "include"),
         CORS_CREDENTIALS => ("cors", "include"),
+        SAME_ORIGIN => ("same-origin", "include"),
         _ => ("cors", "same-origin"),
     }
 }
 
 // __dom.timedResources(el, docNid) -> `[initiator, destination, url, cors, …]`: the resources connecting `el` fetches
-// for no consumer (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS; undefined for none.
+// for no consumer (`timed_resources`), `cors` NO_CORS / CORS / CORS_CREDENTIALS / SAME_ORIGIN; undefined for none.
 fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
     let cid = crate::dom::realm_id(scope, &args);
@@ -151,17 +160,6 @@ fn timed_resources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.useReference(el, docNid) -> the external document an SVG `<use>` references (`use_reference`), which a
-// controlled document fetches through its service worker (destination `image`) — once for the page, undefined after.
-fn use_reference_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let Some(url) = use_reference(arena, id, doc).filter(|u| arena.timed_resources.insert(("use", u.clone()))) else { return };
-    if let Some(url) = v8::String::new(scope, &url) {
-        rv.set(url.into());
-    }
-}
 
 // The resource a connected `<embed>` or `<object>` element `id` (of document `doc`) is to fetch as its processing runs
 // — HTML's embed setup steps and object processing model, at its insertion and as its `src` / `data` / `type` change —
