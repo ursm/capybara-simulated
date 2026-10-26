@@ -242,55 +242,121 @@ pub(crate) fn entry_fields(f: &Facts) -> Vec<(&'static str, Field)> {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "resourceTimingEntry", entry_op, context_id);
 }
+// A string of `s` — a key internalized, as a property key is (every entry makes its fields).
+fn key<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> Option<v8::Local<'s, v8::String>> {
+    v8::String::new_from_one_byte(scope, s.as_bytes(), v8::NewStringType::Internalized)
+}
 fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
-// The member `key` of `obj`, None where it is null or undefined.
-fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, key: &str) -> Option<v8::Local<'s, v8::Value>> {
-    let k = v8::String::new(scope, key)?;
-    obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
+// The member `name` of `obj` (none: no object) as it is, undefined where it has none.
+fn raw<'s>(scope: &mut v8::PinScope<'s, '_>, obj: Option<v8::Local<'_, v8::Object>>, name: &str) -> v8::Local<'s, v8::Value> {
+    obj.and_then(|o| key(scope, name).and_then(|k| o.get(scope, k.into()))).unwrap_or_else(|| v8::undefined(scope).into())
 }
-// __dom.resourceTimingEntry(facts) -> the entry's fields (`entry_fields`) as an object, `serverTiming` a flat
-// [name, duration, description, …] list — `facts` an object of `Facts`' members by their camel-cased names, a header
-// null for none — or null for a resource of no network scheme.
+// …None where it is null or undefined.
+fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: Option<v8::Local<'_, v8::Object>>, name: &str) -> Option<v8::Local<'s, v8::Value>> {
+    Some(raw(scope, obj, name)).filter(|v| !v.is_null_or_undefined())
+}
+// …as a string (None for none, or one falsy where `truthy`); as `x | 0`, 0 for none.
+fn string_of(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object>>, name: &str, truthy: bool) -> Option<String> {
+    let v = member(scope, obj, name)?;
+    (!truthy || v.boolean_value(scope)).then(|| v.to_rust_string_lossy(scope))
+}
+fn int_of(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object>>, name: &str) -> Option<f64> {
+    let v = member(scope, obj, name)?;
+    Some(v.int32_value(scope).unwrap_or(0) as f64)
+}
+fn flag_of(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object>>, name: &str) -> bool {
+    let v = raw(scope, obj, name);
+    v.boolean_value(scope)
+}
+// __dom.resourceTimingEntry(desc, now) -> the fields of the entry a fetch files (`entry_fields`), its `name`, `startTime`
+// and `initiatorType` among them, `serverTiming` a flat [name, duration, description, …] list — or null for a resource
+// of no network scheme. `desc` what the fetch tells of it: `{ name, initiatorType, startTime, resp, body, renderBlocking,
+// noCors, cached, encoded, decoded, status, headers, type, redirected }`, `resp` a response hash (status / headers /
+// bytes / encoded / cached / redirected / type / url / tao / contentEncoding / serverTiming) the rest defaults from —
+// none for a network error, an entry of its times alone, but where `status` is given — `body` a text body of the asset
+// cache's that sizes one with no hash; `now` its end, the clock the bindings keep. The document's origin is the calling
+// realm's.
 fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(obj) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    rv.set_null();
+    let Ok(desc) = v8::Local::<v8::Object>::try_from(args.get(0)) else { return };
+    let desc = Some(desc);
+    let now = args.get(1).number_value(scope).unwrap_or(0.0);
+    let resp = member(scope, desc, "resp").and_then(|v| v8::Local::<v8::Object>::try_from(v).ok());
+    // (…its name the description's, else its response's URL)
+    let name = string_of(scope, desc, "name", true).or_else(|| string_of(scope, resp, "url", true)).unwrap_or_default();
     // (…none for a resource whose URL is of no HTTP(S) scheme — Fetch's "finalize and report timing" returns for its
-    // original URL's: data:, blob:, about: … — its scheme read off the string's start, a data: URL's body left in it)
-    let Some(name) = member(scope, obj, "name").and_then(|v| v.to_string(scope)) else { return rv.set_null() };
-    let mut head = [0u16; 6];
-    let len = name.length().min(head.len());
-    name.write_v2(scope, 0, &mut head[..len], v8::WriteFlags::empty());
-    let head = String::from_utf16_lossy(&head[..len]).to_ascii_lowercase();
-    if !(head.starts_with("http:") || head.starts_with("https:")) {
-        return rv.set_null();
+    // original URL's: data:, blob:, about: …)
+    if !name.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("http:")) && !name.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("https:")) {
+        return;
     }
-    let string = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).map(|v| v.to_rust_string_lossy(scope));
-    let flag = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).is_some_and(|v| v.boolean_value(scope));
-    let number = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, obj, key).and_then(|v| v.number_value(scope)).unwrap_or(0.0);
+    let status_given = member(scope, desc, "status").map(|v| v.number_value(scope).unwrap_or(0.0));
+    let failed = resp.is_none() && status_given.is_none();
+    let headers = member(scope, desc, "headers").or_else(|| member(scope, resp, "headers")).and_then(|h| v8::Local::<v8::Object>::try_from(h).ok());
+    let [tao_header, content_type, encoding_header, timing_header] = match headers {
+        Some(h) => crate::fetch_rules::response_headers(scope, h, ["timing-allow-origin", "content-type", "content-encoding", "server-timing"]),
+        None => [None, None, None, None],
+    };
+    // (…its sizes a text body's, its response's, or as given; none of a network error)
+    let (mut encoded, mut decoded) = (0.0, 0.0);
+    if !failed {
+        if let Some(body) = string_of(scope, desc, "body", false) {
+            (encoded, decoded) = (body.len() as f64, body.len() as f64);
+        } else {
+            let sized = if resp.is_some() { [resp, resp] } else { [desc, desc] };
+            let (bytes_key, encoded_key) = if resp.is_some() { ("bytes", "encoded") } else { ("decoded", "encoded") };
+            decoded = int_of(scope, sized[0], bytes_key).unwrap_or(0.0);
+            encoded = int_of(scope, sized[1], encoded_key).unwrap_or(decoded);
+        }
+    }
+    let redirected_resp = flag_of(scope, resp, "redirected");
+    let final_url = if redirected_resp { string_of(scope, resp, "url", true) } else { None };
+    let initiator = string_of(scope, desc, "initiatorType", true).unwrap_or_else(|| "other".to_owned());
+    let response_type = string_of(scope, desc, "type", true).or_else(|| string_of(scope, resp, "type", true));
+    let cached_given = raw(scope, desc, "cached");
+    let cached = if cached_given.is_undefined() { string_of(scope, resp, "cached", true) } else { cached_given.boolean_value(scope).then(|| cached_given.to_rust_string_lossy(scope)) };
+    let redirected_given = raw(scope, desc, "redirected");
+    let redirected = if redirected_given.is_undefined() { redirected_resp } else { redirected_given.boolean_value(scope) };
+    let status = match status_given {
+        Some(n) => n,
+        None => int_of(scope, resp, "status").unwrap_or(0.0),
+    };
+    let start = member(scope, desc, "startTime").and_then(|v| v.number_value(scope)).unwrap_or(now);
+    let cid = crate::dom::realm_id(scope, &args);
     let facts = Facts {
-        name: name.to_rust_string_lossy(scope),
-        final_url: string(scope, "finalUrl").unwrap_or_default(),
-        document_origin: string(scope, "documentOrigin").unwrap_or_default(),
-        tao: string(scope, "tao"),
-        opaque: flag(scope, "opaque"),
-        document: flag(scope, "document"),
-        no_cors: flag(scope, "noCors"),
-        start: number(scope, "start"),
-        end: number(scope, "end"),
-        cached: string(scope, "cached"),
-        encoded: number(scope, "encoded"),
-        decoded: number(scope, "decoded"),
-        redirected: flag(scope, "redirected"),
-        status: number(scope, "status"),
-        content_type: string(scope, "contentType"),
-        content_encoding: string(scope, "contentEncoding"),
-        server_timing: string(scope, "serverTiming"),
-        render_blocking: flag(scope, "renderBlocking"),
-        failed: flag(scope, "failed"),
+        final_url: final_url.unwrap_or_else(|| name.clone()),
+        document_origin: crate::dom::realm(scope, cid).location.origin().to_owned(),
+        tao: string_of(scope, resp, "tao", false).or(tao_header),
+        opaque: response_type.as_deref() == Some("opaque"),
+        document: matches!(initiator.as_str(), "iframe" | "frame"),
+        no_cors: flag_of(scope, desc, "noCors"),
+        start,
+        end: now,
+        cached,
+        encoded,
+        decoded,
+        redirected,
+        status,
+        content_type,
+        content_encoding: string_of(scope, resp, "contentEncoding", false).or(encoding_header),
+        server_timing: string_of(scope, resp, "serverTiming", false).or(timing_header),
+        render_blocking: flag_of(scope, desc, "renderBlocking"),
+        failed,
+        name,
     };
     let out = v8::Object::new(scope);
-    for (key, field) in entry_fields(&facts) {
+    let mut set = |scope: &mut v8::PinScope<'_, '_>, k: &str, value: v8::Local<'_, v8::Value>| {
+        if let Some(k) = key(scope, k) {
+            out.set(scope, k.into(), value);
+        }
+    };
+    let (name, start) = (text(scope, &facts.name), v8::Number::new(scope, facts.start).into());
+    set(scope, "name", name);
+    set(scope, "startTime", start);
+    let initiator = text(scope, &initiator);
+    set(scope, "initiatorType", initiator);
+    for (k, field) in entry_fields(&facts) {
         let value: v8::Local<v8::Value> = match field {
             Field::Number(n) => v8::Number::new(scope, n).into(),
             Field::Text(t) => text(scope, &t),
@@ -304,9 +370,7 @@ fn entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
                 v8::Array::new_with_elements(scope, &items).into()
             }
         };
-        if let Some(k) = v8::String::new(scope, key) {
-            out.set(scope, k.into(), value);
-        }
+        set(scope, k, value);
     }
     rv.set(out.into());
 }
