@@ -3950,7 +3950,7 @@ module Capybara
           'url'             => result['url'],
           'status'          => result['status'].to_i,
           'body_error'      => result['body_error'] == true,
-          'headers'         => %w[content-type x-content-type-options].to_h {|name|
+          'headers'         => %w[content-type x-content-type-options referrer-policy].to_h {|name|
             [name, result['headers']&.find {|k, _| k.to_s.casecmp?(name) }&.last]
           },
           'bytes'           => result['bytes'].to_i,
@@ -5348,12 +5348,17 @@ module Capybara
         # A binary consumer (a classic script / video / font / image bytes) takes the bytes as they are — the
         # utf8 text funnel would mangle non-UTF-8 byte sequences — with the status, the content type and the
         # headers its checks and its Resource Timing entry read; and the response's URL ('' for a constructed one's),
-        # a style sheet's location.
-        if binary
-          headers = r['headers'] || {}
-          return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers, 'url' => r['url'].to_s}
-        end
-        {'body' => RuntimeShared.utf8_text(bytes), 'type' => type, 'status' => status, 'contentType' => header_field(r['headers'] || {}, 'content-type').to_s, 'url' => r['url'].to_s}
+        # a style sheet's location, and its `Referrer-Policy` header, a style sheet's policy.
+        headers = r['headers'] || {}
+        return {'bytes' => bytes, 'type' => type, 'status' => status, 'contentType' => header_field(headers, 'content-type').to_s, 'headers' => headers, 'url' => r['url'].to_s} if binary
+        {
+          'body'           => RuntimeShared.utf8_text(bytes),
+          'type'           => type,
+          'status'         => status,
+          'contentType'    => header_field(headers, 'content-type').to_s,
+          'url'            => r['url'].to_s,
+          'referrerPolicy' => (policy = header_field(headers, 'referrer-policy')) && Array(policy).join(',')
+        }
       end
 
       def sw_import_script_fetch(sw_handle, url, client_handle)
@@ -8518,12 +8523,13 @@ module Capybara
       # the facts of the fetch that brought it (`resource_timing_meta`); a cross-visit cache hit
       # reports the same facts as served from the cache (Chrome files a cached font with
       # `transferSize` 0). `referrer` the URL the request is referred by where it is not its client's: a rule's face's, its
-      # style resource base URL (CSS Values 4 "fetch a style resource", a font a `cors` fetch) — its sheet's location.
-      def font_file_and_meta_for(url, realm = 0, referrer = nil)
+      # style resource base URL (CSS Values 4 "fetch a style resource", a font a `cors` fetch) — its sheet's location —
+      # and `policy` the referrer policy it is made under, its sheet's where its response set one (Referrer Policy §7).
+      def font_file_and_meta_for(url, realm = 0, referrer = nil, policy = nil)
         key = resolve_against_current(url.to_s)
         return [nil, nil] unless key.is_a?(String)
 
-        client = client_for(realm, referrer: referrer)
+        client = client_for(realm, policy, referrer: referrer)
         # (…its file kept by the origin of the client it was fetched as, whose CORS check it passed or failed: another
         # origin's request of it is a fetch of its own — CSS Fonts 4 §4.9.1)
         cached = [client_origin_of(client).to_s, key]
@@ -8595,8 +8601,8 @@ module Capybara
       # container still loads, measured with the fallback family).
       # (…fetched, where no cache has it, as the document of realm `realm` requests it — referred by `referrer` where its
       # face has one: `font_file_and_meta_for`)
-      def web_font_fetch(url, realm = 0, referrer = nil)
-        file, meta = font_file_and_meta_for(url, realm, referrer)
+      def web_font_fetch(url, realm = 0, referrer = nil, policy = nil)
+        file, meta = font_file_and_meta_for(url, realm, referrer, policy)
         {'path' => file, 'meta' => meta, 'ok' => !file.nil? || (meta && meta['status'].to_i.between?(200, 399)) == true}
       end
 

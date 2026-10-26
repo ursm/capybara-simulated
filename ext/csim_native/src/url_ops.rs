@@ -25,6 +25,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "noteRequestPolicy", note_request_policy_op, context_id);
     register(scope, ns, "inheritReferrerPolicy", inherit_referrer_policy_op, context_id);
     register(scope, ns, "requestPolicy", request_policy_op, context_id);
+    register(scope, ns, "noteSheetPolicy", note_sheet_policy_op, context_id);
     register(scope, ns, "hyperlinkReferrerPolicy", hyperlink_referrer_policy_op, context_id);
     register(scope, ns, "referrerPolicyAttribute", referrer_policy_attribute_op, context_id);
     register(scope, ns, "elementTarget", element_target_op, context_id);
@@ -250,6 +251,25 @@ impl crate::dom::RealmArena {
     pub(crate) fn document_referrer_policy(&self, doc: crate::dom::NodeId) -> &'static str {
         self.referrer_policies.get(&doc).copied().unwrap_or("")
     }
+    // A style sheet at `location` made of a response whose `Referrer-Policy` header is `header` (None: no such header):
+    // the sheet's referrer policy, which the requests it is responsible for — its `@import`s', its images', its fonts' —
+    // are made under (Referrer Policy §7 "Integration with CSS": a sheet processes the header and stores a policy as a
+    // Document does); none for none, theirs then its document's.
+    pub(crate) fn note_sheet_policy(&mut self, location: &str, header: Option<&str>) {
+        match header.and_then(policy_of_header) {
+            Some(policy) => self.sheet_policies.insert(location.to_owned(), policy),
+            None => self.sheet_policies.remove(location),
+        };
+    }
+    // …the policy of the sheet at `location`, where its response set one.
+    pub(crate) fn sheet_referrer_policy(&self, location: &str) -> Option<&'static str> {
+        self.sheet_policies.get(location).copied()
+    }
+}
+// Fetch "parse a referrer policy from a `Referrer-Policy` header": the last of its comma-separated tokens that is a
+// policy — matched as it is, case and all (`No-Referrer` none) — None where none is.
+pub(crate) fn policy_of_header(header: &str) -> Option<&'static str> {
+    header.split(',').rev().find_map(|token| POLICIES.iter().find(|&&p| !p.is_empty() && p == token.trim_matches([' ', '\t'])).copied())
 }
 // __dom.metaReferrerPolicy(docNid) -> the policy its `<meta name="referrer">` elements have set
 // (`document_referrer_policy`), '' for none.
@@ -285,6 +305,13 @@ fn note_request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
     let cid = crate::dom::realm_id(scope, &args);
     crate::dom::realm(scope, cid).note_request_policy(id);
+}
+// __dom.noteSheetPolicy(location, header): `note_sheet_policy`, `header` null for a response with none.
+fn note_sheet_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let location = args.get(0).to_rust_string_lossy(scope);
+    let header = args.get(1).is_string().then(|| args.get(1).to_rust_string_lossy(scope));
+    let cid = crate::dom::realm_id(scope, &args);
+    crate::dom::realm(scope, cid).note_sheet_policy(&location, header.as_deref());
 }
 // __dom.requestPolicy(nid) -> the policy the element was inserted under ('' for none), undefined where none was noted.
 fn request_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -614,6 +641,16 @@ fn javascript_url_source_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_referrer_policy_header_is_its_last_policy_token() {
+        assert_eq!(policy_of_header("no-referrer"), Some("no-referrer"));
+        assert_eq!(policy_of_header("unsafe-url, bogus, origin"), Some("origin"));
+        assert_eq!(policy_of_header("origin,\tbogus"), Some("origin"));
+        // (…matched as it is, case and all; none of no policy, an empty one's included)
+        assert_eq!(policy_of_header("No-Referrer"), None);
+        assert_eq!(policy_of_header(""), None);
+    }
 
     #[test]
     fn an_origin_is_trustworthy_as_secure_contexts_says() {

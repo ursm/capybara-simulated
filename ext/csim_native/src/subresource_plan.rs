@@ -27,7 +27,8 @@ const OPAQUE: u32 = 1 << 8;
 //   one); a font's a CORS one of credentials same-origin (CSS Fonts 4 §4.9.1); a CSS image's no-cors with its
 //   credentials included (CSS Values 4 "fetch a style resource"); a plugin's a navigation's; a timed resource's as
 //   `timed_resources` found it;
-// - the referrer policy it is made under: the element's `referrerpolicy` (`attr`), else the one its document had as
+// - the referrer policy it is made under: the element's `referrerpolicy` (`attr`) — or the style sheet's responsible
+//   for it, where its response set one (`plan_op`'s `sheet`: Referrer Policy §7) — else the one its document had as
 //   the element was inserted (`noted`: its default where it had none); else, for a load the host makes for an image, a
 //   video or a CSS image, its document's (`document`, its `<meta name="referrer">`'s) — none for any other, whose
 //   fetch takes its policy container's as it is made (Fetch "main fetch"): a module script's options keep its own;
@@ -82,13 +83,16 @@ fn fields_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let items: Vec<v8::Local<v8::Value>> = [mode, credentials, policy].iter().filter_map(|t| v8::String::new(scope, t)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.subresourcePlan(kind, nid, doc) -> `plan` of the request a `kind` consumer makes for the element `nid` (none for
-// one no element makes) in the document `doc`, from the calling realm, whose origin is its client's.
+// __dom.subresourcePlan(kind, nid, doc[, sheet]) -> `plan` of the request a `kind` consumer makes for the element `nid`
+// (none for one no element makes) in the document `doc`, from the calling realm, whose origin is its client's — one a
+// style sheet is responsible for (an `@import`'s, an image's, a font's) under that sheet's policy, `sheet` its location
+// (url_ops.rs `sheet_referrer_policy`).
 // (…the opaque bit the calling realm's: a load the host makes for an image or a video says it, as the host cannot ask a
 // frame still parsing — the host asks a request element's realm its own)
 fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let kind = args.get(0).uint32_value(scope).unwrap_or(0);
     let (el, doc) = (crate::dom::nid_arg(scope, &args, 1), crate::dom::nid_arg(scope, &args, 2));
+    let sheet = args.get(3).is_string().then(|| args.get(3).to_rust_string_lossy(scope));
     let cid = crate::dom::realm_id(scope, &args);
     let realm = crate::dom::realm(scope, cid);
     let node = el.and_then(|id| realm.get(id));
@@ -100,7 +104,10 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
         J_IMAGE => node.is_some_and(|n| n.is_html_named("img")),
         k => matches!(k, J_CLASSIC_SCRIPT | J_MODULE_SCRIPT | J_SHEET | J_LINK | J_PREFETCH),
     };
-    let attr = node.filter(|_| referring).map_or("", crate::url_ops::referrer_policy_attribute);
+    let attr = match sheet.and_then(|s| realm.sheet_referrer_policy(&s)) {
+        Some(policy) => policy,
+        None => node.filter(|_| referring).map_or("", crate::url_ops::referrer_policy_attribute),
+    };
     let worker = node
         .and_then(|n| crate::script::modulepreload_destination(n.plain_attr("as").unwrap_or("")))
         .is_some_and(|d| matches!(d, "worker" | "sharedworker" | "serviceworker"));

@@ -163,6 +163,42 @@ RSpec.describe 'a subresource request' do
     expect(sites['/fo.woff2']).to eq('same-origin')
   end
 
+  # …and under the sheet's own referrer policy, its response's `Referrer-Policy` header's — its last policy token —
+  # where it has one (Referrer Policy §7: a sheet processes the header and stores a policy as a Document does): its
+  # `@import`s, its images and its fonts alike; the document's where it has none.
+  it "is referred under its sheet's Referrer-Policy header", :https do
+    refs = referers
+    session = simulated_session(lambda {|env|
+      path = env['PATH_INFO']
+      refs[path] = env['HTTP_REFERER']
+      next [200, {'content-type' => 'font/woff2'}, ['']] if path.end_with?('.woff2')
+      next [200, {'content-type' => 'image/png'}, ['']] if path.end_with?('.png')
+
+      css = {
+        '/n.css' => [{'referrer-policy' => 'no-referrer'}, '@import "/ni.css"; @font-face{font-family:N;src:url(/fn.woff2)} #n{background-image:url(/bn.png)}'],
+        '/o.css' => [{'referrer-policy' => 'unsafe-url, bogus, origin'}, '@font-face{font-family:O;src:url(/fo.woff2)} #o{background-image:url(/bo.png)}'],
+        '/d.css' => [{}, '#d{background-image:url(/bd.png)}'],
+        '/ni.css' => [{}, '']
+      }[path]
+      next [200, {'content-type' => 'text/css', **css[0]}, [css[1]]] if css
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><link rel=stylesheet href=/n.css>' \
+                                              '<link rel=stylesheet href=/o.css><link rel=stylesheet href=/d.css>' \
+                                              '<div id=n>n</div><div id=o>o</div><div id=d>d</div>']]
+    })
+    session.visit '/p'
+    session.evaluate_script('Promise.all(["N", "O"].map((f) => document.fonts.load(`16px ${f}`)))')
+    session.evaluate_script('1')
+    expect(referers.slice('/ni.css', '/fn.woff2', '/bn.png', '/fo.woff2', '/bo.png', '/bd.png')).to eq(
+      '/ni.css'   => nil,
+      '/fn.woff2' => nil,
+      '/bn.png'   => nil,
+      '/fo.woff2' => 'https://www.example.com/',
+      '/bo.png'   => 'https://www.example.com/',
+      '/bd.png'   => 'https://www.example.com/d.css'
+    )
+  end
+
   # A module a script imports is referred by that script's base URL (HTML "fetch the descendants of a module script",
   # HostLoadImportedModule): a static import by its importer's URL, an `import()` by the URL of the script it is in — an
   # inline one's its document's base URL — and a graph's every fetch under the referrer policy its element sets, an

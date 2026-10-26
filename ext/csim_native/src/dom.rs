@@ -987,6 +987,9 @@ pub(crate) struct RealmArena {
     // insertion begins is made under, whatever a `<meta>` after it sets before the fetch runs (url_ops.rs
     // `note_request_policy`).
     pub(crate) request_policies: std::collections::HashMap<NodeId, &'static str>,
+    // …and each style sheet's referrer policy, as its response's `Referrer-Policy` header set it, by its location: the
+    // policy the requests it is responsible for are made under (url_ops.rs `note_sheet_policy`).
+    pub(crate) sheet_policies: std::collections::HashMap<String, &'static str>,
     // The popovers in the middle of being shown or hidden (HTML's "popover showing or hiding" flag).
     pub(crate) popovers_changing: std::collections::HashSet<NodeId>,
     // The close watchers running their cancel action (dialogs.rs `dialogRequestClose`).
