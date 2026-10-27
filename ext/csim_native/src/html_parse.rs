@@ -451,6 +451,9 @@ impl Parse {
 struct Parses {
     next: u32,
     live: std::collections::HashMap<u32, Parse>,
+    // The script-created parse of each document that ended last (`htmlEnded`): the one whose "the end" fires the
+    // document's load — none an earlier one's, whose written document is gone with the document opened again.
+    ended: std::collections::HashMap<crate::dom::NodeId, u32>,
 }
 
 fn parses<'s>(scope: &'s mut v8::PinScope<'_, '_>) -> &'s mut Parses {
@@ -468,6 +471,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "htmlScriptEnd", html_script_end, context_id);
     register(scope, ns, "htmlWrite", html_write, context_id);
     register(scope, ns, "htmlParserState", html_parser_state, context_id);
+    register(scope, ns, "htmlEnded", html_ended, context_id);
+    register(scope, ns, "htmlTakeEnded", html_take_ended, context_id);
     register(scope, ns, "htmlScriptStopped", html_script_stopped, context_id);
     register(scope, ns, "htmlTakeBlockingScript", html_take_blocking_script, context_id);
     register(scope, ns, "htmlDone", html_done, context_id);
@@ -758,6 +763,26 @@ fn html_take_blocking_script(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let id = parse_id(scope, &args);
     let script = parses(scope).live.get_mut(&id).filter(|p| p.set_aside.is_empty()).and_then(|p| p.blocking.take());
     rv.set(crate::dom::node_value(scope, script));
+}
+
+// __dom.htmlEnded(id, doc): the script-created parse `id` of the document `doc` ended — its "the end" run.
+fn html_ended(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    if let Some(doc) = crate::dom::nid_arg(scope, &args, 1) {
+        parses(scope).ended.insert(doc, id);
+    }
+}
+// __dom.htmlTakeEnded(id, doc) -> whether the parse `id` is still the one of `doc`'s that ended last — let go of then:
+// the task "the end" queued for its load runs once.
+fn html_take_ended(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 1) else { return rv.set_bool(false) };
+    let ended = &mut parses(scope).ended;
+    let last = ended.get(&doc) == Some(&id);
+    if last {
+        ended.remove(&doc);
+    }
+    rv.set_bool(last);
 }
 
 // __dom.htmlClose(id): a script-created parse's input stream has its end (`document.close()`): it ends where the input
