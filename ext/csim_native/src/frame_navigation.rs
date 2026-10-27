@@ -442,7 +442,11 @@ const SUBMISSION_LAND: u32 = 1;
 // "navigate", as top-level submissions do) — and whether it is still a POST — where its last hop went as one (a 307's,
 // a 308's: `method`, the network's), else where nothing redirected it (a service worker's answer).
 fn frame_submission_response(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(container), Some(form)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
+    let answer = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, code: u32, url: &str, posted: bool| {
+        let items = [v8::Integer::new_from_unsigned(scope, code).into(), crate::subresource_obtain::text(scope, url), v8::Boolean::new(scope, posted).into()];
+        rv.set(v8::Array::new_with_elements(scope, &items).into());
+    };
+    let (Some(container), Some(form)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return answer(scope, rv, SUBMISSION_NONE, "", false) };
     let token = args.get(2).uint32_value(scope).unwrap_or(0);
     let status = args.get(3).uint32_value(scope).unwrap_or(0);
     let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| (!args.get(i).is_null_or_undefined()).then(|| args.get(i).to_rust_string_lossy(scope)).filter(|s| !s.is_empty());
@@ -450,10 +454,6 @@ fn frame_submission_response(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let redirected = args.get(7).is_true();
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let answer = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, code: u32, url: &str, posted: bool| {
-        let items = [v8::Integer::new_from_unsigned(scope, code).into(), crate::subresource_obtain::text(scope, url), v8::Boolean::new(scope, posted).into()];
-        rv.set(v8::Array::new_with_elements(scope, &items).into());
-    };
     if status == 204 || status == 205 {
         if arena.land_frame_navigation(container, form, token) {
             arena.set_frame_nav(container, NAV_PENDING, false);
@@ -469,7 +469,8 @@ fn frame_submission_response(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     answer(scope, rv, SUBMISSION_LAND, &url, posted);
 }
 // __dom.frameTakeContent(containerNid, url, bytes, contentType, referrer) -> the realm the container's navigable's
-// document was in (-1 for none), or -2 where its unloading ignores the navigation: the response document of a scripted
+// document was in (-1 for none), or -2 for none taken — an element that is no HTML iframe or frame, `bytes` no view, or
+// a document whose unloading ignores the navigation: the response document of a scripted
 // navigation (a form submitted into it) the navigation carries — this navigation the one that fires its `load` now, a
 // `src` one waiting for its response over — and every earlier navigation of it superseded. The bindings unload the
 // old document's realm and build the new one.
@@ -477,11 +478,6 @@ fn frame_take_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_int32(-2);
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let Ok(view) = v8::Local::<v8::ArrayBufferView>::try_from(args.get(2)) else { return };
-    let mut bytes = vec![0u8; view.byte_length()];
-    view.copy_contents(&mut bytes);
-    let url = utf16_arg(scope, args.get(1));
-    let content_type = utf16_arg(scope, args.get(3));
-    let referrer = if args.get(4).is_null_or_undefined() { Vec::new() } else { utf16_arg(scope, args.get(4)) };
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     if !arena.get(container).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame")) {
@@ -491,6 +487,12 @@ fn frame_take_content(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     if old.is_some_and(|r| arena.unloading(r)) {
         return;
     }
+    let mut bytes = vec![0u8; view.byte_length()];
+    view.copy_contents(&mut bytes);
+    let url = utf16_arg(scope, args.get(1));
+    let content_type = utf16_arg(scope, args.get(3));
+    let referrer = if args.get(4).is_null_or_undefined() { Vec::new() } else { utf16_arg(scope, args.get(4)) };
+    let arena = crate::dom::realm(scope, cid);
     let content_type = if content_type.is_empty() { "text/html".encode_utf16().collect() } else { content_type };
     arena.frame_navigation(container).contents[CONTENT_NAV] = Some(Content { url, bytes, content_type, referrer, policy: Vec::new() });
     arena.set_frame_nav(container, LOAD_FIRED | NAV_PENDING | COMMIT_PENDING, false);
