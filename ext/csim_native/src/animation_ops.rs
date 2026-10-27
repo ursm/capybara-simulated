@@ -86,6 +86,26 @@ fn with_engine(
     });
 }
 
+// …an op that may move what an element shows otherwise than with the clock — an animation made, sought, paused,
+// canceled, its effect, timing, target or keyframes changed: each element it touched marked, with its subtree, to be laid
+// out again. The restyle the next flush makes marks it too (layout.js `markRestyles`), but a read that asks first
+// whether the element is rendered (rendered.rs `Answered`: `offsetHeight`, `innerText`, `checkVisibility`) answers off
+// the generations before any flush — a `display: none` animation canceled read as not rendered still.
+fn with_engine_marking(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: &v8::FunctionCallbackArguments<'_>,
+    op: impl FnOnce(&mut v8::PinScope<'_, '_>, &mut StyleEngine, &RealmArena),
+) {
+    with_engine(scope, args, |scope, engine, arena| {
+        let at = engine.web_animations.touched();
+        op(scope, engine, arena);
+        let touched = engine.web_animations.touched_since(at);
+        if touched > 0 {
+            arena.mark_shown(touched);
+        }
+    });
+}
+
 fn string_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<String> {
     (value.is_string()).then(|| value.to_rust_string_lossy(scope))
 }
@@ -270,7 +290,7 @@ fn anim_timing_check(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // it — answered with the TypeError's message where it is refused, b: the members the page set), `target` (a: node | -1, b: pseudo), `keyframes` (a: keyframes as the bindings read them — answered with
 // the TypeError's message where they are none), `composite` / `iterationComposite` (a: the operation). What a page sets of a CSS animation's effect, its style no longer does.
 fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, _arena| {
+    with_engine_marking(scope, &args, |scope, engine, _arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as EffectId) else { return };
         match string_arg(scope, args.get(1)).as_deref() {
             Some("timing") => {
@@ -350,7 +370,7 @@ fn anim_effect_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
 
 // __dom.animNew(effect | 0, timeline origin time | null) -> animation id.
 fn anim_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, _arena| {
+    with_engine_marking(scope, &args, |scope, engine, _arena| {
         let effect = number_arg(scope, args.get(0)).map(|n| n as EffectId).filter(|&e| e != 0);
         let timeline = number_arg(scope, args.get(1));
         let id = engine.web_animations_op(|model| model.new_animation(effect, timeline));
@@ -361,7 +381,7 @@ fn anim_new(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // __dom.animCall(animation, method, arg) -> undefined, or the name of the error the method throws
 // (`InvalidStateError`, `TypeError`).
 fn anim_call(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, arena| {
+    with_engine_marking(scope, &args, |scope, engine, arena| {
         let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return };
         let method = string_arg(scope, args.get(1)).unwrap_or_default();
         let arg = number_arg(scope, args.get(2));

@@ -544,8 +544,10 @@ fn resolve_imports(
             }
             let (text, clean, location) = &fetched[&request];
             let text = text.as_deref().filter(|_| depth < IMPORT_DEPTH_LIMIT);
-            let mut children = Vec::new();
-            crate::dom::style_op(scope, cid, |scope| children = crate::dom::style_import_in(scope, cid, &url, referrer.as_deref(), text, quirks, *clean, location));
+            // (…none further where the engine's hand-over panicked: its exception what the op ends with)
+            let mut children = None;
+            crate::dom::style_op(scope, cid, |scope| children = Some(crate::dom::style_import_in(scope, cid, &url, referrer.as_deref(), text, quirks, *clean, location)));
+            let Some(children) = children else { return Ok(()) };
             let encoding = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.encodings.get(&url).copied());
             for child in children {
                 push(&mut next, child, encoding.map(str::to_owned).or_else(|| env.clone()));

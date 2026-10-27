@@ -566,6 +566,18 @@ impl Animations {
         }
     }
 
+    // How many elements an op touched since the last flush — and of them those since `at` such a count was, each once (a
+    // flush between, all of them).
+    pub(crate) fn touched(&self) -> usize {
+        self.dirty_targets.len()
+    }
+    pub(crate) fn touched_since(&self, at: usize) -> u32 {
+        let mut since: Vec<NodeId> = self.dirty_targets.get(at..).unwrap_or(&self.dirty_targets).to_vec();
+        since.sort_unstable_by_key(|n| (n.idx, n.generation));
+        since.dedup();
+        since.len() as u32
+    }
+
     // The elements whose animated values are to be composed again at this flush: every one a frame moved or an op
     // touched since the last.
     pub(crate) fn take_targets_to_restyle(&mut self) -> Vec<NodeId> {
