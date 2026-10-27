@@ -393,7 +393,8 @@ fn page_string<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str, standins: &Stan
 }
 
 // One parse in progress: its tokenizer (which owns the tree builder, which owns the sink), the input not yet tokenized,
-// and — for each script running with an INSERTION POINT (HTML §13.2.4.1) — the input after it, set aside: a
+// and — for each script running with an INSERTION POINT (HTML §13.2.4.1), so as many as the script nesting level is —
+// the input after it, set aside: a
 // `document.write` puts its text at the end of `input`, which is where the insertion point is, and the parse stops
 // there when `input` runs out. Once the input has all been taken, the tokenizer is ENDED (its tree builder has popped
 // everything) and takes nothing more.
@@ -413,6 +414,10 @@ struct Parse {
     // …and, where a build paused (`Pause`), the steps of its batch left and the status the parse stopped with
     // (`htmlRunBuilt`).
     pending: Option<(std::vec::IntoIter<Operand>, i32)>,
+    // The pending parsing-blocking script a parser-run script's `document.write` inserted (HTML "the end tag of a script
+    // in the text insertion mode": an external parser-blocking one), which runs once the nesting level is back to zero,
+    // and until it has, nothing past it is tokenized — a node `handles` holds.
+    blocking: Option<crate::dom::NodeId>,
 }
 
 impl Parse {
@@ -462,6 +467,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "htmlScriptBegin", html_script_begin, context_id);
     register(scope, ns, "htmlScriptEnd", html_script_end, context_id);
     register(scope, ns, "htmlWrite", html_write, context_id);
+    register(scope, ns, "htmlParserState", html_parser_state, context_id);
+    register(scope, ns, "htmlScriptStopped", html_script_stopped, context_id);
+    register(scope, ns, "htmlTakeBlockingScript", html_take_blocking_script, context_id);
     register(scope, ns, "htmlDone", html_done, context_id);
     register(scope, ns, "htmlClose", html_close, context_id);
     register(scope, ns, "htmlParseFragment", html_parse_fragment, context_id);
@@ -515,7 +523,7 @@ fn html_parse(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         all.next += 1;
         let id = all.next;
         let script_created = args.get(5).is_true();
-        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, script_created, handles: Vec::new(), held: Vec::new(), pending: None });
+        all.live.insert(id, Parse { tokenizer, input, set_aside: Vec::new(), standins, ended: false, script_created, handles: Vec::new(), held: Vec::new(), pending: None, blocking: None });
         rv.set(v8::Array::new_with_elements(scope, &[v8::Integer::new_from_unsigned(scope, id).into()]).into());
     });
 }
@@ -718,6 +726,38 @@ fn html_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
         rv.set_bool(true);
     });
+}
+
+// What `htmlParserState` answers of a parse: a script runs with an insertion point — the script nesting level is above
+// zero — and a pending parsing-blocking script waits.
+const PARSER_NESTED: u32 = 1;
+const PARSER_BLOCKED: u32 = 2;
+// __dom.htmlParserState(id) -> `PARSER_*` of the parse (none for one that is gone).
+fn html_parser_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    let state = parses(scope).live.get(&id).map_or(0, |p| {
+        (if p.set_aside.is_empty() { 0 } else { PARSER_NESTED }) | if p.blocking.is_some() { PARSER_BLOCKED } else { 0 }
+    });
+    rv.set_uint32(state);
+}
+// __dom.htmlScriptStopped(id, script) -> whether the script the parse stopped for in what a script wrote is the pending
+// parsing-blocking script — an external parser-blocking one (script.rs `blocks_parser`), which runs as the writer and
+// every script it is nested in have returned — rather than one that runs where it stands.
+fn html_script_stopped(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    let script = crate::node_handle::nid_of(scope, args.get(1));
+    let blocks = script.and_then(|s| crate::dom::dom(scope).arena.get(s)).is_some_and(crate::script::blocks_parser_from_source);
+    if let Some(p) = parses(scope).live.get_mut(&id).filter(|_| blocks) {
+        p.blocking = script;
+    }
+    rv.set_bool(blocks);
+}
+// __dom.htmlTakeBlockingScript(id) -> the pending parsing-blocking script, taken — the nesting level back to zero, it
+// runs now — or null for none, or one that waits on.
+fn html_take_blocking_script(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = parse_id(scope, &args);
+    let script = parses(scope).live.get_mut(&id).filter(|p| p.set_aside.is_empty()).and_then(|p| p.blocking.take());
+    rv.set(crate::dom::node_value(scope, script));
 }
 
 // __dom.htmlClose(id): a script-created parse's input stream has its end (`document.close()`): it ends where the input

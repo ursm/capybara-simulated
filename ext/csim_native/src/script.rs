@@ -176,6 +176,11 @@ fn blocks_parser(n: &crate::dom::NodeData) -> bool {
     let deferred = n.plain_attr("src").is_some() && (n.plain_attr("defer").is_some() || n.plain_attr("async").is_some());
     script_type(n) == CLASSIC && !deferred
 }
+// …one with a source, which the parser waits on (the pending parsing-blocking script) where an inline one runs where it
+// stands.
+pub(crate) fn blocks_parser_from_source(n: &crate::dom::NodeData) -> bool {
+    n.plain_attr("src").is_some() && blocks_parser(n)
+}
 
 impl RealmArena {
     // The parser at the end tag of a script it does not run there — a deferred, async or module one, or one whose type
