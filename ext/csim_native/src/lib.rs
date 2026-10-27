@@ -133,6 +133,7 @@ mod foreign_observations;
 mod frame_navigation;
 mod frame_response;
 mod worker_import;
+mod load_gates;
 mod navigables;
 mod observation_list;
 mod namespaces;

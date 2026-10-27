@@ -1071,6 +1071,8 @@ pub(crate) struct RealmState {
     // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
     // load owed to the parent after it (frame_navigation.rs `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`).
     pub(crate) load_delay: u8,
+    // …and the work it waits for that is a task of its own (load_gates.rs).
+    pub(crate) load_gates: crate::load_gates::LoadGates,
     // Its window viewport and its resize steps' (viewport.rs).
     pub(crate) window_viewport: crate::viewport::Viewport,
     // What its navigator says of the user agent (navigator.rs).
@@ -2823,6 +2825,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::frame_navigation::install(scope, ns, context_id);
     crate::frame_response::install(scope, ns, context_id);
     crate::worker_import::install(scope, ns, context_id);
+    crate::load_gates::install(scope, ns, context_id);
     crate::document_state::install(scope, ns, context_id);
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::selected_coordinates::install(scope, ns, context_id);
