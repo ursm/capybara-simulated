@@ -52,7 +52,7 @@ impl Pixels {
     }
 }
 
-// An image's fetch the host makes on a thread of its own (dom-nodes.js `_finishImageLoadFromNetwork`): the realm that
+// An image's fetch the host makes on a thread of its own (subresource_obtain.rs `image_from_network`): the realm that
 // began it — whose document's load it delays, and which takes its result, wherever the element went meanwhile — the
 // element — held, as an element whose image is being fetched is kept from being collected — the load it is for, its URL
 // and when it began — what its Resource Timing entry reports — until the host hands the result back (`imageFetchTake`).
@@ -115,8 +115,6 @@ impl RealmArena {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "imageLoadBegin", load_begin, context_id);
     crate::dom::register(scope, ns, "imageLoadClear", load_clear, context_id);
-    crate::dom::register(scope, ns, "imagePending", pending, context_id);
-    crate::dom::register(scope, ns, "imageApply", apply, context_id);
     crate::dom::register(scope, ns, "imageInfo", info, context_id);
     crate::dom::register(scope, ns, "imageUrl", url, context_id);
     crate::dom::register(scope, ns, "imageLoad", current_load, context_id);
@@ -164,12 +162,6 @@ fn load_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     *r = ImageRequest { complete: true, load: r.load + 1, ..ImageRequest::default() };
     arena.set_natural_size(id, None);
 }
-// __dom.imagePending(img): the current request pending — not complete, its image data and natural size discarded until
-// the response comes.
-fn pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = element(scope, args.get(0)) else { return };
-    crate::dom::dom(scope).arena.set_image_pending(id);
-}
 impl RealmArena {
     // The element `id`'s request pending: its image data discarded until the response arrives (HTML "update the image
     // data": unavailable, not complete, not broken).
@@ -215,27 +207,19 @@ pub(crate) fn apply_decoded(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: 
     arena.set_natural_size(id, natural);
     true
 }
-// What applying a load's result comes to (`imageApply`): nothing, a later load superseding it; else the event the
+// What applying a load's result comes to (`apply_record`): nothing, a later load superseding it; else the event the
 // element fires — `load`, or `error` for a broken one.
 pub(crate) const APPLIED_NONE: u32 = 0;
 pub(crate) const APPLIED_LOAD: u32 = 1;
 pub(crate) const APPLIED_ERROR: u32 = 2;
-// __dom.imageApply(img, load, r) -> `APPLIED_*` of load `load` applied with what its response decoded to — `r` the
-// decoder's record (`__dom.decodeImage`'s, a host load's): `{width, height, pixels[, pixelsP3, colorSpace], natural,
+// The element `id`'s load `load` applied with what its response decoded to — `r` the decoder's record (`__dom.decodeImage`'s, a host load's): `{width, height, pixels[, pixelsP3, colorSpace], natural,
 // orientation, tainted}` for an image, `{noPixels, …}` for one with none — no area (an SVG whose width or height is 0),
 // or data corrupt past the header that gave its size: the request SUCCEEDED, the element complete and not broken, its
 // size reported, an available source that is not fully decodable — and null, `{broken}` (no image in what was fetched)
 // or `{unsupported}` (a scheme the host fetches nothing of: Chrome's `error`) for a broken one. Complete either way; an
 // image's decoded pixels its bitmap — a wide-gamut (Adobe/CMYK) source's Display-P3 rendering too, which a P3 canvas
 // draws, and the space drawImage converts from — and its natural size, `natural` (`[width, height, viewBoxWidth,
-// viewBoxHeight]`), none for a broken one.
-fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(APPLIED_NONE) };
-    let load = args.get(1).uint32_value(scope).unwrap_or(0);
-    let r = v8::Local::<v8::Object>::try_from(args.get(2)).ok();
-    rv.set_uint32(apply_record(scope, id, load, r));
-}
-// …the element `id`'s load `load` applied with the record `r`: `APPLIED_*`.
+// viewBoxHeight]`), none for a broken one: `APPLIED_*`.
 pub(crate) fn apply_record(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u32, r: Option<v8::Local<'_, v8::Object>>) -> u32 {
     use crate::dom::member;
     fn field<'s>(scope: &mut v8::PinScope<'s, '_>, r: Option<v8::Local<'_, v8::Object>>, k: &str) -> Option<v8::Local<'s, v8::Value>> {

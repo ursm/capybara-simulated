@@ -1244,9 +1244,9 @@ fn image_arrive_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         rv.set_uint32(crate::image_requests::apply_record(scope, el, load, result));
     }
 }
-// __dom.imageBlobLoad(img, load, url, host) — the `<img>`'s load `load` of the `blob:` URL `url` takes the blob's bytes now
-// (H_BLOB: none for a URL revoked or unknown, a network error)
-// (`image_from_network`), decoded and applied, its `load` or `error` fired — none where a later load superseded it.
+// __dom.imageBlobLoad(img, load, url, host) — the `<img>`'s load `load` of the `blob:` URL `url` (`image_from_network`)
+// takes the blob's bytes now — none for a URL revoked or unknown, a network error — decoded and applied, its `load` or
+// `error` fired; nothing where a later load superseded it.
 fn image_blob_load_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return };
     let Some(el) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
@@ -1278,7 +1278,7 @@ fn decode_image(bytes: &[u8]) -> Option<crate::image_decode::Bitmap> {
 }
 
 // A controlled image's answer (`obtainResume`), for a load no later one superseded: none — the request let through —
-// the network's (the bindings'); else judged as the request's mode makes it, its entry the answer's (a network error's
+// the network's (`image_from_network`); else judged as the request's mode makes it, its entry the answer's (a network error's
 // one of its times), its body decoded — an opaque one's `render` — and applied, its element's `load` or `error` fired.
 fn image_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool, render: Option<Vec<u8>>) -> Result<(), Terminated> {
     use crate::subresource_judge::{facts_of, judge, Consumer, J_IMAGE, SRC_SW_EVENT, V_CROSS_ORIGIN, V_OK};
