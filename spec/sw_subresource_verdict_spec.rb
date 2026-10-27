@@ -28,6 +28,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
+        else if (u.pathname === '/scope/slow.mp3') e.respondWith(new Promise(r => setTimeout(() => r(fetch('/a.mp3')), 300)));
         else if (u.pathname === '/scope/pf-slow') e.respondWith(new Promise(r => setTimeout(() => r(new Response('x')), 200)));
         else if (u.pathname === '/scope/pf-stream') e.respondWith(fetch('/log?pf=' + (e.request.integrity || 'none')).then(() => new Response(new ReadableStream({start(c) { c.enqueue(new TextEncoder().encode('abc')); c.close(); }}))));
         else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
@@ -428,6 +429,35 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__loads') == 2 && 2 }).to eq(2)
   end
+  # …and an element its worker is yet to answer is kept for its answer, as one with a fetch under way and its listeners
+  # is no garbage: an audio nothing else holds hears its `canplaythrough` though a collection ran meanwhile.
+  it "keeps an audio its worker is yet to answer for its events" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__frame = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => { globalThis.__frame = f; };
+        document.body.appendChild(f);
+      });
+    JS
+    poll_until { session.evaluate_script('!!globalThis.__frame') }
+    session.execute_script(<<~JS)
+      globalThis.__heard = null;
+      (() => {
+        const audio = new __frame.contentWindow.Audio('/scope/slow.mp3');
+        audio.addEventListener('canplaythrough', () => { globalThis.__heard = 'canplaythrough'; });
+        audio.addEventListener('error', () => { globalThis.__heard = 'error'; });
+      })();
+    JS
+    session.driver.browser.instance_variable_get(:@runtime).instance_variable_get(:@ctx).low_memory_notification
+    expect(poll_until { session.evaluate_script('globalThis.__heard') }).to eq('canplaythrough')
+  end
+
   # …and as it is referred: under its element's `referrerpolicy` — an image's (a fetch event), a script's and a module
   # script's (the synchronous one) alike — its worker's `event.request` the policy and the referrer it is made with; an
   # audio, which has no such attribute, under its document's.

@@ -537,28 +537,6 @@ fn webm(bytes: &[u8]) -> Option<Track> {
     None
 }
 
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "decodeVideo", decode_video, context_id);
-}
-
-// __dom.decodeVideo(bytes) -> a video resource (a Uint8Array) decoded to its first frame (`decode`): `{width, height,
-// duration, pixels}` (`pixels` a Uint8ClampedArray, RGBA), or null where it is no video we can play. A decoder that
-// panics on a corrupt file has decoded nothing.
-fn decode_video(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let video = crate::canvas::bytes_read(args.get(0), None).and_then(|bytes| std::panic::catch_unwind(|| decode(&bytes)).ok().flatten());
-    let Some(video) = video else { return rv.set_null() };
-    let obj = v8::Object::new(scope);
-    let width = v8::Integer::new_from_unsigned(scope, video.width).into();
-    let height = v8::Integer::new_from_unsigned(scope, video.height).into();
-    let duration = v8::Number::new(scope, video.duration).into();
-    let pixels = crate::dom::u8_clamped_array(scope, video.rgba);
-    for (key, value) in [("width", width), ("height", height), ("duration", duration), ("pixels", pixels)] {
-        let key = v8::String::new(scope, key).expect("a short string");
-        obj.set(scope, key.into(), value);
-    }
-    rv.set(obj.into());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

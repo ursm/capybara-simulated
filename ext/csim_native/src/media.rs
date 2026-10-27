@@ -162,7 +162,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "mediaCandidateFailed", media_candidate_failed, context_id);
     crate::dom::register(scope, ns, "mediaFetch", media_fetch, context_id);
     crate::dom::register(scope, ns, "mediaResume", media_resume, context_id);
-    crate::dom::register(scope, ns, "mediaResource", media_resource, context_id);
+    crate::dom::register(scope, ns, "mediaFailed", media_failed, context_id);
     crate::dom::register(scope, ns, "mediaFrame", media_frame, context_id);
     crate::dom::register(scope, ns, "mediaCurrent", media_current, context_id);
     crate::dom::register(scope, ns, "mediaSourceInserted", media_source_inserted, context_id);
@@ -529,28 +529,11 @@ fn media_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 // What the bindings' fetch of the selected resource came to (`mediaResource`): it failed — an empty `src`, a resource
 // that could not be fetched or that cannot be played; a video decoded; an audio usable (not decoded: its readiness
 // alone).
-const RESOURCE_FAILED: u32 = 0;
-const VIDEO_DECODED: u32 = 1;
-const AUDIO_USABLE: u32 = 2;
-
-// __dom.mediaResource(media, outcome, width, height, duration, tainted, frame): the resource's outcome — a failure the
-// dedicated media source failure steps (MEDIA_ERR_SRC_NOT_SUPPORTED, no media data, NO_SOURCE: an earlier resource no
-// longer there, its frame and the frame's taint with it); a decoded video all its data (HAVE_ENOUGH_DATA), its size,
-// duration, taint and frame (`frame`, its RGBA pixels: a Uint8ClampedArray), IDLE — a seek to the default playback
-// start position where that is past 0 (within the duration), which then is 0 whatever it was; a usable audio IDLE. ->
-// the events the media data processing steps owe, in order (`resource_events`): none for a failure.
-fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.mediaFailed(media): the fetch of the element's selected resource failed, as the media load algorithm's dedicated
+// media source failure steps have it (`resource_loaded`, `MediaResource::Failed`).
+fn media_failed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
-    let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
-    let [width, height, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
-    let tainted = args.get(5).boolean_value(scope);
-    let resource = match outcome {
-        VIDEO_DECODED => MediaResource::Video { width, height, duration, tainted, frame: crate::image_requests::Pixels::of(scope, args.get(6)) },
-        AUDIO_USABLE => MediaResource::Audio,
-        _ => MediaResource::Failed,
-    };
-    let events = resource_loaded(scope, id, resource);
-    rv.set(events_value(scope, &events));
+    resource_loaded(scope, id, MediaResource::Failed);
 }
 // …the events as names, for the bindings to fire.
 pub(crate) fn events_value<'s>(scope: &mut v8::PinScope<'s, '_>, events: &[&str]) -> v8::Local<'s, v8::Value> {

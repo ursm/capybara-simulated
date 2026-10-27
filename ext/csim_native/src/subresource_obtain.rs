@@ -71,6 +71,9 @@ pub(crate) struct Request {
     preload: Option<(&'static str, u32)>,
     // (…an image's, the load of its element's it is for: image_requests.rs, 0 for none)
     load: u32,
+    // (…its element's object, held while a service worker is to answer: an element with a fetch under way and its
+    // listeners is no garbage, its answer's events owed to it)
+    holds: Option<v8::Global<v8::Value>>,
     initiator: &'static str,
     started: f64,
 }
@@ -240,7 +243,7 @@ fn fetch_css_images_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host: v8::Local<'_, v8::Function>, initiator: &'static str, url: String, referrer: Option<String>) -> Result<(), Terminated> {
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_CSS_IMAGE, None, Some(doc), referrer.as_deref());
-    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, integrity: String::new(), preload: None, load: 0, initiator, started };
+    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, integrity: String::new(), preload: None, load: 0, holds: None, initiator, started };
     if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
@@ -278,7 +281,7 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
     let arena = realm(scope, cid);
     let plan = plan_in(arena, kind, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
-    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load: 0, initiator, started };
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load: 0, holds: None, initiator, started };
     if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
@@ -291,8 +294,12 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
 
 // `request` handed to the controlling service worker's `fetch` event, its answer the engine's later (`obtainResume`) —
 // or, where no worker controls the document (or the URL is no http(s) one), handed back.
-fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: Request) -> Result<Option<Request>, Terminated> {
+fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, mut r: Request) -> Result<Option<Request>, Terminated> {
     let cid = r.cid;
+    if let Some(el) = r.el {
+        let object = crate::dom::node_value(scope, Some(el));
+        r.holds = (!object.is_null()).then(|| v8::Global::new(scope, object));
+    }
     let token = {
         let arena = realm(scope, cid);
         arena.obtain_tokens += 1;
@@ -388,7 +395,7 @@ fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: N
                 let arena = realm(scope, cid);
                 let plan = plan_in(arena, kind, Some(el), Some(doc), None);
                 let client = arena.get(el).map(|n| n.realm);
-                let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load: 0, initiator: dest, started };
+                let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load: 0, holds: None, initiator: dest, started };
                 let resp = from_network(scope, host, &r)?.map(|resp| v8::Local::new(scope, resp));
                 let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
                 if dest == "object" {
@@ -434,7 +441,7 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_FONT, None, None, referrer);
     let doc = call(scope, host, H_DOCUMENT, &[])?.and_then(|d| v8::Local::new(scope, d).integer_value(scope)).and_then(NodeId::from_i64);
-    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), preload: None, load: 0, initiator: "css", started };
+    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), preload: None, load: 0, holds: None, initiator: "css", started };
     if let Some(preloaded) = preloaded(scope, host, &r)? {
         let Some(response) = preloaded else { return Ok(None) };
         let facts = response.facts();
@@ -512,7 +519,7 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = realm_id(scope, &args);
     let Ok(started) = now(scope, host) else { return };
     let client = realm(scope, cid).get(el).map(|n| n.realm);
-    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, preload: None, load: 0, initiator: "link", started };
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, preload: None, load: 0, holds: None, initiator: "link", started };
     let route = crate::fetch_rules::fetch_route(&r.url, 0, "");
     let done = if matches!(route, crate::fetch_rules::ROUTE_DATA | crate::fetch_rules::ROUTE_BLOB) {
         let preload_destination = if obtains & OBTAINS_PRELOAD != 0 { crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("") } else { "" };
@@ -715,7 +722,7 @@ fn link_preload_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     arena.obtain_tokens += 1;
     let id = arena.obtain_tokens;
     let client = arena.get(el).map(|n| n.realm);
-    let request = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: Some((destination, id)), load: 0, initiator: "link", started };
+    let request = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: Some((destination, id)), load: 0, holds: None, initiator: "link", started };
     arena.preload_begin(key.clone(), integrity, request.clone());
     arena.link_preloads.insert(el, LinkPreload { key, request, id, got: None, loaded: false, early });
     rv.set_uint32(id);
@@ -977,7 +984,7 @@ fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_
     let arena = realm(scope, cid);
     let plan = plan_in(arena, J_CLASSIC_SCRIPT, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
-    let r = Request { cid, kind: J_CLASSIC_SCRIPT, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: None, load: 0, initiator: "script", started };
+    let r = Request { cid, kind: J_CLASSIC_SCRIPT, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: None, load: 0, holds: None, initiator: "script", started };
     // What answered: its verdict, its Content-Type, its entry's facts, and its body — served bytes (a preload's, a
     // worker's), else the host's text with the bytes it kept where they are not its text's UTF-8.
     let (v, content_type, answered, served, raw, host_text): (u32, String, Option<Answered>, bool, Option<Vec<u8>>, Option<v8::Global<v8::Value>>);
@@ -1119,7 +1126,7 @@ fn image_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         return;
     }
     let Ok(started) = now(scope, host) else { return };
-    let r = Request { cid, kind: J_IMAGE, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load, initiator: "img", started };
+    let r = Request { cid, kind: J_IMAGE, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load, holds: None, initiator: "img", started };
     // (…the request pending: the image data discarded until the worker answers — an observable window, as a browser's)
     let arena = realm(scope, cid);
     arena.set_image_pending(el);
@@ -1203,7 +1210,7 @@ fn media_fetch_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let kind = if video { crate::subresource_judge::J_VIDEO } else { crate::subresource_judge::J_AUDIO };
     let Ok(started) = now(scope, host) else { return };
     let plan = plan_in(realm(scope, cid), kind, Some(el), Some(doc), None);
-    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client: None, referrer: None, integrity: String::new(), preload: None, load, initiator: if video { "video" } else { "audio" }, started };
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client: None, referrer: None, integrity: String::new(), preload: None, load, holds: None, initiator: if video { "video" } else { "audio" }, started };
     let done = if video { fetch_video(scope, host, &r).map(MediaFetched::Done) } else { fetch_audio(scope, host, r) };
     match done {
         Ok(MediaFetched::Done(Some(events))) => rv.set(crate::media::events_value(scope, &events)),
