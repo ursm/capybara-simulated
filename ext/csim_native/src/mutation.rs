@@ -5,7 +5,7 @@
 // frame's discarding, a select's reset) called back where they fall, and those it ends with — the custom element
 // reactions, the connection walk — the bindings' to take as it returns.
 
-use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_STRUCTURE, GEN_SUBTREE_MARKS, GEN_TREE};
+use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_SUBTREE_MARKS, GEN_TREE};
 
 // DOM node types, as the page side names them.
 const ELEMENT: u32 = 1;
@@ -514,7 +514,7 @@ fn move_child_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // siblings either side (`siblings`; for an insertion alone, those of the nodes it put in where they still are) — and what
 // moves with it: the target realm's layout marks (the target, its subtree where it is an element or a shadow root — what
 // the selectors read of a child list, positions, `:empty`, a `:has()` above — and each node put in with its subtree,
-// measured where it is now); the calling realm's settle, tree, nodes and structure generations and the observations a
+// measured where it is now); the calling realm's settle, tree and nodes generations and the observations a
 // change schedules; and, where the change gave a sheet owner a new sheet (the count `renewals` was at as it began), the
 // cascade — the version too on a page with shadow trees, whose sheets are handed to the style engine by it. False where
 // a node factory threw making the record's answers (none queued): the caller goes no further, its exception what the op
@@ -545,7 +545,7 @@ pub(crate) fn record_child_list(
     // keys on moves with the tree)
     for moved in [caller, cid].into_iter().take(if caller == cid { 1 } else { 2 }) {
         let generations = &realm(scope, moved).generations;
-        for which in [GEN_SETTLE, GEN_TREE, GEN_NODES, GEN_STRUCTURE] {
+        for which in [GEN_SETTLE, GEN_TREE, GEN_NODES] {
             generations.bump(which);
         }
         crate::dom::dom(scope).arena.observers.note_observations(moved);

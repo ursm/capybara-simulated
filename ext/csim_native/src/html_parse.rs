@@ -651,6 +651,7 @@ fn html_run_built(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             }
         }
         if failed {
+            build.built_tree(scope);
             return;
         }
         let (status, stepped) = match paused {
@@ -1665,17 +1666,19 @@ impl<'s> Build<'s> {
             crate::dom::assign_slots_in(scope, self.cid, Some(shadow), &[]);
         }
     }
+    // The tree it built a change of the tree's, which its memos key on — no settle generation's: the parser's mutations are
+    // silent — whether the build went to its end or stopped at a node factory that threw, having put nodes in.
+    pub(crate) fn built_tree(&self, scope: &mut v8::PinScope<'s, '_>) {
+        let generations = &crate::dom::realm(scope, self.cid).generations;
+        generations.bump(crate::dom::GEN_TREE);
+        generations.bump(crate::dom::GEN_NODES);
+    }
     // What the page is handed: the count of `tops` and their objects, then each element the bindings have steps for,
     // the names of its attributes whose steps are theirs and its flags — an element with an id, autofocus or an
     // `open` given its insertion steps too (`BUILT_INSERTED`). None past a node factory that threw: its exception is what
     // the op ends with.
     pub(crate) fn answer(&mut self, scope: &mut v8::PinScope<'s, '_>, tops: &[crate::dom::NodeId]) -> Option<Vec<v8::Local<'s, v8::Value>>> {
-        // (…the tree it built a change of the tree's and the structure's, which their memos key on — no settle generation's:
-        // the parser's mutations are silent)
-        let generations = &crate::dom::realm(scope, self.cid).generations;
-        for which in [crate::dom::GEN_STRUCTURE, crate::dom::GEN_TREE, crate::dom::GEN_NODES] {
-            generations.bump(which);
-        }
+        self.built_tree(scope);
         for (_, names, flags) in self.steps.iter_mut() {
             if names.iter().any(|n| matches!(n.as_str(), "id" | "autofocus" | "open")) {
                 *flags |= BUILT_INSERTED;

@@ -793,7 +793,7 @@ pub(crate) struct Generations {
 }
 // …the sequence of the last change a layout has to see; how many subtree-wide layout marks there were (a diagnostic);
 // the settle generation (every observable change); the tree's (that and every parser change); the nodes' (that but a
-// text's data); the structure's (an insertion or removal, nothing else); the style state's (a state no other moves); the
+// text's data); the style state's (a state no other moves); the
 // rule set's (the cascade made of other sheets — the bindings' `cascadeVersion`, cascade.js); the scroll's (a scroll
 // offset moved, or a scroll into view asked for, which moves every rendered box and no other generation). And beside
 // them a word of flags rather than a count: the observations the realm owes at its next rendering update
@@ -803,12 +803,11 @@ pub(crate) const GEN_SUBTREE_MARKS: usize = 1;
 pub(crate) const GEN_SETTLE: usize = 2;
 pub(crate) const GEN_TREE: usize = 3;
 pub(crate) const GEN_NODES: usize = 4;
-pub(crate) const GEN_STRUCTURE: usize = 5;
-pub(crate) const GEN_STYLE_STATE: usize = 6;
-pub(crate) const GEN_CASCADE: usize = 7;
-pub(crate) const GEN_SCROLL: usize = 8;
-pub(crate) const GEN_OBSERVATIONS: usize = 9;
-const GENERATIONS: usize = 10;
+pub(crate) const GEN_STYLE_STATE: usize = 5;
+pub(crate) const GEN_CASCADE: usize = 6;
+pub(crate) const GEN_SCROLL: usize = 7;
+pub(crate) const GEN_OBSERVATIONS: usize = 8;
+const GENERATIONS: usize = 9;
 
 impl Generations {
     pub(crate) fn get(&self, which: usize) -> u32 {
@@ -833,12 +832,11 @@ impl Generations {
             cell.set(byte);
         }
     }
-    // …the buffer, made as the realm's bindings first view it: every generation 0, but the structure's, 1.
+    // …the buffer, made as the realm's bindings first view it: every generation 0.
     fn store(&mut self) -> v8::SharedRef<v8::BackingStore> {
         self.buffer
             .get_or_insert_with(|| {
-                let mut words = [0u32; GENERATIONS];
-                words[GEN_STRUCTURE] = 1;
+                let words = [0u32; GENERATIONS];
                 let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
                 v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared()
             })
@@ -1906,9 +1904,10 @@ impl RealmArena {
         at
     }
 
-    // A write's own steps changed an element's state — a radio group's others unchecked, a form owner reset, a control's
-    // value reset with its type — an observable change: the settle generation moved (Capybara's settle and the memos of
-    // what is shown key on it, as on the tree's) and a rendering update's observations asked for.
+    // An observable change the engine made — an element's checkedness or selectedness written, a radio group's others
+    // unchecked, a form owner reset, a control's value reset with its type, the realm's URL, the marks a parse left for
+    // the next layout pass — the settle generation moved (Capybara's settle and the memos of what is shown key on it, as
+    // on the tree's) and a rendering update's observations asked for.
     pub(crate) fn note_state_changed(&mut self) {
         for which in [GEN_SETTLE, GEN_TREE, GEN_NODES] {
             self.generations.bump(which);
