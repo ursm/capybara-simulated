@@ -1670,6 +1670,12 @@ impl<'s> Build<'s> {
     // `open` given its insertion steps too (`BUILT_INSERTED`). None past a node factory that threw: its exception is what
     // the op ends with.
     pub(crate) fn answer(&mut self, scope: &mut v8::PinScope<'s, '_>, tops: &[crate::dom::NodeId]) -> Option<Vec<v8::Local<'s, v8::Value>>> {
+        // (…the tree it built a change of the tree's and the structure's, which their memos key on — no settle generation's:
+        // the parser's mutations are silent)
+        let generations = &crate::dom::realm(scope, self.cid).generations;
+        for which in [crate::dom::GEN_STRUCTURE, crate::dom::GEN_TREE, crate::dom::GEN_NODES] {
+            generations.bump(which);
+        }
         for (_, names, flags) in self.steps.iter_mut() {
             if names.iter().any(|n| matches!(n.as_str(), "id" | "autofocus" | "open")) {
                 *flags |= BUILT_INSERTED;

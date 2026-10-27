@@ -558,10 +558,11 @@ fn note_parsed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     }
 }
 
-// __dom.flushParsedMarks() -> whether the parse changed anything since the last pass: a layout pass begins — the nodes
-// it changed under marked, in the realm whose tree each is in, each with its subtree where it is an element
-// (`GEN_DIRTY`, `GEN_SUBTREE_MARKS`) — and kept from now on.
-fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.flushParsedMarks(): a layout pass begins — the nodes the parse changed under since the last one marked, in the
+// realm whose tree each is in, each with its subtree where it is an element (`GEN_DIRTY`, `GEN_SUBTREE_MARKS`), as the
+// childList records would have marked them, and kept from now on; the calling realm's change noted
+// (`note_state_changed`), as the records' would have been: the cascade's structural memos move with it.
+fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     arena.parsed.layout_ran = true;
@@ -575,7 +576,9 @@ fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         }
         state.generations.bump(crate::dom::GEN_DIRTY);
     }
-    rv.set_bool(!parents.is_empty());
+    if !parents.is_empty() {
+        crate::dom::realm(scope, cid).note_state_changed();
+    }
 }
 
 // __dom.moTakeObservations() -> [realm, …]: the several realms a change since asked a rendering update's observations
