@@ -25,6 +25,8 @@ const H_DOCUMENT: u32 = 7;
 const H_FONT_BYTES: u32 = 8;
 const H_FONT_NETWORK: u32 = 9;
 pub(crate) const H_LOCAL_FONT: u32 = 10;
+const H_FETCH: u32 = 11;
+const H_LINK_EVENT: u32 = 12;
 
 // What processing a plugin element came to (`processPlugin`): it had a resource to process, an `<object>`'s that
 // failed, and its fallback content shown or no longer (constants.js `PLUGIN_*`).
@@ -45,6 +47,8 @@ pub(crate) struct Request {
     plan: u32,
     client: Option<i32>,
     referrer: Option<String>,
+    // (…its `integrity` metadata, as it was made: a link's)
+    integrity: String,
     initiator: &'static str,
     started: f64,
 }
@@ -64,6 +68,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fetchTimedResources", fetch_timed_resources_op, context_id);
     register(scope, ns, "obtainResume", resume_op, context_id);
     register(scope, ns, "processPlugin", process_plugin_op, context_id);
+    register(scope, ns, "linkPrefetch", link_prefetch_op, context_id);
 }
 
 // `host(step, …args)` on the page side: what it answers, none for null or undefined, or where it throws — Terminated
@@ -190,7 +195,7 @@ fn fetch_css_images_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host: v8::Local<'_, v8::Function>, initiator: &'static str, url: String, referrer: Option<String>) -> Result<(), Terminated> {
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_CSS_IMAGE, None, Some(doc), referrer.as_deref());
-    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, initiator, started };
+    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, integrity: String::new(), initiator, started };
     if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
@@ -228,13 +233,21 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
     let arena = realm(scope, cid);
     let plan = plan_in(arena, kind, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
-    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, initiator, started };
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), initiator, started };
     if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
     if code & 15 == crate::subresources::SAME_ORIGIN_REFUSED {
         return file(scope, host, &r, Answered::Network(None));
     }
+    let Some(r) = dispatch(scope, host, r)? else { return Ok(()) };
+    from_network(scope, host, &r).map(drop)
+}
+
+// `request` handed to the controlling service worker's `fetch` event, its answer the engine's later (`obtainResume`) —
+// or, where no worker controls the document (or the URL is no http(s) one), handed back.
+fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: Request) -> Result<Option<Request>, Terminated> {
+    let cid = r.cid;
     let token = {
         let arena = realm(scope, cid);
         arena.obtain_tokens += 1;
@@ -242,13 +255,14 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
     };
     let mut args = request_args(scope, &r).to_vec();
     args.push(v8::Integer::new_from_unsigned(scope, token).into());
+    let integrity = text(scope, &r.integrity);
+    args.push(integrity);
     // (…kept before the event is dispatched: a worker that is gone answers at once, letting the request through)
     realm(scope, cid).obtains.insert(token, r);
     if call(scope, host, H_SW_DISPATCH, &args)?.is_some_and(|d| v8::Local::new(scope, d).is_true()) {
-        return Ok(());
+        return Ok(None);
     }
-    let Some(r) = realm(scope, cid).obtains.remove(&token) else { return Ok(()) };
-    from_network(scope, host, &r).map(drop)
+    Ok(realm(scope, cid).obtains.remove(&token))
 }
 
 // __dom.obtainResume(token, answer, redirected, host): a service worker's `fetch` event's answer to the request `token`
@@ -261,6 +275,10 @@ fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let token = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     let Some(r) = realm(scope, cid).obtains.remove(&token) else { return };
+    if r.kind & 0xff == crate::subresource_judge::J_LINK {
+        let _ = prefetch_answered(scope, host, &r, v8::Local::<v8::Object>::try_from(args.get(1)).ok(), args.get(2).is_true());
+        return;
+    }
     let Ok(answer) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         let _ = from_network(scope, host, &r);
         return;
@@ -309,7 +327,7 @@ fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: N
                 let arena = realm(scope, cid);
                 let plan = plan_in(arena, kind, Some(el), Some(doc), None);
                 let client = arena.get(el).map(|n| n.realm);
-                let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, initiator: dest, started };
+                let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), initiator: dest, started };
                 let resp = from_network(scope, host, &r)?.map(|resp| v8::Local::new(scope, resp));
                 let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
                 if dest == "object" {
@@ -362,7 +380,7 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_FONT, None, None, referrer);
     let doc = call(scope, host, H_DOCUMENT, &[])?.and_then(|d| v8::Local::new(scope, d).integer_value(scope)).and_then(NodeId::from_i64);
-    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), initiator: "css", started };
+    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), initiator: "css", started };
     if let Some(preloaded) = preloaded(scope, host, &r)? {
         let Some(response) = preloaded else { return Ok(None) };
         let facts = response.facts();
@@ -413,4 +431,68 @@ fn file_of_bytes(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Funct
 // The text a host step answered, none where it answered no string.
 pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Global<v8::Value>>) -> Option<String> {
     answer.map(|a| v8::Local::new(scope, a)).filter(|a| a.is_string()).map(|a| a.to_rust_string_lossy(scope))
+}
+
+// __dom.linkPrefetch(el, doc, url, plan, integrity, host) -> whether a controlling service worker's `fetch` event takes
+// the `<link rel=prefetch>` `el`'s request (of document `doc`) — `plan` and `integrity` the request's as its fetch began
+// (bridge.entry.js `requestAsItBegins`): the engine's then to judge its answer, file its entry and fire its element's
+// `load` or `error` (`prefetch_answered`); false where none controls the document, whose fetch is the bindings' network
+// one.
+fn link_prefetch_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return };
+    let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
+    let url = args.get(2).to_rust_string_lossy(scope);
+    let plan = args.get(3).uint32_value(scope).unwrap_or(0);
+    let integrity = args.get(4).to_rust_string_lossy(scope);
+    let cid = realm_id(scope, &args);
+    let Ok(started) = now(scope, host) else { return };
+    let client = realm(scope, cid).get(el).map(|n| n.realm);
+    let kind = crate::subresource_judge::J_LINK | crate::link_resource::OBTAINS_PREFETCH << 8;
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, initiator: "link", started };
+    if let Ok(back) = dispatch(scope, host, r) {
+        rv.set_bool(back.is_none());
+    }
+}
+
+// …its answer: `answer` the worker's, as an entry reads it (`redirected` whether the response it answered with says it
+// was), or none where it let the request through, which the network answers then — the request as it was made. A
+// prefetch loads where its answer is a response Fetch lets answer it, whatever its status (HTML's prefetch "process the
+// linked resource"), and its bytes match its integrity: its entry what answered (a refused answer's a network error),
+// and its element's `load` or `error` fired.
+fn prefetch_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool) -> Result<(), Terminated> {
+    use crate::subresource_judge::{facts_of, judge, Consumer, SRC_NETWORK, SRC_SW_EVENT, V_OK};
+    let (source, response) = match answer {
+        Some(answer) => (SRC_SW_EVENT, Some(answer)),
+        None => {
+            let args = request_args(scope, r);
+            let resp = call(scope, host, H_FETCH, &args)?.map(|resp| v8::Local::new(scope, resp));
+            (SRC_NETWORK, resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok()))
+        }
+    };
+    let mut facts = facts_of(scope, response, r.kind & 0xff, source);
+    facts.redirected = source == SRC_SW_EVENT && redirected;
+    let body = if r.integrity.is_empty() {
+        Vec::new()
+    } else {
+        let bytes = response.and_then(|resp| member(scope, resp, if source == SRC_SW_EVENT { "bytes" } else { "body_bytes" }));
+        bytes.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned()).unwrap_or_default()
+    };
+    let mode = if source == SRC_SW_EVENT { fields(r.plan).0 } else { "no-cors" };
+    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination: "", preload_destination: "", integrity: &r.integrity, body: &body, mode, quirks: false };
+    let ok = judge(&consumer, source, &facts) & V_OK != 0;
+    let answered = match (source, response) {
+        (SRC_SW_EVENT, Some(answer)) if ok => Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(answer))),
+        (SRC_SW_EVENT, _) => {
+            let refused = v8::Object::new(scope);
+            let (k, yes) = (text(scope, "blocked"), v8::Boolean::new(scope, true).into());
+            refused.set(scope, k, yes);
+            Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(refused)))
+        }
+        (_, resp) => Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))),
+    };
+    file(scope, host, r, answered)?;
+    let Some(el) = r.el else { return Ok(()) };
+    let (nid, ok) = (v8::Number::new(scope, el.to_f64()).into(), v8::Boolean::new(scope, ok).into());
+    call(scope, host, H_LINK_EVENT, &[nid, ok]).map(drop)
 }

@@ -28,6 +28,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
+        else if (u.pathname === '/scope/pf-stream') e.respondWith(fetch('/log?pf=' + (e.request.integrity || 'none')).then(() => new Response(new ReadableStream({start(c) { c.enqueue(new TextEncoder().encode('abc')); c.close(); }}))));
         else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
         else if (u.pathname === '/scope/moved.css') e.respondWith(fetch('/other/x.css'));
         else if (u.pathname === '/scope/two.css') e.respondWith(fetch('/log?two=' + e.request.mode + ',' + (e.request.integrity || 'none')).then(() => new Response('p {}', {headers: {'content-type': 'text/css'}})));
@@ -370,6 +371,36 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     # (…the page stepped as the driver asks it)
     expect(poll_until { session.evaluate_script('1') && (logged = hits.grep(%r{\A/log\?})).size == 2 && logged.sort }).to eq(%w[/log?hint-cors=cors /log?hint-plain=no-cors])
+  end
+  # …and with its `integrity`, which the worker's answer is checked against once its body is read — a streamed one's too:
+  # the prefetch loads, and its entry is sized by what the stream held.
+  it "hands the worker a prefetch's integrity and checks a streamed answer against it" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument, W = f.contentWindow;
+          const link = d.createElement('link');
+          link.rel = 'prefetch';
+          link.integrity = 'sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=';
+          link.href = '/scope/pf-stream';
+          for (const type of ['load', 'error']) link.addEventListener(type, () => {
+            const e = W.performance.getEntriesByType('resource').find((e) => e.name.endsWith('pf-stream'));
+            globalThis.__seen = [type, e && e.encodedBodySize];
+          });
+          d.head.appendChild(link);
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['load', 3])
+    expect(hits).to include('/log?pf=sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=')
   end
   # …and as it is referred: under its element's `referrerpolicy` — an image's (a fetch event), a script's and a module
   # script's (the synchronous one) alike — its worker's `event.request` the policy and the referrer it is made with; an
