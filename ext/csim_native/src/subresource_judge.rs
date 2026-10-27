@@ -87,8 +87,9 @@ pub(crate) struct Facts {
 //   an answer the host judged already, nor of an opaque answer to a fetch event, whose status a no-cors consumer cannot
 //   read, nor of a scheme's;
 // - a body cut short is none to use, nor one with no body or (for a decoded one) an empty one;
-// - one whose request has `integrity` metadata must match it (Fetch "main fetch": SRI's "does response match
-//   metadataList?", which an opaque response fails) — else it is a network error, whatever its consumer;
+// - one whose request has `integrity` metadata must not be refused by it (integrity.rs `integrity_refuses`: a
+//   CORS-cross-origin one — opaque, or tainted — whose body is null by any metadata, else by SRI's byte matching) —
+//   else it is a network error, whatever its consumer;
 // - a classic script's must be none Fetch refuses it for (script.rs `script_response_refused`: its MIME type,
 //   `nosniff`); a worker-imported script's from the network must be of a
 //   JavaScript MIME type; a style sheet's must be one
