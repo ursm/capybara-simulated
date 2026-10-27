@@ -289,8 +289,8 @@ pub(crate) fn send_target(engine: &mut crate::style::StyleEngine, arena: &crate:
     let facts = plan(arena, id, &[], None, 0);
     let doc = Some(arena.shadow_including_root(id)).filter(|&d| arena.get(d).is_some_and(|d| d.kind == crate::dom::NodeKind::Document));
     let body = doc.and_then(|d| arena.body_element(d));
-    // (…the element its document has focused, the body where nothing is)
-    let active = doc.and_then(|d| arena.realm_state(arena.get(d)?.realm)?.focus.filter(|&f| arena.shadow_including_root(f) == d));
+    // (…the element its document has focused)
+    let active = crate::focus::document_focus(arena, id);
     // An element a key does something to — one a text is typed into, a checkbox or a radio, a link, a button — or one
     // that takes focus whatever it is (a `tabindex` container, a listbox: WebDriver "keyboard-interactable") is focused,
     // as Selenium / Playwright `send_keys` focus their target even where nothing is typed into it — blurring what had

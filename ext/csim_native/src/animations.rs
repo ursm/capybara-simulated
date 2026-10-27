@@ -362,6 +362,8 @@ pub(crate) enum Signal {
     // A finish notification was queued for the next microtask checkpoint: the handle is to run it then
     // (`finish_notification`).
     FinishNotificationQueued { animation: AnimationId },
+    // A playback event of the animation was queued: the handle is to be held until it is dispatched (`held`).
+    EventQueued { animation: AnimationId },
 }
 
 // A playback event of an animation a handle holds — `finish`, `cancel` or `remove` — in the document's pending
@@ -426,8 +428,10 @@ pub(crate) struct Animations {
     // The document timeline's current time (ms), None before the page has one.
     pub(crate) timeline_time: Option<f64>,
     pub(crate) signals: Vec<Signal>,
-    // The playback events queued since the last rendering update took them…
-    pub(crate) playback_events: Vec<PlaybackEvent>,
+    // The playback events queued since the last rendering update took them (`take_playback_events`), and the animations
+    // they are of…
+    playback_events: Vec<PlaybackEvent>,
+    queued: std::collections::HashSet<AnimationId>,
     // …and the events the CSS animations owe.
     pub(crate) css_events: Vec<CssEvent>,
     // The elements whose animations' properties changed — an effect came or went, or its keyframes changed — since a
@@ -1449,20 +1453,30 @@ impl Animations {
         };
         let scheduled = at.map_or(f64::NEG_INFINITY, |at| at + a.timeline.unwrap_or(0.0));
         self.playback_events.push(PlaybackEvent { animation: id, kind, current_time, timeline_time, scheduled, class });
+        if self.queued.insert(id) {
+            self.signals.push(Signal::EventQueued { animation: id });
+        }
+    }
+    pub(crate) fn take_playback_events(&mut self) -> Vec<PlaybackEvent> {
+        self.queued.clear();
+        std::mem::take(&mut self.playback_events)
     }
 
-    // Whether animation `id`'s handle is held, whatever the page holds of it: by its timeline while it plays — not idle,
-    // and not over without a fill — so a page that let go of it still finds it in `getAnimations()`, its promises and
-    // events still reaching their listeners; and by the pending animation event queue while an event of it waits there.
+    // Whether animation `id`'s handle is held, whatever the page holds of it: by the pending animation event queue while
+    // an event of it waits there — the handle told so as the first is queued (`EventQueued`), the engine's animation
+    // gone or not — and by its timeline while it plays — not idle, and not over without a fill — so a page that let go
+    // of it still finds it in `getAnimations()`, its promises and events still reaching their listeners.
     pub(crate) fn held(&self, id: AnimationId) -> bool {
+        if self.queued.contains(&id) {
+            return true;
+        }
         let Some(a) = self.animations.get(&id) else { return false };
-        let plays = a.timeline.is_some()
+        a.timeline.is_some()
             && match self.play_state(id) {
                 PlayState::Idle => false,
                 PlayState::Finished => a.effect.and_then(|e| self.computed_timing(e)).is_some_and(|t| t.progress.is_some()),
                 _ => true,
-            };
-        plays || self.playback_events.iter().any(|e| e.animation == id)
+            }
     }
 }
 
@@ -1683,7 +1697,7 @@ mod tests {
         let signals = model.take_signals();
         assert!(signals.contains(&Signal::FinishedResolved { animation: id, generation: 0 }));
         assert_eq!(
-            model.playback_events,
+            model.take_playback_events(),
             [PlaybackEvent { animation: id, kind: "finish", current_time: Some(1000.0), timeline_time: Some(1500.0), scheduled: 1000.0, class: 2 }]
         );
         // …and playing it again rewinds it, with a new finished promise.
@@ -1712,10 +1726,10 @@ mod tests {
         let id = playing(&mut model, 1000.0);
         model.finish(id).unwrap();
         assert_eq!((model.play_state(id), model.current_time(id)), (PlayState::Finished, Some(1000.0)));
-        assert!(std::mem::take(&mut model.playback_events).iter().any(|e| e.kind == "finish"));
+        assert!(model.take_playback_events().iter().any(|e| e.kind == "finish"));
         model.cancel(id);
         assert_eq!((model.play_state(id), model.current_time(id)), (PlayState::Idle, None));
-        assert!(model.playback_events.iter().any(|e| e.kind == "cancel"));
+        assert!(model.take_playback_events().iter().any(|e| e.kind == "cancel"));
         let infinite = model.new_effect(EffectTiming { iterations: f64::INFINITY, ..timing(1000.0) });
         let forever = model.new_animation(Some(infinite), Some(0.0));
         assert_eq!(model.finish(forever), Err(AnimationError::InvalidState));

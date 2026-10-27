@@ -5764,13 +5764,14 @@ fn style_tick_unguarded(
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleTakeAnimationEvents() -> [type, nid, pseudo, name, time, animation, timelineTime, …]: the document's
+// __dom.styleTakeAnimationEvents() -> [type, target, pseudo, name, time, animation, timelineTime, …]: the document's
 // pending animation events, taken in the order the rendering update dispatches them (`take_animation_events`) — after
 // its microtask checkpoint, so what a script queued there (a `cancel()` in a `ready` reaction) is due in the same update
-// (web-animations §4.2 step 4). A CSS animation's or transition's: the element it is fired at (`pseudo` null for an
-// element's own), the animation's name or the transition's property, its `elapsedTime` (`time`); a playback event's
-// (`finish`, `cancel`, `remove`): nid -1, its `currentTime` (`time`) and `timelineTime`, null for none. `animation` the
-// engine's id of the animation it is about.
+// (web-animations §4.2 step 4). A CSS animation's or transition's: the element it is fired at — itself, connected or
+// not: one a reaction in that checkpoint removed is owed it still, as one a style change removed is its cancel event
+// (Chrome) — `pseudo` null for an element's own, the animation's name or the transition's property, its `elapsedTime`
+// (`time`); a playback event's (`finish`, `cancel`, `remove`): target null, its `currentTime` (`time`) and
+// `timelineTime`, null for none. `animation` the engine's id of the animation it is about.
 fn style_take_animation_events(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -5782,8 +5783,16 @@ fn style_take_animation_events(
     let events = engine.take_animation_events(arena);
     let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * 7);
     for e in events {
+        let target = node_value(scope, e.node);
+        if factory_threw(scope) {
+            return;
+        }
+        // (…a CSS event's element gone from the arena, which nothing held, none to fire it at)
+        if e.node.is_some() && target.is_null() {
+            continue;
+        }
         items.push(v8::String::new(scope, e.kind).map_or_else(|| v8::undefined(scope).into(), Into::into));
-        items.push(v8::Number::new(scope, e.node.map_or(-1.0, |n| n.to_f64())).into());
+        items.push(target);
         items.push(match e.pseudo.and_then(|p| v8::String::new(scope, p)) {
             Some(p) => p.into(),
             None => v8::null(scope).into(),

@@ -183,6 +183,38 @@ RSpec.describe 'CSS animation and transition events' do
     expect(cancel.split(':')[2].to_f).to be_between(0.05, 0.3).exclusive
   end
 
+  # An element removed while its event waits is owed it still, at the element itself, now detached: one a `ready`
+  # reaction removes in the rendering update's microtask checkpoint its `animationstart`, and one removed by a timer
+  # its `animationcancel` (Chrome 156, measured).
+  it 'fires an animation event at an element removed while it waits' do
+    s = page('<div id="t"></div><div id="u"></div>')
+    s.execute_script(<<~JS)
+      window.log = [];
+      setInterval(() => {}, 1000);
+      const t = document.getElementById('t');
+      t.addEventListener('animationstart', () => window.log.push('animationstart:' + t.isConnected));
+      requestAnimationFrame(() => {
+        t.className = 'go';
+        const a = document.getElementById('u').animate([{ flexGrow: 0 }, { flexGrow: 1 }], 1000);
+        a.ready.then(() => { window.log.push('ready'); t.remove(); });
+      });
+    JS
+    expect(drain(s, 4)).to eq(['ready', 'animationstart:false'])
+  end
+
+  it 'fires animationcancel at an element removed while its animation runs' do
+    s = page('<div id="t"></div>')
+    s.execute_script(<<~JS)
+      window.log = [];
+      setInterval(() => {}, 1000);
+      const t = document.getElementById('t');
+      t.addEventListener('animationstart', () => { window.log.push('start'); setTimeout(() => t.remove(), 50); });
+      t.addEventListener('animationcancel', () => window.log.push('cancel:' + t.isConnected));
+      t.className = 'go';
+    JS
+    expect(drain(s, 6)).to eq(['start', 'cancel:false'])
+  end
+
   it 'does not transition an element that has just become rendered' do
     s = page('<div id="b" class="fade" style="display:none"></div>')
     value = s.evaluate_script(<<~JS)

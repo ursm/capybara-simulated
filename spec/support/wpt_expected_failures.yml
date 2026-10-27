@@ -1740,7 +1740,6 @@ css/css-transitions/animations/transition-timing-function.html:
 css/css-transitions/disconnected-element-001.html:
 - Transitions are canceled when an element is re-parented
 - Transitions are canceled when an element is re-parented to the same node
-- Transitions are canceled when an element is removed from the document
 - "[harness] TIMEOUT"
 css/css-transitions/idlharness-2.html:
 - 'Partial dictionary TransitionEventInit: original dictionary defined'
@@ -1792,7 +1791,6 @@ css/css-transitions/starting-style-size-container.html:
 - Triggered transition from first style update based on up-to-date container query
 - Triggered transition from the display change inside the up-to-date container query
 css/css-transitions/transition-events-with-document-change.html:
-- "[harness] TIMEOUT"
 - transition events for an element changing document
 css/css-transitions/transition-reparented.html:
 - When an element is reparented, any CSS Transition on it should be cancelled

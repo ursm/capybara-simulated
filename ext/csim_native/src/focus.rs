@@ -32,7 +32,7 @@ pub(crate) fn focusable(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId
     if arena.is_actually_disabled(id) || !candidate(arena, id, n) || arena.is_inert(id) {
         return false;
     }
-    if !arena.navigables.document_fully_active(arena.shadow_including_root(id)) {
+    if !arena.document_fully_active(arena.shadow_including_root(id)) {
         return false;
     }
     let rendered = |engine: &mut StyleEngine, id| crate::rendered::rendered(engine, arena, id, false, true, None, now);
@@ -519,10 +519,10 @@ pub(crate) fn dialog_focus_control(engine: &mut StyleEngine, arena: &RealmArena,
     }
     focus_delegate(engine, arena, dialog, now).unwrap_or(dialog)
 }
-// The element the document `dialog` is in has focused — its realm's, whichever realm asks; none for a document the
+// The element the document `node` is in has focused — its realm's, whichever realm asks; none for a document the
 // realm made that is not the one it shows (a DOMParser's), which has no focus of its own.
-fn document_focus(arena: &RealmArena, dialog: NodeId) -> Option<NodeId> {
-    let root = arena.shadow_including_root(dialog);
+pub(crate) fn document_focus(arena: &RealmArena, node: NodeId) -> Option<NodeId> {
+    let root = arena.shadow_including_root(node);
     let doc = arena.get(root).filter(|d| d.kind == NodeKind::Document)?;
     arena.realm_state(doc.realm)?.focus.filter(|&f| arena.shadow_including_root(f) == root)
 }

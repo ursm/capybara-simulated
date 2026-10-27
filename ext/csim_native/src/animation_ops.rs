@@ -592,8 +592,9 @@ fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 
 // __dom.animSignals() -> [kind, animation, generation, …]: what the handles are to do, in order — settle a promise
-// (`ready` / `readyReject` / `finished` / `finishedReject`, its generation), or queue a microtask for the animation's
-// finish notification (`finishNotification`, generation null).
+// (`ready` / `readyReject` / `finished` / `finishedReject`, its generation), queue a microtask for the animation's
+// finish notification (`finishNotification`, generation null), or hold the handle an event of which was queued
+// (`eventQueued`, generation null).
 fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let signals = engine.web_animations.take_signals();
@@ -605,6 +606,7 @@ fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
                 Signal::FinishedResolved { animation, generation } => ("finished", animation, Some(generation as f64)),
                 Signal::FinishedRejected { animation, generation } => ("finishedReject", animation, Some(generation as f64)),
                 Signal::FinishNotificationQueued { animation } => ("finishNotification", animation, None),
+                Signal::EventQueued { animation } => ("eventQueued", animation, None),
             };
             items.push(string_value(scope, kind));
             items.push(v8::Number::new(scope, animation as f64).into());

@@ -101,10 +101,6 @@ impl Navigables {
     fn fully_active(&self, cid: i32) -> bool {
         !self.discarded.contains(&cid)
     }
-    // …and whether `doc` is: the document of some realm whose document is.
-    pub(crate) fn document_fully_active(&self, doc: NodeId) -> bool {
-        self.documents.iter().any(|(&cid, &d)| d == doc && self.fully_active(cid))
-    }
 }
 
 impl RealmArena {
@@ -418,6 +414,10 @@ impl RealmArena {
             let Some(parent) = self.get(container).map(|n| n.realm) else { return false };
             realm = parent;
         }
+    }
+    // Whether `doc` is fully active (HTML): the document of its realm, whose document is.
+    pub(crate) fn document_fully_active(&self, doc: NodeId) -> bool {
+        self.get(doc).is_some_and(|d| self.navigables.documents.get(&d.realm) == Some(&doc) && self.navigables.fully_active(d.realm))
     }
     // …realm `cid`'s document, where it has one (a worker's none).
     pub(crate) fn realm_document(&self, cid: i32) -> Option<NodeId> {
@@ -1087,10 +1087,10 @@ fn browsing_context_discarded(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
 fn document_fully_active(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let doc = (args.length() > 0).then(|| nid_arg(scope, &args, 0));
     let cid = realm_id(scope, &args);
-    let navigables = &crate::dom::dom(scope).arena.navigables;
+    let arena = &crate::dom::dom(scope).arena;
     rv.set_bool(match doc {
-        Some(doc) => doc.is_some_and(|doc| navigables.document_fully_active(doc)),
-        None => navigables.fully_active(cid),
+        Some(doc) => doc.is_some_and(|doc| arena.document_fully_active(doc)),
+        None => arena.navigables.fully_active(cid),
     });
 }
 

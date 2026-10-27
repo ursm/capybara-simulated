@@ -2048,7 +2048,7 @@ impl StyleEngine {
                 })
             });
         }
-        let playback = std::mem::take(&mut self.web_animations.playback_events);
+        let playback = self.web_animations.take_playback_events();
         let mut events: Vec<AnimationEvent> = css
             .into_iter()
             .map(|e| AnimationEvent {
