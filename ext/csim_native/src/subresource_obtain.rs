@@ -111,12 +111,9 @@ fn now(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> R
     Ok(t.and_then(|t| v8::Local::new(scope, t).number_value(scope)).unwrap_or(0.0))
 }
 
-// The bytes a body is (a view's, a blob's bytes object's) — an empty one's no bytes missing — none for anything else.
+// The bytes a body's view is — an empty one's no bytes missing — none for anything but a view.
 pub(crate) fn view_bytes(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
-    if v.is_array_buffer_view() {
-        return Some(crate::blob_data::bytes_arg(scope, v));
-    }
-    crate::canvas::bytes_read(v, None).map(|b| b.into_owned())
+    v.is_array_buffer_view().then(|| crate::blob_data::bytes_arg(scope, v))
 }
 
 pub(crate) fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
