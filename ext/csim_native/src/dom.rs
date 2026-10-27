@@ -1913,6 +1913,16 @@ impl RealmArena {
         self.observers.note_observations(self.cur);
     }
 
+    // …and what one shows moved too: `subtrees` boxes and what is under them to be laid out again — each a SUBTREE mark,
+    // which the diagnostics count (`__csimSubtreeMarks`).
+    pub(crate) fn note_shown_changed(&mut self, subtrees: u32) {
+        for _ in 0..subtrees {
+            self.generations.bump(GEN_SUBTREE_MARKS);
+            self.generations.bump(GEN_DIRTY);
+        }
+        self.note_state_changed();
+    }
+
     // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         self.state_epoch += 1;

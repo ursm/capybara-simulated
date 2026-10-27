@@ -519,6 +519,13 @@ fn change(
     if let Some((mode, selectable)) = input_type_change.filter(|_| old.as_deref() != value) {
         steps |= type_change(scope, cid, caller, element, id, mode, selectable);
     }
+    // (…what the element shows, and what is inside it — a `class` or `style` written, or an attribute a selector reads,
+    // reaches what is measured inside it too — moved in the realm whose tree it is in, and the change observable there and
+    // in the calling realm, whose memos of that tree key on its own generations)
+    realm(scope, cid).note_shown_changed(1);
+    if caller != cid {
+        realm(scope, caller).note_state_changed();
+    }
     Some((steps, old, local))
 }
 
