@@ -229,7 +229,8 @@ fn forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // __dom.fetchPreload(url, method, mode, credentials, destination, integrity, authored, host) -> what a `fetch()`'s or an
 // XHR's request takes first (Fetch "fetch": "consume a preloaded resource"): the preload of it the calling realm's
 // document has — a window's, for a GET that is no navigation and has no header of its author's (`authored`: none an XHR's
-// `open()` credentials gave it either) — as `preloadConsume` answers; undefined for a request that takes none.
+// `open()` credentials gave it either) — the response the preload had (`consume`), its fetch run first where it was yet
+// to, through the bindings' `host` (subresource-host.js); none for a request that takes none.
 fn fetch_preload_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
     let [url, method, mode, credentials, destination, integrity] = [0, 1, 2, 3, 4, 5].map(|i| args.get(i).to_rust_string_lossy(scope));

@@ -136,7 +136,7 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
     if source & S_EMPTY != 0 && matches!(kind, J_IMAGE | J_VIDEO | J_AUDIO | J_FONT) {
         return 0;
     }
-    if !crate::integrity::response_matches(consumer.body, consumer.integrity, !cross) {
+    if crate::integrity::integrity_refuses(consumer.body, consumer.integrity, cross) {
         return 0;
     }
     let essence = || crate::mime::extract(&facts.content_type).map(|m| m.essence);
@@ -407,8 +407,9 @@ mod tests {
         assert_eq!([sheet(sha) & V_OK, sheet("sha256-AAAA")], [V_OK, 0]);
         let image = Consumer { integrity: "sha256-AAAA", body: b"x", ..Consumer::of(J_IMAGE) };
         assert_eq!(judge(&image, SRC_NETWORK, &resp("basic", Some(200))), 0);
-        // (…an opaque response fails any metadata of an algorithm known; metadata of none known is no check at all)
+        // (…an opaque response fails any metadata, its body null — one of no algorithm known too: Fetch's main fetch,
+        // Firefox; Chrome loads it — and none at all is no check)
         let opaque = |integrity| judge(&Consumer { integrity, body: b"x", ..Consumer::of(J_IMAGE) }, SRC_NETWORK, &resp("opaque", Some(0)));
-        assert_eq!([opaque(sha), opaque("md5-xx") & V_OK], [0, V_OK]);
+        assert_eq!([opaque(sha), opaque("md5-xx"), opaque("") & V_OK], [0, 0, V_OK]);
     }
 }

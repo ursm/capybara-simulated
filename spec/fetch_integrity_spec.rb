@@ -7,8 +7,8 @@ require_relative 'support/poll_until'
 
 # A `fetch()` of integrity metadata is a network error where its response's body matches none of it (Fetch "main
 # fetch"), the body read whole first: a service worker's answer streamed in chunks is checked against all of them, not
-# against what it had read so far (none). An opaque response matches no metadata it is checked against — but metadata
-# of no algorithm SRI knows is no check at all (SRI §3.3.5 "Does response match metadataList?", step 2).
+# against what it had read so far (none). An opaque response is refused by any metadata — its body is null, which main
+# fetch refuses before SRI's matching would let metadata of no algorithm it knows through (Chrome and Firefox alike).
 RSpec.describe 'fetch() integrity' do
   include PollUntil
 
@@ -43,7 +43,7 @@ RSpec.describe 'fetch() integrity' do
     end
   end
 
-  it "refuses an opaque response by metadata it checks, and lets it through metadata of no algorithm it knows" do
+  it "refuses an opaque response by any metadata, one of no algorithm SRI knows too" do
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']
     ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # (…another origin served in-process)
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']] })
@@ -53,7 +53,33 @@ RSpec.describe 'fetch() integrity' do
       const attempt = (integrity) => fetch('http://other.example.com/x', { mode: 'no-cors', integrity }).then((r) => r.type, (e) => e.name);
       Promise.all([attempt('sha256-#{'A' * 43}='), attempt('sha999-abc')]).then(done);
     JS
-    expect(got).to eq(%w[TypeError opaque])
+    expect(got).to eq(%w[TypeError TypeError])
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
+
+  # (…and an element's — a no-cors `<script>` of another origin — the same main fetch's: Firefox fires `error`; Chrome
+  # loads it, a Blink departure from the spec)
+  it "refuses an element's opaque response by any metadata" do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
+    s = simulated_session(lambda {|env|
+      if env['PATH_INFO'] == '/x.js' then [200, {'content-type' => 'text/javascript'}, ['']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+      end
+    })
+    s.visit '/'
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const load = (integrity) => new Promise((res) => {
+        const el = Object.assign(document.createElement('script'), { src: 'http://other.example.com/x.js', integrity });
+        el.onload = () => res('load');
+        el.onerror = () => res('error');
+        document.body.append(el);
+      });
+      Promise.all([load('sha999-abc'), load('')]).then(done);
+    JS
+    expect(got).to eq(%w[error load])
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end

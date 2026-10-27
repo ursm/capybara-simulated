@@ -826,7 +826,7 @@ pub(crate) fn run_preload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, 
         (ok, Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))), response)
     };
     file(scope, host, &r, answered)?;
-    let response = response.filter(|resp| r.integrity.is_empty() || crate::integrity::response_matches(resp.body(), &r.integrity, !resp.opaque()));
+    let response = response.filter(|resp| !crate::integrity::integrity_refuses(resp.body(), &r.integrity, resp.opaque()));
     let arena = realm(scope, r.cid);
     if let Some(doc) = r.doc {
         arena.preload_commit(crate::preload_map::Key::new(doc, &r.url, destination, r.plan), r.integrity.clone(), response);
