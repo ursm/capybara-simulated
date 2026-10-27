@@ -394,9 +394,8 @@ fn page_string<'s>(scope: &mut v8::PinScope<'s, '_>, text: &str, standins: &Stan
 
 // One parse in progress: its tokenizer (which owns the tree builder, which owns the sink), the input not yet tokenized,
 // and — for each script running with an INSERTION POINT (HTML §13.2.4.1), so as many as the script nesting level is —
-// the input after it, set aside: a
-// `document.write` puts its text at the end of `input`, which is where the insertion point is, and the parse stops
-// there when `input` runs out. Once the input has all been taken, the tokenizer is ENDED (its tree builder has popped
+// the input after it, set aside: a `document.write` puts its text at the end of `input`, which is where the insertion
+// point is, and the parse stops there when `input` runs out. Once the input has all been taken, the tokenizer is ENDED (its tree builder has popped
 // everything) and takes nothing more.
 struct Parse {
     tokenizer: Tokenizer<TreeBuilder<u32, Sink>>,
@@ -416,7 +415,8 @@ struct Parse {
     pending: Option<(std::vec::IntoIter<Operand>, i32)>,
     // The pending parsing-blocking script a parser-run script's `document.write` inserted (HTML "the end tag of a script
     // in the text insertion mode": an external parser-blocking one), which runs once the nesting level is back to zero,
-    // and until it has, nothing past it is tokenized — a node `handles` holds.
+    // and until it has, nothing past it is tokenized — a node of this parse's, which `held` keeps.
+    // (…a parse a panic dropped drops it: what it would have run with it — a parser bug's cost, not a script's)
     blocking: Option<crate::dom::NodeId>,
 }
 
