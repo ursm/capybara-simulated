@@ -1060,7 +1060,7 @@ pub(crate) struct RealmArena {
 pub(crate) struct RealmState {
     // A service worker's script resource map (Service Workers §3.1.4: its imported scripts, by URL — each its source text
     // and whether its errors are muted), which a repeated `importScripts` of one runs again from, before any fetch
-    // (service_worker.rs `swScriptResource`).
+    // (worker_import.rs `workerImport`).
     pub(crate) script_resources: std::collections::HashMap<String, (Vec<u16>, bool)>,
     // …and, a service worker's realm, what its spawn gave it (service_worker.rs `swGlobalInit`).
     pub(crate) service_worker: Option<crate::service_worker::ServiceWorkerGlobal>,

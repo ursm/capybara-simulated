@@ -7,7 +7,7 @@
 pub(crate) struct RealmIdentity {
     client_id: Option<String>,
     window_key: Option<u32>,
-    pub(crate) worker_handle: u32,
+    worker_handle: u32,
     agent_owner: u64,
     module_worker: bool,
 }
@@ -15,6 +15,10 @@ impl RealmIdentity {
     // (…its agent's owner token, 0 for none: agents.rs `agentJoin`)
     pub(crate) fn agent_owner(&self) -> u64 {
         self.agent_owner
+    }
+    // (…a worker's handle, 0 for a window's realm)
+    pub(crate) fn worker_handle(&self) -> u32 {
+        self.worker_handle
     }
 }
 

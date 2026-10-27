@@ -33,7 +33,7 @@ fn worker_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 
 fn worker_import<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, url: &str) -> Result<Option<(v8::Local<'s, v8::Value>, bool)>, Terminated> {
     let Some(state) = realm(scope, cid).realm_state_mut(cid) else { return Ok(None) };
-    let handle = state.identity.worker_handle;
+    let handle = state.identity.worker_handle();
     let service = state.service_worker.is_some();
     if let Some((source, muted)) = state.script_resources.get(url).filter(|_| service).cloned() {
         return Ok(Some((crate::dom::utf16_value(scope, &source), muted)));
@@ -44,12 +44,13 @@ fn worker_import<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::F
     }
     let cache_mode = worker.as_ref().and_then(|g| g.import_cache_mode());
     let probed = worker.and_then(|g| g.take_probed_import(url));
-    // (…a data: or blob: URL's its own — no server to ask, no fetch event — its body decoded as UTF-8, as any
-    // worker-imported script's is, whatever its MIME type: the JavaScript MIME type check is an HTTP(S) response's)
+    // (…a data: or blob: URL's its own — no server to ask, no fetch event — its body UTF-8 decoded, as any
+    // worker-imported script's is, whatever its MIME type: the JavaScript MIME type check is an HTTP(S) response's; a
+    // UTF-8 BOM taken off and no other, UTF-16's no encoding it names)
     let route = crate::fetch_rules::fetch_route(url, 0, "");
     let (facts, body, source) = if matches!(route, crate::fetch_rules::ROUTE_DATA | crate::fetch_rules::ROUTE_BLOB) {
         let Some((bytes, content_type)) = crate::subresource_obtain::scheme_response(scope, host, url)? else { return Ok(None) };
-        let (decoded, _, _) = encoding_rs::UTF_8.decode(&bytes);
+        let (decoded, _) = encoding_rs::UTF_8.decode_with_bom_removal(&bytes);
         (crate::subresource_obtain::scheme_facts(content_type), text(scope, &decoded), SRC_SCHEME)
     } else {
         // (…a version an update spawned the Update probe's response — the 404 its byte check saw the one this sees, once

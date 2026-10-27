@@ -30,7 +30,10 @@ RSpec.describe 'Worker global scope' do
       when '/imp.js'
         [200, {'content-type' => 'text/javascript'}, [<<~'JS']]
           const out = [];
-          for (const u of ['/missing.js', 'http://[bad', 'data:text/javascript,self.v%3D%22%C3%A9%22', '/plain.txt']) {
+          // (…a data: URL's body UTF-8 decoded, its UTF-8 BOM taken off and a UTF-16 one no encoding it names: HTML "fetch a
+          // classic worker-imported script")
+          const utf16 = 'data:,%FF%FEs%00e%00l%00f%00.%00v%00%3D%002%00';
+          for (const u of ['/missing.js', 'http://[bad', 'data:text/javascript,self.v%3D%22%C3%A9%22', '/plain.txt', 'data:,%EF%BB%BFself.v%3D1', utf16]) {
             try { importScripts(u); out.push(self.v); } catch (e) { out.push(e.name); }
           }
           postMessage(out);
@@ -138,6 +141,6 @@ RSpec.describe 'Worker global scope' do
       const done = arguments[0];
       new Worker('/imp.js').onmessage = (e) => done(e.data);
     JS
-    expect(got).to eq(%w[NetworkError SyntaxError é NetworkError])
+    expect(got).to eq(['NetworkError', 'SyntaxError', 'é', 'NetworkError', 1, 'SyntaxError'])
   end
 end
