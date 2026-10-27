@@ -526,16 +526,13 @@ fn media_resume(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_uint32(m.load);
 }
 
-// What the bindings' fetch of the selected resource came to (`mediaResource`): it failed — an empty `src`, a resource
-// that could not be fetched or that cannot be played; a video decoded; an audio usable (not decoded: its readiness
-// alone).
 // __dom.mediaFailed(media): the fetch of the element's selected resource failed, as the media load algorithm's dedicated
 // media source failure steps have it (`resource_loaded`, `MediaResource::Failed`).
 fn media_failed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     resource_loaded(scope, id, MediaResource::Failed);
 }
-// …the events as names, for the bindings to fire.
+// A media element's events as names, for the bindings to fire.
 pub(crate) fn events_value<'s>(scope: &mut v8::PinScope<'s, '_>, events: &[&str]) -> v8::Local<'s, v8::Value> {
     let items: Vec<v8::Local<v8::Value>> = events.iter().filter_map(|e| v8::String::new(scope, e)).map(Into::into).collect();
     v8::Array::new_with_elements(scope, &items).into()
