@@ -770,6 +770,13 @@ impl SharedWord {
     pub(crate) fn bump(&mut self) {
         self.set(self.value.wrapping_add(1));
     }
+    // …as it stands, a binding's write to its view included.
+    pub(crate) fn get(&self) -> u32 {
+        match &self.buffer {
+            Some(buffer) => u32::from_ne_bytes(std::array::from_fn(|i| buffer[i].get())),
+            None => self.value,
+        }
+    }
     // …the buffer it is held in, which a realm's `__dom` views (`view_word`).
     pub(crate) fn store(&mut self) -> v8::SharedRef<v8::BackingStore> {
         let value = self.value;

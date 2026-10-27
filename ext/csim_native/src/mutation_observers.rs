@@ -68,7 +68,10 @@ pub(crate) struct Observers {
     // tree's) — the realm whose tree it is, whichever realm's code made it (`takeCascadeChanges`).
     cascade: Vec<(i32, bool)>,
     // …and the realms a change asked a rendering update's observations of — the one whose tree or element changed,
-    // whichever realm's code changed it: its own observers to hear of it (`takeObservations`).
+    // whichever realm's code changed it: its own observers to hear of it — in a word the bindings read with no call
+    // (`observationsAsked`: 0 none, a realm's id + 1 for that one alone, `ASKED_SEVERAL` for several), the several kept
+    // here (`takeObservations`).
+    observations_asked: crate::dom::SharedWord,
     observations: Vec<i32>,
 }
 
@@ -76,6 +79,8 @@ const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 const PENDING: usize = 3;
 pub(crate) const OBSERVATIONS: usize = 4;
+// (…the word of the realms asked their observations, where there are several of them)
+const ASKED_SEVERAL: u32 = u32::MAX;
 pub(crate) const CASCADE_REFRESH: usize = 5;
 pub(crate) const CASCADE_VERSION: usize = 6;
 pub(crate) const STYLE_LOADS: usize = 7;
@@ -94,8 +99,20 @@ impl Observers {
     }
     // …a rendering update's observations asked of realm `cid` — the one whose tree or element changed.
     pub(crate) fn note_observations(&mut self, cid: i32) {
-        if !self.observations.contains(&cid) {
-            self.observations.push(cid);
+        let one = cid as u32 + 1;
+        match self.observations_asked.get() {
+            0 => self.observations_asked.set(one),
+            asked if asked == one => {},
+            ASKED_SEVERAL => {
+                if !self.observations.contains(&cid) {
+                    self.observations.push(cid);
+                }
+            },
+            asked => {
+                self.observations.clear();
+                self.observations.extend([asked as i32 - 1, cid]);
+                self.observations_asked.set(ASKED_SEVERAL);
+            },
         }
         self.note(OBSERVATIONS);
     }
@@ -199,6 +216,7 @@ impl Observers {
         }
         self.pending.retain(|&c| c != cid);
         self.signals.retain(|&(_, c, _)| c != cid);
+        self.observations.retain(|&c| c != cid);
         if self.queued_in == Some(cid) {
             self.queued_in = None;
             if let Some(flags) = &self.flags {
@@ -329,6 +347,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
     crate::dom::register(scope, ns, "moTakeCascade", take_cascade, context_id);
     crate::dom::register(scope, ns, "moTakeObservations", take_observations, context_id);
+    let asked = crate::dom::dom(scope).arena.observers.observations_asked.store();
+    crate::dom::view_word(scope, ns, "observationsAsked", asked);
     crate::dom::register(scope, ns, "noteParsed", note_parsed, context_id);
     crate::dom::register(scope, ns, "flushParsedMarks", flush_parsed_marks, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
@@ -559,10 +579,12 @@ fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(!parents.is_empty());
 }
 
-// __dom.moTakeObservations() -> [realm, …]: the realms a change since asked a rendering update's observations of
-// (`note_observations`) — none any more.
+// __dom.moTakeObservations() -> [realm, …]: the several realms a change since asked a rendering update's observations
+// of (`note_observations`) — none any more.
 fn take_observations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let asked = std::mem::take(&mut crate::dom::dom(scope).arena.observers.observations);
+    let observers = &mut crate::dom::dom(scope).arena.observers;
+    observers.observations_asked.set(0);
+    let asked = std::mem::take(&mut observers.observations);
     let items: Vec<v8::Local<v8::Value>> = asked.iter().map(|&cid| v8::Number::new(scope, f64::from(cid)).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
