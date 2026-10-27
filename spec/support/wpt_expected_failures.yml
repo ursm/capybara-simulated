@@ -3367,11 +3367,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <object> contents ignored ("<div><object>abc")
 - <optgroup> containing <optgroup> ("<select><optgroup class='poke-optgroup'></select>")
 - <optgroup> in <div> ("<div>a<optgroup>123</optgroup>bc")
-- <option> in <div> ("<div>a<option>123</option>bc")
-- <select size='1'> contents of options preserved ("<div><select size='1'><option>abc</option><option>def")
-- <select size='1'> contents of options preserved ("<select size='1'><option>abc</option><option>def")
-- <select size='2'> contents of options preserved ("<div><select size='2'><option>abc</option><option>def")
-- <select size='2'> contents of options preserved ("<select size='2'><option>abc</option><option>def")
 - <select> containing text node child ("<select class='poke'></select>")
 - <svg> non-rendered text ignored ("<div><svg><stop>abc</stop></svg></div>")
 - <textarea> contents ignored ("<textarea>abc")
@@ -3382,12 +3377,10 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   abc </span>def")
 - Leading/trailing space removal at display:inline-grid boundary ("<div>123<span style='display:inline-grid'>
   abc </span>def")
-- Newline at display:block boundary ("<div>123<span style='display:block'>abc</span>def")
 - Newline-separated table rows ("<div><div class='itable'><span class='row'><span
   class='cell'>abc</span></span>\n<span class='row'><span class='cell'>def</span></span></div>")
 - Newline-separated table rows ("<div><div class='table'><span class='row'><span class='cell'>abc</span></span>\n<span
   class='row'><span class='cell'>def</span></span></div>")
-- No newlines around inline-table ("<div>abc<div class='itable'><span class='cell'>def</span></div>ghi")
 - Replaced element <canvas> with display:block should be treated as block-level ("<div>abc
   <canvas style='display:block'></canvas> def")
 - Replaced element <img> with display:block should be treated as block-level ("<div>abc
@@ -3404,17 +3397,10 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   def")
 - Whitespace around inline-grid should not be collapsed ("<div>abc <span style='display:inline-grid'></span>
   def")
-- display:block <rp> ("<div><rp style='display:block'>abc</rp>def")
-- display:block <rp> with whitespace ("<div><rp style='display:block'> abc </rp>def")
 - display:block <script> is rendered ("<div><script style='display:block'>abc")
 - display:block <style> is rendered ("<div><style style='display:block'>abc")
-- empty <optgroup> in <div> ("<div>a<optgroup></optgroup>bc")
 - empty <optgroup> in <select> ("<div>a<select><optgroup></select>bc")
-- empty <option> in <div> ("<div>a<option></option>bc")
 - empty <option> in <select> ("<div>a<select><option></select>bc")
-- floats induce a block boundary ("<div>abc<span style='float:left'>123</span>def")
-- opened <details> content shown ("<div><details open><summary>abc</summary>123")
-- position:absolute induces a block boundary ("<div>abc<span style='position:absolute'>123</span>def")
 - text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
   ı")
 html/dom/idlharness.any.js:
