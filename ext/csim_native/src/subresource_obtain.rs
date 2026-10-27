@@ -111,7 +111,15 @@ fn now(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> R
     Ok(t.and_then(|t| v8::Local::new(scope, t).number_value(scope)).unwrap_or(0.0))
 }
 
-fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
+// The bytes a body is (a view's, a blob's bytes object's) — an empty one's no bytes missing — none for anything else.
+pub(crate) fn view_bytes(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Option<Vec<u8>> {
+    if v.is_array_buffer_view() {
+        return Some(crate::blob_data::bytes_arg(scope, v));
+    }
+    crate::canvas::bytes_read(v, None).map(|b| b.into_owned())
+}
+
+pub(crate) fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
 fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, s: Option<&str>) -> v8::Local<'s, v8::Value> {
@@ -369,17 +377,10 @@ fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: N
                 }
                 if !failed {
                     let body = resp.and_then(|resp| member(scope, resp, "body"));
-                    bytes = body.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
+                    bytes = body.and_then(|b| view_bytes(scope, b));
                 }
             }
-            ROUTE_DATA => bytes = crate::data_url::process(&url).map(|(_, body)| body),
-            ROUTE_BLOB => {
-                let u = text(scope, &url);
-                let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
-                let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
-                let blob = blob.and_then(|b| member(scope, b, "bytes"));
-                bytes = blob.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
-            }
+            ROUTE_DATA | ROUTE_BLOB => bytes = scheme_response(scope, host, &url)?.map(|(body, _)| body),
             _ => {}
         }
     }
@@ -426,7 +427,7 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
     if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
         let local = v8::Local::new(scope, &answer);
         let answer_obj = v8::Local::<v8::Object>::try_from(local).ok();
-        let bytes = answer_obj.and_then(|a| member(scope, a, "bytes")).and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
+        let bytes = answer_obj.and_then(|a| member(scope, a, "bytes")).and_then(|b| view_bytes(scope, b));
         let facts = facts_of(scope, answer_obj, J_FONT, SRC_SW_SYNC);
         let ok = judge(&consumer, SRC_SW_SYNC | bytes.as_deref().map_or(S_EMPTY, empty), &facts) & V_OK != 0;
         file(scope, host, &r, Answered::Worker(answer))?;
@@ -436,12 +437,8 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
         };
     }
     if crate::fetch_rules::fetch_route(url, 0, "") == crate::fetch_rules::ROUTE_BLOB {
-        let u = text(scope, url);
-        let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
-        let bytes = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok()).and_then(|b| member(scope, b, "bytes"));
-        let bytes = bytes.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
-        return match bytes {
-            Some(bytes) => file_of_bytes(scope, host, bytes),
+        return match scheme_response(scope, host, url)? {
+            Some((bytes, _)) => file_of_bytes(scope, host, bytes),
             None => Ok(None),
         };
     }
@@ -499,7 +496,7 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let done = if matches!(route, crate::fetch_rules::ROUTE_DATA | crate::fetch_rules::ROUTE_BLOB) {
         let preload_destination = if obtains & OBTAINS_PRELOAD != 0 { crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("") } else { "" };
         let integrity = if obtains & OBTAINS_STYLESHEET != 0 { crate::sheet_fetch::owner_integrity(realm(scope, cid), el) } else { r.integrity.clone() };
-        link_scheme(scope, host, &Request { integrity, ..r }, route, (&module_destination, preload_destination)).map(link_done)
+        link_scheme(scope, host, &Request { integrity, ..r }, (&module_destination, preload_destination)).map(link_done)
     } else if obtains & OBTAINS_STYLESHEET != 0 {
         let integrity = crate::sheet_fetch::owner_integrity(realm(scope, cid), el);
         link_sheet(scope, host, &Request { integrity, ..r }).map(link_done)
@@ -529,7 +526,7 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, destinations: (&str, &str)) -> bool {
     let body = match bytes.filter(|_| !r.integrity.is_empty()) {
         Some(b) if b.is_string() => b.to_rust_string_lossy(scope).into_bytes(),
-        Some(b) => crate::canvas::bytes_read(b, None).map(|b| b.into_owned()).unwrap_or_default(),
+        Some(b) => view_bytes(scope, b).unwrap_or_default(),
         None => Vec::new(),
     };
     link_verdict_of(scope, r, facts, source, &body, mode, destinations)
@@ -777,7 +774,7 @@ pub(crate) fn run_preload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, 
         let ok = link_verdict(scope, &r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", ("", destination));
         // (…the body the cache holds: its bytes, where they are not its text's UTF-8)
         let held = match (bytes, body) {
-            (Some(b), _) => crate::canvas::bytes_read(b, None).map(|b| b.into_owned()),
+            (Some(b), _) => view_bytes(scope, b),
             (None, Some(t)) => Some(t.to_rust_string_lossy(scope).into_bytes()),
             (None, None) => None,
         };
@@ -858,36 +855,26 @@ fn link_sheet(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function
 
 // …a `data:` or a `blob:` URL's: its body, as its MIME type makes it what the link obtains (`link_verdict`) — no entry,
 // as no network scheme files one.
-fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, route: u32, destinations: (&str, &str)) -> Result<bool, Terminated> {
-    use crate::subresource_judge::{Facts, SRC_SCHEME};
+fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, destinations: (&str, &str)) -> Result<bool, Terminated> {
+    let Some((body, content_type)) = scheme_response(scope, host, &r.url)? else { return Ok(false) };
     let stylesheet = (r.kind >> 8) & crate::link_resource::OBTAINS_STYLESHEET != 0;
-    let (facts, body) = if route == crate::fetch_rules::ROUTE_DATA {
-        let Some((mime, body)) = crate::data_url::process(&r.url) else { return Ok(false) };
-        if stylesheet && crate::mime::parse(&mime).is_none_or(|m| m.essence != "text/css") {
-            return Ok(false);
-        }
-        (Facts { response_type: "default".to_owned(), content_type: mime, ..Default::default() }, body)
-    } else {
-        let u = text(scope, &r.url);
-        let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
-        let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
-        let Some(bytes) = blob.and_then(|b| member(scope, b, "bytes")).and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned()) else { return Ok(false) };
-        let content_type = blob.and_then(|b| member(scope, b, "type")).map_or_else(String::new, |t| t.to_rust_string_lossy(scope));
-        (Facts { response_type: "basic".to_owned(), status: Some(200), content_type, ..Default::default() }, bytes)
-    };
+    if stylesheet && crate::fetch_rules::fetch_route(&r.url, 0, "") == crate::fetch_rules::ROUTE_DATA && crate::mime::parse(&content_type).is_none_or(|m| m.essence != "text/css") {
+        return Ok(false);
+    }
     let body = if r.integrity.is_empty() { Vec::new() } else { body };
-    Ok(link_verdict_of(scope, r, &facts, SRC_SCHEME, &body, "no-cors", destinations))
+    Ok(link_verdict_of(scope, r, &scheme_facts(content_type), crate::subresource_judge::SRC_SCHEME, &body, "no-cors", destinations))
 }
 
 // __dom.fetchClassicScript(el, doc, src, parser, host) -> `[ok, body, entry]`: HTML "fetch a classic script" for the
 // script element `el` (of document `doc`) whose src is `src` (resolved; null where it does not resolve, the raw
 // attribute its URL then): whether its response is one to run (`judge`: none for a network error, a status not ok, a
 // refused response, a body its `integrity` does not match), its source text — decoded as its Content-Type's charset or
-// else the document's says (script.rs `classic_script_encoding`) — and the description of its Resource Timing entry for
-// the bindings to file once the load completes, null where it files none (a scheme URL's, an element's second). A
-// `data:` or `blob:` URL's is its scheme's; else the preload its request takes (no entry of its own), else a controlling
-// service worker's answer, else — `parser` the parser's — the cross-visit asset cache's, or the network's. Its errors
-// are muted where its response is of another origin (the report of an exception thrown in it reads its URL's).
+// else the document's says (script.rs `classic_script_encoding`), the host's own text where that is its UTF-8 — and the
+// description of its Resource Timing entry for the bindings to file once the load completes, null where it files none
+// (a scheme URL's, an element's second). A `data:` or `blob:` URL's is its scheme's; else the preload its request takes
+// (no entry of its own), else a controlling service worker's answer, else — `parser` the parser's — the cross-visit
+// asset cache's, or the network's. Its errors are muted where its response is of another origin (the report of an
+// exception thrown in it reads its URL's).
 fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
@@ -895,7 +882,10 @@ fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let parser = args.get(3).is_true();
     let cid = realm_id(scope, &args);
     let Ok((ok, body, entry)) = classic_script(scope, cid, host, el, doc, src, parser) else { return };
-    let body = text(scope, &body);
+    let body = match body {
+        ScriptText::Host(host_text) => v8::Local::new(scope, host_text),
+        ScriptText::Decoded(decoded) => text(scope, &decoded),
+    };
     let entry = match entry {
         Some(e) => v8::Local::new(scope, e),
         None => v8::null(scope).into(),
@@ -904,15 +894,42 @@ fn fetch_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
+// A classic script's source text: the host's own (its response read as UTF-8, which it is), or decoded.
+enum ScriptText {
+    Host(v8::Global<v8::Value>),
+    Decoded(String),
+}
+
+// What a `data:` or a `blob:` URL's scheme fetch makes (Fetch "scheme fetch"): its body and its Content-Type — a data:
+// URL's MIME type, a blob's type as it was given — None for a network error (no comma, a body that is no base64, a
+// blob: URL that names none).
+pub(crate) fn scheme_response(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, url: &str) -> Result<Option<(Vec<u8>, String)>, Terminated> {
+    if crate::fetch_rules::fetch_route(url, 0, "") == crate::fetch_rules::ROUTE_DATA {
+        return Ok(crate::data_url::process(url).map(|(mime, body)| (body, mime)));
+    }
+    let u = text(scope, url);
+    let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
+    let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
+    let Some(bytes) = blob.and_then(|b| member(scope, b, "bytes")).and_then(|b| view_bytes(scope, b)) else { return Ok(None) };
+    let content_type = blob.and_then(|b| member(scope, b, "type")).map_or_else(String::new, |t| t.to_rust_string_lossy(scope));
+    Ok(Some((bytes, content_type)))
+}
+// …and the facts its verdict is made of: a basic 200 response of that Content-Type.
+pub(crate) fn scheme_facts(content_type: String) -> crate::subresource_judge::Facts {
+    crate::subresource_judge::Facts { response_type: "basic".to_owned(), status: Some(200), content_type, ..Default::default() }
+}
+
 #[allow(clippy::type_complexity)]
-fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, doc: NodeId, src: Option<String>, parser: bool) -> Result<(bool, String, Option<v8::Global<v8::Value>>), Terminated> {
+fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, el: NodeId, doc: NodeId, src: Option<String>, parser: bool) -> Result<(bool, ScriptText, Option<v8::Global<v8::Value>>), Terminated> {
     use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA};
     use crate::subresource_judge::{facts_of, judge, Consumer, Facts, J_CLASSIC_SCRIPT, SRC_ASSET, SRC_NETWORK, SRC_SCHEME, SRC_SW_SYNC, S_NO_BODY, V_CROSS_ORIGIN, V_OK};
+    let none = || ScriptText::Decoded(String::new());
     let integrity = realm(scope, cid).get(el).and_then(|n| n.plain_attr("integrity")).unwrap_or("").to_owned();
     let charset = call(scope, host, H_CHARSET, &[])?;
     let charset = text_of(scope, charset).unwrap_or_default();
-    let verdict = |scope: &mut v8::PinScope<'_, '_>, facts: &Facts, source: u32, body: &dyn Fn() -> Vec<u8>| {
-        let bytes = if integrity.is_empty() { Vec::new() } else { body() };
+    // (…`bytes` its body's, asked for where it has integrity metadata alone)
+    let verdict = |scope: &mut v8::PinScope<'_, '_>, facts: &Facts, source: u32, bytes: &dyn Fn(&mut v8::PinScope<'_, '_>) -> Vec<u8>| {
+        let bytes = if integrity.is_empty() { Vec::new() } else { bytes(scope) };
         let quirks = realm(scope, cid).document_mode(Some(doc)).0;
         let consumer = Consumer { kind: J_CLASSIC_SCRIPT, obtains: 0, module_destination: "", preload_destination: "", integrity: &integrity, body: &bytes, mode: "no-cors", quirks };
         judge(&consumer, source, facts)
@@ -922,25 +939,14 @@ fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_
         let e = encoding_rs::Encoding::for_label(encoding.as_bytes()).unwrap_or(encoding_rs::UTF_8);
         e.decode(bytes).0.into_owned()
     };
-    // (…a scheme URL's: its response scheme fetch makes — a data: URL's body, a blob's — none where that is a network
-    // error, or refused)
+    // (…a scheme URL's: its response scheme fetch makes, none where that is a network error, or refused)
     if let Some(url) = src.as_deref().filter(|u| matches!(fetch_route(u, 0, ""), ROUTE_DATA | ROUTE_BLOB)) {
-        let (bytes, content_type) = if fetch_route(url, 0, "") == ROUTE_DATA {
-            let Some((mime, body)) = crate::data_url::process(url) else { return Ok((false, String::new(), None)) };
-            (body, mime)
-        } else {
-            let u = text(scope, url);
-            let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
-            let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
-            let Some(bytes) = blob.and_then(|b| member(scope, b, "bytes")).and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned()) else { return Ok((false, String::new(), None)) };
-            let content_type = blob.and_then(|b| member(scope, b, "type")).map_or_else(String::new, |t| t.to_rust_string_lossy(scope));
-            (bytes, content_type)
-        };
-        let facts = Facts { response_type: "basic".to_owned(), status: Some(200), content_type: content_type.clone(), ..Default::default() };
-        if verdict(scope, &facts, SRC_SCHEME, &|| bytes.clone()) & V_OK == 0 {
-            return Ok((false, String::new(), None));
+        let Some((bytes, content_type)) = scheme_response(scope, host, url)? else { return Ok((false, none(), None)) };
+        let facts = scheme_facts(content_type.clone());
+        if verdict(scope, &facts, SRC_SCHEME, &|_| bytes.clone()) & V_OK == 0 {
+            return Ok((false, none(), None));
         }
-        return Ok((true, decode(&bytes, &content_type), None));
+        return Ok((true, ScriptText::Decoded(decode(&bytes, &content_type)), None));
     }
     let url = match src {
         Some(u) => u,
@@ -951,24 +957,20 @@ fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_
     let plan = plan_in(arena, J_CLASSIC_SCRIPT, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
     let r = Request { cid, kind: J_CLASSIC_SCRIPT, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: None, initiator: "script", started };
-    // (…what answered: whether it is served bytes — a preload's, a worker's — its verdict, its bytes, its text as the host
-    // read it, its Content-Type, and its entry's facts)
-    let (served, v, bytes, text_body, content_type, answered): (bool, u32, Option<Vec<u8>>, String, String, Option<Answered>);
+    // What answered: its verdict, its Content-Type, its entry's facts, and its body — served bytes (a preload's, a
+    // worker's), else the host's text with the bytes it kept where they are not its text's UTF-8.
+    let (v, content_type, answered, served, raw, host_text): (u32, String, Option<Answered>, bool, Option<Vec<u8>>, Option<v8::Global<v8::Value>>);
     if let Some(preloaded) = crate::preload_map::consume(scope, cid, (doc, &r.url, "script", plan), &integrity, host)? {
         answered = None;
+        host_text = None;
         match preloaded {
             Some(resp) => {
-                let body = resp.body().to_vec();
-                v = verdict(scope, &resp.facts(), SRC_NETWORK, &|| body.clone());
-                served = true;
+                v = verdict(scope, &resp.facts(), SRC_NETWORK, &|_| resp.body().to_vec());
                 content_type = resp.header("content-type").unwrap_or("").to_owned();
-                bytes = Some(body);
+                (served, raw) = (true, Some(resp.into_body()));
             }
-            None => {
-                (served, v, bytes, content_type) = (false, 0, None, String::new());
-            }
+            None => (v, content_type, served, raw) = (0, String::new(), false, None),
         }
-        text_body = String::new();
     } else {
         let mut sw_args = request_args(scope, &r).to_vec();
         let (binary, integrity_value) = (v8::Boolean::new(scope, true).into(), text(scope, &integrity));
@@ -976,79 +978,77 @@ fn classic_script(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_
         let sw = call(scope, host, H_SW_ANSWER, &sw_args)?;
         let sw_obj = sw.as_ref().map(|g| v8::Local::new(scope, g)).and_then(|l| v8::Local::<v8::Object>::try_from(l).ok());
         let blocked = sw_obj.and_then(|o| member(scope, o, "blocked")).is_some_and(|b| b.is_true());
-        let sw_bytes = sw_obj.and_then(|o| member(scope, o, "bytes")).and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
+        let sw_bytes = sw_obj.and_then(|o| member(scope, o, "bytes")).and_then(|b| view_bytes(scope, b));
         if let (Some(answer), true) = (sw.clone(), blocked) {
-            (served, v, bytes, text_body, content_type) = (false, 0, None, String::new(), String::new());
+            // (…an answer that is no ok one is still a response, whose status its entry reports; a network error has none)
+            (v, content_type, served, raw, host_text) = (0, String::new(), false, None, None);
             answered = Some(Answered::Worker(answer));
-        } else if let (Some(answer), Some(b)) = (sw, sw_bytes) {
+        } else if let (Some(answer), Some(bytes)) = (sw, sw_bytes) {
             let facts = facts_of(scope, sw_obj, J_CLASSIC_SCRIPT, SRC_SW_SYNC);
-            v = verdict(scope, &facts, SRC_SW_SYNC, &|| b.clone());
+            v = verdict(scope, &facts, SRC_SW_SYNC, &|_| bytes.clone());
             content_type = header_of(scope, sw_obj, "content-type");
-            (served, bytes, text_body) = (true, Some(b), String::new());
+            (served, raw, host_text) = (true, Some(bytes), None);
             answered = Some(Answered::Worker(answer));
-        } else if parser {
-            let args = request_args(scope, &r);
-            let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
-            let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
-            let mut at = [None; 3];
-            if let Some(g) = got {
-                for (k, slot) in at.iter_mut().enumerate() {
-                    *slot = g.get_index(scope, k as u32).filter(|v| !v.is_null_or_undefined());
-                }
-            }
-            let [body, meta, raw] = at;
-            let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
-            let body_text = body.map(|b| b.to_rust_string_lossy(scope));
-            let raw = raw.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
-            let facts = facts_of(scope, meta, J_CLASSIC_SCRIPT, SRC_ASSET);
-            let no_body = if body_text.is_none() { S_NO_BODY } else { 0 };
-            let all = raw.clone().unwrap_or_else(|| body_text.clone().unwrap_or_default().into_bytes());
-            v = verdict(scope, &facts, SRC_ASSET | no_body, &|| all.clone());
-            content_type = header_of(scope, meta, "content-type");
-            (served, bytes, text_body) = (false, raw, body_text.clone().unwrap_or_default());
-            // (…its entry sized by its source text where the cache kept no facts of its response)
-            answered = Some(match meta {
-                Some(m) => Answered::Network(Some(v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))),
-                None => Answered::Text(body_text),
-            });
         } else {
+            // (…the parser's from the cross-visit asset cache — `[text, facts, bytes]`, its entry sized by its text where
+            // the cache kept no facts — an inserted one's from the network)
             let args = request_args(scope, &r);
-            let resp = call(scope, host, H_FETCH, &args)?.map(|g| v8::Local::new(scope, g));
-            let resp = resp.and_then(|g| v8::Local::<v8::Object>::try_from(g).ok());
-            let facts = facts_of(scope, resp, J_CLASSIC_SCRIPT, SRC_NETWORK);
-            let raw = resp.and_then(|o| member(scope, o, "body_bytes")).and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
-            let body_text = resp.and_then(|o| member(scope, o, "body")).map(|b| b.to_rust_string_lossy(scope)).unwrap_or_default();
-            let no_body = if resp.is_none() { S_NO_BODY } else { 0 };
-            let all = raw.clone().unwrap_or_else(|| body_text.clone().into_bytes());
-            v = verdict(scope, &facts, SRC_NETWORK | no_body, &|| all.clone());
-            content_type = header_of(scope, resp, "content-type");
-            (served, bytes, text_body) = (false, raw, body_text);
-            answered = Some(Answered::Network(resp.map(|o| v8::Global::new(scope, v8::Local::<v8::Value>::from(o)))));
+            let (body, meta, kept, source) = if parser {
+                let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
+                let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
+                let mut at = [None; 3];
+                if let Some(g) = got {
+                    for (k, slot) in at.iter_mut().enumerate() {
+                        *slot = g.get_index(scope, k as u32).filter(|v| !v.is_null_or_undefined());
+                    }
+                }
+                let [body, meta, kept] = at;
+                (body, meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok()), kept, SRC_ASSET)
+            } else {
+                let resp = call(scope, host, H_FETCH, &args)?.map(|g| v8::Local::new(scope, g));
+                let resp = resp.and_then(|g| v8::Local::<v8::Object>::try_from(g).ok());
+                let body = resp.map(|o| member(scope, o, "body").unwrap_or_else(|| text(scope, "")));
+                let kept = resp.and_then(|o| member(scope, o, "body_bytes"));
+                (body, resp, kept, SRC_NETWORK)
+            };
+            let facts = facts_of(scope, meta, J_CLASSIC_SCRIPT, source);
+            let no_body = if body.is_none() { S_NO_BODY } else { 0 };
+            let kept = kept.and_then(|b| view_bytes(scope, b));
+            v = verdict(scope, &facts, source | no_body, &|scope| kept.clone().unwrap_or_else(|| body.map_or_else(Vec::new, |b| b.to_rust_string_lossy(scope).into_bytes())));
+            content_type = header_of(scope, meta, "content-type");
+            answered = Some(match (source, meta) {
+                (SRC_ASSET, None) => Answered::Text(body.map(|b| b.to_rust_string_lossy(scope))),
+                (_, meta) => Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))),
+            });
+            (served, raw, host_text) = (false, kept, body.map(|b| v8::Global::new(scope, b)));
         }
     }
     let ok = v & V_OK != 0;
     let body = if !ok {
-        String::new()
+        none()
     } else {
-        // (…served bytes decoded, and the network's where the host's UTF-8 is not their encoding)
-        let encoding = crate::script::classic_script_encoding(&content_type, &charset);
-        if served || encoding != "UTF-8" { decode(bytes.as_deref().unwrap_or(text_body.as_bytes()), &content_type) } else { text_body }
+        // (…served bytes decoded, and the host's text where its UTF-8 is not their encoding)
+        let utf8 = crate::script::classic_script_encoding(&content_type, &charset) == "UTF-8";
+        match (served || !utf8, raw, host_text) {
+            (false, _, Some(text)) => ScriptText::Host(text),
+            (_, Some(bytes), _) => ScriptText::Decoded(decode(&bytes, &content_type)),
+            (_, None, Some(text)) => {
+                let text = v8::Local::new(scope, text).to_rust_string_lossy(scope);
+                ScriptText::Decoded(decode(text.as_bytes(), &content_type))
+            }
+            (_, None, None) => none(),
+        }
     };
     if ok {
-        let muted = &mut realm(scope, cid).muted_scripts;
-        if v & V_CROSS_ORIGIN != 0 {
-            muted.insert(r.url.clone());
-        } else {
-            muted.remove(&r.url);
-        }
+        crate::script::note_muted(realm(scope, cid), &r.url, v & V_CROSS_ORIGIN != 0);
     }
     // (Once per element: a script appended while the parser is still running is fetched by both.)
     let Some(answered) = answered else { return Ok((ok, body, None)) };
-    let filed = realm(scope, cid).get(el).is_some_and(|n| n.element_flags & crate::element_flags::SCRIPT_TIMING_FILED != 0);
-    if filed {
+    let arena = realm(scope, cid);
+    if arena.get(el).is_none_or(|n| n.element_flags & crate::element_flags::SCRIPT_TIMING_FILED != 0) {
         return Ok((ok, body, None));
     }
-    if let Some(n) = realm(scope, cid).get_mut_quietly(el) {
+    if let Some(n) = arena.get_mut_quietly(el) {
         n.element_flags |= crate::element_flags::SCRIPT_TIMING_FILED;
     }
     Ok((ok, body, Some(entry_desc(scope, &r, answered))))

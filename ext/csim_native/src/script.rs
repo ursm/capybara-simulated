@@ -456,15 +456,19 @@ fn script_muted_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let url = args.get(0).to_rust_string_lossy(scope);
     let muted = (args.length() > 1).then(|| args.get(1).boolean_value(scope));
     let cid = crate::dom::realm_id(scope, &args);
-    let scripts = &mut crate::dom::realm(scope, cid).muted_scripts;
+    let arena = crate::dom::realm(scope, cid);
     if let Some(muted) = muted {
-        if muted {
-            scripts.insert(url.clone());
-        } else {
-            scripts.remove(&url);
-        }
+        note_muted(arena, &url, muted);
     }
-    rv.set_bool(scripts.contains(&url));
+    rv.set_bool(arena.muted_scripts.contains(&url));
+}
+// …the script at `url` muted, or no longer: what its response was as it was fetched.
+pub(crate) fn note_muted(arena: &mut crate::dom::RealmArena, url: &str, muted: bool) {
+    if muted {
+        arena.muted_scripts.insert(url.to_owned());
+    } else {
+        arena.muted_scripts.remove(url);
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -485,7 +489,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moduleContent", module_content_op, context_id);
     crate::dom::register(scope, ns, "modulepreloadDestination", modulepreload_destination_op, context_id);
     crate::dom::register(scope, ns, "preloadDestination", preload_destination_op, context_id);
-    crate::dom::register(scope, ns, "classicScriptEncoding", classic_script_encoding_op, context_id);
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
     crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
     crate::dom::register(scope, ns, "prepareScript", prepare_script_op, context_id);
@@ -578,13 +581,6 @@ pub(crate) fn classic_script_encoding(content_type: &str, document_charset: &str
         .or_else(|| encoding_rs::Encoding::for_label(document_charset.as_bytes()))
         .map_or("UTF-8", |e| e.name())
 }
-// __dom.classicScriptEncoding(contentType, documentCharset) -> `classic_script_encoding`.
-fn classic_script_encoding_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [content_type, charset] = [0, 1].map(|i| args.get(i).to_rust_string_lossy(scope));
-    let name = v8::String::new(scope, classic_script_encoding(&content_type, &charset)).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    rv.set(name);
-}
-
 // `HTMLScriptElement.supports(type)` (HTML §4.12.1.1): whether `type` names a script type this UA runs — what
 // `prepare_script` runs: a classic script, a module and an import map; speculation rules, a type it knows, it does not.
 fn supports(ty: &str) -> bool {

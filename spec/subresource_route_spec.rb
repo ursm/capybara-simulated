@@ -5,8 +5,8 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
 # What answers a subresource request is the engine's (fetch_rules.rs `fetch_route`), by the URL as it resolves: a
-# `<link rel=stylesheet>` of a `blob:` URL loads its blob's sheet and applies it, and one whose `href` has white space
-# around a `data:` URL is that data: URL's — neither is a request to the network.
+# `<link rel=stylesheet>` of a `blob:` URL loads its blob's sheet and applies it — an empty blob's an empty sheet — and one
+# whose `href` has white space around a `data:` URL is that data: URL's — neither is a request to the network.
 RSpec.describe 'a subresource request route' do
   include PollUntil
 
@@ -25,8 +25,9 @@ RSpec.describe 'a subresource request route' do
       };
       add(URL.createObjectURL(new Blob(['#a { color: rgb(1, 2, 3) }'], { type: 'text/css' })), 'blob');
       add('  data:text/css,%23b%20%7B%20color%3A%20rgb(4%2C%205%2C%206)%20%7D', 'data');
+      add(URL.createObjectURL(new Blob([], { type: 'text/css' })), 'empty blob');
     JS
-    expect(poll_until { (v = s.evaluate_script('seen')).size == 2 && v }.sort).to eq(['blob load', 'data load'])
+    expect(poll_until { (v = s.evaluate_script('seen')).size == 3 && v }.sort).to eq(['blob load', 'data load', 'empty blob load'])
     expect(s.evaluate_script("['a', 'b'].map((id) => getComputedStyle(document.getElementById(id)).color)")).to eq(['rgb(1, 2, 3)', 'rgb(4, 5, 6)'])
   end
 

@@ -21,6 +21,7 @@ RSpec.describe 'Service Worker script charset' do
         const bytes = (name) => new Uint8Array([...new TextEncoder().encode('window.' + name + " = '"), 0x96, 0xBC, 0x27, 0x3B]);
         if (u.pathname === '/scope/parsed.js') e.respondWith(new Response(bytes('parsed'), {headers: {'content-type': 'text/javascript; charset=shift_jis'}}));
         else if (u.pathname === '/scope/inserted.js') e.respondWith(new Response(bytes('inserted'), {headers: {'content-type': 'text/javascript; charset=shift_jis'}}));
+        else if (u.pathname === '/scope/empty.js') e.respondWith(new Response('', {headers: {'content-type': 'text/javascript'}}));
         else if (u.pathname === '/scope/sniffed.js') e.respondWith(new Response('window.sniffed = 1;', {headers: {'content-type': 'text/plain', 'x-content-type-options': 'nosniff'}}));
       });
     JS
@@ -31,6 +32,7 @@ RSpec.describe 'Service Worker script charset' do
         when '/'                then [200, {'content-type' => 'text/html'}, ['<html><body>main</body></html>']]
         when '/sw.js'           then [200, {'content-type' => 'text/javascript'}, [worker]]
         when '/scope/page.html' then [200, {'content-type' => 'text/html'}, [page]]
+        when '/scope/empty.js'  then [200, {'content-type' => 'text/javascript'}, ['window.fromNetwork = true;']]
         else [404, {'content-type' => 'text/plain'}, ['nope']]
         end
       }
@@ -72,5 +74,29 @@ RSpec.describe 'Service Worker script charset' do
       });
     JS
     expect(poll_until { session.evaluate_script('globalThis.__got') }).to eq(['名', '名', 'error', nil])
+  end
+
+  # …and an empty answer is the script's body: it loads, runs nothing, and the network is never asked.
+  it 'takes an empty answer as the script it serves' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__got = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const W = f.contentWindow, s = f.contentDocument.createElement('script');
+          s.src = '/scope/empty.js';
+          s.onload = () => { globalThis.__got = ['load', W.fromNetwork ?? null]; };
+          s.onerror = () => { globalThis.__got = ['error', W.fromNetwork ?? null]; };
+          f.contentDocument.body.appendChild(s);
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__got') }).to eq(['load', nil])
   end
 end

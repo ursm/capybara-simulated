@@ -20,7 +20,7 @@ use std::rc::Rc;
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
 use crate::subresource_judge::{facts_of, judge, Consumer, Facts, J_SHEET, SRC_ASSET, SRC_NETWORK, SRC_SCHEME, SRC_SW_SYNC, S_NO_BODY, V_CROSS_ORIGIN, V_FETCHED, V_OK};
-use crate::subresource_obtain::{call, H_ASSET, H_BLOB, H_CHARSET, H_CONTROLLER, H_DOCUMENT, H_SW_ANSWER};
+use crate::subresource_obtain::{call, H_ASSET, H_CHARSET, H_CONTROLLER, H_DOCUMENT, H_SW_ANSWER};
 use crate::subresource_plan::{plan_in, PLAN_REQUEST};
 
 // A sheet's owner, and its node document (its request's client's).
@@ -104,7 +104,7 @@ fn bytes_of(scope: &mut v8::PinScope<'_, '_>, v: Option<v8::Local<'_, v8::Value>
     if v.is_string() {
         return Some(v.to_rust_string_lossy(scope).into_bytes());
     }
-    crate::canvas::bytes_read(v, None).map(|b| b.into_owned())
+    crate::subresource_obtain::view_bytes(scope, v)
 }
 // …a response object's header `name` (its `headers`, a plain object).
 fn header(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object>>, name: &str) -> Option<String> {
@@ -272,13 +272,8 @@ fn blob_sheet_text(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'
     if let Some(text) = known {
         return Ok(text);
     }
-    let u = text_value(scope, url);
-    let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
-    let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
-    let raw = blob.and_then(|b| member(scope, b, "bytes"));
-    let Some(bytes) = bytes_of(scope, raw) else { return Ok(None) };
-    let content_type = string_member(scope, blob, "type").unwrap_or_default();
-    let facts = Facts { response_type: "basic".to_owned(), status: Some(200), content_type: content_type.clone(), ..Default::default() };
+    let Some((bytes, content_type)) = crate::subresource_obtain::scheme_response(scope, host, url)? else { return Ok(None) };
+    let facts = crate::subresource_obtain::scheme_facts(content_type.clone());
     let verdict = judge_sheet(scope, cid, env, owner, &facts, SRC_SCHEME, &|| bytes.clone());
     let text = if verdict == 0 {
         None
