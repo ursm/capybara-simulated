@@ -768,9 +768,15 @@ fn html_take_blocking_script(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
 // __dom.htmlEnded(id, doc): the script-created parse `id` of the document `doc` ended — its "the end" run.
 fn html_ended(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = parse_id(scope, &args);
-    if let Some(doc) = crate::dom::nid_arg(scope, &args, 1) {
-        parses(scope).ended.insert(doc, id);
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 1) else { return };
+    // (…and those of documents gone with the realms they were in, whose own task never ran to let theirs go)
+    let docs: Vec<crate::dom::NodeId> = parses(scope).ended.keys().copied().collect();
+    let freed: Vec<crate::dom::NodeId> = docs.into_iter().filter(|&d| crate::dom::dom(scope).arena.get(d).is_none()).collect();
+    let ended = &mut parses(scope).ended;
+    for d in freed {
+        ended.remove(&d);
     }
+    ended.insert(doc, id);
 }
 // __dom.htmlTakeEnded(id, doc) -> whether the parse `id` is still the one of `doc`'s that ended last — let go of then:
 // the task "the end" queued for its load runs once.
