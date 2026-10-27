@@ -410,7 +410,8 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 // `Accept: */*` for one with no destination, which XHR's and fetch()'s are — not a document navigation's richer Accept,
 // which the host fills in — and the user agent's `Accept-Language`.
 const DEFAULT_REQUEST_HEADERS: [(&str, &str); 2] = [("Accept", "*/*"), ("Accept-Language", "en-US,en;q=0.9")];
-// Fetch "fetch" step 12: the `Accept` a request of `destination` carries where its header list has none.
+// Fetch "fetch" step 12: the `Accept` a request of `destination` carries where its header list has none (a prefetch's,
+// whose initiator says so before its destination does, a document's: subresource_obtain.rs `dispatch`).
 pub(crate) fn default_accept(destination: &str) -> &'static str {
     match destination {
         "document" | "frame" | "iframe" => "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -419,6 +420,10 @@ pub(crate) fn default_accept(destination: &str) -> &'static str {
         "style" => "text/css,*/*;q=0.1",
         _ => "*/*",
     }
+}
+// …for the host: a request the host hands a service worker (browser.rb `sw_fetch_request`).
+pub(crate) fn default_accept_for_ruby(destination: String) -> String {
+    default_accept(&destination).to_owned()
 }
 
 // __dom.defaultRequestHeaders() -> [name, value, …]: `DEFAULT_REQUEST_HEADERS`.

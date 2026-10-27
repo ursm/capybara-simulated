@@ -5305,7 +5305,8 @@ module Capybara
         req = JSON.generate(
           method:         'GET',
           url:            url.to_s,
-          headers:        {},
+          # Fetch "fetch" step 12: its destination's `Accept`, the request having none of its own.
+          headers:        {'Accept' => Native.default_accept(destination.to_s)},
           body_b64:       '',
           # As the engine planned the request (subresource_plan.rs `plan`): by the
           # element's `crossorigin` for a potential-CORS one (absent → no-cors+include,
@@ -5445,7 +5446,7 @@ module Capybara
         return false if !w || sw_redundant?(handle)
         # Resolve BEFORE bumping the pending counter: a raise here must not strand @sw_fetch_pending
         # (settle would then block for the full round-trip budget with no fetch ever queued to answer).
-        req = resolve_sw_fetch_referrer(req_json.to_s)
+        req = sw_fetch_request(req_json.to_s)
         msg = {kind: 'fetch', req:, fetch_id: fetch_id.to_i, realm_id: realm_id.to_i}
         # Handle Fetch: "If activeWorker's state is activating, wait for it to become
         # activated" — a controlled client's fetch against a worker whose activate
@@ -5490,11 +5491,16 @@ module Capybara
       # (`referrerSource`, its document URL for the `about:client` default); we replace it with the
       # policy-resolved value under `referrer` (nil / stripped → '', the no-referrer state). No
       # source (older payload / navigation request) → passed through untouched.
-      private def resolve_sw_fetch_referrer(req_json)
+      # A client's request as its controlling worker's `fetch` event takes it: its referrer resolved from its source under
+      # its policy, and an `Accept` its destination's where it carries none (Fetch "fetch" step 12: a media element's
+      # data, any request the bindings built of no headers).
+      private def sw_fetch_request(req_json)
         req = JSON.parse(req_json)
-        return req_json unless req.is_a?(Hash) && req.key?('referrerSource')
+        return req_json unless req.is_a?(Hash)
 
-        req['referrer'] = compute_referrer(req['referrerPolicy'], req.delete('referrerSource'), req['url']).to_s
+        req['referrer'] = compute_referrer(req['referrerPolicy'], req.delete('referrerSource'), req['url']).to_s if req.key?('referrerSource')
+        headers = req['headers'].is_a?(Hash) ? req['headers'] : (req['headers'] = {})
+        headers['Accept'] = Native.default_accept(req['destination'].to_s) unless headers.keys.any? {|k| k.casecmp?('accept') }
         JSON.generate(req)
       rescue JSON::ParserError
         req_json

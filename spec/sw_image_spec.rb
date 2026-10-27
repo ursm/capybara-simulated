@@ -20,6 +20,10 @@ RSpec.describe 'a service worker image' do
         }), {headers: {'content-type': 'image/png'}})));
       } else if (path.endsWith('/buffered.png')) {
         e.respondWith(fetch('/real.png'));
+      } else if (path.endsWith('/accept.css')) {
+        // (…a style sheet only where its request — the synchronous channel's — carries a sheet's Accept)
+        const accept = e.request.headers.get('accept');
+        e.respondWith(accept === 'text/css,*/*;q=0.1' ? new Response('#t { color: rgb(1, 2, 3) }', {headers: {'content-type': 'text/css'}}) : new Response(accept, {status: 400}));
       } else if (path.endsWith('/accept.png')) {
         // (…the image only where its request carries an image's Accept: Fetch "fetch" step 12)
         const accept = e.request.headers.get('accept');
@@ -104,5 +108,34 @@ RSpec.describe 'a service worker image' do
       });
     JS
     expect(poll_until { session.evaluate_script('window.got') }).to eq('buffered' => 'load 100', 'streamed' => 'load 100', 'accept' => 'load 100')
+  end
+
+  # …and so does a style sheet's, which the worker answers synchronously: a sheet's.
+  it "hands the worker a style sheet's request with a sheet's Accept" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.got = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async (reg) => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => {
+          if (w.state === 'activated') return res();
+          w.addEventListener('statechange', () => { if (w.state === 'activated') res(); });
+        });
+        const frame = document.body.appendChild(document.createElement('iframe'));
+        frame.src = '/scope/page.html';
+        frame.onload = () => {
+          const doc = frame.contentDocument, p = doc.body.appendChild(doc.createElement('p'));
+          p.id = 't';
+          const link = doc.createElement('link');
+          link.rel = 'stylesheet';
+          link.href = '/scope/accept.css';
+          link.onload = () => { window.got = frame.contentWindow.getComputedStyle(p).color; };
+          link.onerror = () => { window.got = 'error'; };
+          doc.head.appendChild(link);
+        };
+      });
+    JS
+    expect(poll_until { session.evaluate_script('window.got') }).to eq('rgb(1, 2, 3)')
   end
 end
