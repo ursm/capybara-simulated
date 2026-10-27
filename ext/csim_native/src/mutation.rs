@@ -237,7 +237,7 @@ fn step(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Array>, which
 
 // A removed subtree's removing steps: its frames' browsing contexts discarded (the bindings'), then the engine's — a
 // popover hidden, a dialog modal no more, focus and hover gone with it (dialogs.rs `removing_steps`), in the realm whose
-// tree it left — whose change of an element's state the bindings hear of with the change's end (`note_state_changed`).
+// tree it left — whose change of an element's state moves the settle generation (`note_state_changed`).
 fn removing_steps(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Array>, node: NodeId) -> Option<()> {
     let frames = crate::dom::dom(scope).arena.leaving_elements(node, true);
     let cid = crate::dom::dom(scope).arena.get(node).map(|n| n.realm);
@@ -249,7 +249,7 @@ fn removing_steps(scope: &mut v8::PinScope<'_, '_>, steps: v8::Local<'_, v8::Arr
     if let Some(cid) = cid {
         let arena = realm(scope, cid);
         if arena.removing_steps(node) {
-            arena.observers.note_state_changed();
+            arena.note_state_changed();
         }
     }
     Some(())
@@ -488,7 +488,7 @@ fn move_child(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, parent: N
     arena.parser_form_owners_removed(node);
     let carried = |id: Option<NodeId>| id.is_some_and(|f| arena.shadow_including_ancestor(node, f));
     if old != Some(parent) && (carried(arena.focus) || carried(arena.hover)) {
-        arena.observers.note_state_changed();
+        arena.note_state_changed();
     }
     Some(old)
 }

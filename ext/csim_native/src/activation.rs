@@ -46,7 +46,7 @@ impl RealmArena {
         if on && !was_checked {
             self.radio_steps(id);
         }
-        self.observers.note_state_changed();
+        self.note_state_changed();
     }
 }
 

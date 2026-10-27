@@ -1896,6 +1896,16 @@ impl RealmArena {
         at
     }
 
+    // A write's own steps changed an element's state — a radio group's others unchecked, a form owner reset, a control's
+    // value reset with its type — an observable change: the settle generation moved (Capybara's settle and the memos of
+    // what is shown key on it, as on the tree's) and a rendering update's observations asked for.
+    pub(crate) fn note_state_changed(&mut self) {
+        for which in [GEN_SETTLE, GEN_TREE, GEN_NODES] {
+            self.generations.bump(which);
+        }
+        self.observers.note(crate::mutation_observers::OBSERVATIONS);
+    }
+
     // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         self.state_epoch += 1;
@@ -3634,11 +3644,11 @@ pub(crate) fn insert_nodes(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: N
     insertion_steps(scope, cid, &inserted);
 }
 // The insertion steps of the inserted nodes' elements the engine runs: the radio buttons' (`radio_insertion_steps`),
-// whose state change the bindings hear of (`note_state_changed`).
+// whose state change moves the settle generation (`note_state_changed`).
 fn insertion_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, nodes: &[NodeId]) {
     let arena = realm(scope, cid);
     if arena.radio_insertion_steps(nodes) {
-        arena.observers.note_state_changed();
+        arena.note_state_changed();
     }
     let released = arena.registry_insertion_steps(nodes);
     if !released.is_empty() {
@@ -3661,7 +3671,7 @@ fn set_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         let was_checked = mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 && arena.is_checked(id);
         arena.set_state(id, next);
         if mask & (STATE_CHECKED | STATE_CHECKED_DIRTY) != 0 && !was_checked && arena.is_checked(id) && arena.radio_steps(id) {
-            arena.observers.note_state_changed();
+            arena.note_state_changed();
         }
     }
     rv.set_uint32(had);
@@ -3988,7 +3998,7 @@ fn slot_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, parent: NodeId, nodes:
 }
 // The steps of an attribute write the engine runs after it: the slot steps (`slot_attribute_steps`), an element
 // reference's (its explicitly set elements forgotten, element_references.rs), and a radio button's (`radio_steps`),
-// whose state change the bindings hear of (`note_state_changed`) — as its `name`, `type` or `form` written changed its
+// whose state change moves the settle generation (`note_state_changed`) — as its `name`, `type` or `form` written changed its
 // group, or its `checked` its checkedness from false (`was_checked`) to true: one dirty has a checkedness of its own,
 // which its attribute no longer sets.
 fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names: &[&str], was_checked: bool) {
@@ -3998,7 +4008,7 @@ fn attribute_steps(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, names
     let regrouped = names.iter().any(|n| matches!(*n, "name" | "type" | "form"));
     let checked = names.contains(&"checked") && !was_checked && arena.is_checked(id);
     if (regrouped || checked) && arena.radio_steps(id) {
-        arena.observers.note_state_changed();
+        arena.note_state_changed();
     }
     if names.iter().any(|n| matches!(*n, "name" | "content")) {
         arena.meta_referrer_steps(id);

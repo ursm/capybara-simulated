@@ -646,7 +646,7 @@ fn type_change(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, element:
         let value = sanitized(scope, &units);
         if value != units && realm(scope, cid).write_live_value(id, Some(value.into_boxed_slice())) {
             crate::node_handle::forget_live_value(scope, element);
-            realm(scope, cid).observers.note_state_changed();
+            realm(scope, cid).note_state_changed();
         }
     }
     let arena = realm(scope, cid);
@@ -659,6 +659,6 @@ fn type_change(scope: &mut v8::PinScope<'_, '_>, cid: i32, caller: i32, element:
 fn clear_live_value(scope: &mut v8::PinScope<'_, '_>, cid: i32, element: v8::Local<'_, v8::Value>, id: NodeId) {
     if realm(scope, cid).write_live_value(id, None) {
         crate::node_handle::forget_live_value(scope, element);
-        realm(scope, cid).observers.note_state_changed();
+        realm(scope, cid).note_state_changed();
     }
 }

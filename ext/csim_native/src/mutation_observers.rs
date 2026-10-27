@@ -58,11 +58,9 @@ pub(crate) struct Observers {
     // has a registered observer — which a change must then ask about, whichever realm's script made it — [1] whether
     // the agent's mutation observer microtask is queued, [2] whether observers are being notified, [3] whether anything
     // is pending — set as a realm becomes pending, cleared as the notification takes them all — which a change the
-    // engine signaled a slot for asks the microtask to be queued by, [4] whether a write's own steps changed an element's
-    // state (a radio group unchecked by an insertion), which the bindings' generations have to hear of — and what of the
-    // bindings' a change the engine made asks for: [5] a rendering update's observations scheduled, [6] the document's
-    // cascade refreshed, [7] the cascade version moved (a shadow tree's sheet), [8] a `<style>` owed its `load`
-    // (sheet_owners.rs `takeStyleLoads`).
+    // engine signaled a slot for asks the microtask to be queued by — and what of the bindings' a change the engine made
+    // asks for: [4] a rendering update's observations scheduled, [5] the document's cascade refreshed, [6] the cascade
+    // version moved (a shadow tree's sheet), [7] a `<style>` owed its `load` (sheet_owners.rs `takeStyleLoads`).
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
@@ -74,23 +72,18 @@ pub(crate) struct Observers {
 const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 const PENDING: usize = 3;
-const STATE_CHANGED: usize = 4;
-pub(crate) const OBSERVATIONS: usize = 5;
-pub(crate) const CASCADE_REFRESH: usize = 6;
-pub(crate) const CASCADE_VERSION: usize = 7;
-pub(crate) const STYLE_LOADS: usize = 8;
-const FLAGS: usize = 9;
+pub(crate) const OBSERVATIONS: usize = 4;
+pub(crate) const CASCADE_REFRESH: usize = 5;
+pub(crate) const CASCADE_VERSION: usize = 6;
+pub(crate) const STYLE_LOADS: usize = 7;
+const FLAGS: usize = 8;
 
 impl Observers {
     // Whether any node has a registered observer: a change with none asks no more.
     pub(crate) fn observing(&self) -> bool {
         !self.lists.is_empty()
     }
-    // A write's own steps changed an element's state (flag [4]).
-    pub(crate) fn note_state_changed(&self) {
-        self.note(STATE_CHANGED);
-    }
-    // …or a change asks for one of the bindings' steps (`OBSERVATIONS`, `CASCADE_REFRESH`, `CASCADE_VERSION`).
+    // A change asks for one of the bindings' steps (`OBSERVATIONS`, `CASCADE_REFRESH`, `CASCADE_VERSION`).
     pub(crate) fn note(&self, flag: usize) {
         if let Some(flags) = &self.flags {
             flags[flag].set(1);

@@ -1660,7 +1660,7 @@ impl<'s> Build<'s> {
             roots.extend(arena.get(c).map_or(&[][..], |n| &n.children[..]).iter().copied());
         }
         if arena.radio_insertion_steps(&roots) {
-            arena.observers.note_state_changed();
+            arena.note_state_changed();
         }
         // (…and the slots of each shadow tree it attached assigned, as the insertions into a live one assign them)
         for &shadow in &self.shadows {
