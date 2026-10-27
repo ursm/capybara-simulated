@@ -163,9 +163,10 @@ fn load_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     arena.set_image_bitmap(id, None);
     let r = arena.image_mut(id);
     *r = ImageRequest { complete: true, load: r.load + 1, ..ImageRequest::default() };
+    arena.set_natural_size(id, None);
 }
-// __dom.imagePending(img): the current request pending — not complete, its image data discarded until the response
-// comes.
+// __dom.imagePending(img): the current request pending — not complete, its image data and natural size discarded until
+// the response comes.
 fn pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     crate::dom::dom(scope).arena.set_image_pending(id);
@@ -179,6 +180,7 @@ impl RealmArena {
         r.complete = false;
         r.broken = false;
         r.size = [0, 0];
+        self.set_natural_size(id, None);
     }
     // …its current load's number, 0 for none.
     pub(crate) fn image_load_of(&self, id: NodeId) -> u32 {
@@ -214,31 +216,66 @@ pub(crate) fn apply_decoded(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: 
     arena.set_natural_size(id, natural);
     true
 }
-// __dom.imageApply(img, load, result, width, height, orientation, tainted, pixels, pixelsP3, displayP3) -> whether the
-// result applies: load `load`'s (`RESULT_IMAGE` …), none where a later load superseded it. Complete either way; broken
-// for `RESULT_BROKEN`; an image's decoded pixels (`pixels`, and `pixelsP3` for a wide-gamut source, Uint8ClampedArrays;
-// `displayP3` the space they are in) its bitmap.
+// What applying a load's result comes to (`imageApply`): nothing, a later load superseding it; else the event the
+// element fires — `load`, or `error` for a broken one.
+const APPLIED_NONE: u32 = 0;
+const APPLIED_LOAD: u32 = 1;
+const APPLIED_ERROR: u32 = 2;
+// __dom.imageApply(img, load, r) -> `APPLIED_*` of load `load` applied with what its response decoded to — `r` the
+// decoder's record (`__dom.decodeImage`'s, a host load's): `{width, height, pixels[, pixelsP3, colorSpace], natural,
+// orientation, tainted}` for an image, `{noPixels, …}` for one with none — no area (an SVG whose width or height is 0),
+// or data corrupt past the header that gave its size: the request SUCCEEDED, the element complete and not broken, its
+// size reported, an available source that is not fully decodable — and null, `{broken}` (no image in what was fetched)
+// or `{unsupported}` (a scheme the host fetches nothing of: Chrome's `error`) for a broken one. Complete either way; an
+// image's decoded pixels its bitmap — a wide-gamut (Adobe/CMYK) source's Display-P3 rendering too, which a P3 canvas
+// draws, and the space drawImage converts from — and its natural size, `natural` (`[width, height, viewBoxWidth,
+// viewBoxHeight]`), none for a broken one.
 fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = element(scope, args.get(0)) else { return rv.set_bool(false) };
-    let number = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).uint32_value(scope).unwrap_or(0);
-    let (load, result, width, height, orientation) = (number(scope, 1), number(scope, 2), number(scope, 3), number(scope, 4), number(scope, 5));
-    let tainted = args.get(6).is_true();
-    let bitmap = Pixels::of(scope, args.get(7))
+    use crate::subresource_obtain::member;
+    let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(APPLIED_NONE) };
+    let load = args.get(1).uint32_value(scope).unwrap_or(0);
+    let r = v8::Local::<v8::Object>::try_from(args.get(2)).ok();
+    fn field<'s>(scope: &mut v8::PinScope<'s, '_>, r: Option<v8::Local<'_, v8::Object>>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
+        r.and_then(|r| member(scope, r, k))
+    }
+    let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| field(scope, r, k).is_some_and(|v| v.is_true());
+    let number = |scope: &mut v8::PinScope<'_, '_>, k: &str| field(scope, r, k).and_then(|v| v.uint32_value(scope)).unwrap_or(0);
+    let pixels = field(scope, r, "pixels");
+    let result = if r.is_none() || flag(scope, "broken") || flag(scope, "unsupported") {
+        RESULT_BROKEN
+    } else if flag(scope, "noPixels") {
+        RESULT_NO_PIXELS
+    } else if pixels.is_some() {
+        RESULT_IMAGE
+    } else {
+        RESULT_BROKEN
+    };
+    let image = matches!(result, RESULT_IMAGE | RESULT_NO_PIXELS);
+    let (width, height, orientation, tainted) = (number(scope, "width"), number(scope, "height"), number(scope, "orientation"), flag(scope, "tainted"));
+    let display_p3 = field(scope, r, "colorSpace").is_some_and(|v| v.to_rust_string_lossy(scope) == "display-p3");
+    let p3 = field(scope, r, "pixelsP3");
+    let bitmap = pixels
         .filter(|_| result == RESULT_IMAGE)
-        .map(|srgb| Bitmap { srgb, p3: Pixels::of(scope, args.get(8)), display_p3: args.get(9).is_true() });
+        .and_then(|p| Pixels::of(scope, p))
+        .map(|srgb| Bitmap { srgb, p3: p3.and_then(|p| Pixels::of(scope, p)), display_p3 });
+    // (…an Array of the host's, a Float64Array of `decodeImage`'s: read by index either way)
+    let natural = field(scope, r, "natural").filter(|_| image).and_then(|n| v8::Local::<v8::Object>::try_from(n).ok()).map(|n| {
+        let [w, h, vw, vh] = [0, 1, 2, 3].map(|k| n.get_index(scope, k).and_then(|v| v.number_value(scope)));
+        crate::dom::NaturalSize { width: w, height: h, view_box: vw.zip(vh) }
+    });
     let arena = &mut crate::dom::dom(scope).arena;
     if load != arena.image_mut(id).load {
-        return rv.set_bool(false);
+        return rv.set_uint32(APPLIED_NONE);
     }
     arena.set_image_bitmap(id, bitmap);
     let r = arena.image_mut(id);
     r.complete = true;
     r.broken = result == RESULT_BROKEN;
-    let image = matches!(result, RESULT_IMAGE | RESULT_NO_PIXELS);
     r.size = if image { [width, height] } else { [0, 0] };
     r.orientation = if image { orientation as u8 } else { 0 };
     r.tainted = image && tainted;
-    rv.set_bool(true);
+    arena.set_natural_size(id, natural);
+    rv.set_uint32(if image { APPLIED_LOAD } else { APPLIED_ERROR });
 }
 // __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density]: the current request, as the
 // element's members and a canvas read it — its decoded bitmap's size, and its source's pixel density, which the natural

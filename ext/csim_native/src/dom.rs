@@ -2885,7 +2885,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "setArena", set_arena, context_id);
     register(scope, ns, "setNodeFactory", set_node_factory, context_id);
     register(scope, ns, "arenaOf", arena_of, context_id);
-    register(scope, ns, "setNaturalSize", set_natural_size, context_id);
     register(scope, ns, "pseudoBox", pseudo_box, context_id);
     register(scope, ns, "directionality", directionality, context_id);
     register(scope, ns, "setTemplateContent", set_template_content, context_id);
@@ -3737,21 +3736,7 @@ impl NaturalSize {
     }
 }
 
-// __dom.setNaturalSize(nid[, width, height, viewBoxWidth, viewBoxHeight]): an `<img>`'s decoded image's natural size
-// (`NaturalSize`; NaN for one it has not) — or, with nothing after the nid, none: nothing decoded.
-fn set_natural_size(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(id) = nid_arg(scope, &args, 0) else {
-        return;
-    };
-    let [w, h, vw, vh] = [1, 2, 3, 4].map(|k| args.get(k).number_value(scope));
-    let natural = (args.length() > 1).then_some(NaturalSize { width: w, height: h, view_box: vw.zip(vh) });
-    let cid = realm_id(scope, &args);
-    realm(scope, cid).set_natural_size(id, natural);
-}
+// An `<img>`'s decoded image's natural size (`NaturalSize`, image_requests.rs `imageApply`) — or none: nothing decoded.
 impl RealmArena {
     // …element `id`'s, a dimension of no finite size none, nor a view box of no positive one.
     pub(crate) fn set_natural_size(&mut self, id: NodeId, natural: Option<NaturalSize>) {

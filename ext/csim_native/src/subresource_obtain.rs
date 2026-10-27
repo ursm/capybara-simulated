@@ -1133,7 +1133,6 @@ fn image_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     // (…the request pending: the image data discarded until the worker answers — an observable window, as a browser's)
     let arena = realm(scope, cid);
     arena.set_image_pending(el);
-    arena.set_natural_size(el, None);
     match dispatch(scope, host, r) {
         Ok(None) => rv.set_uint32(IMAGE_FETCH_PENDING),
         // (…none answered at once: the network's)
