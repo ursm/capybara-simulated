@@ -321,6 +321,96 @@ pub(crate) fn send_target(engine: &mut crate::style::StyleEngine, arena: &crate:
     }
 }
 
+// What a driver's `set` does to an element (Capybara's `Element#set`, as Selenium does it: `set_plan`) — its KIND: nothing
+// (a read-only control; a select with no option of the value the user can pick), the value typed over what it held (a
+// textarea's, a text-like input's — cut at `maxlength`, the caret at its end), the value as given (a number field keeps
+// what was typed, out of range or not), the value sanitized (a range's UI can only land on its range and step), a
+// checkbox or radio button clicked where that changes it — no click unchecks a radio button — or left as it is, the
+// `value` content attribute written (a checkbox's or radio's set to no boolean), an option picked, an editing host's
+// content replaced as typed — and whether it is focused first (a text control or an editing host, as Selenium's typing
+// focuses it), is an input or a textarea (a user's edit: `tooShort` / `tooLong` can apply), and is submitted after (an
+// input's value ending in a line feed, the feed no part of it: Enter pressed).
+pub(crate) const SET_NONE: u32 = 0;
+pub(crate) const SET_TYPE: u32 = 1;
+pub(crate) const SET_LIVE: u32 = 2;
+pub(crate) const SET_SANITIZED: u32 = 3;
+pub(crate) const SET_CLICK: u32 = 4;
+pub(crate) const SET_UNCHANGED: u32 = 5;
+pub(crate) const SET_VALUE_ATTRIBUTE: u32 = 6;
+pub(crate) const SET_OPTION: u32 = 7;
+pub(crate) const SET_EDITING_HOST: u32 = 8;
+pub(crate) const SET_FOCUS: u32 = 1 << 4;
+pub(crate) const SET_CONTROL: u32 = 1 << 5;
+pub(crate) const SET_SUBMIT: u32 = 1 << 6;
+
+// What `set` is given: a boolean, or a value's string (none for null).
+pub(crate) enum SetValue {
+    Bool(bool),
+    Text(Vec<u16>),
+}
+
+// `set_plan` of `id` given `value`: its bits, the text it writes, and the option it picks.
+pub(crate) fn set_plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, value: &SetValue) -> (u32, Vec<u16>, Option<crate::dom::NodeId>) {
+    let Some(n) = arena.get(id) else { return (SET_NONE, Vec::new(), None) };
+    let (input, textarea) = (n.is_html_named("input"), n.is_html_named("textarea"));
+    let host = plan(arena, id, &[], None, 0) & EDITING_HOST != 0;
+    let mut flags = 0;
+    if input || textarea {
+        flags |= SET_CONTROL;
+    }
+    if input || textarea || host {
+        flags |= SET_FOCUS;
+    }
+    if n.is_read_only() {
+        return (flags, Vec::new(), None);
+    }
+    let mut text = match value {
+        SetValue::Bool(b) => (if *b { "true" } else { "false" }).encode_utf16().collect(),
+        SetValue::Text(t) => t.clone(),
+    };
+    if input && matches!(value, SetValue::Text(t) if t.last() == Some(&u16::from(b'\n'))) {
+        text.pop();
+        flags |= SET_SUBMIT;
+    }
+    let kind = if textarea {
+        SET_TYPE
+    } else if input {
+        match n.input_type() {
+            kind @ ("checkbox" | "radio") => {
+                let want = match value {
+                    SetValue::Bool(b) => Some(*b),
+                    SetValue::Text(t) if is_units(t, "true") => Some(true),
+                    SetValue::Text(t) if is_units(t, "false") => Some(false),
+                    SetValue::Text(_) => None,
+                };
+                match want {
+                    None => SET_VALUE_ATTRIBUTE,
+                    Some(want) if want != arena.is_checked(id) && (want || kind == "checkbox") => SET_CLICK,
+                    Some(_) => SET_UNCHANGED,
+                }
+            },
+            "number" => SET_LIVE,
+            "range" => SET_SANITIZED,
+            _ => SET_TYPE,
+        }
+    } else if n.is_html_named("select") {
+        // (…the first option of the value — the option's value, its `value` attribute else its collapsed text — that the
+        // user can pick: none in a disabled select, nor a disabled one)
+        let pick = (!arena.is_actually_disabled(id))
+            .then(|| arena.list_of_options(id).into_iter().find(|&o| !arena.option_disabled(o) && arena.option_value(o) == text))
+            .flatten();
+        return match pick {
+            Some(o) => (flags | SET_OPTION, text, Some(o)),
+            None => (flags, text, None),
+        };
+    } else if host {
+        SET_EDITING_HOST
+    } else {
+        SET_LIVE
+    };
+    (flags | kind, text, None)
+}
+
 // The edit a key makes in a typeable element (`edit`), besides its `inputType`: a character typed (a textarea's line
 // break among them), an editing host's line break or paragraph, or a deletion — forward or back, of a word or to the
 // line's start.
@@ -434,6 +524,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "keyChord", chord_op, context_id);
     crate::dom::register(scope, ns, "keyPlan", plan_op, context_id);
     crate::dom::register(scope, ns, "sendKeysTarget", send_target_op, context_id);
+    crate::dom::register(scope, ns, "setPlan", set_plan_op, context_id);
     crate::dom::register(scope, ns, "keyEdit", edit_op, context_id);
     crate::dom::register(scope, ns, "keyMotion", motion_op, context_id);
 }
@@ -454,6 +545,26 @@ fn send_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let bits = v8::Integer::new_from_unsigned(scope, bits).into();
     let to = crate::dom::node_value(scope, Some(to));
     rv.set(v8::Array::new_with_elements(scope, &[bits, to]).into());
+}
+// __dom.setPlan(element, value) -> [bits, text, option | null] (`set_plan`; `value` a boolean, null, or any other value
+// as its string).
+fn set_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    let value = args.get(1);
+    let value = if value.is_boolean() {
+        SetValue::Bool(value.is_true())
+    } else if value.is_null_or_undefined() {
+        SetValue::Text(Vec::new())
+    } else {
+        let Some(text) = value.to_string(scope) else { return };
+        SetValue::Text(crate::dom::utf16_arg(scope, text.into()))
+    };
+    let (bits, text, option) = set_plan(crate::dom::realm(scope, cid), id, &value);
+    let bits = v8::Integer::new_from_unsigned(scope, bits).into();
+    let text = v8::String::new_from_two_byte(scope, &text, v8::NewStringType::Normal).map_or_else(|| v8::undefined(scope).into(), Into::into);
+    let option = crate::dom::node_value(scope, option);
+    rv.set(v8::Array::new_with_elements(scope, &[bits, text, option]).into());
 }
 // __dom.keyEdit(element, key, char, inputType, modifiers, selection) -> [inputType, edit] (`edit`; `char` and
 // `inputType` null for none, as `resolveKey` gives them), null for none.
