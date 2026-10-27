@@ -1058,11 +1058,11 @@ impl<'s> Build<'s> {
             let arena = crate::dom::realm(scope, self.cid);
             let is = arena.get(id).and_then(|n| n.plain_attr("is").map(|v| v.encode_utf16().collect::<Vec<u16>>()));
             if let Some(is) = is {
+                // (…as it is made, in no tree yet: no generation moves for it)
                 if let Some(n) = arena.get_mut_quietly(id) {
                     n.is_value = Some(is.into_boxed_slice());
+                    n.state |= crate::dom::STATE_IS_VALUE;
                 }
-                let had = arena.get(id).map_or(0, |n| n.state);
-                arena.set_state(id, had | crate::dom::STATE_IS_VALUE);
             }
         }
     }

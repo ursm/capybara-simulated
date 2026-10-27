@@ -26,11 +26,44 @@ RSpec.describe 'the style-state generation' do
     s.visit '/'
     shown = -> { %w[a b d e].map {|id| s.find("##{id}", visible: :all).visible? } }
     expect(shown.call).to eq([true, true, true, true])
+    # (…each write on its own, read after it: one that moved nothing reads as before)
     s.execute_script("document.getElementById('f').focus()")
+    expect(shown.call).to eq([false, true, true, true])
     s.execute_script("document.getElementById('c').indeterminate = true")
+    expect(shown.call).to eq([false, false, true, true])
     s.execute_script("document.getElementById('p').showPopover()")
+    expect(shown.call).to eq([false, false, false, true])
     s.execute_script("customElements.define('x-e', class extends HTMLElement {})")
     expect(shown.call).to eq([false, false, false, false])
+  end
+
+  # …and in the realm whose arena holds the element, whichever realm's code writes it: one adopted from a frame into
+  # the page, written by the frame's setters — its `:indeterminate`, `:checked` and `:invalid` — moves the page's memo.
+  it "moves the element's realm's, written by another realm's code" do
+    app = lambda {|env|
+      body = if env['PATH_INFO'] == '/f'
+               '<input type=checkbox id=c><input id=v>'
+             else
+               '<style>#c:indeterminate + i, #c:checked + i + b, #v:invalid + u { display: none }</style>' \
+                 '<div id=h1></div><i id=i>i</i><b id=b>b</b><div id=h2></div><u id=u>u</u><iframe src="/f"></iframe>'
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const d = frames[0].document;
+      document.getElementById('h1').replaceWith(d.getElementById('c'));
+      document.getElementById('h2').replaceWith(d.getElementById('v'));
+    JS
+    shown = -> { %w[i b u].map {|id| s.find("##{id}", visible: :all).visible? } }
+    expect(shown.call).to eq([true, true, true])
+    s.execute_script("document.getElementById('c').indeterminate = true")
+    expect(shown.call).to eq([false, true, true])
+    s.execute_script("document.getElementById('c').click()")
+    expect(shown.call).to eq([true, false, true])
+    s.execute_script("document.getElementById('v').setCustomValidity('no')")
+    expect(shown.call).to eq([true, false, false])
   end
 
   it 'moves with a live value, a custom validity, a custom state and the target' do

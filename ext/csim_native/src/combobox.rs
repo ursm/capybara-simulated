@@ -4,7 +4,7 @@
 // which the UA sheet's `option:filtered { display: none }` hides. The bindings fire the cancelable `beforefilter`
 // between finding the list and filtering it.
 
-use crate::dom::{nid_arg, node_value, realm, realm_id, NodeId, RealmArena, GEN_STYLE_STATE, STATE_FILTERED};
+use crate::dom::{nid_arg, node_value, realm, realm_id, NodeId, RealmArena, STATE_FILTERED};
 
 impl RealmArena {
     // The `<select>` or `<datalist>` a combobox `<input>` names: the element of its tree whose ID its `filter`
@@ -15,13 +15,12 @@ impl RealmArena {
         let list = self.element_by_id(self.root_of(input), &id)?;
         self.get(list).filter(|l| l.is_html_named("select") || l.is_html_named("datalist")).map(|_| list)
     }
-    // `list`'s options filtered by `input`'s value — a select's list of options, a datalist's descendant options — the
-    // style state moved where any one's `:filtered` did (a cascade input no attribute stands behind).
+    // `list`'s options filtered by `input`'s value — a select's list of options, a datalist's descendant options — each
+    // one's `:filtered` written (a cascade input no attribute stands behind: its write moves the style state).
     pub(crate) fn filter_combobox(&mut self, input: NodeId, list: NodeId) {
         let Some(l) = self.get(list) else { return };
         let options = if l.is_html_named("select") { self.list_of_options(list) } else { self.descendant_options(list) };
         let needle = self.get(input).map_or_else(String::new, |n| String::from_utf16_lossy(&self.relevant_value(n)).to_lowercase());
-        let mut moved = false;
         for option in options {
             let text = String::from_utf16_lossy(&self.option_text_units(option));
             let filtered = !needle.is_empty() && !text.to_lowercase().starts_with(&needle);
@@ -29,11 +28,7 @@ impl RealmArena {
             let next = if filtered { had | STATE_FILTERED } else { had & !STATE_FILTERED };
             if next != had {
                 self.set_state(option, next);
-                moved = true;
             }
-        }
-        if moved {
-            self.generations.bump(GEN_STYLE_STATE);
         }
     }
     fn descendant_options(&self, root: NodeId) -> Vec<NodeId> {

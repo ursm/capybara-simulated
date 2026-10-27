@@ -124,14 +124,17 @@ pub(crate) fn clone_into(
     }
     let arena = crate::dom::realm(scope, cid);
     arena.clone_nonce(src, copy);
-    if state != 0 {
-        let had = arena.get(copy).map_or(0, |c| c.state);
-        arena.set_state(copy, had | state);
-        // (…a dirty checkedness its radio group's too)
-        arena.note_radio(copy);
+    // (…the copy's state and live value written as it is made, in no tree yet: nothing shows it, so no generation moves —
+    // a clone read for its text alone keeps the page's rendered memo)
+    if let Some(c) = arena.get_mut_quietly(copy) {
+        c.state |= state;
+        if value.is_some() {
+            c.value = value;
+        }
     }
-    if value.is_some() {
-        arena.write_live_value(copy, value);
+    // (…a dirty checkedness its radio group's too)
+    if state != 0 {
+        arena.note_radio(copy);
     }
     let handle = crate::node_handle::bare(scope, copy, doc, maker);
     // (…an element's custom element registry association, the source's)

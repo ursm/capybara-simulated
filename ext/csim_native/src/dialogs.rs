@@ -156,14 +156,13 @@ fn topmost_dialog(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let found = realm(scope, cid).topmost_dialog(doc);
     rv.set(node_value(scope, found));
 }
-// __dom.removingSteps(rootNid) -> whether the removing steps of the subtree changed an element's state
-// (`removing_steps`).
-fn removing_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+// __dom.removingSteps(rootNid): the removing steps of the subtree (`removing_steps`).
+fn removing_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
     // (…in the realm whose tree it left, whose document's modal stack its dialogs leave, whichever realm's code removed it)
     let caller = realm_id(scope, &args);
     let cid = crate::dom::dom(scope).arena.get(root).map_or(caller, |n| n.realm);
-    rv.set_bool(realm(scope, cid).removing_steps(root));
+    realm(scope, cid).removing_steps(root);
 }
 
 // A dialog's `closedby` attribute's state (HTML §4.11.4): `any`, `closerequest` or `none`, ASCII case-insensitively; a
