@@ -263,6 +263,11 @@ pub(crate) fn apply_record(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u
     r.orientation = if image { orientation as u8 } else { 0 };
     r.tainted = image && tainted;
     arena.set_natural_size(id, natural);
+    // (…what it shows moved, its box and what is in it laid out again — before its `load` or `error` is fired, whose
+    // listener reads its size — and an observable change)
+    if let Some(cid) = arena.get(id).map(|n| n.realm) {
+        crate::dom::realm(scope, cid).note_shown_changed(1);
+    }
     if image { APPLIED_LOAD } else { APPLIED_ERROR }
 }
 // __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density]: the current request, as the
