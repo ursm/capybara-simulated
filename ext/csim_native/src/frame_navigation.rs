@@ -464,7 +464,7 @@ fn set_frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
     let cid = realm_id(scope, &args);
-    rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.flags & !DEFERRED_LISTED));
+    rv.set_uint32(crate::dom::realm(scope, cid).frame_nav(container));
 }
 
 // __dom.takeSwDeferredFrames() -> the containers of the calling realm whose builds are parked on a service worker still
@@ -557,9 +557,12 @@ fn set_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     crate::dom::realm(scope, cid).set_frame_nav(container, flags, on);
 }
 impl RealmArena {
-    // The container's navigation's flags: whether it has them…
+    // The container's navigation's flags, the bindings' (none of the engine's own), and whether it has them…
+    fn frame_nav(&self, container: NodeId) -> u32 {
+        self.frame_navigations.0.get(&container).map_or(0, |n| n.flags & !DEFERRED_LISTED)
+    }
     pub(crate) fn frame_nav_has(&self, container: NodeId, flags: u32) -> bool {
-        self.frame_navigations.0.get(&container).is_some_and(|nav| nav.flags & flags != 0)
+        self.frame_nav(container) & flags != 0
     }
     // …and them set (`on`) or cleared.
     pub(crate) fn set_frame_nav(&mut self, container: NodeId, flags: u32, on: bool) {

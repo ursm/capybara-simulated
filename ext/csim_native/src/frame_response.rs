@@ -30,8 +30,13 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // creator, the client id its navigation reserved, the Referer its request sent and the Referrer-Policy and Refresh its
 // response set (null for none), its origins (`frame_origins`) and its sandboxing flags.
 fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
-    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    // (…a container of no node, or no host: no document made, as for a build parked)
+    let deferred = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>| {
+        let code = v8::Integer::new_from_unsigned(scope, FRAME_DEFERRED).into();
+        rv.set(v8::Array::new_with_elements(scope, &[code]).into());
+    };
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return deferred(scope, rv) };
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return deferred(scope, rv) };
     let doc = crate::node_handle::handle_of(scope, args.get(0))
         // SAFETY: the handle lives while the object, an argument, does.
         .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
