@@ -1900,8 +1900,14 @@ impl RealmArena {
     pub(crate) fn set_state(&mut self, id: NodeId, bits: u32) {
         self.state_epoch += 1;
         let Some(node) = self.get_mut(id) else { return };
-        let was_modal = node.state & STATE_MODAL != 0;
+        let had = node.state;
+        let was_modal = had & STATE_MODAL != 0;
         node.state = bits;
+        // (…what a dynamic pseudo-class reads moved: the style-state generation the memos of what it shows key on —
+        // whoever wrote it, a click's activation, a script's `.checked`, the selectedness algorithm, focus)
+        if had != bits {
+            self.generations.bump(GEN_STYLE_STATE);
+        }
         let state = &mut self.state;
         for (bit, slot) in [(STATE_FOCUSED, &mut state.focus), (STATE_HOVERED, &mut state.hover)] {
             if bits & bit != 0 {
