@@ -892,7 +892,8 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
 }
 // What a hyperlink followed in a frame's or a window's realm routes through (`hyperlinkRoute`): none of its own — the
-// top-level page's link, whose own navigation its caller takes — a new auxiliary window the host opens (a name, or
+// top-level page's link, whose own navigation its caller takes (a discarded frame's follows none at all: dom-nodes.js
+// `followHyperlink`) — a new auxiliary window the host opens (a name, or
 // `_blank`: the frame's VM not rebuilt, a fresh window), or the navigable a keyword chooses, navigated by this document.
 const LINK_UNROUTED: u32 = 0;
 const LINK_AUXILIARY: u32 = 1;
