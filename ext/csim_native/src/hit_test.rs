@@ -691,22 +691,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "hitTest", hit_test_op, context_id);
     crate::dom::register(scope, ns, "clickObstructor", click_obstructor_op, context_id);
     crate::dom::register(scope, ns, "observedVisible", observed_visible_op, context_id);
-    crate::dom::register(scope, ns, "clippedAway", clipped_away_op, context_id);
+    crate::dom::register(scope, ns, "clickPoint", click_point_op, context_id);
 }
 
-// __dom.clippedAway(nid) -> whether the element's rendered box is clipped away whole (`clipped_away`).
 // __dom.isInert(nid) -> whether the node is inert (`RealmArena::is_inert`): the driver refuses to click it.
 fn is_inert_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let inert = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| crate::dom::realm(scope, cid).is_inert(id));
     rv.set_bool(inert);
 }
-fn clipped_away_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let away = crate::dom::nid_arg(scope, &args, 0).is_some_and(|id| clipped_away(crate::dom::realm(scope, cid), id));
-    rv.set(v8::Boolean::new(scope, away).into());
-}
-
 // One painting question asked with the realm's arena and its style engine's animations at the realm's clock.
 pub(crate) fn painting<R>(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, ask: impl FnOnce(&mut Painting<'_>) -> R) -> Option<R> {
     let cid = crate::dom::realm_id(scope, args);
@@ -774,6 +767,37 @@ fn click_obstructor_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         })
     };
     rv.set(crate::dom::node_value(scope, other));
+}
+
+// __dom.clickPoint(nid, dx, dy) -> `[x, y]`, where in this document's viewport a click aimed at the element lands ON it
+// — on it or a flat-tree descendant of it: the centre of its rendered box, or (`dx`, `dy`) from that box's corner (a
+// frame's, at the point a click in its document landed) — or null where it is OBSCURED there (CSSOM / Selenium's
+// click-point occlusion): it is not rendered (`visibility` included), has no box, a box that clips it clips it away
+// whole, the point is outside the viewport (no element is there at all: a half-scrolled-off element's centre), or what
+// the point hits is another's. A frame's document asks its container's the same at the point it answers.
+fn click_point_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let [dx, dy] = [1, 2].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
+    let rendered = crate::rendered::with_engine(scope, &args, |engine, arena, now| crate::rendered::rendered(engine, arena, id, false, true, None, now));
+    if rendered != Some(true) {
+        return;
+    }
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if crate::geometry::laid_out_box(arena, id).is_none() || clipped_away(arena, id) {
+        return;
+    }
+    let Some([bx, by, bw, bh]) = crate::geometry::rendered_box(arena, id) else { return };
+    let [x, y] = if dx.is_nan() || dy.is_nan() { [bx + bw / 2.0, by + bh / 2.0] } else { [bx + dx, by + dy] };
+    let [vw, vh] = crate::viewport::here(scope, &args);
+    if x < 0.0 || y < 0.0 || x > vw || y > vh {
+        return;
+    }
+    let Some(hit) = painting(scope, &args, |p| p.hit(x, y, false).first().copied()).flatten() else { return };
+    if crate::geometry::flat_inclusive_ancestor(crate::dom::realm(scope, cid), id, hit) {
+        rv.set(crate::dom::f64_array(scope, &[x, y]).into());
+    }
 }
 
 // __dom.observedVisible(nids) -> Float64Array: for each element `nids` names, 1 where an intersection observer
