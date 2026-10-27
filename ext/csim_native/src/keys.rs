@@ -353,7 +353,9 @@ pub(crate) enum SetValue {
 pub(crate) fn set_plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, value: &SetValue) -> (u32, Vec<u16>, Option<crate::dom::NodeId>) {
     let Some(n) = arena.get(id) else { return (SET_NONE, Vec::new(), None) };
     let (input, textarea) = (n.is_html_named("input"), n.is_html_named("textarea"));
-    let host = plan(arena, id, &[], None, 0) & EDITING_HOST != 0;
+    // (…an HTML text control edits its own value; any other element an editing host's content: its own, or a host's
+    // that holds it)
+    let host = !(input || textarea) && arena.is_editable(id);
     let mut flags = 0;
     if input || textarea {
         flags |= SET_CONTROL;
