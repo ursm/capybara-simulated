@@ -3937,6 +3937,11 @@ fn set_shadow_host(
     if let Some(engine) = engine {
         engine.shadow_attached(arena, host);
     }
+    // (…the host rendering its empty shadow tree now, every light child out of the flat tree until a slot takes it — no
+    // DOM mutation says so: Chrome drops `<div id=h><div style="height:50px">` to 0 the moment the root is attached — and
+    // the host's text "" where a memo kept its children's)
+    let children = arena.get(host).map_or(0, |n| n.children.len() as u32);
+    arena.note_shown_changed(1 + children);
 }
 
 // The nids a JS array lists (an entry that is none skipped).
@@ -3946,29 +3951,26 @@ pub(crate) fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8
         .filter_map(|i| arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
         .collect()
 }
-// __dom.assignSlots(rootNid, [slotNid, …]) -> [nodes, counts]: assign the slots of the shadow tree `rootNid` (-1 for
-// none) and the slots listed (ones that left it, assigned what their own tree now gives them), each slot whose assigned
-// nodes changed signaled, and answer them with the nodes that left them — for the caller's layout marks: `nodes` each
-// such slot and then the nodes that left it, as `nodes_value` answers them, and `counts` how many left each.
+// __dom.assignSlots(rootNid, [slotNid, …]): assign the slots of the shadow tree `rootNid` (-1 for none) and the slots
+// listed (ones that left it, assigned what their own tree now gives them), each slot whose assigned nodes changed
+// signaled and what it shows marked.
 fn assign_slots(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let root = nid_arg(scope, &args, 0);
     let extra = nids_arg(scope, args.get(1));
     let cid = realm_id(scope, &args);
     let changed = assign_slots_in(scope, cid, root, &extra);
-    let mut nodes = Vec::new();
-    let mut counts = Vec::with_capacity(changed.len());
+    // (…each slot whose assigned nodes changed, and the nodes that LEFT it: the flat tree changed shape under it — what it
+    // lays out is its new assigned set, inheriting from it, which no DOM mutation marks, the light node that moved being
+    // under the host — and the nodes that left move with nothing above them that the change marks; the text memos
+    // (`innerText`, Capybara's text) key on the settle generation, which an `assign()` moves nothing else of)
+    let arena = realm(scope, cid);
     for c in &changed {
-        nodes.push(c.slot);
-        nodes.extend_from_slice(&c.left);
-        counts.push(c.left.len() as f64);
+        arena.note_shown_changed(1 + c.left.len() as u32);
     }
-    let nodes = nodes_value(scope, cid, &nodes);
-    let counts = f64_array(scope, &counts);
-    rv.set(v8::Array::new_with_elements(scope, &[nodes, counts.into()]).into());
 }
 
 // "Assign slottables for a tree" of the shadow tree `root` and the slots `extra` (`slots::assign`), the style engine told
