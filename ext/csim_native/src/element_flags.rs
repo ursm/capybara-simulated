@@ -12,6 +12,8 @@ const ELEMENT_FLAGS: u16 = 0b11_1111_1111;
 // A `<select>` has a `<selectedcontent>` it keeps mirroring its selection (element-flags.js
 // `SELECT_HAS_SELECTED_CONTENT`): the parser pauses at its options for the bindings to mirror them.
 pub(crate) const SELECT_HAS_SELECTED_CONTENT: u16 = 1 << 0;
+// A select connected before (element-flags.js `EVER_CONNECTED`): a batch that connects its options again is not its first.
+pub(crate) const EVER_CONNECTED: u16 = 1 << 1;
 // A `<style>`'s `load` queued for the sheet it has (element-flags.js `STYLE_LOAD_FIRED`): a new sheet owes another.
 pub(crate) const STYLE_LOAD_FIRED: u16 = 1 << 6;
 // A classic script's Resource Timing entry filed (element-flags.js `SCRIPT_TIMING_FILED`): an element's once.

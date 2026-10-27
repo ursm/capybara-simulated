@@ -546,6 +546,23 @@ impl RealmArena {
         }
         !self.is_list_box(select) && !self.find_option(select, false, &mut |o| o != option && self.option_initialised(o) & STATE_SELECTED != 0)
     }
+    // What connecting `option` asks of its select, as a connect walk reaches it (HTML's option insertion steps): the
+    // select, where its selectedness setting algorithm runs now — the option's insertion can change what it leaves
+    // (`option_insertion_runs_selectedness`), and the select either mirrors its selection into a `<selectedcontent>`,
+    // reconciling as each of its options connects so a script after one sees it, or (`parsed`) was connected by an
+    // earlier batch, a drain the parser made among its options; the select's own batch runs it after the walk, once
+    // every option is initialised — and whether it reconciles per option, which that batch leaves be (OPTION_PER_OPTION).
+    // None for neither: an ordinary select's options leave it to its batch.
+    pub(crate) fn option_connecting(&self, option: NodeId, parsed: bool) -> Option<(NodeId, u32)> {
+        let select = self.html_ancestor(option, "select", false)?;
+        let flags = self.get(select)?.element_flags;
+        let per_option = flags & crate::element_flags::SELECT_HAS_SELECTED_CONTENT != 0;
+        if !per_option && !(parsed && flags & crate::element_flags::EVER_CONNECTED != 0) {
+            return None;
+        }
+        let run = self.option_insertion_runs_selectedness(select, option);
+        Some((select, if run { OPTION_RUN } else { 0 } | if per_option { OPTION_PER_OPTION } else { 0 }))
+    }
     // Whether a change of `nodes` under `parent` touches a select's options — an option or an optgroup among them; or,
     // the parent in a select, an option one of them holds (a customizable select's wrapper of one: its insertion steps
     // run for every inclusive descendant) — so that its select is asked for a reset. A text node or an element holding
@@ -761,7 +778,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "isSubmitButton", is_submit_button, context_id);
     crate::dom::register(scope, ns, "buttonType", button_type, context_id);
     crate::dom::register(scope, ns, "selectedness", selectedness, context_id);
-    crate::dom::register(scope, ns, "optionInsertionRunsSelectedness", option_insertion_runs_selectedness, context_id);
+    crate::dom::register(scope, ns, "optionConnecting", option_connecting, context_id);
     crate::dom::register(scope, ns, "askForReset", ask_for_reset, context_id);
     crate::dom::register(scope, ns, "optionSelect", option_select, context_id);
     crate::dom::register(scope, ns, "elementAncestor", element_ancestor_op, context_id);
@@ -1123,12 +1140,18 @@ fn selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set(crate::dom::nodes_value(scope, cid, &changed));
 }
 
-// __dom.optionInsertionRunsSelectedness(selectNid, optionNid) -> whether the option's insertion can change what the
-// selectedness setting algorithm leaves (`option_insertion_runs_selectedness`).
-fn option_insertion_runs_selectedness(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// `option_connecting`'s answer: the select's selectedness setting algorithm runs now; it reconciles per option.
+const OPTION_RUN: u32 = 1;
+const OPTION_PER_OPTION: u32 = 1 << 1;
+// __dom.optionConnecting(optionNid, parsed) -> [select, bits] (`option_connecting`), null for nothing to do.
+fn option_connecting(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    let (Some(select), Some(option)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
-    rv.set_bool(crate::dom::realm(scope, cid).option_insertion_runs_selectedness(select, option));
+    let Some(option) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set_null() };
+    let parsed = args.get(1).is_true();
+    let Some((select, bits)) = crate::dom::realm(scope, cid).option_connecting(option, parsed) else { return rv.set_null() };
+    let select = crate::dom::node_value(scope, Some(select));
+    let bits = v8::Integer::new_from_unsigned(scope, bits).into();
+    rv.set(v8::Array::new_with_elements(scope, &[select, bits]).into());
 }
 
 // __dom.optionSelect(nid) -> the select whose list of options the option is in (`option_select`), as `node_value`
