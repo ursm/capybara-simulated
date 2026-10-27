@@ -1914,9 +1914,14 @@ impl RealmArena {
         let was_modal = had & STATE_MODAL != 0;
         node.state = bits;
         // (…what a dynamic pseudo-class reads moved: the style-state generation the memos of what it shows key on —
-        // whoever wrote it, a click's activation, a script's `.checked`, the selectedness algorithm, focus)
+        // whoever wrote it, a click's activation, a script's `.checked`, the selectedness algorithm, focus — and where it
+        // is a control's checkedness or an option's selectedness, what a form submits and a select shows: an observable
+        // change, as a tree's is, which a focus or a hover is not)
         if had != bits {
             self.generations.bump(GEN_STYLE_STATE);
+        }
+        if (had ^ bits) & (STATE_CHECKED | STATE_CHECKED_DIRTY | STATE_SELECTED) != 0 {
+            self.note_state_changed();
         }
         let state = &mut self.state;
         for (bit, slot) in [(STATE_FOCUSED, &mut state.focus), (STATE_HOVERED, &mut state.hover)] {
