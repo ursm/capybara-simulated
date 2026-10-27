@@ -14,9 +14,8 @@ use crate::font_files::{face_file, Terminated};
 pub(crate) type Resolved = (i32, [Option<f64>; 3]);
 
 // What the page side does for the engine: `subresources(step, …)` a source's file fetched or looked up (font_files.rs,
-// subresource-host.js),
-// `settle(index, ok)` the document's face `index` once its file is known, `system(family, bucket)` the file fontconfig
-// resolves a family's system face to (null for none).
+// subresource-host.js), `settle(index, ok)` the document's face `index` once its file is known, `system(family, bucket)`
+// the file fontconfig resolves a family's system face to (null for none).
 struct Host<'s> {
     subresources: v8::Local<'s, v8::Function>,
     settle: v8::Local<'s, v8::Function>,

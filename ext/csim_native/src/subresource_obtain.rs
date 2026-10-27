@@ -1,11 +1,13 @@
 // The fetches the engine makes for a consumer of its own — the images a rendering update owes (rendered.rs), the
-// resources connecting an element fetches for no consumer (subresources.rs `timed_resources`) — in the order of Fetch
-// "fetch": the request planned (subresource_plan.rs), a preload of it taken first (preload_map.rs: no fetch then, and no
-// entry of its own), a same-origin request of another origin's URL a network error, else a controlling service worker's
-// answer, else the network's, and the Resource Timing entry of what answered filed. What reaches past the engine the
-// bindings do, through one host function `host(step, …)` (subresource-host.js): the clock, a pending preload's fetch, a
-// service worker's answer — at once, or as a `fetch` event's, later (`obtainResume`) — the network's and the filing of an
-// entry.
+// resources connecting an element fetches for no consumer (subresources.rs `timed_resources`), an `<embed>`'s or an
+// `<object>`'s resource, a face's `url()` source (font_files.rs) — in the order of Fetch "fetch": the request planned
+// (subresource_plan.rs), a preload of it taken first (preload_map.rs: no fetch then, and no entry of its own), a
+// same-origin request of another origin's URL a network error, else a controlling service worker's answer, else a
+// scheme's or the network's, and the Resource Timing entry of what answered filed. What reaches past the engine the
+// bindings do, through one host function `host(step, …)` (subresource-host.js, which lists its steps): the clock, the
+// realm's document, a pending preload's fetch, a service worker's answer — at once, or as a `fetch` event's, later
+// (`obtainResume`) — a `blob:` URL's bytes, the network's answer, a font file made of bytes or named by `local()`, and
+// the filing of an entry.
 
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
@@ -47,7 +49,8 @@ pub(crate) struct Request {
     started: f64,
 }
 impl Request {
-    // (…which the realm `cid`'s discarding, or its document's going, lets go of: it is answered by no one then)
+    // (…which the realm `cid`'s discarding, or its document's going, lets go of: it is answered by no one then — one of
+    // no document's only the realm's)
     pub(crate) fn of_realm(&self, cid: i32) -> bool {
         self.cid == cid
     }
@@ -97,15 +100,16 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
     obj.get(scope, k.into()).filter(|v| !v.is_undefined())
 }
 
-// "Consume a preloaded resource" for `request`: whether a preload answered it, its fetch run first where it was yet to —
-// none of a request of no document's (a worker's).
-fn preloaded(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<bool, Terminated> {
-    let Some(doc) = r.doc else { return Ok(false) };
+// "Consume a preloaded resource" for `request`: the response the preload of it had, None for a network error — its
+// fetch run first where it was yet to — or None where none answers it, as none does a request of no document's (a
+// worker's).
+fn preloaded(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<Option<Option<crate::preload_map::Response>>, Terminated> {
+    let Some(doc) = r.doc else { return Ok(None) };
     let run = |scope: &mut v8::PinScope<'_, '_>, token: u32| {
         let token = v8::Integer::new_from_unsigned(scope, token).into();
         call(scope, host, H_RUN_PRELOAD, &[token]).map(drop)
     };
-    Ok(crate::preload_map::consume(scope, r.cid, (doc, &r.url, destination(r.plan), r.plan), "", run)?.is_some())
+    crate::preload_map::consume(scope, r.cid, (doc, &r.url, destination(r.plan), r.plan), "", run)
 }
 
 // The request's `url`, `plan`, referrer and client, as the host's steps take a request.
@@ -187,7 +191,7 @@ fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_CSS_IMAGE, None, Some(doc), referrer.as_deref());
     let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, initiator, started };
-    if preloaded(scope, host, &r)? {
+    if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
     let args = request_args(scope, &r);
@@ -225,7 +229,7 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
     let plan = plan_in(arena, kind, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
     let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, initiator, started };
-    if preloaded(scope, host, &r)? {
+    if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
     if code & 15 == crate::subresources::SAME_ORIGIN_REFUSED {
@@ -358,15 +362,8 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_FONT, None, None, referrer);
     let doc = call(scope, host, H_DOCUMENT, &[])?.and_then(|d| v8::Local::new(scope, d).integer_value(scope)).and_then(NodeId::from_i64);
-    let run = |scope: &mut v8::PinScope<'_, '_>, token: u32| {
-        let token = v8::Integer::new_from_unsigned(scope, token).into();
-        call(scope, host, H_RUN_PRELOAD, &[token]).map(drop)
-    };
-    let preloaded = match doc {
-        Some(doc) => crate::preload_map::consume(scope, cid, (doc, url, "font", plan), "", run)?,
-        None => None,
-    };
-    if let Some(preloaded) = preloaded {
+    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), initiator: "css", started };
+    if let Some(preloaded) = preloaded(scope, host, &r)? {
         let Some(response) = preloaded else { return Ok(None) };
         let facts = response.facts();
         let body = response.into_body();
@@ -375,7 +372,6 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
         }
         return file_of_bytes(scope, host, body);
     }
-    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), initiator: "css", started };
     let args = request_args(scope, &r);
     if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
         let local = v8::Local::new(scope, &answer);
@@ -412,5 +408,9 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
 fn file_of_bytes(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, bytes: Vec<u8>) -> Result<Option<String>, Terminated> {
     let bytes = crate::blob_data::byte_array(scope, bytes);
     let path = call(scope, host, H_FONT_BYTES, &[bytes])?;
-    Ok(path.map(|p| v8::Local::new(scope, p)).filter(|p| p.is_string()).map(|p| p.to_rust_string_lossy(scope)))
+    Ok(text_of(scope, path))
+}
+// The text a host step answered, none where it answered no string.
+pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Global<v8::Value>>) -> Option<String> {
+    answer.map(|a| v8::Local::new(scope, a)).filter(|a| a.is_string()).map(|a| a.to_rust_string_lossy(scope))
 }

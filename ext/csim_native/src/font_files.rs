@@ -12,7 +12,7 @@ use crate::font_faces::FaceSource;
 #[derive(Default)]
 pub(crate) struct FontFiles(HashMap<(u32, String), Option<String>>);
 
-// A source's kind, by number, as its file is kept by.
+// A source's kind, by number: what its file is kept under, beside its key.
 pub(crate) const URL: u32 = 0;
 const LOCAL: u32 = 1;
 
@@ -45,7 +45,7 @@ fn source_file(
                 FaceSource::Local(name) => {
                     let (Some(v), Some(b)) = (v8::String::new(scope, name), v8::String::new(scope, bucket)) else { return Ok(None) };
                     let got = crate::subresource_obtain::call(scope, host, crate::subresource_obtain::H_LOCAL_FONT, &[v.into(), b.into()])?;
-                    got.map(|g| v8::Local::new(scope, g)).filter(|g| g.is_string()).map(|g| g.to_rust_string_lossy(scope))
+                    crate::subresource_obtain::text_of(scope, got)
                 }
             };
             realm(scope, cid).font_files.0.insert(key, got.clone());
