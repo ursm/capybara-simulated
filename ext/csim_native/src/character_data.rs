@@ -8,7 +8,6 @@
 // observations a change schedules, the cascade a `<style>`'s text refreshes.
 
 use crate::dom::{realm, realm_id, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_SUBTREE_MARKS, GEN_TREE};
-use crate::mutation_observers::OBSERVATIONS;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "replaceData", replace_data_op, context_id);
@@ -265,8 +264,8 @@ pub(crate) fn replace_data(
             let generations = &realm(scope, moved).generations;
             generations.bump(GEN_SETTLE);
             generations.bump(GEN_TREE);
+            crate::dom::dom(scope).arena.observers.note_observations(moved);
         }
-        crate::dom::dom(scope).arena.observers.note(OBSERVATIONS);
     }
     let arena = realm(scope, cid);
     // (…an `<?xml-stylesheet?>`'s data its pseudo-attributes: a new sheet, or none, which its document's cascade takes)

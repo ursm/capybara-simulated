@@ -259,8 +259,8 @@ impl RealmArena {
     // changes" unchecks the rest of its group): of the radios among `nodes` and their shadow-including descendants, each
     // checked one unchecks the checked others of its group, the last in tree order winning — each is visited in reverse
     // tree order, and one an earlier visit unchecked is passed by. One neither connected nor with a form owner has no
-    // group to uncheck. Whether a radio's checkedness changed.
-    pub(crate) fn radio_insertion_steps(&mut self, nodes: &[NodeId]) -> bool {
+    // group to uncheck. (Each unchecking a state write: `set_state` moves what it moves.)
+    pub(crate) fn radio_insertion_steps(&mut self, nodes: &[NodeId]) {
         let mut radios = Vec::new();
         for &root in nodes {
             let mut stack = vec![root];
@@ -277,33 +277,29 @@ impl RealmArena {
             self.note_radio(r);
         }
         // (…one neither connected nor with a form owner neither became connected nor changed owners: nothing to uncheck)
-        let mut changed = false;
         for &r in radios.iter().rev() {
             if self.is_connected(r) || self.form_owner(r).is_some() {
-                changed |= self.uncheck_group_mates(r);
+                self.uncheck_group_mates(r);
             }
         }
-        changed
     }
     // …and a radio button's steps as its `checked` (to a checkedness not dirty), `name`, `type` or `form` is written, or its
     // checkedness is (`setState`) — the same §4.10.5.1.15 phenomena: its checkedness set to true, its name or its form
-    // owner changed — in whatever tree it is: its group is its tree's. Whether a radio's checkedness changed.
-    pub(crate) fn radio_steps(&mut self, id: NodeId) -> bool {
+    // owner changed — in whatever tree it is: its group is its tree's.
+    pub(crate) fn radio_steps(&mut self, id: NodeId) {
         self.note_radio(id);
-        self.uncheck_group_mates(id)
+        self.uncheck_group_mates(id);
     }
-    // Where `id` is a checked radio button, the checked others of its group unchecked. Whether any was.
-    fn uncheck_group_mates(&mut self, id: NodeId) -> bool {
+    // Where `id` is a checked radio button, the checked others of its group unchecked.
+    fn uncheck_group_mates(&mut self, id: NodeId) {
         let radio = self.get(id).is_some_and(|n| n.is_html_named("input") && n.input_type() == "radio");
         if !radio || !self.is_checked(id) {
-            return false;
+            return;
         }
-        let mates = self.checked_group_mates(id);
-        for &other in &mates {
+        for other in self.checked_group_mates(id) {
             let Some(state) = self.get(other).map(|n| n.state) else { continue };
             self.set_state(other, (state | STATE_CHECKED_DIRTY) & !STATE_CHECKED);
         }
-        !mates.is_empty()
     }
     // `id`, where it is a checked radio button with a name, among the checked radios (`checked_radios`), under its name
     // and its form owner — called where one can become checked or change either: inserted, its state or an attribute it

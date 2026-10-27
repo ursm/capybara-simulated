@@ -67,6 +67,9 @@ pub(crate) struct Observers {
     // The realms whose cascade a change asks for — refreshed (a document's sheet owner), or its version moved (a shadow
     // tree's) — the realm whose tree it is, whichever realm's code made it (`takeCascadeChanges`).
     cascade: Vec<(i32, bool)>,
+    // …and the realms a change asked a rendering update's observations of — the one whose tree or element changed,
+    // whichever realm's code changed it: its own observers to hear of it (`takeObservations`).
+    observations: Vec<i32>,
 }
 
 const ANY_REGISTERED: usize = 0;
@@ -88,6 +91,13 @@ impl Observers {
         if let Some(flags) = &self.flags {
             flags[flag].set(1);
         }
+    }
+    // …a rendering update's observations asked of realm `cid` — the one whose tree or element changed.
+    pub(crate) fn note_observations(&mut self, cid: i32) {
+        if !self.observations.contains(&cid) {
+            self.observations.push(cid);
+        }
+        self.note(OBSERVATIONS);
     }
     // …the cascade of realm `cid` — the one whose tree changed — refreshed, or (`version`) its version moved.
     pub(crate) fn note_cascade(&mut self, cid: i32, version: bool) {
@@ -318,6 +328,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
     crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
     crate::dom::register(scope, ns, "moTakeCascade", take_cascade, context_id);
+    crate::dom::register(scope, ns, "moTakeObservations", take_observations, context_id);
     crate::dom::register(scope, ns, "noteParsed", note_parsed, context_id);
     crate::dom::register(scope, ns, "flushParsedMarks", flush_parsed_marks, context_id);
     crate::dom::register(scope, ns, "moQueue", queue, context_id);
@@ -546,6 +557,14 @@ fn flush_parsed_marks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         state.generations.bump(crate::dom::GEN_DIRTY);
     }
     rv.set_bool(!parents.is_empty());
+}
+
+// __dom.moTakeObservations() -> [realm, …]: the realms a change since asked a rendering update's observations of
+// (`note_observations`) — none any more.
+fn take_observations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let asked = std::mem::take(&mut crate::dom::dom(scope).arena.observers.observations);
+    let items: Vec<v8::Local<v8::Value>> = asked.iter().map(|&cid| v8::Number::new(scope, f64::from(cid)).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.moTakeCascade() -> [realm, version, …]: the realms whose cascade the changes since asked for (`note_cascade`) —

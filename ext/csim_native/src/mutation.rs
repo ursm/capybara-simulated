@@ -6,7 +6,6 @@
 // reactions, the connection walk — the bindings' to take as it returns.
 
 use crate::dom::{nid_arg, node_value, nodes_value, realm, realm_id, NodeId, NodeKind, RealmArena, GEN_DIRTY, GEN_NODES, GEN_SETTLE, GEN_STRUCTURE, GEN_SUBTREE_MARKS, GEN_TREE};
-use crate::mutation_observers::OBSERVATIONS;
 
 // DOM node types, as the page side names them.
 const ELEMENT: u32 = 1;
@@ -549,9 +548,9 @@ pub(crate) fn record_child_list(
         for which in [GEN_SETTLE, GEN_TREE, GEN_NODES, GEN_STRUCTURE] {
             generations.bump(which);
         }
+        crate::dom::dom(scope).arena.observers.note_observations(moved);
     }
     let dom = crate::dom::dom(scope);
-    dom.arena.observers.note(OBSERVATIONS);
     if renewals.is_some_and(|r| r != dom.arena.sheet_renewals) {
         dom.arena.observers.note_cascade(cid, in_shadow);
         if shadow_hosts {

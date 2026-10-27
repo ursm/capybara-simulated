@@ -1070,7 +1070,6 @@ fn option_pick(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
             arena.set_state(select, had | STATE_USER_INTERACTED);
         }
     }
-    arena.note_state_changed();
     picked_value(scope, cid, select, &changed, rv);
 }
 
@@ -1121,7 +1120,6 @@ fn arrow_default(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         if let Some(had) = arena.get(control).map(|n| n.state).filter(|s| s & STATE_USER_INTERACTED == 0) {
             arena.set_state(control, had | STATE_USER_INTERACTED);
         }
-        arena.note_state_changed();
         (control, changed)
     } else {
         return;
