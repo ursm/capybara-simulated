@@ -6,7 +6,7 @@
 // (subresource_obtain.rs `run_preload`). Kept in the arena (`RealmArena::preloads`) until it is consumed, or its document
 // goes or loads anew (`forget_preloads`).
 
-use crate::dom::{NodeId, RealmArena};
+use crate::dom::{member, NodeId, RealmArena};
 use crate::subresource_plan::PLAN_REQUEST;
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -151,22 +151,8 @@ fn integrity_matches(consumer: &str, preload: &str) -> bool {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "preloadConsume", consume_op, context_id);
+    crate::dom::register(scope, ns, "fetchPreload", fetch_preload_op, context_id);
     crate::dom::register(scope, ns, "preloadsForget", forget_op, context_id);
-}
-
-// The key of args `[doc, url, destination, plan]`.
-fn key_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<Key> {
-    let doc = crate::dom::nid_arg(scope, args, 0)?;
-    let url = args.get(1).to_rust_string_lossy(scope);
-    let destination = args.get(2).to_rust_string_lossy(scope);
-    let request = args.get(3).uint32_value(scope).unwrap_or(0) & PLAN_REQUEST;
-    Some(Key { doc, url, destination, request })
-}
-
-fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, key: &str) -> Option<v8::Local<'s, v8::Value>> {
-    let k = v8::String::new(scope, key)?;
-    obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
 
 // The response a preload had as the host, a service worker or the asset cache gave it, `resp` — its `status`,
@@ -240,16 +226,26 @@ fn forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     arena.link_preloads.retain(|_, plan| plan.doc() != doc);
 }
 
-// __dom.preloadConsume(doc, url, destination, plan, integrity, host) -> what "consume a preloaded resource" takes for a
-// consumer's request of `integrity` (`consume`): the response the preload had — `{status, statusText, type, url,
-// redirected, tainted, headers, body_bytes}` — null for a network error, undefined where no preload matches; one whose
-// fetch was yet to run run first, through the bindings' `host` (subresource-host.js).
-fn consume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(key) = key_arg(scope, &args) else { return };
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return };
-    let integrity = args.get(4).to_rust_string_lossy(scope);
+// __dom.fetchPreload(url, method, mode, credentials, destination, integrity, authored, host) -> what a `fetch()`'s or an
+// XHR's request takes first (Fetch "fetch": "consume a preloaded resource"): the preload of it the calling realm's
+// document has — a window's, for a GET that is no navigation and has no header of its author's (`authored`: none an XHR's
+// `open()` credentials gave it either) — as `preloadConsume` answers; undefined for a request that takes none.
+fn fetch_preload_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
+    let [url, method, mode, credentials, destination, integrity] = [0, 1, 2, 3, 4, 5].map(|i| args.get(i).to_rust_string_lossy(scope));
+    if method != "GET" || mode == "navigate" || args.get(6).is_true() {
+        return;
+    }
     let cid = crate::dom::realm_id(scope, &args);
-    let r = match consume(scope, cid, (key.doc, &key.url, &key.destination, key.request), &integrity, host) {
+    let Some(doc) = crate::dom::realm(scope, cid).realm_document(cid) else { return };
+    let plan = crate::subresource_plan::request_bits(&mode, &credentials);
+    let consumed = consume(scope, cid, (doc, &url, &destination, plan), &integrity, host);
+    set_consumed(scope, &mut rv, consumed);
+}
+// …its answer: the response — `{status, statusText, type, url, redirected, tainted, headers, body_bytes}` — null for a
+// network error, undefined for none.
+fn set_consumed(scope: &mut v8::PinScope<'_, '_>, rv: &mut v8::ReturnValue<'_, v8::Value>, consumed: Result<Option<Option<Response>>, crate::font_files::Terminated>) {
+    let r = match consumed {
         Ok(None) | Err(_) => return,
         Ok(Some(None)) => return rv.set_null(),
         Ok(Some(Some(r))) => r,

@@ -69,7 +69,7 @@ pub(crate) fn plan(kind: u32, crossorigin: Option<&str>, worker: bool, attr: &st
     request_bits(mode, credentials) | policy << 4 | if opaque { OPAQUE } else { 0 }
 }
 // …its request fields alone (`PLAN_REQUEST`'s): its mode's and its credentials mode's.
-fn request_bits(mode: &str, credentials: &str) -> u32 {
+pub(crate) fn request_bits(mode: &str, credentials: &str) -> u32 {
     let index = |table: &[&str], v: &str| table.iter().position(|t| *t == v).unwrap_or(0) as u32;
     index(&MODES, mode) | index(&CREDENTIALS, credentials) << 2
 }
@@ -93,7 +93,6 @@ pub(crate) fn fields_for_ruby(plan: u32) -> (String, String, String, bool, Strin
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "subresourcePlan", plan_op, context_id);
     crate::dom::register(scope, ns, "subresourcePlanFields", fields_op, context_id);
-    crate::dom::register(scope, ns, "requestPlanOf", request_plan_op, context_id);
     crate::dom::register(scope, ns, "requestReferrerPolicy", request_referrer_policy_op, context_id);
 }
 // __dom.requestReferrerPolicy(plan) -> the referrer policy a request of `plan` (0: a request's defaults, which name none)
@@ -117,12 +116,6 @@ fn fields_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let items: Vec<v8::Local<v8::Value>> =
         [mode, credentials, policy, destination(plan)].iter().filter_map(|t| v8::String::new(scope, t)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.requestPlanOf(mode, credentials) -> the plan of a request of `mode` and `credentials` mode alone — a `fetch()`'s,
-// whose fields its Request holds — no referrer policy of its own (`PLAN_REQUEST`'s fields: what a preload key holds).
-fn request_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let [mode, credentials] = [0, 1].map(|i| args.get(i).to_rust_string_lossy(scope));
-    rv.set_uint32(request_bits(&mode, &credentials));
 }
 // __dom.subresourcePlan(kind, nid, doc[, sheet]) -> `plan` of the request a `kind` consumer makes for the element `nid`
 // (none for one no element makes) in the document `doc`, from the calling realm, whose origin is its client's — one a
