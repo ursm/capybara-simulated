@@ -80,6 +80,13 @@ RSpec.describe 'innerText line breaks' do
     expect(inner_text('x<span style="display:contents"><div>c</div></span>y')).to           eq("x\nc\ny")
   end
 
+  # …but a table shown inline keeps its rows' separators inside it: it is no line of its own (Chrome = Firefox).
+  it 'keeps the breaks of a table shown inline inside it' do
+    expect(inner_text('abc<table style="display:inline-table"><tr><td>x</td><td>y</td></tr></table>def')).to eq("abcx\tydef")
+    expect(inner_text('abc<table style="display:inline-table"><tr><td>x</td></tr><tr><td>z</td></tr></table>def')).to eq("abcx\nzdef")
+    expect(inner_text('<table style="display:inline"><tr><td>a</td></tr></table>b')).to eq('ab')
+  end
+
   # A `<p>` asks for TWO — a blank line either side — and keeps asking however it is displayed.
   it 'gives a paragraph a blank line either side' do
     expect(inner_text('123<p style="display:block">abc')).to        eq("123\n\nabc")

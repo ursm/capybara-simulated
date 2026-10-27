@@ -560,9 +560,11 @@ impl Walk<'_> {
             }
         }
         self.last_collapsible_only = collapsible_only;
-        // (…a trailing required break is NOT written: this element's block-ness is the PARENT's business)
-        self.last_leading = leading;
-        self.last_owed = pending;
+        // (…a trailing required break is NOT written: this element's block-ness is the PARENT's business — but a table
+        // shown inline keeps its rows' separators inside it, no line of its own:
+        // `abc<table style="display:inline-table"><tr><td>x</td></tr></table>def` reads "abcxdef", Chrome = Firefox)
+        let inline_table = node.kind == NodeKind::Element && tag(node) == "table" && !block_display(arena, id);
+        (self.last_leading, self.last_owed) = if inline_table { (0, 0) } else { (leading, pending) };
         out
     }
 
