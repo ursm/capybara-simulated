@@ -2,8 +2,9 @@
 // preload key — its URL, destination, mode and credentials mode — for the first fetch that matches it to take ("consume
 // a preloaded resource", which Fetch's "fetch" runs before its main fetch: the consumer's request then reaches no
 // service worker and no network, and files no Resource Timing entry). An entry is in the map from the moment the
-// preload's fetch is planned, its response pending until that fetch has run — which a consumer that finds it runs then.
-// Kept in the arena (`RealmArena::preloads`) until it is consumed or its document goes.
+// preload's fetch is planned, its response pending until that fetch has run — which a consumer that finds it runs then
+// (subresource_obtain.rs `run_preload`). Kept in the arena (`RealmArena::preloads`) until it is consumed, or its document
+// goes or loads anew (`forget_preloads`).
 
 use crate::dom::{NodeId, RealmArena};
 use crate::subresource_plan::PLAN_REQUEST;
@@ -21,10 +22,10 @@ pub(crate) struct Preloaded {
     response: Had,
 }
 
-// What a preload had: its fetch yet to run — the bindings' to run, by the token they named it with, when a consumer
-// wants its response first — or its response, None for a network error, which a consumer takes as its own.
+// What a preload had: its fetch yet to run — the request its link made, which a consumer that wants its response first
+// runs — or its response, None for a network error, which a consumer takes as its own.
 enum Had {
-    Pending(u32),
+    Pending(Box<crate::subresource_obtain::Request>),
     Response(Option<Response>),
 }
 
@@ -41,6 +42,9 @@ pub(crate) struct Response {
 }
 
 impl Key {
+    pub(crate) fn new(doc: NodeId, url: &str, destination: &str, plan: u32) -> Key {
+        Key { doc, url: url.to_owned(), destination: destination.to_owned(), request: plan & PLAN_REQUEST }
+    }
     pub(crate) fn doc(&self) -> NodeId {
         self.doc
     }
@@ -62,43 +66,61 @@ impl Response {
 }
 
 impl RealmArena {
-    // The preload's entry committed to its document's map, one of the same key replaced.
-    fn preload_commit(&mut self, key: Key, entry: Preloaded) {
-        self.preloads.insert(key, entry);
+    // A preload's entry put in its document's map as its fetch is planned, its response pending — the request its link
+    // made (HTML `preload`: the entry is in the map from the start, a consumer that comes meanwhile waiting for its
+    // response) — one of the same key replaced.
+    pub(crate) fn preload_begin(&mut self, key: Key, integrity: String, request: crate::subresource_obtain::Request) {
+        self.preloads.insert(key, Preloaded { integrity, response: Had::Pending(Box::new(request)) });
+    }
+    // …its response committed, None for a network error.
+    pub(crate) fn preload_commit(&mut self, key: Key, integrity: String, response: Option<Response>) {
+        self.preloads.insert(key, Preloaded { integrity, response: Had::Response(response) });
+    }
+    // …the pending entry of `key` taken out of the map, where it is the one `is_it` names: its request, to run or to
+    // let go of (its link planned another before it ran).
+    pub(crate) fn preload_take_pending(&mut self, key: &Key, is_it: impl FnOnce(&crate::subresource_obtain::Request) -> bool) -> Option<crate::subresource_obtain::Request> {
+        if !self.preloads.get(key).is_some_and(|entry| matches!(&entry.response, Had::Pending(r) if is_it(r))) {
+            return None;
+        }
+        match self.preloads.remove(key).map(|entry| entry.response) {
+            Some(Had::Pending(r)) => Some(*r),
+            _ => None,
+        }
+    }
+    // …and every entry of `doc`'s, as it loads anew (an in-place reload keeps its node): a new document's map is empty.
+    pub(crate) fn forget_preloads(&mut self, doc: NodeId) {
+        self.preloads.retain(|key, _| key.doc != doc);
     }
     // "Consume a preloaded resource": the entry of `key` taken out of the map — its response, None for a network
-    // error — or, its fetch yet to run, left in it; None where there is none, or where `integrity` names metadata other
-    // than the preload's.
+    // error, or its fetch yet to run — None where there is none, or where `integrity` names metadata other than the
+    // preload's.
     fn preload_consume(&mut self, key: &Key, integrity: &str) -> Option<Had> {
         let entry = self.preloads.get(key)?;
         if !integrity_matches(integrity, &entry.integrity) {
             return None;
         }
-        if let Had::Pending(token) = entry.response {
-            return Some(Had::Pending(token));
-        }
         self.preloads.remove(key).map(|entry| entry.response)
     }
 }
 
-// …for a consumer the engine fetches for itself (subresource_obtain.rs), the request `url` of `doc` its `destination`
-// and its `plan`'s mode and credentials mode: the response, None for a network error — a preload whose fetch is yet to
-// run running it first (`run`, the bindings' by its token), the response the consumer waits for — or None where none
-// matches.
+// "Consume a preloaded resource" for a request of `doc` — `url`, its `destination`, its `plan`'s mode and credentials
+// mode — of `integrity` metadata: the response, None for a network error — a preload whose fetch is yet to run running
+// it first (subresource_obtain.rs `run_preload`, through the bindings' `host`), the response the consumer waits for — or
+// None where none matches.
 pub(crate) fn consume(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
     (doc, url, destination, plan): (NodeId, &str, &str, u32),
     integrity: &str,
-    run: impl FnOnce(&mut v8::PinScope<'_, '_>, u32) -> Result<(), crate::font_files::Terminated>,
+    host: v8::Local<'_, v8::Function>,
 ) -> Result<Option<Option<Response>>, crate::font_files::Terminated> {
-    let key = Key { doc, url: url.to_owned(), destination: destination.to_owned(), request: plan & PLAN_REQUEST };
-    let token = match crate::dom::realm(scope, cid).preload_consume(&key, integrity) {
+    let key = Key::new(doc, url, destination, plan);
+    let pending = match crate::dom::realm(scope, cid).preload_consume(&key, integrity) {
         None => return Ok(None),
         Some(Had::Response(r)) => return Ok(Some(r)),
-        Some(Had::Pending(token)) => token,
+        Some(Had::Pending(r)) => r,
     };
-    run(scope, token)?;
+    crate::subresource_obtain::run_preload(scope, host, *pending)?;
     Ok(match crate::dom::realm(scope, cid).preload_consume(&key, integrity) {
         Some(Had::Response(r)) => Some(r),
         _ => None,
@@ -125,10 +147,8 @@ fn integrity_matches(consumer: &str, preload: &str) -> bool {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "preloadBegin", begin_op, context_id);
-    crate::dom::register(scope, ns, "preloadCommit", commit_op, context_id);
-    crate::dom::register(scope, ns, "preloadWithdraw", withdraw_op, context_id);
     crate::dom::register(scope, ns, "preloadConsume", consume_op, context_id);
+    crate::dom::register(scope, ns, "preloadsForget", forget_op, context_id);
 }
 
 // The key of args `[doc, url, destination, plan]`.
@@ -145,35 +165,11 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
 
-// __dom.preloadBegin(doc, url, destination, plan, integrity, token): a preload's entry put in `doc`'s map as its fetch is
-// planned, its response pending — the fetch the bindings name `token` (HTML `preload`: the entry is in the map from
-// the start, a consumer that comes meanwhile waiting for its response).
-fn begin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(key) = key_arg(scope, &args) else { return };
-    let integrity = args.get(4).to_rust_string_lossy(scope);
-    let token = args.get(5).uint32_value(scope).unwrap_or(0);
-    crate::dom::dom(scope).arena.preload_commit(key, Preloaded { integrity, response: Had::Pending(token) });
-}
-
-// __dom.preloadWithdraw(doc, url, destination, plan, token): the pending entry of the fetch the bindings named `token`
-// taken out of `doc`'s map — its link planned another before it ran (its `crossorigin` set as it was inserted).
-fn withdraw_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(key) = key_arg(scope, &args) else { return };
-    let token = args.get(4).uint32_value(scope).unwrap_or(0);
-    let preloads = &mut crate::dom::dom(scope).arena.preloads;
-    if preloads.get(&key).is_some_and(|entry| matches!(entry.response, Had::Pending(t) if t == token)) {
-        preloads.remove(&key);
-    }
-}
-
-// __dom.preloadCommit(doc, url, destination, plan, integrity, resp): a preload's entry committed to `doc`'s map — the
-// response it had, `resp` (its `status`, `statusText`, `type`, `url`, `redirected`, `tainted`, `headers` and its body's bytes — a
-// service worker's answer's `bytes`, the network's `body_bytes`, else its text `body`), a network error where it is none
-// or `blocked`.
-fn commit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(key) = key_arg(scope, &args) else { return };
-    let integrity = args.get(4).to_rust_string_lossy(scope);
-    let response = v8::Local::<v8::Object>::try_from(args.get(5)).ok().and_then(|resp| {
+// The response a preload had as the host, a service worker or the asset cache gave it, `resp` — its `status`,
+// `statusText`, `type`, `url`, `redirected`, `tainted`, `headers` and its body's bytes (a service worker's answer's
+// `bytes`, the network's `body_bytes`, else its text `body`) — none for a network error: none, or `blocked`.
+pub(crate) fn response_of(scope: &mut v8::PinScope<'_, '_>, resp: Option<v8::Local<'_, v8::Object>>) -> Option<Response> {
+    resp.and_then(|resp| {
         if member(scope, resp, "blocked").is_some_and(|v| v.boolean_value(scope)) {
             return None;
         }
@@ -204,22 +200,48 @@ fn commit_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
             headers,
             body,
         })
-    });
-    crate::dom::dom(scope).arena.preload_commit(key, Preloaded { integrity, response: Had::Response(response) });
+    })
+}
+impl Response {
+    // …one of a body alone, its facts none kept: an asset's cached before they were.
+    pub(crate) fn of_body(body: Vec<u8>) -> Response {
+        Response { status: 200, status_text: String::new(), kind: "basic".to_owned(), url: String::new(), redirected: false, tainted: false, headers: Vec::new(), body }
+    }
+    // …its body replaced: an asset's, whose facts the cache keeps beside it.
+    pub(crate) fn with_body(self, body: Vec<u8>) -> Response {
+        Response { body, ..self }
+    }
+    // (…its body's bytes, and whether it is opaque: what its integrity is checked against)
+    pub(crate) fn body(&self) -> &[u8] {
+        &self.body
+    }
+    pub(crate) fn opaque(&self) -> bool {
+        self.kind == "opaque"
+    }
 }
 
-// __dom.preloadConsume(doc, url, destination, plan, integrity) -> what "consume a preloaded resource" takes for a
-// consumer's request of `integrity`: the response the preload had — `{status, statusText, type, url, redirected, tainted,
-// headers, body_bytes}` — null for a network error, undefined where no preload matches; the token of its fetch where that is yet
-// to run (`preloadBegin`), its entry left for the consumer to take once it has.
+// __dom.preloadsForget(doc): every entry of `doc`'s map let go of, as it loads anew (`forget_preloads`), and its links'
+// plans of them (subresource_obtain.rs).
+fn forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.forget_preloads(doc);
+    arena.link_preloads.retain(|_, plan| plan.doc() != doc);
+}
+
+// __dom.preloadConsume(doc, url, destination, plan, integrity, host) -> what "consume a preloaded resource" takes for a
+// consumer's request of `integrity` (`consume`): the response the preload had — `{status, statusText, type, url,
+// redirected, tainted, headers, body_bytes}` — null for a network error, undefined where no preload matches; one whose
+// fetch was yet to run run first, through the bindings' `host` (subresource-host.js).
 fn consume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(key) = key_arg(scope, &args) else { return };
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return };
     let integrity = args.get(4).to_rust_string_lossy(scope);
-    let r = match crate::dom::dom(scope).arena.preload_consume(&key, &integrity) {
-        None => return,
-        Some(Had::Pending(token)) => return rv.set_uint32(token),
-        Some(Had::Response(None)) => return rv.set_null(),
-        Some(Had::Response(Some(r))) => r,
+    let cid = crate::dom::realm_id(scope, &args);
+    let r = match consume(scope, cid, (key.doc, &key.url, &key.destination, key.request), &integrity, host) {
+        Ok(None) | Err(_) => return,
+        Ok(Some(None)) => return rv.set_null(),
+        Ok(Some(Some(r))) => r,
     };
     let obj = v8::Object::new(scope);
     let headers = v8::Object::new(scope);

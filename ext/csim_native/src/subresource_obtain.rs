@@ -15,7 +15,6 @@ use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_EMBED
 
 // The host's steps (subresource-host.js `H_*`).
 const H_NOW: u32 = 0;
-const H_RUN_PRELOAD: u32 = 1;
 const H_SW_ANSWER: u32 = 2;
 const H_SW_DISPATCH: u32 = 3;
 const H_NETWORK: u32 = 4;
@@ -47,6 +46,7 @@ const PLUGIN_FALLBACK_CHANGED: u32 = 4;
 // made as (its client: its element's node document's) and the sheet that refers it — with its entry's initiator type and
 // its start time; kept while a service worker's `fetch` event is to answer it (`RealmArena::obtains`), by the realm
 // that made it (`cid`).
+#[derive(Clone)]
 pub(crate) struct Request {
     cid: i32,
     kind: u32,
@@ -58,6 +58,8 @@ pub(crate) struct Request {
     referrer: Option<String>,
     // (…its `integrity` metadata, as it was made: a link's)
     integrity: String,
+    // (…a preload's, its destination and its link's plan of it: `LinkPreload::id`, 0 for one of no plan)
+    preload: Option<(&'static str, u32)>,
     initiator: &'static str,
     started: f64,
 }
@@ -78,6 +80,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "obtainResume", resume_op, context_id);
     register(scope, ns, "processPlugin", process_plugin_op, context_id);
     register(scope, ns, "linkObtain", link_obtain_op, context_id);
+    register(scope, ns, "linkPreloadPlan", link_preload_plan_op, context_id);
+    register(scope, ns, "linkPreloadId", link_preload_id_op, context_id);
+    register(scope, ns, "linkPreloadRun", link_preload_run_op, context_id);
 }
 
 // `host(step, …args)` on the page side: what it answers, none for null or undefined, or where it throws — Terminated
@@ -119,11 +124,7 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
 // worker's).
 fn preloaded(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<Option<Option<crate::preload_map::Response>>, Terminated> {
     let Some(doc) = r.doc else { return Ok(None) };
-    let run = |scope: &mut v8::PinScope<'_, '_>, token: u32| {
-        let token = v8::Integer::new_from_unsigned(scope, token).into();
-        call(scope, host, H_RUN_PRELOAD, &[token]).map(drop)
-    };
-    crate::preload_map::consume(scope, r.cid, (doc, &r.url, destination(r.plan), r.plan), "", run)
+    crate::preload_map::consume(scope, r.cid, (doc, &r.url, destination(r.plan), r.plan), "", host)
 }
 
 // The request's `url`, `plan`, referrer and client, as the host's steps take a request.
@@ -204,7 +205,7 @@ fn fetch_css_images_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host: v8::Local<'_, v8::Function>, initiator: &'static str, url: String, referrer: Option<String>) -> Result<(), Terminated> {
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_CSS_IMAGE, None, Some(doc), referrer.as_deref());
-    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, integrity: String::new(), initiator, started };
+    let r = Request { cid, kind: J_CSS_IMAGE, url, el: None, doc: Some(doc), plan, client: None, referrer, integrity: String::new(), preload: None, initiator, started };
     if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
@@ -242,7 +243,7 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
     let arena = realm(scope, cid);
     let plan = plan_in(arena, kind, Some(el), Some(doc), None);
     let client = arena.get(el).map(|n| n.realm);
-    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), initiator, started };
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, initiator, started };
     if preloaded(scope, host, &r)?.is_some() {
         return Ok(());
     }
@@ -336,7 +337,7 @@ fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: N
                 let arena = realm(scope, cid);
                 let plan = plan_in(arena, kind, Some(el), Some(doc), None);
                 let client = arena.get(el).map(|n| n.realm);
-                let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), initiator: dest, started };
+                let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, initiator: dest, started };
                 let resp = from_network(scope, host, &r)?.map(|resp| v8::Local::new(scope, resp));
                 let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
                 if dest == "object" {
@@ -389,7 +390,7 @@ pub(crate) fn font_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, url: &str, r
     let started = now(scope, host)?;
     let plan = plan_in(realm(scope, cid), J_FONT, None, None, referrer);
     let doc = call(scope, host, H_DOCUMENT, &[])?.and_then(|d| v8::Local::new(scope, d).integer_value(scope)).and_then(NodeId::from_i64);
-    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), initiator: "css", started };
+    let r = Request { cid, kind: J_FONT, url: url.to_owned(), el: None, doc, plan, client: None, referrer: referrer.map(str::to_owned), integrity: String::new(), preload: None, initiator: "css", started };
     if let Some(preloaded) = preloaded(scope, host, &r)? {
         let Some(response) = preloaded else { return Ok(None) };
         let facts = response.facts();
@@ -460,7 +461,7 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_uint32(LINK_LEGACY);
     let kind = args.get(3).uint32_value(scope).unwrap_or(0);
     let obtains = kind >> 8;
-    if obtains & (OBTAINS_STYLESHEET | OBTAINS_PRELOAD) != 0 {
+    if obtains & OBTAINS_STYLESHEET != 0 {
         return;
     }
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
@@ -472,8 +473,13 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let cid = realm_id(scope, &args);
     let Ok(started) = now(scope, host) else { return };
     let client = realm(scope, cid).get(el).map(|n| n.realm);
-    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, initiator: "link", started };
-    let done = if obtains & OBTAINS_MODULEPRELOAD != 0 {
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, preload: None, initiator: "link", started };
+    let done = if obtains & OBTAINS_PRELOAD != 0 {
+        // (…a preload of no plan — its URL none the network answers — run as it is obtained, and committed)
+        let destination = crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("");
+        let r = Request { preload: Some((destination, 0)), ..r };
+        run_preload(scope, host, r).map(u32::from)
+    } else if obtains & OBTAINS_MODULEPRELOAD != 0 {
         modulepreload(scope, host, &r, &module_destination).map(u32::from)
     } else if obtains & OBTAINS_PREFETCH != 0 {
         match dispatch(scope, host, r) {
@@ -490,9 +496,9 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 }
 
 // The verdict on what answered a link's request (`judge`), from `source` — `bytes` its body's (none asked for where the
-// request has no integrity), `module_destination` a modulepreload's.
+// request has no integrity), `destinations` a modulepreload's and a preload's.
 #[allow(clippy::too_many_arguments)]
-fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, module_destination: &str) -> bool {
+fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, (module_destination, preload_destination): (&str, &str)) -> bool {
     use crate::subresource_judge::{judge, Consumer, V_OK};
     let body = if r.integrity.is_empty() {
         Vec::new()
@@ -504,7 +510,7 @@ fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::su
         }
     };
     let quirks = realm(scope, r.cid).document_mode(r.doc).0;
-    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination, preload_destination: "", integrity: &r.integrity, body: &body, mode, quirks };
+    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination, preload_destination, integrity: &r.integrity, body: &body, mode, quirks };
     judge(&consumer, source, facts) & V_OK != 0
 }
 
@@ -516,7 +522,7 @@ fn link_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::F
     let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
     let facts = facts_of(scope, resp, r.kind & 0xff, SRC_NETWORK);
     let bytes = resp.and_then(|resp| member(scope, resp, "body_bytes"));
-    let ok = link_verdict(scope, r, &facts, SRC_NETWORK, bytes, "no-cors", module_destination);
+    let ok = link_verdict(scope, r, &facts, SRC_NETWORK, bytes, "no-cors", (module_destination, ""));
     file(scope, host, r, Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))))?;
     Ok(ok)
 }
@@ -535,7 +541,7 @@ fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Funct
         let body = obj.and_then(|a| member(scope, a, "body_bytes").or_else(|| member(scope, a, "body")));
         let no_body = if obj.and_then(|a| member(scope, a, "body")).is_none() { S_NO_BODY } else { 0 };
         let facts = facts_of(scope, obj, r.kind & 0xff, SRC_SW_SYNC);
-        let ok = link_verdict(scope, r, &facts, SRC_SW_SYNC | no_body, body, "no-cors", module_destination);
+        let ok = link_verdict(scope, r, &facts, SRC_SW_SYNC | no_body, body, "no-cors", (module_destination, ""));
         file(scope, host, r, Answered::Worker(answer))?;
         return Ok(ok);
     }
@@ -555,7 +561,7 @@ fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Funct
     let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
     let facts = facts_of(scope, meta, r.kind & 0xff, SRC_ASSET);
     let no_body = if body.is_none() { S_NO_BODY } else { 0 };
-    let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", module_destination);
+    let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", (module_destination, ""));
     file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))))?;
     Ok(ok)
 }
@@ -578,7 +584,7 @@ fn prefetch_verdict(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Fu
     let mut facts = facts_of(scope, Some(answer), r.kind & 0xff, SRC_SW_EVENT);
     facts.redirected = redirected;
     let bytes = member(scope, answer, "bytes");
-    let ok = link_verdict(scope, r, &facts, SRC_SW_EVENT, bytes, fields(r.plan).0, "");
+    let ok = link_verdict(scope, r, &facts, SRC_SW_EVENT, bytes, fields(r.plan).0, ("", ""));
     let answered = if ok {
         answer
     } else {
@@ -588,5 +594,180 @@ fn prefetch_verdict(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Fu
         refused
     };
     file(scope, host, r, Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(answered))))?;
+    Ok(ok)
+}
+
+// A `<link rel=preload>`'s plan of its fetch (HTML `preload`): its preload key — its document, URL, destination and
+// request — the request it made, a number of its own, whether its fetch ran and what it came to, whether its load task
+// ran, and whether the parser planned it as it inserted the link (`early`). Kept by the link (`RealmArena::link_preloads`)
+// until it plans another, its document loads anew (`preloadsForget`) or it goes.
+pub(crate) struct LinkPreload {
+    key: crate::preload_map::Key,
+    request: Request,
+    id: u32,
+    got: Option<bool>,
+    loaded: bool,
+    early: bool,
+}
+impl LinkPreload {
+    pub(crate) fn doc(&self) -> NodeId {
+        self.key.doc()
+    }
+}
+
+// The `as` of a link, for the destination of a preload of it.
+fn preload_as(scope: &mut v8::PinScope<'_, '_>, el: NodeId, cid: i32) -> String {
+    realm(scope, cid).get(el).and_then(|n| n.plain_attr("as")).unwrap_or("").to_owned()
+}
+
+// __dom.linkPreloadPlan(el, doc, url, kind, plan, integrity, early, host) -> the number of the plan the
+// `<link rel=preload>` `el` (of document `doc`) has of its fetch of `url` — its request's `plan` and `integrity` as its
+// fetch begins, its destination its `as`'s — made now where it has none of this key, or its load task ran: the entry
+// put in its document's map, pending (preload_map.rs), which a consumer that comes first runs. A later plan of another
+// key withdraws the one before it, which no consumer took — but the parser's (`early`) had begun, and runs (Chrome:
+// its first `href`'s fetched too).
+fn link_preload_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
+    let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
+    let url = args.get(2).to_rust_string_lossy(scope);
+    let kind = args.get(3).uint32_value(scope).unwrap_or(0);
+    let plan = args.get(4).uint32_value(scope).unwrap_or(0);
+    let integrity = args.get(5).to_rust_string_lossy(scope);
+    let early = args.get(6).is_true();
+    let cid = realm_id(scope, &args);
+    let Some(destination) = crate::script::preload_destination(&preload_as(scope, el, cid)) else { return };
+    let key = crate::preload_map::Key::new(doc, &url, destination, plan);
+    let before = realm(scope, cid).link_preloads.get(&el).map(|p| (p.key == key && !p.loaded, p.id, p.got.is_none(), p.early, p.key.clone()));
+    if let Some((same, id, unrun, was_early, before_key)) = before {
+        if same {
+            return rv.set_uint32(id);
+        }
+        if unrun {
+            let pending = realm(scope, cid).preload_take_pending(&before_key, |r| r.preload.is_some_and(|(_, i)| i == id));
+            if was_early {
+                let request = match pending {
+                    Some(r) => r,
+                    None => realm(scope, cid).link_preloads[&el].request.clone(),
+                };
+                if run_preload(scope, host, request).is_err() {
+                    return;
+                }
+            }
+        }
+    }
+    let Ok(started) = now(scope, host) else { return };
+    let arena = realm(scope, cid);
+    arena.obtain_tokens += 1;
+    let id = arena.obtain_tokens;
+    let client = arena.get(el).map(|n| n.realm);
+    let request = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: integrity.clone(), preload: Some((destination, id)), initiator: "link", started };
+    arena.preload_begin(key.clone(), integrity, request.clone());
+    arena.link_preloads.insert(el, LinkPreload { key, request, id, got: None, loaded: false, early });
+    rv.set_uint32(id);
+}
+
+// __dom.linkPreloadId(el) -> the number of the link's latest plan of a preload, undefined for none: a load task of an
+// earlier one fires nothing.
+fn link_preload_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(p) = realm(scope, cid).link_preloads.get(&el) {
+        rv.set_uint32(p.id);
+    }
+}
+
+// __dom.linkPreloadRun(el, host) -> what the link's planned preload came to (`LINK_LOAD` / `LINK_ERROR`) as its load task
+// runs: its fetch run now where no consumer ran it first — once, the plan's — or `LINK_LEGACY` where it planned none.
+fn link_preload_run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(LINK_LEGACY);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
+    let Some(el) = crate::dom::nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let Some(p) = realm(scope, cid).link_preloads.get_mut(&el) else { return };
+    p.loaded = true;
+    let (got, id, key) = (p.got, p.id, p.key.clone());
+    let ok = match got {
+        Some(ok) => ok,
+        None => {
+            let pending = realm(scope, cid).preload_take_pending(&key, |r| r.preload.is_some_and(|(_, i)| i == id));
+            let request = match pending {
+                Some(r) => r,
+                None => realm(scope, cid).link_preloads[&el].request.clone(),
+            };
+            let Ok(ok) = run_preload(scope, host, request) else { return };
+            ok
+        }
+    };
+    rv.set_uint32(if ok { LINK_LOAD } else { LINK_ERROR });
+}
+
+// A preload's fetch run (`linkPreloadRun`, or a consumer that came first: preload_map.rs `consume`): a controlling
+// service worker's answer (any destination's: Handle Fetch), else — a style sheet's or a classic script's, which their
+// consumers fetch through the asset cache — the asset cache's, else the network's; its verdict for the link
+// (`link_verdict`: its `nosniff`, its integrity), its entry filed, and the response committed to its document's map —
+// a network error's included, as one that fails its integrity is (Fetch "main fetch") — for the first fetch that
+// matches it. Its link's plan, where it is still the one, learns what it came to.
+pub(crate) fn run_preload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: Request) -> Result<bool, Terminated> {
+    use crate::subresource_judge::{facts_of, SRC_ASSET, SRC_NETWORK, SRC_SW_SYNC, S_NO_BODY};
+    let (destination, id) = r.preload.unwrap_or(("", 0));
+    let kind = r.kind & 0xff;
+    let mut args = request_args(scope, &r).to_vec();
+    let (binary, integrity) = (v8::Boolean::new(scope, true).into(), text(scope, &r.integrity));
+    args.extend([binary, integrity]);
+    let (ok, answered, response) = if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
+        let local = v8::Local::new(scope, &answer);
+        let obj = v8::Local::<v8::Object>::try_from(local).ok();
+        let bytes = obj.and_then(|a| member(scope, a, "bytes"));
+        let no_body = if bytes.is_none() { S_NO_BODY } else { 0 };
+        let facts = facts_of(scope, obj, kind, SRC_SW_SYNC);
+        let ok = link_verdict(scope, &r, &facts, SRC_SW_SYNC | no_body, bytes, "no-cors", ("", destination));
+        let response = crate::preload_map::response_of(scope, obj);
+        (ok, Answered::Worker(answer), response)
+    } else if matches!(destination, "style" | "script") && crate::fetch_rules::fetch_route(&r.url, 0, "") == crate::fetch_rules::ROUTE_NETWORK {
+        let args = request_args(scope, &r);
+        let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
+        let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
+        let mut at = [None; 3];
+        if let Some(g) = got {
+            for (k, slot) in at.iter_mut().enumerate() {
+                *slot = g.get_index(scope, k as u32).filter(|v| !v.is_null_or_undefined());
+            }
+        }
+        let [body, meta, bytes] = at;
+        let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
+        let facts = facts_of(scope, meta, kind, SRC_ASSET);
+        let no_body = if body.is_none() { S_NO_BODY } else { 0 };
+        let ok = link_verdict(scope, &r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", ("", destination));
+        // (…the body the cache holds: its bytes, where they are not its text's UTF-8)
+        let held = match (bytes, body) {
+            (Some(b), _) => crate::canvas::bytes_read(b, None).map(|b| b.into_owned()),
+            (None, Some(t)) => Some(t.to_rust_string_lossy(scope).into_bytes()),
+            (None, None) => None,
+        };
+        let response = match (crate::preload_map::response_of(scope, meta), held) {
+            (Some(resp), Some(held)) => Some(resp.with_body(held)),
+            (None, Some(held)) => Some(crate::preload_map::Response::of_body(held)),
+            (resp, None) => resp,
+        };
+        (ok, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))), response)
+    } else {
+        let args = request_args(scope, &r);
+        let resp = call(scope, host, H_FETCH, &args)?.map(|resp| v8::Local::new(scope, resp));
+        let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
+        let facts = facts_of(scope, resp, kind, SRC_NETWORK);
+        let bytes = resp.and_then(|resp| member(scope, resp, "body_bytes"));
+        let ok = link_verdict(scope, &r, &facts, SRC_NETWORK, bytes, "no-cors", ("", destination));
+        let response = crate::preload_map::response_of(scope, resp);
+        (ok, Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))), response)
+    };
+    file(scope, host, &r, answered)?;
+    let response = response.filter(|resp| r.integrity.is_empty() || crate::integrity::response_matches(resp.body(), &r.integrity, !resp.opaque()));
+    let arena = realm(scope, r.cid);
+    if let Some(doc) = r.doc {
+        arena.preload_commit(crate::preload_map::Key::new(doc, &r.url, destination, r.plan), r.integrity.clone(), response);
+    }
+    if let Some(plan) = r.el.and_then(|el| arena.link_preloads.get_mut(&el)).filter(|p| p.id == id && id != 0) {
+        plan.got = Some(ok);
+    }
     Ok(ok)
 }

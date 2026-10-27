@@ -912,6 +912,8 @@ pub(crate) struct RealmArena {
     // bindings with each (subresource_obtain.rs), and the last token.
     pub(crate) obtains: std::collections::HashMap<u32, crate::subresource_obtain::Request>,
     pub(crate) obtain_tokens: u32,
+    // Each `<link rel=preload>`'s plan of its fetch (subresource_obtain.rs `LinkPreload`).
+    pub(crate) link_preloads: std::collections::HashMap<NodeId, crate::subresource_obtain::LinkPreload>,
     // Each image element's current request, from its first load (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
@@ -1411,6 +1413,7 @@ impl RealmArena {
         self.media.retain(|id, _| live(slots, id));
         self.preloads.retain(|key, _| live(slots, &key.doc()));
         self.obtains.retain(|_, request| request.doc().is_none_or(|doc| live(slots, &doc)));
+        self.link_preloads.retain(|id, _| live(slots, id));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
