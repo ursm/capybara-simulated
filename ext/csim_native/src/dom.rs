@@ -908,8 +908,8 @@ pub(crate) struct RealmArena {
     pub(crate) media: std::collections::HashMap<NodeId, crate::media::Media>,
     // Each document's map of preloaded resources, by preload key (preload_map.rs).
     pub(crate) preloads: std::collections::HashMap<crate::preload_map::Key, crate::preload_map::Preloaded>,
-    // The requests the engine made whose service worker's `fetch` event is yet to answer, by the token the bindings name
-    // each with (subresource_obtain.rs), and the last token.
+    // The requests the engine made whose service worker's `fetch` event is yet to answer, by the token it handed the
+    // bindings with each (subresource_obtain.rs), and the last token.
     pub(crate) obtains: std::collections::HashMap<u32, crate::subresource_obtain::Request>,
     pub(crate) obtain_tokens: u32,
     // Each image element's current request, from its first load (image_requests.rs).

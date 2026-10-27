@@ -248,6 +248,36 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(hits.grep(/timed-/)).to eq([])
   end
 
+  # A worker gone as the event is dispatched (no record of it, or redundant: browser.rb `sw_redundant?`) lets the request
+  # through at once, before the dispatch returns: the network answers it, and its entry is filed.
+  it "has the network answer a poster's request a worker gone lets through at once" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__seen = null;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const d = f.contentDocument, W = f.contentWindow;
+          W.__csim_serviceWorkerControllerFetch = () => false;
+          d.body.insertAdjacentHTML('beforeend', '<video poster="/scope/gone-poster.png" preload=none></video>');
+          const poll = () => {
+            const e = W.performance.getEntriesByType('resource').find((e) => e.name.endsWith('gone-poster.png'));
+            if (!e) return setTimeout(poll, 20);
+            globalThis.__seen = e.initiatorType + ':' + e.responseStatus;
+          };
+          poll();
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('video:404')
+    expect(hits).to include('/scope/gone-poster.png')
+  end
+
   # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
   # rules, and the network never asked for it — the cascade's and the getter's one answer. And a response is judged by
   # the mode its request was made in: an audio whose `crossorigin` is set while its no-cors request is in flight takes

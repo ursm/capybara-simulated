@@ -161,10 +161,9 @@ fn file(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: 
 // rendered element uses it; the driver paints no background yet, so the fetch is for what a page observes of it: its
 // service worker's `fetch` event (destination `image`) and its entry.
 fn fetch_css_images_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
     let doc = crate::dom::nid_arg(scope, &args, 0);
     let owed = crate::rendered::take_owed_css_images(scope, &args);
-    let Some(doc) = doc else { return };
+    let (Some(doc), Ok(host)) = (doc, v8::Local::<v8::Function>::try_from(args.get(1))) else { return };
     let cid = realm_id(scope, &args);
     for (initiator, url, referrer) in owed {
         if fetch_css_image(scope, cid, doc, host, initiator, url, referrer).is_err() {
@@ -233,46 +232,39 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
     };
     let mut args = request_args(scope, &r).to_vec();
     args.push(v8::Integer::new_from_unsigned(scope, token).into());
+    // (…kept before the event is dispatched: a worker that is gone answers at once, letting the request through)
+    realm(scope, cid).obtains.insert(token, r);
     if call(scope, host, H_SW_DISPATCH, &args)?.is_some_and(|d| v8::Local::new(scope, d).is_true()) {
-        realm(scope, cid).obtains.insert(token, r);
         return Ok(());
     }
+    let Some(r) = realm(scope, cid).obtains.remove(&token) else { return Ok(()) };
     from_network(scope, host, &r).map(drop)
 }
 
-// __dom.obtainResume(token, resp, bytes, host): a service worker's `fetch` event's answer to the request `token` named
-// (`fetch_timed`): `resp` the response it answered with — its body's `bytes`, a streamed one's read — `{__networkError}`
-// for a network error, null where it let the request through, which the network answers then: the request as it was
-// made, whatever its element is now. An answer Fetch "HTTP fetch" step 5.5 does not let answer it is a network error.
+// __dom.obtainResume(token, answer, redirected, host): a service worker's `fetch` event's answer to the request `token`
+// named (`fetch_timed`) — `answer` its facts as an entry reads them (sw-client.js `workerAnswerFacts`, `{blocked}` for a
+// network error), `redirected` whether the response it answered with says it was — or null where it let the request
+// through, which the network answers then: the request as it was made, whatever its element is now. An answer Fetch
+// "HTTP fetch" step 5.5 does not let answer it is a network error.
 fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return };
     let token = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     let Some(r) = realm(scope, cid).obtains.remove(&token) else { return };
-    let Ok(resp) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
+    let Ok(answer) = v8::Local::<v8::Object>::try_from(args.get(1)) else {
         let _ = from_network(scope, host, &r);
         return;
     };
-    let kind = member(scope, resp, "type").map_or_else(|| "default".to_owned(), |t| t.to_rust_string_lossy(scope));
-    let redirected = member(scope, resp, "redirected").is_some_and(|v| v.is_true());
-    let error = member(scope, resp, "__networkError").is_some_and(|v| v.is_true());
-    let answer = v8::Object::new(scope);
-    let set = |scope: &mut v8::PinScope<'_, '_>, k: &str, v: v8::Local<'_, v8::Value>| {
-        let k = text(scope, k);
-        answer.set(scope, k, v);
-    };
-    if error || !crate::fetch_rules::service_worker_response_allowed(fields(r.plan).0, "follow", &kind, redirected) {
-        let yes = v8::Boolean::new(scope, true).into();
-        set(scope, "blocked", yes);
+    let kind = member(scope, answer, "type").map_or_else(|| "default".to_owned(), |t| t.to_rust_string_lossy(scope));
+    let blocked = member(scope, answer, "blocked").is_some_and(|v| v.is_true());
+    let answer = if blocked || crate::fetch_rules::service_worker_response_allowed(fields(r.plan).0, "follow", &kind, args.get(2).is_true()) {
+        answer
     } else {
-        for k in ["status", "type", "headers"] {
-            if let Some(v) = member(scope, resp, k) {
-                set(scope, k, v);
-            }
-        }
-        let bytes = args.get(2);
-        set(scope, "bytes", bytes);
-    }
+        let refused = v8::Object::new(scope);
+        let (k, yes) = (text(scope, "blocked"), v8::Boolean::new(scope, true).into());
+        refused.set(scope, k, yes);
+        refused
+    };
     let answer = v8::Global::new(scope, v8::Local::<v8::Value>::from(answer));
     let _ = file(scope, host, &r, Answered::Worker(answer));
 }

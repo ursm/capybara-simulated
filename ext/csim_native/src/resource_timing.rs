@@ -282,7 +282,7 @@ const WORKER_MODULE: u32 = 1;
 const FETCH_BEACON: u32 = 1;
 // The initiator type of an entry of `kind` (the detail in its high bits), of its element `nid` (Resource Timing
 // "initiator type", resource-timing/initiator-type/*) — None where the caller names it: a timed resource's, a CSS
-// image's, which the engine handed it (subresources.rs `timed_resources`, rendered.rs `css_images_owed`).
+// image's, which the engine handed it (subresources.rs `timed_resources`, rendered.rs `take_owed_css_images`).
 fn initiator_of(realm: &crate::dom::RealmArena, kind: u32, nid: Option<crate::dom::NodeId>) -> Option<&'static str> {
     use crate::subresource_judge::{J_AUDIO, J_CLASSIC_SCRIPT, J_FONT, J_IMAGE, J_LINK, J_SHEET, J_VIDEO};
     let node = nid.and_then(|id| realm.get(id));
