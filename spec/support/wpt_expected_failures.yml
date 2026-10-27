@@ -58,8 +58,6 @@ cookies/domain/domain-attribute-matches-host.sub.https.html:
 cookies/name/name-ctl.html:
 - Cookie with %xa in name is rejected or modified (HTTP).
 - Cookie with %xd in name is rejected or modified (HTTP).
-cookies/navigated-away.html:
-- document.cookie behavior on documents without browser context
 cookies/origin-bound-cookies/port-bound-cookies.html:
 - Cookies should be bound to their origin's port.
 cookies/origin-bound-cookies/scheme-bound-cookies.https.html:
