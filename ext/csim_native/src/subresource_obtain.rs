@@ -459,6 +459,8 @@ pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Globa
 //   - a prefetch: a controlling service worker's `fetch` event's, whose answer the engine takes later and fires the
 //     link's event for (`LINK_PENDING`), else the network's;
 //   - any other (a manifest's): the network's;
+// a `data:` or `blob:` URL carries its own body, judged by its MIME type — a style sheet's `text/css` — one that does not
+// parse, or names no blob, a network error (Fetch), the link's load an `error` whatever it obtains;
 // its verdict the engine's (`judge`: what the link obtains, its integrity) and its entry filed.
 fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_PREFETCH, OBTAINS_PRELOAD, OBTAINS_STYLESHEET};
@@ -475,7 +477,12 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Ok(started) = now(scope, host) else { return };
     let client = realm(scope, cid).get(el).map(|n| n.realm);
     let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, preload: None, initiator: "link", started };
-    let done = if obtains & OBTAINS_STYLESHEET != 0 {
+    let route = crate::fetch_rules::fetch_route(&r.url, 0, "");
+    let done = if matches!(route, crate::fetch_rules::ROUTE_DATA | crate::fetch_rules::ROUTE_BLOB) {
+        let preload_destination = if obtains & OBTAINS_PRELOAD != 0 { crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("") } else { "" };
+        let integrity = if obtains & OBTAINS_STYLESHEET != 0 { crate::sheet_fetch::owner_integrity(realm(scope, cid), el) } else { r.integrity.clone() };
+        link_scheme(scope, host, &Request { integrity, ..r }, route, (&module_destination, preload_destination)).map(link_done)
+    } else if obtains & OBTAINS_STYLESHEET != 0 {
         let integrity = crate::sheet_fetch::owner_integrity(realm(scope, cid), el);
         link_sheet(scope, host, &Request { integrity, ..r }).map(link_done)
     } else if obtains & OBTAINS_PRELOAD != 0 {
@@ -829,4 +836,27 @@ fn link_sheet(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function
     let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", ("", ""));
     file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))))?;
     Ok(ok)
+}
+
+// …a `data:` or a `blob:` URL's: its body, as its MIME type makes it what the link obtains (`link_verdict`) — no entry,
+// as no network scheme files one.
+fn link_scheme(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, route: u32, destinations: (&str, &str)) -> Result<bool, Terminated> {
+    use crate::subresource_judge::{Facts, SRC_SCHEME};
+    let stylesheet = (r.kind >> 8) & crate::link_resource::OBTAINS_STYLESHEET != 0;
+    let (facts, body) = if route == crate::fetch_rules::ROUTE_DATA {
+        let Some((mime, body)) = crate::data_url::process(&r.url) else { return Ok(false) };
+        if stylesheet && crate::mime::parse(&mime).is_none_or(|m| m.essence != "text/css") {
+            return Ok(false);
+        }
+        (Facts { response_type: "default".to_owned(), content_type: mime, ..Default::default() }, body)
+    } else {
+        let u = text(scope, &r.url);
+        let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
+        let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
+        let Some(bytes) = blob.and_then(|b| member(scope, b, "bytes")).and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned()) else { return Ok(false) };
+        let content_type = blob.and_then(|b| member(scope, b, "type")).map_or_else(String::new, |t| t.to_rust_string_lossy(scope));
+        (Facts { response_type: "basic".to_owned(), status: Some(200), content_type, ..Default::default() }, bytes)
+    };
+    let body = if r.integrity.is_empty() { Vec::new() } else { body };
+    Ok(link_verdict_of(scope, r, &facts, SRC_SCHEME, &body, "no-cors", destinations))
 }
