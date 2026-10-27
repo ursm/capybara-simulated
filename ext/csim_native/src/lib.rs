@@ -131,6 +131,7 @@ mod mutation;
 mod mutation_observers;
 mod foreign_observations;
 mod frame_navigation;
+mod frame_response;
 mod navigables;
 mod observation_list;
 mod namespaces;

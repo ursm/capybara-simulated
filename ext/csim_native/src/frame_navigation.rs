@@ -26,14 +26,14 @@ const CONTENT_SLOTS: usize = 3;
 
 // A document as bytes: its URL, its body, its content type.
 #[derive(Clone)]
-struct Content {
-    url: Vec<u16>,
-    bytes: Vec<u8>,
-    content_type: Vec<u16>,
+pub(crate) struct Content {
+    pub(crate) url: Vec<u16>,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) content_type: Vec<u16>,
     // The Referer the request it answered sent — the referrer of the document it makes — and the referrer policy it
     // makes it with (a javascript: URL's result its frame's active document's: HTML), each empty for none.
-    referrer: Vec<u16>,
-    policy: Vec<u16>,
+    pub(crate) referrer: Vec<u16>,
+    pub(crate) policy: Vec<u16>,
 }
 
 #[derive(Default)]
@@ -68,11 +68,15 @@ struct FrameNavigation {
     activation: Option<(f64, u32)>,
 }
 
+// Its element's `load` fired or queued (frame-nav.js `FN_LOAD_FIRED`).
+pub(crate) const LOAD_FIRED: u32 = 1 << 0;
 // A scripted navigation's response awaited (frame-nav.js `FN_NAV_PENDING`): what a plan superseded clears.
 const NAV_PENDING: u32 = 1 << 1;
+// Its old document its own until the new one's response is in (frame-nav.js `FN_COMMIT_PENDING`).
+pub(crate) const COMMIT_PENDING: u32 = 1 << 2;
 // Its build parked on a still-activating service worker (frame-nav.js `FN_DEFERRED_SW`) — set until the replay that
 // `takeSwDeferredFrames` hands it to runs — and (the engine's own bit) handed to one already.
-const DEFERRED_SW: u32 = 1 << 3;
+pub(crate) const DEFERRED_SW: u32 = 1 << 3;
 const DEFERRED_LISTED: u32 = 1 << 16;
 // The navigation is a reload (frame-nav.js `FN_RELOAD_NAV`).
 const RELOAD_NAV: u32 = 1 << 5;
@@ -178,7 +182,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameSandbox", frame_sandbox_op, context_id);
     crate::dom::register(scope, ns, "frameNavigationActivated", frame_navigation_activated, context_id);
     crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
-    crate::dom::register(scope, ns, "frameSource", frame_source, context_id);
 }
 
 // HTML "shared attribute processing steps for iframe and frame elements" step 3, as the frame `container`'s attributes
@@ -235,7 +238,7 @@ impl crate::dom::RealmArena {
         }
     }
     // …taken by the document it makes: the next navigation's its own.
-    fn take_frame_sandbox(&mut self, container: NodeId) -> Option<String> {
+    pub(crate) fn take_frame_sandbox(&mut self, container: NodeId) -> Option<String> {
         let snapshot = self.frame_navigations.0.get_mut(&container).and_then(|nav| nav.sandbox.take());
         snapshot.unwrap_or_else(|| self.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned))
     }
@@ -264,7 +267,12 @@ fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 fn frame_navigation_activated(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).is_some_and(|nav| nav.activated));
+    rv.set_bool(crate::dom::realm(scope, cid).frame_navigation_activated(container));
+}
+impl RealmArena {
+    pub(crate) fn frame_navigation_activated(&self, container: NodeId) -> bool {
+        self.frame_navigations.0.get(&container).is_some_and(|nav| nav.activated)
+    }
 }
 // __dom.frameSandbox(containerNid) -> `RealmArena::frame_sandbox` (null: none), not taken: what the navigation under way
 // began with, which "allowed to download" asks of a response that makes no document.
@@ -540,31 +548,40 @@ fn load_delayed_here(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(delayed);
 }
 
-// __dom.setFrameNav(containerNid, flags, on) — sets (`on`) or clears the flags.
+// __dom.setFrameNav(containerNid, flags, on) — sets (`on`) or clears the flags (`RealmArena::set_frame_nav`).
 fn set_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let flags = args.get(1).uint32_value(scope).unwrap_or(0);
     let on = args.get(2).boolean_value(scope);
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    if on {
-        let parked = flags & DEFERRED_SW != 0 && arena.frame_navigation(container).flags & DEFERRED_SW == 0;
-        if parked {
-            arena.frame_navigations.1.deferrals += 1;
-            let at = arena.frame_navigations.1.deferrals;
-            let nav = arena.frame_navigation(container);
-            nav.deferred_at = at;
-            nav.flags &= !DEFERRED_LISTED;
-        }
-        arena.frame_navigation(container).flags |= flags;
-    } else if let Some(nav) = arena.frame_navigations.0.get_mut(&container) {
-        // (…a build parked no more no replay's either)
-        let flags = if flags & DEFERRED_SW != 0 { flags | DEFERRED_LISTED } else { flags };
-        nav.flags &= !flags;
-        // (…its navigable destroyed with its post-insertion step undone — the container removed — and what the window
-        // of its initial about:blank document had with it: one inserted again is a new one's)
-        if flags & CONTEXT_READY != 0 {
-            nav.activation = None;
+    crate::dom::realm(scope, cid).set_frame_nav(container, flags, on);
+}
+impl RealmArena {
+    // The container's navigation's flags: whether it has them…
+    pub(crate) fn frame_nav_has(&self, container: NodeId, flags: u32) -> bool {
+        self.frame_navigations.0.get(&container).is_some_and(|nav| nav.flags & flags != 0)
+    }
+    // …and them set (`on`) or cleared.
+    pub(crate) fn set_frame_nav(&mut self, container: NodeId, flags: u32, on: bool) {
+        if on {
+            let parked = flags & DEFERRED_SW != 0 && self.frame_navigation(container).flags & DEFERRED_SW == 0;
+            if parked {
+                self.frame_navigations.1.deferrals += 1;
+                let at = self.frame_navigations.1.deferrals;
+                let nav = self.frame_navigation(container);
+                nav.deferred_at = at;
+                nav.flags &= !DEFERRED_LISTED;
+            }
+            self.frame_navigation(container).flags |= flags;
+        } else if let Some(nav) = self.frame_navigations.0.get_mut(&container) {
+            // (…a build parked no more no replay's either)
+            let flags = if flags & DEFERRED_SW != 0 { flags | DEFERRED_LISTED } else { flags };
+            nav.flags &= !flags;
+            // (…its navigable destroyed with its post-insertion step undone — the container removed — and what the window
+            // of its initial about:blank document had with it: one inserted again is a new one's)
+            if flags & CONTEXT_READY != 0 {
+                nav.activation = None;
+            }
         }
     }
 }
@@ -582,9 +599,30 @@ fn frame_nav_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 fn supersede_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    let nav = crate::dom::realm(scope, cid).frame_navigation(container);
-    nav.generation = nav.generation.wrapping_add(1);
-    nav.flags &= !LOAD_OWED;
+    crate::dom::realm(scope, cid).supersede_frame_nav(container);
+}
+impl RealmArena {
+    pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {
+        let nav = self.frame_navigation(container);
+        nav.generation = nav.generation.wrapping_add(1);
+        nav.flags &= !LOAD_OWED;
+    }
+    // The history entry the navigation pushes as it commits, let go of: one that makes no document pushes none.
+    pub(crate) fn take_frame_history_url(&mut self, container: NodeId) {
+        if let Some(nav) = self.frame_navigations.0.get_mut(&container) {
+            nav.history = None;
+        }
+    }
+    // …and the URL it started with: the response is in.
+    pub(crate) fn take_frame_src_url(&mut self, container: NodeId) {
+        if let Some(nav) = self.frame_navigations.0.get_mut(&container) {
+            nav.src = None;
+        }
+    }
+    // …and the document it loaded last, which a reload loads again (a blob: URL's, revoked by then).
+    pub(crate) fn keep_frame_loaded(&mut self, container: NodeId, content: Content) {
+        self.frame_navigation(container).contents[CONTENT_LOADED] = Some(content);
+    }
 }
 
 // __dom.frameNavUrl(containerNid, slot, take) -> the URL the navigation carries in the slot (0 the one it started
@@ -639,97 +677,78 @@ fn set_frame_nav_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 const CONTENT_NAV: usize = 0;
 const CONTENT_LOADED: usize = 1;
 
-// What a frame's document is loaded from (`__dom.frameSource`, bridge.entry.js `FRAME_SOURCE_*`): a scripted
-// navigation's response, its `srcdoc`, no URL (the initial about:blank), or a URL of a scheme: about:, data:,
-// javascript:, blob:, or one fetched.
-const SOURCE_NAVIGATION: i32 = 0;
-const SOURCE_SRCDOC: i32 = 1;
-const SOURCE_NONE: i32 = 2;
-const SOURCE_ABOUT: i32 = 3;
-const SOURCE_DATA: i32 = 4;
-const SOURCE_JAVASCRIPT: i32 = 5;
-const SOURCE_BLOB: i32 = 6;
-const SOURCE_FETCH: i32 = 7;
+// What a frame's document is loaded from (frame_response.rs `frame_response`): a scripted navigation's response, its
+// `srcdoc`, no URL (the initial about:blank), or a URL of a scheme — about:, data:, javascript:, blob:, or one fetched.
+pub(crate) enum FrameSource {
+    Navigation(Content),
+    Srcdoc(String),
+    None,
+    About(String),
+    Data(String),
+    Javascript(String),
+    Blob(String),
+    Fetch(String),
+}
 
-// __dom.frameSource(container) -> where a build of the frame's document loads it from (HTML "process the iframe
-// attributes"), its reload flag and the document URL a reload keeps taken as it begins — whichever branch it takes, so
-// neither leaks to a later load:
-// - [SOURCE_NAVIGATION, reload, url, bytes, contentType]: a scripted navigation's response (a form submitted into it),
-//   taken, and kept as the document loaded last, which a reload loads again;
-// - [SOURCE_SRCDOC, reload, srcdoc];
-// - [kind, reload, url] for the URL it navigates to: a reload's kept URL, else the one its navigation started with, else
-//   its `src` — none (SOURCE_NONE) where that is none, empty or about:blank, refused as its attributes were last
-//   processed, or no URL its document parses; else by its scheme.
-fn frame_source(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    // (…a node the engine holds no slot for none: the initial about:blank)
-    let none = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, reload: bool| {
-        let (kind, reload, url) = (v8::Integer::new(scope, SOURCE_NONE).into(), v8::Boolean::new(scope, reload).into(), v8::String::empty(scope).into());
-        rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url]).into());
-    };
-    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return none(scope, rv, false) };
-    let doc = crate::node_handle::handle_of(scope, args.get(0))
-        // SAFETY: the handle lives while the object, an argument, does.
-        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
-        .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let nav = arena.frame_navigation(container);
-    let reload = nav.flags & RELOAD_NAV != 0;
-    nav.flags &= !RELOAD_NAV;
-    let kept = nav.reload.take();
-    let reload_url = kept.filter(|_| reload);
-    if let Some(content) = nav.contents[CONTENT_NAV].take() {
-        nav.contents[CONTENT_LOADED] = Some(content.clone());
-        let url = utf16_value(scope, &content.url);
-        let bytes = crate::dom::u8_array(scope, content.bytes);
-        let content_type = utf16_value(scope, &content.content_type);
-        let referrer = utf16_value(scope, &content.referrer);
-        let policy = utf16_value(scope, &content.policy);
-        let (kind, reload) = (v8::Integer::new(scope, SOURCE_NAVIGATION).into(), v8::Boolean::new(scope, reload).into());
-        return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url, bytes, content_type, referrer, policy]).into());
-    }
-    let started = nav.src.clone();
-    let refused = nav.flags & SRC_REFUSED != 0;
-    let Some(node) = arena.get(container) else { return none(scope, rv, reload) };
-    // (…its `srcdoc`, but for a reload of the document it went on to since: one of another URL than about:srcdoc, its
-    // fragment aside)
-    let went_on = reload_url.as_ref().is_some_and(|url| {
-        let url = String::from_utf16_lossy(url);
-        let url = url.split('#').next().unwrap_or_default();
-        !url.eq_ignore_ascii_case("about:srcdoc")
-    });
-    if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on).map(str::to_owned) {
-        let (kind, reload) = (v8::Integer::new(scope, SOURCE_SRCDOC).into(), v8::Boolean::new(scope, reload).into());
-        let srcdoc = v8::String::new(scope, &srcdoc).map_or_else(|| v8::undefined(scope).into(), Into::into);
-        return rv.set(v8::Array::new_with_elements(scope, &[kind, reload, srcdoc]).into());
-    }
-    // (…a reload's URL, else the one its navigation started with, else its `src` — that refused by its attributes'
-    // processing none, but not a reload's nor that of a navigation under way, which a refused change leaves to go on)
-    let src = match (&reload_url, &started) {
-        (Some(url), _) => Some(String::from_utf16_lossy(url)),
-        (None, Some(started)) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
-        (None, None) if refused => None,
-        (None, None) => node.plain_attr("src").map(str::to_owned),
-    };
-    let root = arena.root_of(container);
-    let doc = doc.or_else(|| arena.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root));
-    let url = src.filter(|s| !s.is_empty() && s != "about:blank").zip(doc).and_then(|(s, doc)| arena.parse_document_url(doc, &s));
-    let (kind, url) = match url {
-        None => (SOURCE_NONE, String::new()),
-        Some(url) => {
-            let kind = match url.protocol() {
-                "about:" => SOURCE_ABOUT,
-                "data:" => SOURCE_DATA,
-                "javascript:" => SOURCE_JAVASCRIPT,
-                "blob:" => SOURCE_BLOB,
-                _ => SOURCE_FETCH,
-            };
-            (kind, url.href().to_owned())
+impl RealmArena {
+    // Where a build of the frame `container`'s document — in `doc`, none for the root of its tree — loads it from (HTML
+    // "process the iframe attributes"), and its reload flag, both taken with the document URL a reload keeps as it
+    // begins — whichever branch it takes, so none leaks to a later load:
+    // - a scripted navigation's response (a form submitted into it), taken, and kept as the document loaded last, which
+    //   a reload loads again;
+    // - its `srcdoc`;
+    // - the URL it navigates to: a reload's kept URL, else the one its navigation started with, else its `src` — none
+    //   where that is none, empty or about:blank, refused as its attributes were last processed, or no URL its document
+    //   parses; else by its scheme.
+    pub(crate) fn frame_source(&mut self, container: NodeId, doc: Option<NodeId>) -> (FrameSource, bool) {
+        let nav = self.frame_navigation(container);
+        let reload = nav.flags & RELOAD_NAV != 0;
+        nav.flags &= !RELOAD_NAV;
+        let kept = nav.reload.take();
+        let reload_url = kept.filter(|_| reload);
+        if let Some(content) = nav.contents[CONTENT_NAV].take() {
+            nav.contents[CONTENT_LOADED] = Some(content.clone());
+            return (FrameSource::Navigation(content), reload);
         }
-    };
-    let (kind, reload) = (v8::Integer::new(scope, kind).into(), v8::Boolean::new(scope, reload).into());
-    let url = v8::String::new(scope, &url).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    rv.set(v8::Array::new_with_elements(scope, &[kind, reload, url]).into());
+        let started = nav.src.clone();
+        let refused = nav.flags & SRC_REFUSED != 0;
+        let Some(node) = self.get(container) else { return (FrameSource::None, reload) };
+        // (…its `srcdoc`, but for a reload of the document it went on to since: one of another URL than about:srcdoc, its
+        // fragment aside)
+        let went_on = reload_url.as_ref().is_some_and(|url| {
+            let url = String::from_utf16_lossy(url);
+            let url = url.split('#').next().unwrap_or_default();
+            !url.eq_ignore_ascii_case("about:srcdoc")
+        });
+        if let Some(srcdoc) = node.plain_attr("srcdoc").filter(|_| !went_on) {
+            return (FrameSource::Srcdoc(srcdoc.to_owned()), reload);
+        }
+        // (…a reload's URL, else the one its navigation started with, else its `src` — that refused by its attributes'
+        // processing none, but not a reload's nor that of a navigation under way, which a refused change leaves to go on)
+        let src = match (&reload_url, &started) {
+            (Some(url), _) => Some(String::from_utf16_lossy(url)),
+            (None, Some(started)) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
+            (None, None) if refused => None,
+            (None, None) => node.plain_attr("src").map(str::to_owned),
+        };
+        let root = self.root_of(container);
+        let doc = doc.or_else(|| self.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root));
+        let url = src.filter(|s| !s.is_empty() && s != "about:blank").zip(doc).and_then(|(s, doc)| self.parse_document_url(doc, &s));
+        let source = match url {
+            None => FrameSource::None,
+            Some(url) => {
+                let href = url.href().to_owned();
+                match url.protocol() {
+                    "about:" => FrameSource::About(href),
+                    "data:" => FrameSource::Data(href),
+                    "javascript:" => FrameSource::Javascript(href),
+                    "blob:" => FrameSource::Blob(href),
+                    _ => FrameSource::Fetch(href),
+                }
+            }
+        };
+        (source, reload)
+    }
 }
 
 // The URL a container's navigation goes to, as its attributes give it: the one the navigation under way started with,

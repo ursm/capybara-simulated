@@ -14,11 +14,11 @@ use crate::font_files::Terminated;
 use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_EMBED, J_TIMED};
 
 // The host's steps (subresource-host.js `H_*`).
-const H_NOW: u32 = 0;
+pub(crate) const H_NOW: u32 = 0;
 pub(crate) const H_SW_ANSWER: u32 = 2;
 const H_SW_DISPATCH: u32 = 3;
 pub(crate) const H_NETWORK: u32 = 4;
-const H_FILE: u32 = 5;
+pub(crate) const H_FILE: u32 = 5;
 pub(crate) const H_BLOB: u32 = 6;
 pub(crate) const H_DOCUMENT: u32 = 7;
 const H_FONT_BYTES: u32 = 8;
@@ -33,6 +33,8 @@ const H_IMAGE_NETWORK: u32 = 16;
 const H_IMAGE_EVENT: u32 = 17;
 const H_VIDEO_BYTES: u32 = 18;
 const H_MEDIA_DONE: u32 = 19;
+pub(crate) const H_FRAME_NAVIGATION: u32 = 20;
+pub(crate) const H_LOAD_BLOCKER_SETTLED: u32 = 21;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event
@@ -117,7 +119,7 @@ pub(crate) fn call(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Fun
     Ok(answer.filter(|v| !v.is_null_or_undefined()).map(|v| v8::Global::new(tc, v)))
 }
 // …the clock the bindings keep.
-fn now(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> Result<f64, Terminated> {
+pub(crate) fn now(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>) -> Result<f64, Terminated> {
     let t = call(scope, host, H_NOW, &[])?;
     Ok(t.and_then(|t| v8::Local::new(scope, t).number_value(scope)).unwrap_or(0.0))
 }
@@ -130,13 +132,13 @@ pub(crate) fn view_bytes(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::
 pub(crate) fn text<'s>(scope: &mut v8::PinScope<'s, '_>, s: &str) -> v8::Local<'s, v8::Value> {
     v8::String::new(scope, s).map_or_else(|| v8::undefined(scope).into(), Into::into)
 }
-fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, s: Option<&str>) -> v8::Local<'s, v8::Value> {
+pub(crate) fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, s: Option<&str>) -> v8::Local<'s, v8::Value> {
     match s {
         Some(s) => text(scope, s),
         None => v8::null(scope).into(),
     }
 }
-fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
+pub(crate) fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
     let k = v8::String::new(scope, k)?;
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
