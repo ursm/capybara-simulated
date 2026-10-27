@@ -852,9 +852,9 @@ fn ce_form_state_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 // __dom.ceFormOwnersReset(rootNid) -> the same for the form-associated custom elements of the root's tree whose `form`
 // attribute names their owner (HTML: "an element with an ID is inserted into or removed from the Document, or its ID
-// changes" — each resets its form owner, its formAssociatedCallback enqueued where it is another now). In a document only those naming an id whose
-// element is another than the id lookup last gave (`form_ids`) — a change there asks those few ids, and walks the tree
-// only where one moved; in any other tree (a shadow tree's) every one.
+// changes" — each resets its form owner, its formAssociatedCallback enqueued where it is another now). In a document
+// only those naming an id whose element is another than the id lookup last gave (`form_ids`) — a change there asks
+// those few ids, and walks the tree only where one moved; in any other tree (a shadow tree's) every one.
 fn ce_form_owners_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(root) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);

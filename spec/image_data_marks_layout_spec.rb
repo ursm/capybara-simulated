@@ -19,8 +19,11 @@ RSpec.describe "an image's data applied" do
     end
   }
 
-  {'network' => "'/i.svg'", 'data:' => "'data:image/svg+xml,' + encodeURIComponent(SVG)",
-   'blob:' => "URL.createObjectURL(new Blob([SVG], {type: 'image/svg+xml'}))"}.each do |name, src|
+  {
+    'network' => "'/i.svg'",
+    'data:'   => "'data:image/svg+xml,' + encodeURIComponent(SVG)",
+    'blob:'   => "URL.createObjectURL(new Blob([SVG], {type: 'image/svg+xml'}))"
+  }.each do |name, src|
     it "lays out what follows a #{name} image as its size puts it" do
       s = simulated_session(app)
       s.visit '/'
