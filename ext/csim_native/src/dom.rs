@@ -914,6 +914,8 @@ pub(crate) struct RealmArena {
     pub(crate) obtain_tokens: u32,
     // Each `<link rel=preload>`'s plan of its fetch (subresource_obtain.rs `LinkPreload`).
     pub(crate) link_preloads: std::collections::HashMap<NodeId, crate::subresource_obtain::LinkPreload>,
+    // Each style sheet owner's request of the sheet it obtains (sheet_fetch.rs).
+    pub(crate) sheet_requests: std::collections::HashMap<NodeId, crate::sheet_fetch::SheetRequest>,
     // Each image element's current request, from its first load (image_requests.rs).
     pub(crate) images: std::collections::HashMap<NodeId, crate::image_requests::ImageRequest>,
     // …the fetches of theirs the host makes on a thread of its own, by the id it numbers them with, until it hands the
@@ -1064,6 +1066,8 @@ pub(crate) struct RealmState {
     pub(crate) service_worker: Option<crate::service_worker::ServiceWorkerGlobal>,
     // …and who it is to the host: its client id, its window key, a worker's handle (realm_identity.rs).
     pub(crate) identity: crate::realm_identity::RealmIdentity,
+    // …and its own of its sheets' fetches (sheet_fetch.rs).
+    pub(crate) sheet_fetches: crate::sheet_fetch::RealmSheets,
     // Whether its document's load event is delayed — fired once nothing delays it — and, where it is, its container's
     // load owed to the parent after it (frame_navigation.rs `LOAD_DELAYED`, `CONTAINER_LOAD_OWED`).
     pub(crate) load_delay: u8,
@@ -1414,6 +1418,7 @@ impl RealmArena {
         self.preloads.retain(|key, _| live(slots, &key.doc()));
         self.obtains.retain(|_, request| request.doc().is_none_or(|doc| live(slots, &doc)));
         self.link_preloads.retain(|id, _| live(slots, id));
+        self.sheet_requests.retain(|id, _| live(slots, id));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
@@ -2812,6 +2817,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::realm_location::install(scope, ns, context_id);
     crate::font_resolve::install(scope, ns, context_id);
     crate::subresource_obtain::install(scope, ns, context_id);
+    crate::sheet_fetch::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);

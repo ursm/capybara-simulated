@@ -181,6 +181,15 @@ pub(crate) fn stylesheet_encoding(content_type: &str, bytes: &[u8], environment:
 // encoding — its environment the `<link>`'s `charset` where that is an encoding's label (HTML "link type stylesheet"),
 // else the document's or the importing sheet's (`documentCharset`) — a BOM's over it (CSS Syntax "decode"); the text
 // undefined where it decodes as the host read it (UTF-8, or ASCII in an encoding ASCII is ASCII in).
+// A sheet's bytes decoded (CSS Syntax "decode": `stylesheet_encoding`, a BOM's over all, its environment `link_charset`
+// where that is an encoding, else `document_charset`), and the encoding it decoded with.
+pub(crate) fn decode_stylesheet(bytes: &[u8], content_type: &str, link_charset: &str, document_charset: &str) -> (String, &'static str) {
+    let environment = if encoding_rs::Encoding::for_label(link_charset.as_bytes()).is_some() { link_charset } else { document_charset };
+    let encoding = encoding_rs::Encoding::for_bom(bytes).map_or_else(|| stylesheet_encoding(content_type, bytes, environment), |(e, _)| e);
+    let (text, _, _) = encoding.decode(bytes);
+    (text.into_owned(), encoding.name())
+}
+
 fn stylesheet_text(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let input = args.get(0);
     let bytes = if input.is_string() { input.to_rust_string_lossy(scope).into_bytes() } else { let Some(b) = bytes_arg(scope, input) else { return }; b };

@@ -30,6 +30,7 @@ enum Had {
 }
 
 // The response a preload had, as its consumer reads it.
+#[derive(Clone)]
 pub(crate) struct Response {
     status: u32,
     status_text: String,
@@ -50,13 +51,16 @@ impl Key {
     }
 }
 impl Response {
-    // The facts its consumer's verdict is made of (subresource_judge.rs `judge`), and its body.
+    // The facts its consumer's verdict is made of (subresource_judge.rs `judge`: its type, its `nosniff`), and its body.
     pub(crate) fn facts(&self) -> crate::subresource_judge::Facts {
+        let header = |name: &str| self.header(name).unwrap_or("").to_owned();
         crate::subresource_judge::Facts {
             response_type: self.kind.clone(),
             redirected: self.redirected,
             status: Some(self.status),
             tainted: self.tainted,
+            content_type: header("content-type"),
+            nosniff: header("x-content-type-options"),
             ..Default::default()
         }
     }
@@ -217,6 +221,13 @@ impl Response {
     }
     pub(crate) fn opaque(&self) -> bool {
         self.kind == "opaque"
+    }
+    pub(crate) fn url(&self) -> &str {
+        &self.url
+    }
+    // (…its header `name`'s value, of the first of that name)
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
     }
 }
 

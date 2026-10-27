@@ -15,18 +15,20 @@ use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_EMBED
 
 // The host's steps (subresource-host.js `H_*`).
 const H_NOW: u32 = 0;
-const H_SW_ANSWER: u32 = 2;
+pub(crate) const H_SW_ANSWER: u32 = 2;
 const H_SW_DISPATCH: u32 = 3;
-const H_NETWORK: u32 = 4;
+pub(crate) const H_NETWORK: u32 = 4;
 const H_FILE: u32 = 5;
-const H_BLOB: u32 = 6;
-const H_DOCUMENT: u32 = 7;
+pub(crate) const H_BLOB: u32 = 6;
+pub(crate) const H_DOCUMENT: u32 = 7;
 const H_FONT_BYTES: u32 = 8;
 const H_FONT_NETWORK: u32 = 9;
 pub(crate) const H_LOCAL_FONT: u32 = 10;
-const H_FETCH: u32 = 11;
+pub(crate) const H_FETCH: u32 = 11;
 const H_LINK_EVENT: u32 = 12;
-const H_ASSET: u32 = 13;
+pub(crate) const H_ASSET: u32 = 13;
+pub(crate) const H_CONTROLLER: u32 = 14;
+pub(crate) const H_CHARSET: u32 = 15;
 
 // What a link's fetch came to (`linkObtain`): its resource loads or not — or it is the bindings' to fetch (a style sheet's,
 // a preload's), or a controlling service worker's to answer, the engine's then to fire its event (constants.js
@@ -463,9 +465,6 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_uint32(LINK_LEGACY);
     let kind = args.get(3).uint32_value(scope).unwrap_or(0);
     let obtains = kind >> 8;
-    if obtains & OBTAINS_STYLESHEET != 0 {
-        return;
-    }
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let url = args.get(2).to_rust_string_lossy(scope);
@@ -476,7 +475,10 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Ok(started) = now(scope, host) else { return };
     let client = realm(scope, cid).get(el).map(|n| n.realm);
     let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, preload: None, initiator: "link", started };
-    let done = if obtains & OBTAINS_PRELOAD != 0 {
+    let done = if obtains & OBTAINS_STYLESHEET != 0 {
+        let integrity = crate::sheet_fetch::owner_integrity(realm(scope, cid), el);
+        link_sheet(scope, host, &Request { integrity, ..r }).map(link_done)
+    } else if obtains & OBTAINS_PRELOAD != 0 {
         // (…a preload of no plan — its URL none the network answers — run as it is obtained, and committed)
         let destination = crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("");
         let r = Request { preload: Some((destination, 0)), ..r };
@@ -499,19 +501,19 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 
 // The verdict on what answered a link's request (`judge`), from `source` — `bytes` its body's (none asked for where the
 // request has no integrity), `destinations` a modulepreload's and a preload's.
-fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, (module_destination, preload_destination): (&str, &str)) -> bool {
-    use crate::subresource_judge::{judge, Consumer, V_OK};
-    let body = if r.integrity.is_empty() {
-        Vec::new()
-    } else {
-        match bytes {
-            Some(b) if b.is_string() => b.to_rust_string_lossy(scope).into_bytes(),
-            Some(b) => crate::canvas::bytes_read(b, None).map(|b| b.into_owned()).unwrap_or_default(),
-            None => Vec::new(),
-        }
+fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, destinations: (&str, &str)) -> bool {
+    let body = match bytes.filter(|_| !r.integrity.is_empty()) {
+        Some(b) if b.is_string() => b.to_rust_string_lossy(scope).into_bytes(),
+        Some(b) => crate::canvas::bytes_read(b, None).map(|b| b.into_owned()).unwrap_or_default(),
+        None => Vec::new(),
     };
+    link_verdict_of(scope, r, facts, source, &body, mode, destinations)
+}
+// …its body's bytes `body` (none asked for where the request has no integrity).
+fn link_verdict_of(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, body: &[u8], mode: &str, (module_destination, preload_destination): (&str, &str)) -> bool {
+    use crate::subresource_judge::{judge, Consumer, V_OK};
     let quirks = realm(scope, r.cid).document_mode(r.doc).0;
-    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination, preload_destination, integrity: &r.integrity, body: &body, mode, quirks };
+    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination, preload_destination, integrity: &r.integrity, body, mode, quirks };
     judge(&consumer, source, facts) & V_OK != 0
 }
 
@@ -779,5 +781,52 @@ pub(crate) fn run_preload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, 
     if let Some(plan) = r.el.and_then(|el| arena.link_preloads.get_mut(&el)).filter(|p| p.id == id && id != 0) {
         plan.got = Some(ok);
     }
+    Ok(ok)
+}
+
+// …a style sheet's (`linkObtain`): the one its owner obtains — the preload its request takes, the controlling service
+// worker's answer, the asset cache's (sheet_fetch.rs, the cascade's and `.sheet`'s readers sharing each), else the
+// network's — judged as the link's (`link_verdict`: a style sheet's type), its entry filed but a preload's (the
+// preload's alone).
+fn link_sheet(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<bool, Terminated> {
+    use crate::subresource_judge::{facts_of, SRC_ASSET, SRC_NETWORK, SRC_SW_SYNC, S_NO_BODY};
+    let (Some(el), cid) = (r.el, r.cid) else { return Ok(false) };
+    let owner = crate::sheet_fetch::Owner { id: el, doc: r.doc };
+    if let Some(preloaded) = crate::sheet_fetch::owner_preload(scope, cid, host, owner, &r.url, r.plan)? {
+        let Some(resp) = preloaded else { return Ok(false) };
+        let body = if r.integrity.is_empty() { Vec::new() } else { resp.body().to_vec() };
+        return Ok(link_verdict_of(scope, r, &resp.facts(), SRC_NETWORK, &body, "no-cors", ("", "")));
+    }
+    if let Some(answer) = crate::sheet_fetch::worker_answer(scope, cid, host, &r.url, r.plan, &r.integrity, None, Some(owner))? {
+        let local = v8::Local::new(scope, &answer);
+        let obj = v8::Local::<v8::Object>::try_from(local).ok();
+        let no_body = if obj.and_then(|a| member(scope, a, "body")).is_none() { S_NO_BODY } else { 0 };
+        let bytes = obj.and_then(|a| member(scope, a, "body_bytes").or_else(|| member(scope, a, "body")));
+        let facts = facts_of(scope, obj, r.kind & 0xff, SRC_SW_SYNC);
+        let ok = link_verdict(scope, r, &facts, SRC_SW_SYNC | no_body, bytes, "no-cors", ("", ""));
+        file(scope, host, r, Answered::Worker(answer))?;
+        return Ok(ok);
+    }
+    if crate::fetch_rules::fetch_route(&r.url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
+        return link_from_network(scope, host, r, "");
+    }
+    let Some(response) = crate::sheet_fetch::asset(scope, cid, host, &r.url, r.plan, Some(owner), None)? else {
+        file(scope, host, r, Answered::Network(None))?;
+        return Ok(false);
+    };
+    let local = v8::Local::new(scope, &response);
+    let array = v8::Local::<v8::Array>::try_from(local).ok();
+    let mut at = [None; 3];
+    if let Some(g) = array {
+        for (k, slot) in at.iter_mut().enumerate() {
+            *slot = g.get_index(scope, k as u32).filter(|v| !v.is_null_or_undefined());
+        }
+    }
+    let [body, meta, bytes] = at;
+    let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
+    let facts = facts_of(scope, meta, r.kind & 0xff, SRC_ASSET);
+    let no_body = if body.is_none() { S_NO_BODY } else { 0 };
+    let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", ("", ""));
+    file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))))?;
     Ok(ok)
 }
