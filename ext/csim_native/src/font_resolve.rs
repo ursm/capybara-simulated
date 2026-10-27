@@ -13,11 +13,12 @@ use crate::font_files::{face_file, Terminated};
 // system face's).
 pub(crate) type Resolved = (i32, [Option<f64>; 3]);
 
-// What the page side does for the engine: `fetch(kind, value, bucket, referrer)` a source's file (font_files.rs),
+// What the page side does for the engine: `subresources(step, …)` a source's file fetched or looked up (font_files.rs,
+// subresource-host.js),
 // `settle(index, ok)` the document's face `index` once its file is known, `system(family, bucket)` the file fontconfig
 // resolves a family's system face to (null for none).
 struct Host<'s> {
-    fetch: v8::Local<'s, v8::Function>,
+    subresources: v8::Local<'s, v8::Function>,
     settle: v8::Local<'s, v8::Function>,
     system: v8::Local<'s, v8::Function>,
 }
@@ -36,7 +37,7 @@ fn indexed_file(scope: &mut v8::PinScope<'_, '_>, cid: i32, index: usize, host: 
         return Ok(known.clone());
     }
     let Some(face) = arena.font_faces.get(index).cloned() else { return Ok(None) };
-    let file = face_file(scope, cid, face.file.as_deref(), &face.sources, face.local_style(), face.referrer.as_deref(), host.fetch)?;
+    let file = face_file(scope, cid, face.file.as_deref(), &face.sources, face.local_style(), face.referrer.as_deref(), host.subresources)?;
     let files = &mut realm(scope, cid).face_files;
     if files.len() <= index {
         files.resize(index + 1, None);
@@ -139,10 +140,10 @@ fn stack_handle(faces: &[crate::font_faces::FaceRecord], own: Option<usize>, can
 // The functions of the page side's `Host`, from `args` at `at`, …
 fn host<'s>(args: &v8::FunctionCallbackArguments<'s>, at: i32) -> Option<Host<'s>> {
     let f = |k: i32| v8::Local::<v8::Function>::try_from(args.get(at + k)).ok();
-    Some(Host { fetch: f(0)?, settle: f(1)?, system: f(2)? })
+    Some(Host { subresources: f(0)?, settle: f(1)?, system: f(2)? })
 }
 
-// __dom.fontFamilyFace(family, bucket, fetch, settle, system) -> `[handle, ascentOverride, descentOverride,
+// __dom.fontFamilyFace(family, bucket, subresources, settle, system) -> `[handle, ascentOverride, descentOverride,
 // lineGapOverride]` of the face `family` takes at `bucket` (`family_face`), NaN for an override it has none of.
 fn font_family_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 2) else { return };
@@ -154,7 +155,7 @@ fn font_family_face(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.fontFamilyHandle(family, bucket, fetch, settle, system) -> the handle alone (what a canvas's text op shapes
+// __dom.fontFamilyHandle(family, bucket, subresources, settle, system) -> the handle alone (what a canvas's text op shapes
 // with, asked on every one).
 fn font_family_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 2) else { return };
@@ -165,7 +166,7 @@ fn font_family_handle(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     }
 }
 
-// __dom.fontFaceFile(index, fetch, settle, system) -> the file the document's face `index` is read from (`indexed_file`),
+// __dom.fontFaceFile(index, subresources, settle, system) -> the file the document's face `index` is read from (`indexed_file`),
 // or null where it has none native reads.
 fn font_face_file(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(host) = host(&args, 1) else { return rv.set_null() };

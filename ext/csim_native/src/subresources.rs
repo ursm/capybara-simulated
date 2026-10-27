@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use web_atoms::ns;
 
-use crate::dom::{nid_arg, NodeId, NodeKind, RealmArena};
+use crate::dom::{NodeId, NodeKind, RealmArena};
 
 // The resources `timed_resources` handed out for the page, by initiator and URL — and the images
 // and `@import`s whose entries it filed (resource_timing.rs `filed_once`: "img", "css"), as its memory cache serves them

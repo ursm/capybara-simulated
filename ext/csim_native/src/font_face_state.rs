@@ -363,17 +363,17 @@ fn sources_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     rv.set(list.into());
 }
 
-// __dom.ffFile(state, fetch) -> the file the face is read from, or null where it has none native reads: a buffer face's
+// __dom.ffFile(state, subresources) -> the file the face is read from, or null where it has none native reads: a buffer face's
 // own, else the first of its sources, in order, that gives one (font_files.rs `face_file`) — what `load()` loads.
 fn file_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(face), Ok(fetch)) = (face(scope, args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1))) else { return rv.set_null() };
+    let (Some(face), Ok(subresources)) = (face(scope, args.get(0)), v8::Local::<v8::Function>::try_from(args.get(1))) else { return rv.set_null() };
     let (file, sources, bucket, referrer) = {
         let mut f = face.borrow_mut();
         let bucket = f.record().local_style();
         (f.file.clone(), f.sources.clone().unwrap_or_default(), bucket, f.referrer.clone())
     };
     let cid = crate::dom::realm_id(scope, &args);
-    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, referrer.as_deref(), fetch);
+    let file = crate::font_files::face_file(scope, cid, file.as_deref(), &sources, bucket, referrer.as_deref(), subresources);
     crate::font_files::answer_file(scope, &mut rv, file);
 }
 

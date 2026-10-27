@@ -45,6 +45,21 @@ impl Key {
         self.doc
     }
 }
+impl Response {
+    // The facts its consumer's verdict is made of (subresource_judge.rs `judge`), and its body.
+    pub(crate) fn facts(&self) -> crate::subresource_judge::Facts {
+        crate::subresource_judge::Facts {
+            response_type: self.kind.clone(),
+            redirected: self.redirected,
+            status: Some(self.status),
+            tainted: self.tainted,
+            ..Default::default()
+        }
+    }
+    pub(crate) fn into_body(self) -> Vec<u8> {
+        self.body
+    }
+}
 
 impl RealmArena {
     // The preload's entry committed to its document's map, one of the same key replaced.

@@ -12,24 +12,24 @@ use crate::font_faces::FaceSource;
 #[derive(Default)]
 pub(crate) struct FontFiles(HashMap<(u32, String), Option<String>>);
 
-// A source's kind, by number (font-metrics.js names them).
+// A source's kind, by number, as its file is kept by.
 pub(crate) const URL: u32 = 0;
-pub(crate) const LOCAL: u32 = 1;
+const LOCAL: u32 = 1;
 
 // The script was terminated while the page side was asked: nothing it answered is kept.
 pub(crate) struct Terminated;
 
-// The file a source gives that native reads (`font::register_path`, which keeps what it parsed), or none: asked of the
-// page side's `fetch(kind, value, bucket, referrer)` — a download, requested with the face's `referrer` where it has one
-// (a rule's: `FaceRecord::referrer`), or the font installed under a `local()` name at the weight / style `bucket` — once
-// per source per realm, which a relayout asks again of no one. A `fetch` that throws gave none.
+// The file a source gives that native reads (`font::register_path`, which keeps what it parsed), or none — a download
+// (subresource_obtain.rs `font_file`), requested with the face's `referrer` where it has one (a rule's:
+// `FaceRecord::referrer`), or the font installed under a `local()` name at the weight / style `bucket`, which the page
+// side's `host` names (subresource-host.js) — once per source per realm, which a relayout asks again of no one.
 fn source_file(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
     source: &FaceSource,
     bucket: &str,
     referrer: Option<&str>,
-    fetch: v8::Local<'_, v8::Function>,
+    host: v8::Local<'_, v8::Function>,
 ) -> Result<Option<String>, Terminated> {
     let (kind, value) = match source {
         FaceSource::Url(url) => (URL, url.as_str()),
@@ -40,20 +40,15 @@ fn source_file(
     let path = match known {
         Some(path) => path,
         None => {
-            let (Some(v), Some(b)) = (v8::String::new(scope, value), v8::String::new(scope, bucket)) else { return Ok(None) };
-            let r = match referrer.and_then(|r| v8::String::new(scope, r)) {
-                Some(r) => r.into(),
-                None => v8::null(scope).into(),
+            let got = match source {
+                FaceSource::Url(url) => crate::subresource_obtain::font_file(scope, cid, url, referrer, host)?,
+                FaceSource::Local(name) => {
+                    let (Some(v), Some(b)) = (v8::String::new(scope, name), v8::String::new(scope, bucket)) else { return Ok(None) };
+                    let got = crate::subresource_obtain::call(scope, host, crate::subresource_obtain::H_LOCAL_FONT, &[v.into(), b.into()])?;
+                    got.map(|g| v8::Local::new(scope, g)).filter(|g| g.is_string()).map(|g| g.to_rust_string_lossy(scope))
+                }
             };
-            let args = [v8::Integer::new_from_unsigned(scope, kind).into(), v.into(), b.into(), r];
-            let undefined = v8::undefined(scope).into();
-            v8::tc_scope!(let tc, scope);
-            let got = fetch.call(tc, undefined, &args);
-            if tc.has_terminated() {
-                return Err(Terminated);
-            }
-            let got = got.filter(|v| v.is_string()).map(|v| v.to_rust_string_lossy(tc));
-            realm(tc, cid).font_files.0.insert(key, got.clone());
+            realm(scope, cid).font_files.0.insert(key, got.clone());
             got
         }
     };
@@ -69,13 +64,13 @@ pub(crate) fn face_file(
     sources: &[FaceSource],
     bucket: &str,
     referrer: Option<&str>,
-    fetch: v8::Local<'_, v8::Function>,
+    host: v8::Local<'_, v8::Function>,
 ) -> Result<Option<String>, Terminated> {
     if let Some(file) = file {
         return Ok(Some(file.to_owned()).filter(|p| crate::font::register_path(p) >= 0));
     }
     for source in sources {
-        if let Some(path) = source_file(scope, cid, source, bucket, referrer, fetch)? {
+        if let Some(path) = source_file(scope, cid, source, bucket, referrer, host)? {
             return Ok(Some(path));
         }
     }

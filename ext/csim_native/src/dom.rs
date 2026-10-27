@@ -1410,7 +1410,7 @@ impl RealmArena {
         self.dialog_requests.retain(|id, _| live(slots, id));
         self.media.retain(|id, _| live(slots, id));
         self.preloads.retain(|key, _| live(slots, &key.doc()));
-        self.obtains.retain(|_, request| live(slots, &request.doc()));
+        self.obtains.retain(|_, request| request.doc().is_some_and(|doc| live(slots, &doc)));
         self.video_frames.retain(|id, _| live(slots, id));
         self.images.retain(|id, _| live(slots, id));
         self.close_watcher_order.retain(|id, _| live(slots, id));
