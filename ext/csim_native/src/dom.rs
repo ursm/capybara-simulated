@@ -793,11 +793,11 @@ pub(crate) struct Generations {
 }
 // …the sequence of the last change a layout has to see; how many subtree-wide layout marks there were (a diagnostic);
 // the settle generation (every observable change); the tree's (that and every parser change); the nodes' (that but a
-// text's data); the style state's (a state no other moves); the
-// rule set's (the cascade made of other sheets — the bindings' `cascadeVersion`, cascade.js); the scroll's (a scroll
-// offset moved, or a scroll into view asked for, which moves every rendered box and no other generation). And beside
-// them a word of flags rather than a count: the observations the realm owes at its next rendering update
-// (`OBSERVATIONS_*`, observers.js), which keep its event loop stepping (timers.rs `realmPending`).
+// text's data); the style state's (a state no other moves); the rule set's (the cascade made of other sheets — the
+// bindings' `cascadeVersion`, cascade.js); the scroll's (a scroll offset moved, or a scroll into view asked for, which
+// moves every rendered box and no other generation). And beside them a word of flags rather than a count: the
+// observations the realm owes at its next rendering update (`OBSERVATIONS_*`, observers.js), which keep its event loop
+// stepping (timers.rs `realmPending`).
 pub(crate) const GEN_DIRTY: usize = 0;
 pub(crate) const GEN_SUBTREE_MARKS: usize = 1;
 pub(crate) const GEN_SETTLE: usize = 2;
