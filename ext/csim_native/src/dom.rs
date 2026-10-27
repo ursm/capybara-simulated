@@ -1920,9 +1920,21 @@ impl RealmArena {
     // which the diagnostics count (`__csimSubtreeMarks`). Each in the realm whose tree the node is in, whose memos of it
     // key on its generations (a node another realm's code writes: an adopted one).
     pub(crate) fn note_shown_changed(&mut self, subtrees: u32) {
+        self.mark_shown(subtrees);
+        self.note_state_changed();
+    }
+    // …the marks alone, for a change no settle follows: what an animation's set moved.
+    pub(crate) fn mark_shown(&self, subtrees: u32) {
         self.generations.bump_by(GEN_SUBTREE_MARKS, subtrees);
         self.generations.bump(GEN_DIRTY);
-        self.note_state_changed();
+    }
+    // …those of `retargeted`, the elements whose animations' properties a style flush changed (a CSS animation made or
+    // let go, an effect moved): each one in a tree a document roots — its own or a shadow tree of it — with its subtree.
+    fn mark_retargeted(&self, retargeted: &[NodeId]) {
+        let shown = retargeted.iter().filter(|&&n| self.get(self.shadow_including_root(n)).is_some_and(|r| r.kind == NodeKind::Document)).count();
+        if shown > 0 {
+            self.mark_shown(shown as u32);
+        }
     }
 
     // `id`'s state bits become `bits`. The realm's focused and hovered element is whichever carries that bit last.
@@ -5727,15 +5739,14 @@ pub(crate) fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: 
     true
 }
 
-// __dom.styleFlush() -> [nid, …] | undefined: a style flush at the realm's clock — what a forced
-// `getComputedStyle` or layout read is in a browser: the style engine's animations move to it and the document is
-// styled, starting the animations and transitions a change since the last one owes. The events wait for the rendering
-// update (`styleTakeAnimationEvents`);
-// what comes back is the elements whose animations' properties changed since the JS side was last told, if any.
+// __dom.styleFlush(): a style flush at the realm's clock — what a forced `getComputedStyle` or layout read is in a
+// browser: the style engine's animations move to it and the document is styled, starting the animations and
+// transitions a change since the last one owes, and the elements whose animations' properties changed marked
+// (`mark_retargeted`). The events wait for the rendering update (`styleTakeAnimationEvents`).
 fn style_flush(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let cid = realm_id(scope, &args);
     style_op(scope, cid, |scope| {
@@ -5749,16 +5760,13 @@ fn style_flush(
         if engine.reconcile_animated(arena, &retargeted) {
             arena.generations.bump(GEN_CASCADE);
         }
-        if threw_verify_failures(scope, failures) || retargeted.is_empty() {
-            return;
-        }
-        let items: Vec<v8::Local<v8::Value>> = retargeted.iter().map(|n| v8::Number::new(scope, n.to_f64()).into()).collect();
-        rv.set(v8::Array::new_with_elements(scope, &items).into());
+        arena.mark_retargeted(&retargeted);
+        threw_verify_failures(scope, failures);
     });
 }
 
-// __dom.styleTick() -> [nid, …]: a rendering update at the realm's clock: the Web Animations' frame, then a style flush —
-// the elements whose animations' properties changed, as `styleFlush` gives them. The events the update owes stay
+// __dom.styleTick(): a rendering update at the realm's clock: the Web Animations' frame, then a style flush — the
+// elements whose animations' properties changed marked, as `styleFlush` marks them. The events the update owes stay
 // queued for `styleTakeAnimationEvents`.
 fn style_tick(
     scope: &mut v8::PinScope<'_, '_>,
@@ -5771,7 +5779,7 @@ fn style_tick(
 fn style_tick_unguarded(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
     let now = realm_clock(scope, &args);
     let cid = realm_id(scope, &args);
@@ -5788,11 +5796,8 @@ fn style_tick_unguarded(
     if engine.reconcile_animated(arena, &retargeted) {
         arena.generations.bump(GEN_CASCADE);
     }
-    if threw_verify_failures(scope, failures) {
-        return;
-    }
-    let items: Vec<v8::Local<v8::Value>> = retargeted.iter().map(|n| v8::Number::new(scope, n.to_f64()).into()).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    arena.mark_retargeted(&retargeted);
+    threw_verify_failures(scope, failures);
 }
 
 // __dom.styleTakeAnimationEvents() -> [type, target, pseudo, name, time, animation, timelineTime, …]: the document's

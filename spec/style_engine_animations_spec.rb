@@ -659,23 +659,24 @@ RSpec.describe 'style engine animations' do
   end
 
   # A restyle that leaves an element's animations as they were — a `color` change, which its keyframes are computed
-  # again for — tells the JS side nothing: what it caches of every element stays (the report is what a CSS animation
-  # made or let go, or new keyframes, owe).
-  it 'reports no change of animated properties for a restyle that leaves the animations' do
+  # again for — marks nothing: what is cached of every element stays (the marks are what a CSS animation made or let
+  # go, or new keyframes, owe — the flush's own, dom.rs `mark_retargeted`).
+  it 'marks no change of animated properties for a restyle that leaves the animations' do
     s = page('<div id="a" style="animation: fade 100s linear"></div>')
     read = s.evaluate_script(<<~JS)
       (() => {
         const a = document.getElementById('a');
+        const flushMarks = () => { const m = __csimSubtreeMarks(); __dom.styleFlush(); return __csimSubtreeMarks() - m; };
         getComputedStyle(a).marginLeft;
-        const before = __dom.styleFlush();
+        const before = flushMarks();
         a.style.color = 'red';
-        const color = __dom.styleFlush();
+        const color = flushMarks();
         a.style.animationName = 'widen';
-        const renamed = __dom.styleFlush();
-        return [before ?? null, color ?? null, (renamed || []).length];
+        const renamed = flushMarks();
+        return [before, color, renamed];
       })()
     JS
-    expect(read).to eq([nil, nil, 1])
+    expect(read).to eq([0, 0, 1])
   end
 
   # `display` in `@keyframes` animates (css-display-4), holding the value that is not `none` between the ends.
