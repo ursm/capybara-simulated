@@ -1028,8 +1028,13 @@ fn set_prompting(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(-1);
     let cid = realm_id(scope, &args);
-    let nav = &crate::dom::realm(scope, cid).navigables;
-    rv.set_bool(nav.unloading.contains(&realm) || nav.prompting.contains(&realm));
+    rv.set_bool(crate::dom::realm(scope, cid).unloading(realm));
+}
+impl RealmArena {
+    // Whether realm `realm`'s document is being unloaded, or asked whether it may be: a navigation it makes then ignored.
+    pub(crate) fn unloading(&self, realm: i32) -> bool {
+        self.navigables.unloading.contains(&realm) || self.navigables.prompting.contains(&realm)
+    }
 }
 // __dom.ancestorUnloading(realm) -> whether an ancestor navigable's document is being unloaded now
 // (`RealmArena::ancestor_unloading`).
