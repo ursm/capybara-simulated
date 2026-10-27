@@ -59,8 +59,9 @@ pub(crate) struct Observers {
     // the agent's mutation observer microtask is queued, [2] whether observers are being notified, [3] whether anything
     // is pending — set as a realm becomes pending, cleared as the notification takes them all — which a change the
     // engine signaled a slot for asks the microtask to be queued by — and what of the bindings' a change the engine made
-    // asks for: [4] a rendering update's observations scheduled, [5] the document's cascade refreshed, [6] the cascade
-    // version moved (a shadow tree's sheet), [7] a `<style>` owed its `load` (sheet_owners.rs `takeStyleLoads`).
+    // asks for: [4] the document's cascade refreshed, [5] the cascade version moved (a shadow tree's sheet), [6] a
+    // `<style>` owed its `load` (sheet_owners.rs `takeStyleLoads`) — a rendering update's observations asked of the word
+    // of the realms asked (`observations_asked`).
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
@@ -78,20 +79,19 @@ pub(crate) struct Observers {
 const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 const PENDING: usize = 3;
-pub(crate) const OBSERVATIONS: usize = 4;
+pub(crate) const CASCADE_REFRESH: usize = 4;
+pub(crate) const CASCADE_VERSION: usize = 5;
+pub(crate) const STYLE_LOADS: usize = 6;
+const FLAGS: usize = 7;
 // (…the word of the realms asked their observations, where there are several of them)
 const ASKED_SEVERAL: u32 = u32::MAX;
-pub(crate) const CASCADE_REFRESH: usize = 5;
-pub(crate) const CASCADE_VERSION: usize = 6;
-pub(crate) const STYLE_LOADS: usize = 7;
-const FLAGS: usize = 8;
 
 impl Observers {
     // Whether any node has a registered observer: a change with none asks no more.
     pub(crate) fn observing(&self) -> bool {
         !self.lists.is_empty()
     }
-    // A change asks for one of the bindings' steps (`OBSERVATIONS`, `CASCADE_REFRESH`, `CASCADE_VERSION`).
+    // A change asks for one of the bindings' steps (`CASCADE_REFRESH`, `CASCADE_VERSION`, `STYLE_LOADS`).
     pub(crate) fn note(&self, flag: usize) {
         if let Some(flags) = &self.flags {
             flags[flag].set(1);
@@ -114,7 +114,6 @@ impl Observers {
                 self.observations_asked.set(ASKED_SEVERAL);
             },
         }
-        self.note(OBSERVATIONS);
     }
     // …the cascade of realm `cid` — the one whose tree changed — refreshed, or (`version`) its version moved.
     pub(crate) fn note_cascade(&mut self, cid: i32, version: bool) {
