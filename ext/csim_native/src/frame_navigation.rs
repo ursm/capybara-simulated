@@ -167,7 +167,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
-    crate::dom::register(scope, ns, "setFrameLoadedAt", set_frame_loaded_at, context_id);
+    crate::dom::register(scope, ns, "frameLoadFired", frame_load_fired, context_id);
     crate::dom::register(scope, ns, "planFrameNavigation", plan_frame_navigation, context_id);
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
@@ -444,12 +444,21 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     }
 }
 
-// __dom.setFrameLoadedAt(containerNid, time) — the element's `load` fires now.
-fn set_frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.frameLoadFired(containerNid, now, committed) — the element's `load` fires now, at `now` on the virtual clock
+// (what paces the next: `frameLoadBegin`) — outside `frameLoadDue`: the load its document's delayed own reached it with,
+// or (`committed`) the one of a navigation the host committed, a form's POST response, which is the navigation it
+// awaited completing and its load the once-per-navigation one.
+fn frame_load_fired(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let Some(at) = args.get(1).number_value(scope) else { return };
+    let committed = args.get(2).is_true();
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).frame_navigation(container).loaded_at = Some(at);
+    let arena = crate::dom::realm(scope, cid);
+    if committed {
+        arena.set_frame_nav(container, LOAD_FIRED, true);
+        arena.set_frame_nav(container, NAV_PENDING, false);
+    }
+    arena.frame_navigation(container).loaded_at = Some(at);
 }
 
 // __dom.frameNav(containerNid) -> the container's navigation flags.
@@ -749,8 +758,6 @@ impl RealmArena {
     }
 }
 
-// The URL a container's navigation goes to, as its attributes give it: the one the navigation under way started with,
-// else its `src` — none where it has none.
 // The container's `load` as its navigation's load event steps begin (`frameLoadBegin`): fired or queued already; at once,
 // inside the insertion that navigates it to about:blank; its document built first, on a load gate's task, then its load;
 // or its load as a task — paced, where its last `load` fired this instant, by a nested-timer clamp.
@@ -796,8 +803,7 @@ fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     if initial && arena.navigates_to_blank(container, doc) {
         return answer(scope, rv, LOAD_NOW, 0.0, generation);
     }
-    let frame = arena.get(container).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame"));
-    if !(buildable && frame && arena.builds_eagerly(container, doc, cid, all_hosts_local)) {
+    if !(buildable && arena.builds_eagerly(container, doc, cid, all_hosts_local)) {
         return answer(scope, rv, LOAD_TASK, delay, generation);
     }
     let held = arena.frame_navigations.0.get(&container).is_some_and(|n| n.contents[CONTENT_NAV].is_some());
@@ -843,6 +849,8 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set_uint32(DUE_FIRE);
 }
 
+// The URL a container's navigation goes to, as its attributes give it: the one the navigation under way started with,
+// else its `src` — none where it has none.
 fn navigated_src(nav: Option<&FrameNavigation>, node: &crate::dom::NodeData) -> Option<String> {
     match nav.and_then(|n| n.src.as_ref()) {
         Some(started) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
@@ -877,6 +885,14 @@ impl RealmArena {
     }
 }
 
+// The node document of a node object (its handle's), none for one of no handle.
+fn node_document(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    crate::node_handle::handle_of(scope, node)
+        // SAFETY: the handle lives while the object, an argument, does.
+        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
+        .and_then(|d| crate::node_handle::nid_of(scope, d.into()))
+}
+
 // __dom.frameBuildsEagerly(container, allHostsLocal) -> whether a frame container's document is built as it connects,
 // not when its `contentWindow` is first read: one a navigation carries a response for, a `srcdoc` one, and one whose URL
 // — the one its navigation started with, else its `src` — is a document of its own to run: a data:, blob: or
@@ -893,16 +909,13 @@ fn frame_builds_eagerly(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).builds_eagerly(container, doc, cid, all_hosts_local));
 }
-// The node document of a node object (its handle's), none for one of no handle.
-fn node_document(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>) -> Option<NodeId> {
-    crate::node_handle::handle_of(scope, node)
-        // SAFETY: the handle lives while the object, an argument, does.
-        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
-        .and_then(|d| crate::node_handle::nid_of(scope, d.into()))
-}
 impl RealmArena {
-    // …`frameBuildsEagerly` of the frame `container`, in `doc` (none for the root of its tree), of realm `cid`'s document.
+    // …`frameBuildsEagerly` of `container`, in `doc` (none for the root of its tree), of realm `cid`'s document: none of
+    // an element that is no HTML `<iframe>` or `<frame>`.
     fn builds_eagerly(&mut self, container: NodeId, doc: Option<NodeId>, cid: i32, all_hosts_local: bool) -> bool {
+        if !self.get(container).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame")) {
+            return false;
+        }
         let nav = self.frame_navigations.0.get(&container);
         if nav.is_some_and(|n| n.contents[CONTENT_NAV].is_some()) {
             return true;
