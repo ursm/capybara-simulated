@@ -32,11 +32,15 @@ RSpec.describe "an image's data applied" do
         window.seen = []; window.loaded = [];
         const t = document.getElementById('t'), im = document.getElementById('im');
         new IntersectionObserver((es) => es.forEach((e) => seen.push(e.isIntersecting))).observe(t);
-        im.onload = () => loaded.push(Math.round(t.getBoundingClientRect().top));
+        im.onload = () => {
+          loaded.push(Math.round(t.getBoundingClientRect().top));
+          document.body.append(Object.assign(document.createElement('p'), {id: 'loaded'}));
+        };
         setTimeout(() => { im.src = #{src}; t.getBoundingClientRect(); }, 30);
       JS
-      sleep 0.3
-      s.evaluate_script('1')
+      # (…its load waited for, not a wall-clock while: a host thread's fetch takes what it takes)
+      s.find('#loaded', visible: :all)
+      3.times { s.evaluate_script('1') }
       top = s.evaluate_script("Math.round(document.getElementById('t').getBoundingClientRect().top)")
       expect([s.evaluate_script('loaded'), top, s.evaluate_script('seen').last]).to eq([[3000], 3000, false])
     end
