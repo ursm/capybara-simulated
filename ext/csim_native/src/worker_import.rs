@@ -9,7 +9,8 @@
 use crate::dom::{realm, realm_id};
 use crate::font_files::Terminated;
 use crate::subresource_judge::{facts_of, judge, Consumer, J_WORKER_IMPORT, SRC_NETWORK, SRC_SCHEME, V_CROSS_ORIGIN, V_OK};
-use crate::subresource_obtain::{call, member, text, H_IMPORT_NETWORK, H_SW_IMPORT, H_SW_NOTE_IMPORT};
+use crate::dom::member;
+use crate::subresource_obtain::{call, text, H_IMPORT_NETWORK, H_SW_IMPORT, H_SW_NOTE_IMPORT};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "workerImport", worker_import_op, context_id);

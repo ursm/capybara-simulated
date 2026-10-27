@@ -9,7 +9,7 @@
 // (`obtainResume`) — a `blob:` URL's bytes, the network's answer, a font file made of bytes or named by `local()`, and
 // the filing of an entry.
 
-use crate::dom::{realm, realm_id, register, NodeId};
+use crate::dom::{member, realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
 use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_EMBED, J_TIMED};
 
@@ -140,10 +140,6 @@ pub(crate) fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, s: Option<&str>
         Some(s) => text(scope, s),
         None => v8::null(scope).into(),
     }
-}
-pub(crate) fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
-    let k = v8::String::new(scope, k)?;
-    obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
 
 // "Consume a preloaded resource" for `request`: the response the preload of it had, None for a network error — its

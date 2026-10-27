@@ -231,14 +231,15 @@ const APPLIED_ERROR: u32 = 2;
 // draws, and the space drawImage converts from — and its natural size, `natural` (`[width, height, viewBoxWidth,
 // viewBoxHeight]`), none for a broken one.
 fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    use crate::subresource_obtain::member;
+    use crate::dom::member;
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(APPLIED_NONE) };
     let load = args.get(1).uint32_value(scope).unwrap_or(0);
     let r = v8::Local::<v8::Object>::try_from(args.get(2)).ok();
     fn field<'s>(scope: &mut v8::PinScope<'s, '_>, r: Option<v8::Local<'_, v8::Object>>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
         r.and_then(|r| member(scope, r, k))
     }
-    let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| field(scope, r, k).is_some_and(|v| v.is_true());
+    // (…a flag by its truthiness, as the record's producers' JS reads it)
+    let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| field(scope, r, k).is_some_and(|v| v.boolean_value(scope));
     let number = |scope: &mut v8::PinScope<'_, '_>, k: &str| field(scope, r, k).and_then(|v| v.uint32_value(scope)).unwrap_or(0);
     let pixels = field(scope, r, "pixels");
     let result = if r.is_none() || flag(scope, "broken") || flag(scope, "unsupported") {

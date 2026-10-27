@@ -2649,6 +2649,12 @@ pub(crate) fn realm<'s>(scope: &'s mut v8::PinScope<'_, '_>, cid: i32) -> &'s mu
     dom(scope).arena.enter(cid)
 }
 
+// A bindings' record's member `k` — none for null or undefined, nor where reading it threw.
+pub(crate) fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
+    let k = v8::String::new(scope, k)?;
+    obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
+}
+
 // Nodes the engine answers with, to the page side: their objects, which their handles hold from their making
 // (node_handle.rs) — `null` for one whose object V8 dropped (none is yet: node_handle.rs says why).
 pub(crate) fn nodes_value<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, ids: &[NodeId]) -> v8::Local<'s, v8::Value> {
@@ -3736,7 +3742,8 @@ impl NaturalSize {
     }
 }
 
-// An `<img>`'s decoded image's natural size (`NaturalSize`, image_requests.rs `imageApply`) — or none: nothing decoded.
+// An `<img>`'s or a plugin's decoded image's natural size (`NaturalSize`: image_requests.rs `imageApply`,
+// `apply_decoded`; subresource_obtain.rs `processPlugin`) — or none: nothing decoded.
 impl RealmArena {
     // …element `id`'s, a dimension of no finite size none, nor a view box of no positive one.
     pub(crate) fn set_natural_size(&mut self, id: NodeId, natural: Option<NaturalSize>) {

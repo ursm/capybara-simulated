@@ -9,7 +9,8 @@
 use crate::dom::{realm, realm_id, NodeId};
 use crate::font_files::Terminated;
 use crate::frame_navigation::{Content, FrameSource, COMMIT_PENDING, DEFERRED_SW, LOAD_FIRED};
-use crate::subresource_obtain::{call, member, now, text, text_or_null, H_FILE, H_FRAME_NAVIGATION, H_LOAD_BLOCKER_SETTLED};
+use crate::dom::member;
+use crate::subresource_obtain::{call, now, text, text_or_null, H_FILE, H_FRAME_NAVIGATION, H_LOAD_BLOCKER_SETTLED};
 
 // What a build makes of the response (`frameResponse`'s first item): the document it answers; none yet, its navigation
 // parked on a service worker still activating; none at all, a response that makes no document leaving the frame at the
