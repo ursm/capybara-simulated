@@ -743,6 +743,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
     crate::dom::register(scope, ns, "keywordNavigable", keyword_navigable, context_id);
+    crate::dom::register(scope, ns, "hyperlinkRoute", hyperlink_route, context_id);
     crate::dom::register(scope, ns, "navigationAllowed", navigation_allowed, context_id);
     crate::dom::register(scope, ns, "downloadAllowed", download_allowed, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
@@ -889,6 +890,34 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let keyword = args.get(0).uint32_value(scope).unwrap_or(TARGET_TOP);
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
+}
+// What a hyperlink followed in a frame's or a window's realm routes through (`hyperlinkRoute`): none of its own — the
+// top-level page's link, whose own navigation its caller takes — a new auxiliary window the host opens (a name, or
+// `_blank`: the frame's VM not rebuilt, a fresh window), or the navigable a keyword chooses, navigated by this document.
+const LINK_UNROUTED: u32 = 0;
+const LINK_AUXILIARY: u32 = 1;
+const LINK_NAVIGATE: u32 = 2;
+// __dom.hyperlinkRoute(target, auxiliaryOpens) -> `[LINK_*, realm]` of a hyperlink followed in the calling realm with
+// the target `target`: a name or `_blank` from a frame or a window `window.open` made an auxiliary window, where the
+// host opens one (`auxiliaryOpens`); `_self` from either its own realm's navigable; `_top` or `_parent` from a frame
+// the one `keyword_navigable` chooses — -1 where its sandbox lets it navigate none, the link then going nowhere.
+fn hyperlink_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = args.get(0).to_rust_string_lossy(scope);
+    let auxiliary_opens = args.get(1).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let nested = arena.live_container(cid).is_some();
+    let window = arena.realm_state(cid).is_some_and(|s| s.identity.is_window());
+    let (route, realm) = match target_keyword(&target) {
+        TARGET_NAME | TARGET_BLANK if (nested || window) && auxiliary_opens => (LINK_AUXILIARY, -1),
+        TARGET_NAME | TARGET_BLANK => (LINK_UNROUTED, -1),
+        TARGET_SELF if nested || window => (LINK_NAVIGATE, cid),
+        TARGET_SELF => (LINK_UNROUTED, -1),
+        keyword if nested => (LINK_NAVIGATE, arena.keyword_navigable(cid, keyword).unwrap_or(-1)),
+        _ => (LINK_UNROUTED, -1),
+    };
+    let items = [v8::Integer::new_from_unsigned(scope, route).into(), v8::Integer::new(scope, realm).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.navigationAllowed(target) -> whether this realm's document may navigate realm `target`'s navigable
 // (`RealmArena::navigation_allowed`) — none it may that names no realm.

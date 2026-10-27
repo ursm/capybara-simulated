@@ -20,6 +20,10 @@ impl RealmIdentity {
     pub(crate) fn worker_handle(&self) -> u32 {
         self.worker_handle
     }
+    // (…whether it is a window `window.open` made, the host's window key its)
+    pub(crate) fn is_window(&self) -> bool {
+        self.window_key.is_some()
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
