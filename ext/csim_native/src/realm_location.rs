@@ -390,11 +390,14 @@ fn location_part(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(text.into());
 }
 
-// __dom.setLocationURL(href) — the realm's URL is `href` (`RealmLocation::set_url`).
+// __dom.setLocationURL(href) — the realm's URL is `href` (`RealmLocation::set_url`): an observable change.
 fn set_location_url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let href = args.get(0).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    realm(scope, cid).location.set_url(&href);
+    let arena = realm(scope, cid);
+    arena.location.set_url(&href);
+    // (…a URL change observable progress: the settle generation moves on it as on a DOM mutation)
+    arena.note_state_changed();
 }
 
 // __dom.setLocationOrigin(origin) — the origin the realm's location reports, that of its document's opaque URL (null:

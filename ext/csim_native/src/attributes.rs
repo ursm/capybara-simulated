@@ -409,7 +409,16 @@ fn attr_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     // reaches what is measured inside it too — moved in the realm whose tree it is in, and the change observable there and
     // in the calling realm, whose memos of that tree key on its own generations: a script's write, not one a step of the
     // engine's makes inside it — a type change's value, a parser's details closed — which the change around it covers)
-    realm(scope, cid).note_shown_changed(1);
+    // …and a `<picture>`'s `<source>` that selects or sizes its images each sibling `<img>`'s box, which its dimension
+    // attributes map onto (`STEP_PICTURE`).
+    let arena = realm(scope, cid);
+    let images = if steps & STEP_PICTURE != 0 {
+        let siblings = arena.parent_of(id).and_then(|p| arena.get(p)).map_or(&[][..], |p| &p.children[..]);
+        siblings.iter().filter(|&&s| arena.get(s).is_some_and(|n| n.is_html_named("img"))).count() as u32
+    } else {
+        0
+    };
+    arena.note_shown_changed(1 + images);
     if caller != cid {
         realm(scope, caller).note_state_changed();
     }
