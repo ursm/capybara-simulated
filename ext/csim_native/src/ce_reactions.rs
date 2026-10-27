@@ -915,6 +915,10 @@ fn reset_form_state(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: NodeId, elem
     }
     let next = (if owner_changed { owner } else { told_owner }, if disabled_changed { disabled } else { told_disabled });
     dom(scope).arena.ce_reactions.form_states.insert(id, next);
+    // (…a new owner what its form's live `elements` and named getter hold: an observable change, no tree's)
+    if owner_changed {
+        realm(scope, cid).note_state_changed();
+    }
     let element = v8::Global::new(scope, element);
     let mut queue = false;
     if owner_changed {
