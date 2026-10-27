@@ -5,7 +5,7 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
 # An image a controlling service worker answers loads from its response's bytes — a network response passed on, and one
-# whose body is a stream the worker made (its chunks drained, then decoded).
+# whose body is a stream the worker made (its chunks drained, then decoded) — its request carrying an image's `Accept`.
 RSpec.describe 'a service worker image' do
   include PollUntil
 
@@ -20,6 +20,10 @@ RSpec.describe 'a service worker image' do
         }), {headers: {'content-type': 'image/png'}})));
       } else if (path.endsWith('/buffered.png')) {
         e.respondWith(fetch('/real.png'));
+      } else if (path.endsWith('/accept.png')) {
+        // (…the image only where its request carries an image's Accept: Fetch "fetch" step 12)
+        const accept = e.request.headers.get('accept');
+        e.respondWith(accept === 'image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5' ? fetch('/real.png') : new Response(accept, {status: 400}));
       }
     });
   JS
@@ -86,7 +90,7 @@ RSpec.describe 'a service worker image' do
         frame.src = '/scope/page.html';
         frame.onload = async () => {
           const doc = frame.contentDocument, out = {};
-          for (const name of ['buffered', 'streamed']) {
+          for (const name of ['buffered', 'streamed', 'accept']) {
             out[name] = await new Promise((res) => {
               const img = doc.createElement('img');
               img.onload = () => res('load ' + img.naturalWidth);
@@ -99,6 +103,6 @@ RSpec.describe 'a service worker image' do
         };
       });
     JS
-    expect(poll_until { session.evaluate_script('window.got') }).to eq('buffered' => 'load 100', 'streamed' => 'load 100')
+    expect(poll_until { session.evaluate_script('window.got') }).to eq('buffered' => 'load 100', 'streamed' => 'load 100', 'accept' => 'load 100')
   end
 end

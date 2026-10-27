@@ -299,6 +299,9 @@ fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>,
     args.push(v8::Integer::new_from_unsigned(scope, token).into());
     let integrity = text(scope, &r.integrity);
     args.push(integrity);
+    // (…its `Accept` its destination's, as Fetch gives a request of none: what a worker negotiating a format reads)
+    let accept = text(scope, crate::fetch_rules::default_accept(destination(r.plan)));
+    args.push(accept);
     // (…kept before the event is dispatched: a worker that is gone answers at once, letting the request through)
     realm(scope, cid).obtains.insert(token, r);
     if call(scope, host, H_SW_DISPATCH, &args)?.is_some_and(|d| v8::Local::new(scope, d).is_true()) {
@@ -307,9 +310,10 @@ fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>,
     Ok(realm(scope, cid).obtains.remove(&token))
 }
 
-// __dom.obtainResume(token, answer, redirected, host): a service worker's `fetch` event's answer to the request `token`
-// named (`fetch_timed`) — `answer` its facts as an entry reads them (sw-client.js `workerAnswerFacts`, `{blocked}` for a
-// network error), `redirected` whether the response it answered with says it was — or null where it let the request
+// __dom.obtainResume(token, answer, redirected, render, host): a service worker's `fetch` event's answer to the request
+// `token` named (`fetch_timed`'s, a link's, an image's) — `answer` its facts as an entry reads them (sw-client.js
+// `workerAnswerFacts`, `{blocked}` for a network error), `redirected` whether the response it answered with says it was,
+// `render` an opaque one's bytes, which an image paints though no script reads them — or null where it let the request
 // through, which the network answers then: the request as it was made, whatever its element is now. An answer Fetch
 // "HTTP fetch" step 5.5 does not let answer it is a network error.
 fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1099,13 +1103,13 @@ fn image_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         crate::image_requests::apply_decoded(scope, el, load, decoded, verdict & V_CROSS_ORIGIN != 0);
         return rv.set_uint32(if broken { IMAGE_FETCH_BROKEN } else { IMAGE_FETCH_LOADED });
     }
-    let Ok(started) = now(scope, host) else { return };
-    let r = Request { cid, kind: J_IMAGE, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load, initiator: "img", started };
     let Ok(ctrl) = call(scope, host, H_CONTROLLER, &[]) else { return };
     let ctrl = ctrl.and_then(|c| v8::Local::new(scope, c).uint32_value(scope)).unwrap_or(0);
-    if ctrl == 0 || crate::fetch_rules::fetch_route(&r.url, crate::fetch_rules::FETCH_CONTROLLED, "") != crate::fetch_rules::ROUTE_SERVICE_WORKER {
+    if ctrl == 0 || crate::fetch_rules::fetch_route(&url, crate::fetch_rules::FETCH_CONTROLLED, "") != crate::fetch_rules::ROUTE_SERVICE_WORKER {
         return;
     }
+    let Ok(started) = now(scope, host) else { return };
+    let r = Request { cid, kind: J_IMAGE, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity: String::new(), preload: None, load, initiator: "img", started };
     // (…the request pending: the image data discarded until the worker answers — an observable window, as a browser's)
     let arena = realm(scope, cid);
     arena.set_image_pending(el);
