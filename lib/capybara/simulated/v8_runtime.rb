@@ -1927,7 +1927,7 @@ module Capybara
         c.attach('__csim_swMatchClients', ->(include_uncontrolled, type) { sw_hooks[:match_clients].call(include_uncontrolled, type) }) if sw_hooks[:match_clients]
         c.attach('__csim_swSkipWaitingRequest', ->             { sw_hooks[:skip_waiting]&.call; nil }) if sw_hooks[:skip_waiting]
         c.attach('__csim_swNoteRouterRules',    ->             { sw_hooks[:router]&.call; nil }) if sw_hooks[:router]
-        c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, method) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method); nil }) if sw_hooks[:race_network]
+        c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, method, accept) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method, accept); nil }) if sw_hooks[:race_network]
         c.attach('__csim_swUnregisterRequest',  ->             { sw_hooks[:unregister]&.call; nil }) if sw_hooks[:unregister]
         c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
         c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id); nil }) if sw_hooks[:fetch_respond]

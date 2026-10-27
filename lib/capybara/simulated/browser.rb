@@ -3838,9 +3838,9 @@ module Capybara
       # `realm` — requests it, as the engine's `plan` of it says (`request_of_plan`): `rack_fetch`'s answer — a CORS
       # request where its `crossorigin` makes it one.
       def subresource_fetch(url, realm, plan)
-        mode, credentials, policy, dest = request_of_plan(plan)
+        mode, credentials, policy, dest, accept = request_of_plan(plan)
         client = client_for(realm, policy)
-        rack_fetch('GET', url, '', nil, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
+        rack_fetch('GET', url, '', {'Accept' => accept}, 'follow', mode, credentials: credentials, referrer_policy: client[:policy], referrer: client[:referrer], client_url: client[:url], dest: dest,
                                                   client_origin: client[:origin], client_realm: client[:realm])
       end
       def rack_fetch_body(url, cors_mode: nil, credentials: 'same-origin', client_url: nil, client_origin: nil, referrer: nil, referrer_policy: nil, client_realm: nil,
@@ -3932,12 +3932,12 @@ module Capybara
       def resource_timing_fetch(url, realm, plan, referrer = nil)
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
-        mode, credentials, policy, _, dest = Native.subresource_plan_fields(plan.to_i)
+        mode, credentials, policy, _, dest, accept = Native.subresource_plan_fields(plan.to_i)
         client = client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer)
         # (…and a plugin's its body, which may be an image its element takes its natural size from: its bytes as they
         # came, which a text body would mangle)
         plugin = %w[embed object].include?(dest.to_s)
-        result = rack_fetch('GET', key, '', {}, 'follow', mode,
+        result = rack_fetch('GET', key, '', {'Accept' => accept}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                             initiator: client[:initiator], client_origin: client[:origin], client_realm: client[:realm], dest: dest, body_raw: plugin)
         meta = result && resource_timing_meta(result)
@@ -5520,11 +5520,12 @@ module Capybara
       # NAVIGATION (negative id) the pre-fetched leg rides the nav outbox to
       # the parked nav thread, which owns that decision. Direct-reply fids
       # (worker main-script fetches) are not raced.
-      private def sw_race_network(handle, fetch_id, realm_id, url, method)
+      # (…its `Accept` the request's, the one Fetch gave it: a navigation's a document's, an image's image types)
+      private def sw_race_network(handle, fetch_id, realm_id, url, method, accept)
         fid = fetch_id.to_i
         return if fid >= SW_DIRECT_FID_BASE
         # Only GET/HEAD race: the leg re-issues the request WITHOUT the original
-        # body/headers, so racing a POST would run its side effect twice — once
+        # body/headers (but its Accept), so racing a POST would run its side effect twice — once
         # mutilated. (Chromium's race source is effectively GET-shaped too; a
         # non-GET race-matched request simply behaves as fetch-event.)
         m = method.to_s.empty? ? 'GET' : method.to_s.upcase
@@ -5540,7 +5541,7 @@ module Capybara
         # (sw_deliver_fetch_response / the fetch_stream hook / the parked nav
         # loop all apply the same comparison).
         r = begin
-          rack_fetch(m, url.to_s, '', {}, 'follow')
+          rack_fetch(m, url.to_s, '', accept.to_s.empty? ? {} : {'Accept' => accept.to_s}, 'follow')
         rescue StandardError
           nil
         end
@@ -9064,7 +9065,7 @@ module Capybara
           # A race-network-and-fetch-handler route matched: run the network leg on a
           # host thread concurrently with the fetch-event dispatch the worker is
           # about to (possibly synchronously-blocking) run. See sw_race_network.
-          race_network:   ->(fetch_id, realm_id, url2, method) { sw_race_network(handle, fetch_id, realm_id, url2, method) },
+          race_network:   ->(fetch_id, realm_id, url2, method, accept) { sw_race_network(handle, fetch_id, realm_id, url2, method, accept) },
           # The install handler registered Static Routing API rules (addRoutes) — the
           # rules themselves live in the worker isolate (evaluated at its dispatch
           # point); the host records only their EXISTENCE, which keeps a router SW
@@ -10148,9 +10149,10 @@ module Capybara
           # SameSite gate in apply_default_request_env sees it, like a navigation would.
           env['csim.cookie_cross_site'] = true if cookie_cross_site
           # Fetch "fetch" step 12: a request whose header list has no `Accept` carries its destination's — an image's
-          # image types, a sheet's CSS, a navigation's documents, and `*/*` for every other (a script's, a media
-          # resource's, a worker's, a beacon's) — not the document navigation's apply_default_request_env falls back to.
-          env['HTTP_ACCEPT'] ||= Native.default_accept((navigation ? nav_dest : dest).to_s)
+          # image types, a sheet's CSS, and `*/*` for every other (a script's, a media resource's, a worker's, a
+          # beacon's) — not the document navigation's apply_default_request_env falls back to. (A fetch()'s, an XHR's,
+          # a frame navigation's has its own already: fetch_rules.rs `defaultRequestHeaders`.)
+          env['HTTP_ACCEPT'] ||= Native.default_accept(dest.to_s)
           apply_default_request_env(env, referer: hop_referer, force: false)
           # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
           # cross-origin to every real target; otherwise compare the target to the
@@ -13115,10 +13117,11 @@ module Capybara
       # The mode, credentials mode and referrer policy of the request a subresource's `plan` (subresource_plan.rs) is, as a
       # request the asset cache and `subresource_fetch` make takes them: a no-cors one none — the mode-less request an
       # element's load always was, of no response tainting of its own — but a CORS one's, a plugin's navigation.
-      # (…and its destination — subresource_plan.rs `destination` — '' for the empty one: a prefetch's, a `fetch()`'s)
+      # (…and its destination — subresource_plan.rs `destination` — '' for the empty one: a prefetch's, a `fetch()`'s — and
+      # its `Accept`, `accept`: a prefetch's a document's)
       private def request_of_plan(plan)
-        mode, credentials, policy, _, dest = Native.subresource_plan_fields(plan.to_i)
-        mode == 'no-cors' ? [nil, 'same-origin', policy, dest] : [mode, credentials, policy, dest]
+        mode, credentials, policy, _, dest, accept = Native.subresource_plan_fields(plan.to_i)
+        mode == 'no-cors' ? [nil, 'same-origin', policy, dest, accept] : [mode, credentials, policy, dest, accept]
       end
       # …and the request a load the host makes for a subresource's `plan` (subresource_plan.rs) is, to `target_url`: whether
       # it is a CORS one, its credentials mode, its client — pinned, as it is fetched off the main thread, its opacity the

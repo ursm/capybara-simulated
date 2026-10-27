@@ -26,6 +26,8 @@ const DESTINATIONS: [&str; 23] = [
     "paintworklet", "report", "script", "serviceworker", "sharedworker", "style", "track", "video", "webidentity", "worker",
     "xslt",
 ];
+// …bit 14 its initiator `prefetch` (a `<link rel=prefetch>`'s), whose `Accept` that says before its destination does.
+const PREFETCH: u32 = 1 << 14;
 // …its request's fields alone, its mode and credentials mode: what tells two requests of one URL apart (a preload key's).
 pub(crate) const PLAN_REQUEST: u32 = 15;
 
@@ -81,10 +83,11 @@ pub(crate) fn fields(plan: u32) -> (&'static str, &'static str, &'static str, bo
         plan & OPAQUE != 0,
     )
 }
-// Capybara::Simulated::Native.subresource_plan_fields(plan) -> `fields`, for the host's request, and its destination.
-pub(crate) fn fields_for_ruby(plan: u32) -> (String, String, String, bool, String) {
+// Capybara::Simulated::Native.subresource_plan_fields(plan) -> `fields`, for the host's request, its destination and its
+// `Accept`.
+pub(crate) fn fields_for_ruby(plan: u32) -> (String, String, String, bool, String, String) {
     let (mode, credentials, policy, opaque) = fields(plan);
-    (mode.to_owned(), credentials.to_owned(), policy.to_owned(), opaque, destination(plan).to_owned())
+    (mode.to_owned(), credentials.to_owned(), policy.to_owned(), opaque, destination(plan).to_owned(), accept(plan).to_owned())
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -156,7 +159,12 @@ pub(crate) fn plan_in(realm: &crate::dom::RealmArena, kind: u32, el: Option<crat
     let document = doc.map_or("", |d| realm.document_referrer_policy(d));
     let opaque = realm.location.origin() == "null";
     let destination = destination_of(kind, node.and_then(|n| n.plain_attr("as")).unwrap_or(""));
-    plan(kind, crossorigin, worker, attr, noted, document, opaque) | destination_bits(destination)
+    let prefetch = match kind & 0xff {
+        J_PREFETCH => true,
+        J_LINK => (kind >> 8) & crate::link_resource::OBTAINS_PREFETCH != 0,
+        _ => false,
+    };
+    plan(kind, crossorigin, worker, attr, noted, document, opaque) | destination_bits(destination) | if prefetch { PREFETCH } else { 0 }
 }
 // …and the destination of it, by its consumer's `kind` — a link's by what it obtains (its `kind`'s high bits) of the
 // destinations its `as` names, a timed resource's by its code (subresources.rs `timed_code`) — and its index in a plan.
@@ -186,6 +194,11 @@ pub(crate) fn destination_bits(destination: &str) -> u32 {
 pub(crate) fn destination(plan: u32) -> &'static str {
     DESTINATIONS.get((plan >> DESTINATION_SHIFT & 31) as usize).copied().unwrap_or("")
 }
+// …and the `Accept` a request of a plan carries where its header list has none (Fetch "fetch" step 12): a prefetch's a
+// document's, its initiator saying so before its destination does, else its destination's.
+pub(crate) fn accept(plan: u32) -> &'static str {
+    crate::fetch_rules::default_accept(if plan & PREFETCH != 0 { "document" } else { destination(plan) })
+}
 // …and whether a plan is of a `no-cors` request (its mode's bits: `MODES`), of a `navigate` one.
 pub(crate) fn no_cors(plan: u32) -> bool {
     plan & 3 == 0
@@ -209,6 +222,13 @@ mod tests {
         // (…beside the request's fields, which it moves none of)
         let plan = plan(J_IMAGE, Some(""), false, "", None, "origin", true) | destination_bits("image");
         assert_eq!((fields(plan), destination(plan)), (("cors", "same-origin", "origin", true), "image"));
+        // (…and its `Accept` its destination's — a prefetch's a document's, whatever its destination)
+        assert_eq!([accept(plan), accept(destination_bits("style")), accept(0), accept(PREFETCH)], [
+            "image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5",
+            "text/css,*/*;q=0.1",
+            "*/*",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        ]);
     }
 
     #[test]

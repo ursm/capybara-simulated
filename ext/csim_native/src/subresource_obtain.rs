@@ -309,10 +309,8 @@ fn dispatch(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>,
     args.push(v8::Integer::new_from_unsigned(scope, token).into());
     let integrity = text(scope, &r.integrity);
     args.push(integrity);
-    // (…its `Accept` the one Fetch gives a request of none — a prefetch's a document's, its initiator saying so before its
-    // destination does, else its destination's: what a worker negotiating a format reads)
-    let prefetch = r.kind & 0xff == crate::subresource_judge::J_LINK && (r.kind >> 8) & crate::link_resource::OBTAINS_PREFETCH != 0;
-    let accept = text(scope, crate::fetch_rules::default_accept(if prefetch { "document" } else { destination(r.plan) }));
+    // (…its `Accept` the one Fetch gives a request of none, its plan's: what a worker negotiating a format reads)
+    let accept = text(scope, crate::subresource_plan::accept(r.plan));
     args.push(accept);
     // (…kept before the event is dispatched: a worker that is gone answers at once, letting the request through)
     realm(scope, cid).obtains.insert(token, r);

@@ -406,10 +406,10 @@ pub(crate) fn cors_safelisted_response_header(name: &[u8]) -> bool {
 }
 
 // ── For the bindings ──
-// The headers a fetch's request has where its author set none of the name (Fetch §4 "fetching", its steps 12-13):
-// `Accept: */*` for one with no destination, which XHR's and fetch()'s are — not a document navigation's richer Accept,
-// which the host fills in — and the user agent's `Accept-Language`.
-const DEFAULT_REQUEST_HEADERS: [(&str, &str); 2] = [("Accept", "*/*"), ("Accept-Language", "en-US,en;q=0.9")];
+// The headers a fetch's request has where its author set none of the name (Fetch §4 "fetching", its steps 12-13): its
+// destination's `Accept` (`default_accept`) — `*/*` for one of none, which XHR's and fetch()'s are, a document's for a
+// frame's navigation — and the user agent's `Accept-Language`.
+const ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
 // Fetch "fetch" step 12: the `Accept` a request of `destination` carries where its header list has none (a prefetch's,
 // whose initiator says so before its destination does, a document's: subresource_obtain.rs `dispatch`).
 pub(crate) fn default_accept(destination: &str) -> &'static str {
@@ -426,10 +426,13 @@ pub(crate) fn default_accept_for_ruby(destination: String) -> String {
     default_accept(&destination).to_owned()
 }
 
-// __dom.defaultRequestHeaders() -> [name, value, …]: `DEFAULT_REQUEST_HEADERS`.
-fn default_request_headers_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.defaultRequestHeaders([destination]) -> [name, value, …]: those a request of `destination` (none: the empty one)
+// has where its author set none of the name.
+fn default_request_headers_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let destination = if args.get(0).is_string() { args.get(0).to_rust_string_lossy(scope) } else { String::new() };
+    let headers = [("Accept", default_accept(&destination)), ("Accept-Language", ACCEPT_LANGUAGE)];
     let items: Vec<v8::Local<v8::Value>> =
-        DEFAULT_REQUEST_HEADERS.iter().flat_map(|(n, v)| [n, v]).filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
+        headers.iter().flat_map(|(n, v)| [n, v]).filter_map(|s| v8::String::new(scope, s)).map(Into::into).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
