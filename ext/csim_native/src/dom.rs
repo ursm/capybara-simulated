@@ -5267,15 +5267,31 @@ fn style_import_unguarded(
     let clean = args.get(4).boolean_value(scope);
     let location = Some(args.get(5)).filter(|v| v.is_string()).map(|v| v.to_rust_string_lossy(scope)).filter(|l| !l.is_empty()).unwrap_or_else(|| url.clone());
     let cid = realm_id(scope, &args);
+    let pending = style_import_in(scope, cid, &url, referrer.as_deref(), css.as_deref(), quirks, clean, &location);
+    let urls = waiting_array(scope, &pending);
+    rv.set(urls);
+}
+// …the sheet of `url` an `@import` (referred by `referrer`) waits for handed to realm `cid`'s engine — `css`, none for a
+// fetch that failed — at `location`: what ITS `@import`s wait for now.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn style_import_in(
+    scope: &mut v8::PinScope<'_, '_>,
+    cid: i32,
+    url: &str,
+    referrer: Option<&str>,
+    css: Option<&str>,
+    quirks: bool,
+    clean: bool,
+    location: &str,
+) -> Vec<(String, Option<String>)> {
     let d = dom(scope);
     let arena = d.arena.enter(cid);
     let lock = arena.style_lock.0.clone();
-    let pending = arena.sheets.import(&lock, &url, referrer.as_deref(), &location, css.as_deref(), quirks, clean);
+    let pending = arena.sheets.import(&lock, url, referrer, location, css, quirks, clean);
     if let Some(engine) = d.styles.get_mut(&cid) {
         engine.sheets_changed();
     }
-    let urls = waiting_array(scope, &pending);
-    rv.set(urls);
+    pending
 }
 
 // __dom.sheetMake(css, baseUrl, media, constructed, docNid) -> [sheetId, …what its `@import`s wait for: `waiting_items`]: a new sheet

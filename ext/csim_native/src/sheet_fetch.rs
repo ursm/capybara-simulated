@@ -20,7 +20,7 @@ use std::rc::Rc;
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
 use crate::subresource_judge::{facts_of, judge, Consumer, Facts, J_SHEET, SRC_ASSET, SRC_NETWORK, SRC_SCHEME, SRC_SW_SYNC, S_NO_BODY, V_CROSS_ORIGIN, V_FETCHED, V_OK};
-use crate::subresource_obtain::{call, H_ASSET, H_CHARSET, H_CONTROLLER, H_DOCUMENT, H_SW_ANSWER};
+use crate::subresource_obtain::{call, now, H_ASSET, H_CHARSET, H_CONTROLLER, H_DOCUMENT, H_FILE, H_SW_ANSWER};
 use crate::subresource_plan::{plan_in, PLAN_REQUEST};
 
 // A sheet's owner, and its node document (its request's client's).
@@ -59,6 +59,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "sheetIntegrity", sheet_integrity_op, context_id);
     register(scope, ns, "sheetEncodingOf", sheet_encoding_of_op, context_id);
     register(scope, ns, "sheetsForget", sheets_forget_op, context_id);
+    register(scope, ns, "styleResolveImports", resolve_imports_op, context_id);
 }
 
 // A sheet as a response of it makes it: its text — None where it failed (none, or none to use), '' where it is no style
@@ -482,6 +483,117 @@ fn sheet_encoding_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = realm_id(scope, &args);
     let Some(e) = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.encodings.get(&url).copied()) else { return };
     rv.set(text_value(scope, e));
+}
+
+// __dom.styleResolveImports([url, referrer, …], docNid, environment, host): the sheets the style engine's `@import`s
+// wait for (`resolve_imports`).
+fn resolve_imports_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return };
+    let waiting = match v8::Local::<v8::Array>::try_from(args.get(0)) {
+        Ok(list) => {
+            let items: Vec<String> = (0..list.length()).filter_map(|i| list.get_index(scope, i)).map(|v| v.to_rust_string_lossy(scope)).collect();
+            items.chunks_exact(2).map(|p| (p[0].clone(), Some(p[1].clone()).filter(|r| !r.is_empty()))).collect()
+        },
+        Err(_) => Vec::new(),
+    };
+    let doc = crate::dom::nid_arg(scope, &args, 1);
+    let environment = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
+    let cid = realm_id(scope, &args);
+    let _ = resolve_imports(scope, cid, host, waiting, doc, environment);
+}
+// The sheets the style engine's `@import`s wait for — `waiting` (url, referrer), each referred by the location of the
+// sheet importing it (none its document's: a `<style>`'s, CSS Values 4 "fetch a style resource") — fetched and handed
+// over until none is: each request fetched once however many sheets make it, its entry filed (`file_import`), decoded in
+// the encoding of the sheet that imports it (CSS Cascade 5 §2.2: `environment` the first ones'), handed to the engine
+// (dom.rs `style_import_in`). An import CYCLE would ask for ever, so a chain deeper than any real page nests is answered
+// with nothing.
+const IMPORT_DEPTH_LIMIT: usize = 16;
+fn resolve_imports(
+    scope: &mut v8::PinScope<'_, '_>,
+    cid: i32,
+    host: v8::Local<'_, v8::Function>,
+    waiting: Vec<(String, Option<String>)>,
+    doc: Option<NodeId>,
+    environment: Option<String>,
+) -> Result<(), Terminated> {
+    type Request = (String, Option<String>);
+    let quirks = crate::dom::dom(scope).arena.document_mode(doc).0;
+    let mut fetched: HashMap<Request, (Option<String>, bool, String)> = HashMap::new();
+    let push = |list: &mut Vec<(Request, Option<String>)>, request: Request, env: Option<String>| {
+        if !list.iter().any(|(r, _)| *r == request) {
+            list.push((request, env));
+        }
+    };
+    let mut pending = Vec::new();
+    for request in waiting {
+        push(&mut pending, request, environment.clone());
+    }
+    for depth in 0.. {
+        if pending.is_empty() {
+            break;
+        }
+        let mut next = Vec::new();
+        for ((url, referrer), env) in pending {
+            let request = (url.clone(), referrer.clone());
+            if !fetched.contains_key(&request) {
+                let started = now(scope, host)?;
+                let sheet = style_sheet(scope, cid, host, None, &url, env.as_deref(), referrer.as_deref())?;
+                realm(scope, cid).note_sheet_policy(&sheet.location, sheet.policy.as_deref());
+                file_import(scope, host, &url, started, &sheet)?;
+                fetched.insert(request.clone(), (sheet.text, sheet.clean, sheet.location));
+            }
+            let (text, clean, location) = &fetched[&request];
+            let text = text.as_deref().filter(|_| depth < IMPORT_DEPTH_LIMIT);
+            let mut children = Vec::new();
+            crate::dom::style_op(scope, cid, |scope| children = crate::dom::style_import_in(scope, cid, &url, referrer.as_deref(), text, quirks, *clean, location));
+            let encoding = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.encodings.get(&url).copied());
+            for child in children {
+                push(&mut next, child, encoding.map(str::to_owned).or_else(|| env.clone()));
+            }
+        }
+        pending = next;
+    }
+    Ok(())
+}
+// …an `@import`'s entry filed (performance.js `recordResourceTiming`): one fetch to the page however many rebuilds ask,
+// as the memory cache makes it (resource_timing.rs `filed_once`) — none for a sheet no network, service worker or
+// scheme's own processor answered (a preload's) — its facts the response's, a worker's answer's, or a body the asset
+// cache kept no facts of.
+fn file_import(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, url: &str, started: f64, sheet: &Sheet) -> Result<(), Terminated> {
+    use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA};
+    if !sheet.network && sheet.answer.is_none() && !matches!(fetch_route(url, 0, ""), ROUTE_DATA | ROUTE_BLOB) {
+        return Ok(());
+    }
+    let entry = v8::Object::new(scope);
+    let set = |scope: &mut v8::PinScope<'_, '_>, k: &str, v: v8::Local<'_, v8::Value>| {
+        let k = text_value(scope, k);
+        entry.set(scope, k, v);
+    };
+    let name = text_value(scope, url);
+    set(scope, "name", name);
+    let kind = v8::Integer::new_from_unsigned(scope, J_SHEET).into();
+    set(scope, "kind", kind);
+    let start = v8::Number::new(scope, started).into();
+    set(scope, "startTime", start);
+    match (&sheet.answer, &sheet.meta) {
+        (Some(answer), _) => {
+            let answer = v8::Local::new(scope, answer);
+            set(scope, "answer", answer);
+        },
+        (None, Some(meta)) if v8::Local::new(scope, meta).is_object() => {
+            let meta = v8::Local::new(scope, meta);
+            set(scope, "resp", meta);
+        },
+        _ => {
+            if let Some(text) = &sheet.text {
+                let body = text_value(scope, text);
+                set(scope, "body", body);
+                let status = v8::Integer::new(scope, 200).into();
+                set(scope, "status", status);
+            }
+        },
+    }
+    call(scope, host, H_FILE, &[entry.into()]).map(drop)
 }
 
 // __dom.sheetsForget(): the realm's own let go of as its page goes (cascade.js `resetCascadeState`) — its owners' go with
