@@ -3370,7 +3370,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
 - <select> containing text node child ("<select class='poke'></select>")
 - <svg> non-rendered text ignored ("<div><svg><stop>abc</stop></svg></div>")
 - <textarea> contents ignored ("<textarea>abc")
-- Blank lines around a <p> in its own block ("<div>abc<div><p>123</p></div>def")
 - Leading/trailing space removal at display:inline-block boundary ("<div>123<span
   style='display:inline-block'> abc </span>def")
 - Leading/trailing space removal at display:inline-flex boundary ("<div>123<span style='display:inline-flex'>
@@ -3399,8 +3398,6 @@ html/dom/elements/the-innertext-and-outertext-properties/getter.html:
   def")
 - display:block <script> is rendered ("<div><script style='display:block'>abc")
 - display:block <style> is rendered ("<div><style style='display:block'>abc")
-- empty <optgroup> in <select> ("<div>a<select><optgroup></select>bc")
-- empty <option> in <select> ("<div>a<select><option></select>bc")
 - text-transform handles Turkish casing ("<div><div lang='tr' style='text-transform:uppercase'>i
   ı")
 html/dom/idlharness.any.js:

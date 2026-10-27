@@ -66,6 +66,20 @@ RSpec.describe 'innerText line breaks' do
     expect(inner_text('abc<span style="display:list-item">def</span>ghi')).to     eq("abc\ndef\nghi")
   end
 
+  # A block's breaks get out of the inlines around it — a link, a label, a button, an inline-block or a box-less element
+  # holding a card — to be put between it and what the inlines' parent has either side (HTML's required line break
+  # counts merge into the parent's; Chrome = Firefox).
+  it 'puts the breaks a block inside an inline owes either side of the inline' do
+    expect(inner_text('<div style="display:inline"><div>b</div></div>c')).to                eq("b\nc")
+    expect(inner_text('a<div style="display:inline"><div>b</div></div>c')).to               eq("a\nb\nc")
+    expect(inner_text('<ul style="display:inline"><li>a</li><li>b</li></ul>z')).to          eq("a\nb\nz")
+    expect(inner_text('x<a href="#"><div>card</div></a>y')).to                               eq("x\ncard\ny")
+    expect(inner_text('x<span><p>para</p></span>y')).to                                      eq("x\n\npara\n\ny")
+    expect(inner_text('x<label><div>l</div>tail</label>y')).to                               eq("x\nl\ntaily")
+    expect(inner_text('x<span style="display:inline-block"><div>i</div></span>y')).to        eq("x\ni\ny")
+    expect(inner_text('x<span style="display:contents"><div>c</div></span>y')).to           eq("x\nc\ny")
+  end
+
   # A `<p>` asks for TWO — a blank line either side — and keeps asking however it is displayed.
   it 'gives a paragraph a blank line either side' do
     expect(inner_text('123<p style="display:block">abc')).to        eq("123\n\nabc")

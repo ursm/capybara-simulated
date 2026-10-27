@@ -346,8 +346,10 @@ struct Walk<'a> {
     // Anything at all has been rendered.
     any_rendered: bool,
     // What the last collected node produced beyond its text: whether it is only collapsible white space, and the
-    // required line breaks it ended owing its parent.
+    // required line breaks it owes its parent before its content (a block that starts it, through the inlines around it)
+    // and after (one that ends it) — HTML's "required line break count" items, which merge into the parent's own.
     last_collapsible_only: bool,
+    last_leading: u32,
     last_owed: u32,
     // Whether a host's light child renders, and hidden, per slot: 0 not rendered, 1 visible, 2 visibility-hidden.
     slots: std::collections::HashMap<NodeId, u8>,
@@ -369,6 +371,7 @@ impl Walk<'_> {
     // contributes its CHILDREN's items and nothing of its own: no text, no `<br>` newline, no required breaks.
     fn collect(&mut self, id: NodeId, transform: TextTransform, ws: Ws, hidden: bool) -> Vec<u16> {
         self.last_collapsible_only = true;
+        self.last_leading = 0;
         self.last_owed = 0;
         let arena = self.arena;
         let Some(node) = arena.get(id) else { return Vec::new() };
@@ -432,6 +435,8 @@ impl Walk<'_> {
         // Required line breaks are PENDING until something is written after them: they merge (consecutive
         // requirements collapse to the largest), and collapsible white space next to one renders nothing.
         let mut pending = 0u32;
+        // (…and those owed before anything is written here, which are the parent's to put in front of it)
+        let mut leading = 0u32;
         let mut collapsible_only = true;
         for &c in &node.children {
             let Some(cn) = arena.get(c) else { continue };
@@ -459,6 +464,7 @@ impl Walk<'_> {
             let is_element = cn.kind == NodeKind::Element;
             let c_hidden = if is_element { hides_by_visibility(arena, c, inherited) } else { inherited };
             let part = self.collect(c, transform, ws, c_hidden);
+            let (part_leading, part_owed) = (self.last_leading, self.last_owed);
             let part_collapsible = self.last_collapsible_only;
             let part_ends_collapsible = self.ends_collapsible;
             let is_cell = is_element && CELL_TAGS.contains(&tag(cn));
@@ -471,7 +477,7 @@ impl Walk<'_> {
                 self.in_word = false;
             }
             // (…a cell whose content holds a block acts as one at the row's level: breaks before AND after it)
-            let cell_with_block = is_cell && self.last_owed > 0;
+            let cell_with_block = is_cell && part_owed > 0;
             // (…a block by its used `display` — block-level or `table-caption`, HTML's innerText — whatever its tag: a
             // `<span style="display:block">` is, a `<div style="display:inline">` is not (Chrome); a `<p>` whatever its
             // display (HTML: two breaks); the table's row groups and rows by their tags, their rows' line breaks this walk's
@@ -485,13 +491,20 @@ impl Walk<'_> {
                     || (tag(cn) == "br" && generates_box(arena, c) && !is_line_break(arena, c)));
             // (…a block that renders contributes its breaks even with no text — `abc<div></div>def` — but a shadow HOST,
             // whose tree this walk does not descend, has nothing to put between them)
-            if part.is_empty() && !is_cell && !(is_block && cn.shadow_root.is_none() && generates_text_box(self.engine, arena, c, cn, self.now)) {
+            // (…nor an inline whose content owes nothing either side: `abc<span><div></div></span>def` breaks)
+            let owes = !is_cell && (part_leading > 0 || part_owed > 0);
+            if part.is_empty() && !is_cell && !owes && !(is_block && cn.shadow_root.is_none() && generates_text_box(self.engine, arena, c, cn, self.now)) {
                 continue;
             }
             // (…a `<p>` asks for TWO breaks whatever its display, and a cell passes on what its content asked for)
-            let breaks = if is_element && tag(cn) == "p" { 2 } else if is_cell { self.last_owed.max(1) } else { 1 };
-            if is_block && !out.is_empty() {
-                pending = pending.max(breaks);
+            let breaks = if is_element && tag(cn) == "p" { 2 } else if is_cell { part_owed.max(1) } else { 1 };
+            // (…what the child owes before its content — its own block-ness, and a block starting it through an inline —
+            // goes in front of it here, or, nothing written here yet, before this node's content in its parent's)
+            let before = if is_block { breaks.max(part_leading) } else if is_cell { 0 } else { part_leading };
+            if out.is_empty() {
+                leading = leading.max(before);
+            } else {
+                pending = pending.max(before);
             }
             if !part.is_empty() && !(pending > 0 && part_collapsible) {
                 if pending > 0 {
@@ -520,8 +533,12 @@ impl Walk<'_> {
                     collapsible_only = false;
                 }
             }
+            // (…and what it owes after: its own block-ness, and a block ending it through an inline)
             if is_block {
                 pending = pending.max(breaks);
+            }
+            if !is_cell {
+                pending = pending.max(part_owed);
             }
             // (…and cells are separated by a tab; a hidden one adds its children's items and no separator)
             if is_cell && !c_hidden && has_next_cell(arena, node, c) {
@@ -544,6 +561,7 @@ impl Walk<'_> {
         }
         self.last_collapsible_only = collapsible_only;
         // (…a trailing required break is NOT written: this element's block-ness is the PARENT's business)
+        self.last_leading = leading;
         self.last_owed = pending;
         out
     }
@@ -716,6 +734,7 @@ pub(crate) fn visible_text(engine: &mut StyleEngine, arena: &RealmArena, id: Nod
         break_pending: false,
         any_rendered: false,
         last_collapsible_only: true,
+        last_leading: 0,
         last_owed: 0,
         slots: std::collections::HashMap::new(),
         in_word: false,

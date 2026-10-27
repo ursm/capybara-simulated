@@ -60,12 +60,19 @@ impl RealmArena {
         None
     }
 
-    // The nearest inclusive ancestor of `node` that is a block, by its tag (`rendered::is_block_tag`).
+    // The nearest inclusive ancestor of `node` that is a block — by its `display` where it is styled
+    // (`rendered::is_block_level`: a `<span style="display:block">` is one, a `<div style="display:inline">` is not), by
+    // its tag where it is not (`rendered::is_block_tag`).
     fn block_of(&self, node: NodeId) -> Option<NodeId> {
         let mut at = Some(node);
         while let Some(id) = at {
             let n = self.get(id)?;
-            if n.kind == NodeKind::Element && crate::rendered::is_block_tag(&n.local_name) {
+            let block = n.kind == NodeKind::Element
+                && match crate::style::primary_style(self, id) {
+                    Some(_) => crate::rendered::is_block_level(self, id),
+                    None => crate::rendered::is_block_tag(&n.local_name),
+                };
+            if block {
                 return Some(id);
             }
             at = n.parent;
