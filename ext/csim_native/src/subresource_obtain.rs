@@ -626,7 +626,8 @@ fn preload_as(scope: &mut v8::PinScope<'_, '_>, el: NodeId, cid: i32) -> String 
 // fetch begins, its destination its `as`'s — made now where it has none of this key, or its load task ran: the entry
 // put in its document's map, pending (preload_map.rs), which a consumer that comes first runs. A later plan of another
 // key withdraws the one before it, which no consumer took — but the parser's (`early`) had begun, and runs (Chrome:
-// its first `href`'s fetched too).
+// its first `href`'s fetched too). A URL the network does not answer (`data:`, `blob:`) is planned none — its task
+// obtains it as any link's — and lets the plan before it go.
 fn link_preload_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
@@ -638,6 +639,14 @@ fn link_preload_plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let cid = realm_id(scope, &args);
     let Some(destination) = crate::script::preload_destination(&preload_as(scope, el, cid)) else { return };
     let key = crate::preload_map::Key::new(doc, &url, destination, plan);
+    let network = crate::fetch_rules::fetch_route(&url, 0, "") == crate::fetch_rules::ROUTE_NETWORK;
+    if !network {
+        if let Some(p) = realm(scope, cid).link_preloads.remove(&el) {
+            let id = p.id;
+            realm(scope, cid).preload_take_pending(&p.key, |r| r.preload.is_some_and(|(_, i)| i == id));
+        }
+        return;
+    }
     let before = realm(scope, cid).link_preloads.get(&el).map(|p| (p.key == key && !p.loaded, p.id, p.got.is_none(), p.early, p.key.clone()));
     if let Some((same, id, unrun, was_early, before_key)) = before {
         if same {
