@@ -236,6 +236,27 @@ RSpec.describe 'web fonts' do
     expect(width(s, 'added')).to eq(80)
   end
 
+  # …and a worker's, to its own set (`self.fonts`): its font source, which an OffscreenCanvas there measures with (CSS Font
+  # Loading §2.4).
+  it "measures a worker's canvas text with a face added to the worker's set" do
+    s = session
+    got = s.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const src = `(async () => {
+        const c = new OffscreenCanvas(10, 10).getContext('2d');
+        const f = new FontFace('W', 'url(${location.origin}/ahem.ttf)');
+        self.fonts.add(f);
+        await f.load();
+        c.font = '20px W';
+        self.postMessage([f.status, c.measureText('abcd').width]);
+      })();`;
+      const w = new Worker(URL.createObjectURL(new Blob([src])));
+      w.onmessage = (e) => done(e.data);
+      w.onerror = (e) => done('error ' + e.message);
+    JS
+    expect(got).to eq(['loaded', 80])
+  end
+
   # A script's face resolves its `src` against its realm's API base URL — the document's base URL — and a set matches its
   # faces by their stretch before their style and weight (CSS Fonts 4 §5.2): `condensed` takes the condensed face only.
   it "resolves a script face's src against the document's base URL, and matches a set's faces by their stretch" do
