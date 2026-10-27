@@ -7212,12 +7212,12 @@ module Capybara
         end
         # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
         # via `event.request.text()`); the Content-Type the form's enctype implies rides its headers.
-        headers = {'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7'}
+        headers = {'Accept' => Native.default_accept(dest.to_s)}
         headers['Content-Type'] = content_type.to_s unless content_type.to_s.empty?
         req = JSON.generate(
           method:              method.to_s.empty? ? 'GET' : method.to_s.upcase,
           url:                 url.to_s,
-          # The Accept header Fetch inserts for a navigation request (destination 'document').
+          # The Accept header Fetch inserts for a navigation request: its destination's, a document's or a frame's alike.
           headers:             headers,
           # The request wire is JSON text, so the body's bytes travel as base64 in it.
           body_b64:            Base64.strict_encode64(body.to_s),
@@ -10147,6 +10147,10 @@ module Capybara
           # with a cross-site ancestor): flag the env BEFORE cookies attach so the
           # SameSite gate in apply_default_request_env sees it, like a navigation would.
           env['csim.cookie_cross_site'] = true if cookie_cross_site
+          # Fetch "fetch" step 12: a request whose header list has no `Accept` carries its destination's — an image's
+          # image types, a sheet's CSS, a navigation's documents, and `*/*` for every other (a script's, a media
+          # resource's, a worker's, a beacon's) — not the document navigation's apply_default_request_env falls back to.
+          env['HTTP_ACCEPT'] ||= Native.default_accept((navigation ? nav_dest : dest).to_s)
           apply_default_request_env(env, referer: hop_referer, force: false)
           # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
           # cross-origin to every real target; otherwise compare the target to the
