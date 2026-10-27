@@ -2425,7 +2425,7 @@ impl RealmArena {
             // (…the document element's first HTML `head` child; its first HTML `body` or `frameset` child, where it is an
             // HTML `html`)
             RELATIVE_HEAD => self.document_part(id, false, &|n| n.is_html_named("head")),
-            RELATIVE_BODY => self.document_part(id, true, &|n| n.is_html_named("body") || n.is_html_named("frameset")),
+            RELATIVE_BODY => self.body_element(id),
             RELATIVE_SHADOW_ROOT => self.get(id)?.shadow_root.filter(|&s| self.get(s).is_some()),
             RELATIVE_HOST => self.get(id).and_then(|n| n.host.or(n.template_host)).filter(|&h| self.get(h).is_some()),
             RELATIVE_TEMPLATE_CONTENT => self.get(id)?.template_content.filter(|&c| self.get(c).is_some()),
@@ -2433,6 +2433,11 @@ impl RealmArena {
             RELATIVE_DOCTYPE => self.get(id)?.children.iter().copied().find(|&c| self.get(c).is_some_and(|c| c.kind == NodeKind::Other)),
             _ => None,
         }
+    }
+    // HTML's "the body element" of `doc`: its document element's first `body` or `frameset` child, where that is an HTML
+    // `html`.
+    pub(crate) fn body_element(&self, doc: NodeId) -> Option<NodeId> {
+        self.document_part(doc, true, &|n| n.is_html_named("body") || n.is_html_named("frameset"))
     }
     fn document_part(&self, doc: NodeId, in_html: bool, is: &dyn Fn(&NodeData) -> bool) -> Option<NodeId> {
         let root = self.first_element_child(doc)?;

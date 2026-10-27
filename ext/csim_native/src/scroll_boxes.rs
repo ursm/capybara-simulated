@@ -12,13 +12,9 @@ use crate::rendered::{rendered, with_engine};
 use crate::style::{primary_style, StyleEngine};
 use crate::walk::{replaced_or_control, scrolls, WalkDisplay};
 
-// The document element of `doc`, and HTML's "the body element": its `<body>` or `<frameset>` child.
+// The document element of `doc`.
 fn document_element(arena: &RealmArena, doc: NodeId) -> Option<NodeId> {
     arena.get(doc)?.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| n.kind == NodeKind::Element))
-}
-fn body_element(arena: &RealmArena, doc: NodeId) -> Option<NodeId> {
-    let root = arena.get(document_element(arena, doc)?).filter(|r| r.is_html_named("html"))?;
-    root.children.iter().copied().find(|&c| arena.get(c).is_some_and(|n| n.is_html_named("body") || n.is_html_named("frameset")))
 }
 
 fn overflows(style: &ComputedValues) -> [Overflow; 2] {
@@ -34,7 +30,7 @@ pub(crate) fn scrolling_element(engine: &mut StyleEngine, arena: &RealmArena, do
     if !quirks {
         return document_element(arena, doc);
     }
-    let body = body_element(arena, doc)?;
+    let body = arena.body_element(doc)?;
     engine.flush(arena, now);
     let style = |id: Option<NodeId>| id.and_then(|id| primary_style(arena, id)).map(|s| overflows(&s));
     let (Some(own), Some(parent)) = (style(Some(body)), style(arena.get(body).and_then(|n| n.parent))) else { return Some(body) };
@@ -99,7 +95,7 @@ fn propagated_overflow(arena: &RealmArena, id: NodeId, style: &ComputedValues) -
         if root == Some(id) {
             return VISIBLE;
         }
-        if body_element(arena, doc) == Some(id) && root.and_then(|r| primary_style(arena, r)).is_some_and(|s| overflows(&s) == VISIBLE) {
+        if arena.body_element(doc) == Some(id) && root.and_then(|r| primary_style(arena, r)).is_some_and(|s| overflows(&s) == VISIBLE) {
             return VISIBLE;
         }
     }

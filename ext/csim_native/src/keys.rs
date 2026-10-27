@@ -276,6 +276,51 @@ pub(crate) fn plan(arena: &crate::dom::RealmArena, id: crate::dom::NodeId, key: 
     plan
 }
 
+// Where `send_keys` to an element sends its keys, and what it does to it first (`send_target`): FOCUS it — a typeable
+// element that does not have focus its caret moved to the end of its content first (WebDriver "element send keys"): a
+// text control's to its value's end, an editing host's to its last caret position (CARET_LAST) — or focus the VIEWPORT.
+pub(crate) const SEND_FOCUS: u32 = 1;
+pub(crate) const SEND_CARET_END: u32 = 1 << 1;
+pub(crate) const SEND_CARET_LAST: u32 = 1 << 2;
+pub(crate) const SEND_VIEWPORT: u32 = 1 << 3;
+
+// `send_target` of `id`: its bits, and the element the keys go to.
+pub(crate) fn send_target(engine: &mut crate::style::StyleEngine, arena: &crate::dom::RealmArena, id: crate::dom::NodeId, now: f64) -> (u32, crate::dom::NodeId) {
+    let facts = plan(arena, id, &[], None, 0);
+    let doc = Some(arena.shadow_including_root(id)).filter(|&d| arena.get(d).is_some_and(|d| d.kind == crate::dom::NodeKind::Document));
+    let body = doc.and_then(|d| arena.body_element(d));
+    // (…the element its document has focused, the body where nothing is)
+    let active = doc.and_then(|d| arena.realm_state(arena.get(d)?.realm)?.focus.filter(|&f| arena.shadow_including_root(f) == d));
+    // An element a key does something to — one a text is typed into, a checkbox or a radio, a link, a button — or one
+    // that takes focus whatever it is (a `tabindex` container, a listbox: WebDriver "keyboard-interactable") is focused,
+    // as Selenium / Playwright `send_keys` focus their target even where nothing is typed into it — blurring what had
+    // focus (Discourse's `.topic-list-item` drops its `.selected` class on `a.title`'s blur, which keeps its `Enter`
+    // binding from taking the keys to the wrong row).
+    if facts & (TYPEABLE | CHECK_OR_RADIO | INTERACTIVE) != 0 || crate::focus::focusable(engine, arena, id, now) {
+        let caret = match facts & (TYPEABLE | EDITING_HOST) {
+            0 => 0,
+            _ if active.or(body) == Some(id) => 0,
+            TYPEABLE => SEND_CARET_END,
+            _ => SEND_CARET_LAST,
+        };
+        return (SEND_FOCUS | caret, id);
+    }
+    // …the document element, or a body that takes no focus, focusing the VIEWPORT (HTML "get the focusable area"): what
+    // had focus loses it, and the keys go to the body (chromedriver, measured 2026-10-10 — a dialog the focus was in no
+    // longer holds it, so closing it gives none back).
+    if doc.is_some_and(|d| arena.first_element_child(d) == Some(id)) || body == Some(id) {
+        return (SEND_VIEWPORT, body.unwrap_or(id));
+    }
+    // An element that takes no focus at all (a `<details>`, a plain `<div>`) hands the keys to the focused element inside
+    // it — in a shadow tree too — whatever its tag: a key event goes to the focused element. (chromedriver refuses such
+    // a target outright — ElementNotInteractableError, WebDriver's "keyboard-interactable" check — where this driver is
+    // lenient.)
+    match active.filter(|&a| a != id && Some(a) != body && arena.shadow_including_ancestor(id, a)) {
+        Some(a) => (0, a),
+        None => (0, id),
+    }
+}
+
 // The edit a key makes in a typeable element (`edit`), besides its `inputType`: a character typed (a textarea's line
 // break among them), an editing host's line break or paragraph, or a deletion — forward or back, of a word or to the
 // line's start.
@@ -388,6 +433,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "resolveKey", resolve_op, context_id);
     crate::dom::register(scope, ns, "keyChord", chord_op, context_id);
     crate::dom::register(scope, ns, "keyPlan", plan_op, context_id);
+    crate::dom::register(scope, ns, "sendKeysTarget", send_target_op, context_id);
     crate::dom::register(scope, ns, "keyEdit", edit_op, context_id);
     crate::dom::register(scope, ns, "keyMotion", motion_op, context_id);
 }
@@ -399,6 +445,15 @@ fn plan_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments
     let ch = (!args.get(2).is_null_or_undefined()).then(|| crate::dom::utf16_arg(scope, args.get(2)));
     let modifiers = args.get(3).uint32_value(scope).unwrap_or(0);
     rv.set_uint32(plan(crate::dom::realm(scope, cid), id, &key, ch.as_deref(), modifiers));
+}
+// __dom.sendKeysTarget(element) -> [bits, the element the keys go to] (`send_target`); [0, element] where the realm has
+// no style engine.
+fn send_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(id) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_null() };
+    let (bits, to) = crate::rendered::with_engine(scope, &args, |engine, arena, now| send_target(engine, arena, id, now)).unwrap_or((0, id));
+    let bits = v8::Integer::new_from_unsigned(scope, bits).into();
+    let to = crate::dom::node_value(scope, Some(to));
+    rv.set(v8::Array::new_with_elements(scope, &[bits, to]).into());
 }
 // __dom.keyEdit(element, key, char, inputType, modifiers, selection) -> [inputType, edit] (`edit`; `char` and
 // `inputType` null for none, as `resolveKey` gives them), null for none.
