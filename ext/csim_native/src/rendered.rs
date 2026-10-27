@@ -9,7 +9,7 @@ use crate::style::{primary_style, StyleEngine};
 use crate::walk::WalkDisplay;
 use style::properties::ComputedValues;
 use style::values::computed::text::TextTransform;
-use style::values::specified::box_::{DisplayInside, DisplayOutside};
+use style::values::specified::box_::{Display, DisplayInside, DisplayOutside};
 
 // Elements no box is ever made for, whatever the page declares.
 const INVISIBLE_TAGS: [&str; 6] = ["head", "script", "style", "template", "noscript", "title"];
@@ -472,10 +472,17 @@ impl Walk<'_> {
             }
             // (…a cell whose content holds a block acts as one at the row's level: breaks before AND after it)
             let cell_with_block = is_cell && self.last_owed > 0;
-            // (…and a `<br>` that is no line break — block-level, floated, absolutely positioned — is a block)
+            // (…a block by its used `display` — block-level or `table-caption`, HTML's innerText — whatever its tag: a
+            // `<span style="display:block">` is, a `<div style="display:inline">` is not (Chrome); a `<p>` whatever its
+            // display (HTML: two breaks); the table's row groups and rows by their tags, their rows' line breaks this walk's
+            // approximation; and a `<br>` that is no line break — block-level, floated, absolutely positioned — is one)
             let is_block = is_element
                 && !c_hidden
-                && (is_block_tag(tag(cn)) || flex_context || cell_with_block || (tag(cn) == "br" && generates_box(arena, c) && !is_line_break(arena, c)));
+                && (block_display(arena, c)
+                    || matches!(tag(cn), "p" | "tbody" | "thead" | "tfoot" | "tr")
+                    || flex_context
+                    || cell_with_block
+                    || (tag(cn) == "br" && generates_box(arena, c) && !is_line_break(arena, c)));
             // (…a block that renders contributes its breaks even with no text — `abc<div></div>def` — but a shadow HOST,
             // whose tree this walk does not descend, has nothing to put between them)
             if part.is_empty() && !is_cell && !(is_block && cn.shadow_root.is_none() && generates_text_box(self.engine, arena, c, cn, self.now)) {
@@ -633,6 +640,14 @@ impl Walk<'_> {
     }
 }
 
+// Does `id` put a required line break either side of its content in its rendered text — its `display` block-level or
+// `table-caption` (HTML's innerText)?
+fn block_display(arena: &RealmArena, id: NodeId) -> bool {
+    primary_style(arena, id).is_some_and(|s| {
+        let d = s.get_box().clone_display();
+        matches!(d.outside(), DisplayOutside::Block) || d == Display::TableCaption
+    })
+}
 // Is `id` block-level — its computed `display` an outer block (a block's edge ends a line)?
 pub(crate) fn is_block_level(arena: &RealmArena, id: NodeId) -> bool {
     primary_style(arena, id).is_some_and(|s| matches!(s.get_box().clone_display().outside(), DisplayOutside::Block))

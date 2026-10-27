@@ -56,6 +56,16 @@ RSpec.describe 'innerText line breaks' do
     expect(inner_text('<table><tr><td>abc<caption>def</caption></table>')).to eq("abc\ndef")
   end
 
+  # An element asks for its breaks by its used `display` — block-level or `table-caption` — not by its tag: a span shown
+  # as a block, a caption or a flex container asks, a div shown inline does not (Chrome).
+  it 'asks for the breaks its display, not its tag, earns' do
+    expect(inner_text('abc<span style="display:block">def</span>ghi')).to        eq("abc\ndef\nghi")
+    expect(inner_text('abc<div style="display:inline">def</div>ghi')).to         eq('abcdefghi')
+    expect(inner_text('abc<span style="display:table-caption">def</span>ghi')).to eq("abc\ndef\nghi")
+    expect(inner_text('abc<span style="display:flex">def</span>ghi')).to          eq("abc\ndef\nghi")
+    expect(inner_text('abc<span style="display:list-item">def</span>ghi')).to     eq("abc\ndef\nghi")
+  end
+
   # A `<p>` asks for TWO — a blank line either side — and keeps asking however it is displayed.
   it 'gives a paragraph a blank line either side' do
     expect(inner_text('123<p style="display:block">abc')).to        eq("123\n\nabc")
