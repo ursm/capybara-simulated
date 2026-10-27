@@ -161,6 +161,7 @@ impl RealmArena {
         };
         self.mutations += 1;
         self.state_epoch += 1;
+        self.generations.bump(crate::dom::GEN_STYLE_STATE);
         true
     }
     // `validationMessage`: a form-associated custom element's, the one its internals were given; a listed control's, none

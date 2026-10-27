@@ -1937,6 +1937,7 @@ impl RealmArena {
         }
         node.value = units;
         self.state_epoch += 1;
+        self.generations.bump(GEN_STYLE_STATE);
         true
     }
 
@@ -1963,6 +1964,7 @@ impl RealmArena {
         }
         self.mutations += 1;
         self.state_epoch += 1;
+        self.generations.bump(GEN_STYLE_STATE);
         if states.is_empty() {
             self.custom_states.remove(&id);
         } else {
@@ -1976,9 +1978,14 @@ impl RealmArena {
 
     // The document `doc`'s target fragments (none: nothing is the target).
     pub(crate) fn set_target(&mut self, doc: NodeId, fragments: Vec<String>) {
+        let target = (!fragments.is_empty()).then_some((doc, fragments));
+        if self.target == target {
+            return;
+        }
         self.mutations += 1;
         self.state_epoch += 1;
-        self.target = (!fragments.is_empty()).then_some((doc, fragments));
+        self.generations.bump(GEN_STYLE_STATE);
+        self.target = target;
     }
     // Whether the focus shows no ring.
     pub(crate) fn set_focus_ring_hidden(&mut self, hidden: bool) {
@@ -2920,7 +2927,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "assignedSlotOf", assigned_slot_of, context_id);
     register(scope, ns, "assignedNodesOf", assigned_nodes_of, context_id);
     register(scope, ns, "setCustomStates", set_custom_states, context_id);
-    register(scope, ns, "targetElement", target_element, context_id);
     register(scope, ns, "latchFocusRing", latch_focus_ring, context_id);
     register(scope, ns, "setFocusStart", set_focus_start, context_id);
     register(scope, ns, "query", query, context_id);
@@ -3848,17 +3854,6 @@ fn set_custom_states(
     arena.set_custom_states(id, states);
     if let Some(engine) = engine {
         engine.custom_states_changed(arena, id);
-    }
-}
-
-// __dom.targetElement(docNid) -> the realm document's target element — the indicated part of its target fragments
-// (`target_element_of`) — or -1 for none.
-fn target_element(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let target = nid_arg(scope, &args, 0).and_then(|doc| realm(scope, cid).target_element_of(cid, doc));
-    match target {
-        Some(id) => set_nid(scope, &mut rv, id),
-        None => rv.set_int32(-1),
     }
 }
 
