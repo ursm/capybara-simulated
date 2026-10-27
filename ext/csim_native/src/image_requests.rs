@@ -168,12 +168,51 @@ fn load_clear(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // comes.
 fn pending(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
+    crate::dom::dom(scope).arena.set_image_pending(id);
+}
+impl RealmArena {
+    // The element `id`'s request pending: its image data discarded until the response arrives (HTML "update the image
+    // data": unavailable, not complete, not broken).
+    pub(crate) fn set_image_pending(&mut self, id: NodeId) {
+        self.set_image_bitmap(id, None);
+        let r = self.image_mut(id);
+        r.complete = false;
+        r.broken = false;
+        r.size = [0, 0];
+    }
+    // …its current load's number, 0 for none.
+    pub(crate) fn image_load_of(&self, id: NodeId) -> u32 {
+        self.image(id).map_or(0, |r| r.load)
+    }
+}
+// The element `id`'s load `load` applied with what its response decoded to — an image (`decoded`, its pixels), one of no
+// pixels, or none (broken) — `tainted` its response's CORS-cross-origin, and its natural size set: whether it was the
+// current load, which a later one superseded otherwise.
+pub(crate) fn apply_decoded(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u32, decoded: Option<crate::image_decode::Bitmap>, tainted: bool) -> bool {
+    if crate::dom::dom(scope).arena.image_load_of(id) != load {
+        return false;
+    }
+    let result = match &decoded {
+        None => RESULT_BROKEN,
+        Some(b) if b.rgba.is_empty() => RESULT_NO_PIXELS,
+        Some(_) => RESULT_IMAGE,
+    };
+    let (size, orientation, natural) = decoded.as_ref().map_or(([0, 0], 0, None), |b| ([b.width, b.height], b.orientation, Some(b.natural)));
+    let bitmap = decoded.filter(|_| result == RESULT_IMAGE).and_then(|b| {
+        let srgb = crate::dom::u8_clamped_array(scope, b.rgba);
+        let p3 = b.rgba_p3.map(|p| crate::dom::u8_clamped_array(scope, p));
+        Some(Bitmap { srgb: Pixels::of(scope, srgb)?, p3: p3.and_then(|p| Pixels::of(scope, p)), display_p3: b.display_p3 })
+    });
     let arena = &mut crate::dom::dom(scope).arena;
-    arena.set_image_bitmap(id, None);
+    arena.set_image_bitmap(id, bitmap);
     let r = arena.image_mut(id);
-    r.complete = false;
-    r.broken = false;
-    r.size = [0, 0];
+    r.complete = true;
+    r.broken = result == RESULT_BROKEN;
+    r.size = size;
+    r.orientation = orientation;
+    r.tainted = result != RESULT_BROKEN && tainted;
+    arena.set_natural_size(id, natural);
+    true
 }
 // __dom.imageApply(img, load, result, width, height, orientation, tainted, pixels, pixelsP3, displayP3) -> whether the
 // result applies: load `load`'s (`RESULT_IMAGE` …), none where a later load superseded it. Complete either way; broken
@@ -249,7 +288,7 @@ fn url(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>
 // __dom.imageLoad(img) -> the current load's number (0 before any).
 fn current_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(0) };
-    rv.set_uint32(crate::dom::dom(scope).arena.image(id).map_or(0, |r| r.load));
+    rv.set_uint32(crate::dom::dom(scope).arena.image_load_of(id));
 }
 
 // __dom.imageFetchBegin(img, id, load, src, start) — the host fetches load `load` of `img`'s on a thread of its own, as
