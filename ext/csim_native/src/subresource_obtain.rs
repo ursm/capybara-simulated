@@ -9,7 +9,7 @@
 
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
-use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_TIMED};
+use crate::subresource_plan::{destination, fields, plan_in, J_CSS_IMAGE, J_EMBED, J_TIMED};
 
 // The host's steps (subresource-host.js `H_*`).
 const H_NOW: u32 = 0;
@@ -18,6 +18,13 @@ const H_SW_ANSWER: u32 = 2;
 const H_SW_DISPATCH: u32 = 3;
 const H_NETWORK: u32 = 4;
 const H_FILE: u32 = 5;
+const H_BLOB: u32 = 6;
+
+// What processing a plugin element came to (`processPlugin`): it had a resource to process, an `<object>`'s that
+// failed, and its fallback content shown or no longer (constants.js `PLUGIN_*`).
+const PLUGIN_FOUND: u32 = 1;
+const PLUGIN_FAILED: u32 = 2;
+const PLUGIN_FALLBACK_CHANGED: u32 = 4;
 
 // A request as the engine made it — its consumer `kind` (`J_*`), its element and document, its `plan`, the realm it is
 // made as (its client: its element's node document's) and the sheet that refers it — with its entry's initiator type and
@@ -49,6 +56,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fetchCssImages", fetch_css_images_op, context_id);
     register(scope, ns, "fetchTimedResources", fetch_timed_resources_op, context_id);
     register(scope, ns, "obtainResume", resume_op, context_id);
+    register(scope, ns, "processPlugin", process_plugin_op, context_id);
 }
 
 // `host(step, …args)` on the page side: what it answers, none for null or undefined, or where it throws — Terminated
@@ -111,11 +119,12 @@ enum Answered {
     Worker(v8::Global<v8::Value>),
 }
 
-// The network's answer to `request`, and its entry filed.
-fn from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<(), Terminated> {
+// The network's answer to `request`, and its entry filed: the facts of its response, none for a network error.
+fn from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<Option<v8::Global<v8::Value>>, Terminated> {
     let args = request_args(scope, r);
     let resp = call(scope, host, H_NETWORK, &args)?;
-    file(scope, host, r, Answered::Network(resp))
+    file(scope, host, r, Answered::Network(resp.clone()))?;
+    Ok(resp)
 }
 
 // The entry of `request` filed (performance.js `recordResourceTiming`).
@@ -179,7 +188,7 @@ fn fetch_css_image(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, host
     let args = request_args(scope, &r);
     match call(scope, host, H_SW_ANSWER, &args)? {
         Some(answer) => file(scope, host, &r, Answered::Worker(answer)),
-        None => from_network(scope, host, &r),
+        None => from_network(scope, host, &r).map(drop),
     }
 }
 
@@ -228,7 +237,7 @@ fn fetch_timed(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: Node
         realm(scope, cid).obtains.insert(token, r);
         return Ok(());
     }
-    from_network(scope, host, &r)
+    from_network(scope, host, &r).map(drop)
 }
 
 // __dom.obtainResume(token, resp, bytes, host): a service worker's `fetch` event's answer to the request `token` named
@@ -266,4 +275,75 @@ fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     }
     let answer = v8::Global::new(scope, v8::Local::<v8::Value>::from(answer));
     let _ = file(scope, host, &r, Answered::Worker(answer));
+}
+
+// __dom.processPlugin(el, doc, host) -> what HTML's embed setup steps and object processing model came to for the
+// `<embed>` or `<object>` `el` (of document `doc`) — run as it connects and as its `src` / `data` / `type` change — as
+// `PLUGIN_*` bits: its resource (subresources.rs `plugin_resource`) fetched, a navigation request of its destination
+// with its credentials included, which no service worker sees (Handle Fetch), its entry filed; an `<object>`'s network
+// response that is no ok one a failure (`judge`), after which it shows its fallback content, as it does with no
+// resource; a `data:` or `blob:` URL's none, whatever its bytes. An image the resource is — an SVG document's root's
+// dimensions too — gives the element its natural size, which the layout sizes it from as an `<img>`'s (walk.rs
+// `natural_intrinsic`); one with no resource to process has none.
+fn process_plugin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(2)) else { return };
+    let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
+    let cid = realm_id(scope, &args);
+    if let Ok(done) = process_plugin(scope, cid, el, doc, host) {
+        rv.set_uint32(done);
+    }
+}
+fn process_plugin(scope: &mut v8::PinScope<'_, '_>, cid: i32, el: NodeId, doc: NodeId, host: v8::Local<'_, v8::Function>) -> Result<u32, Terminated> {
+    use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA, ROUTE_NETWORK};
+    use crate::subresource_judge::{judge, Consumer, J_OBJECT, SRC_NETWORK, V_OK};
+    let found = crate::subresources::plugin_resource(realm(scope, cid), el, doc);
+    let object = realm(scope, cid).get(el).is_some_and(|n| n.is_html_named("object"));
+    let (mut failed, mut bytes) = (false, None);
+    if let Some((dest, url)) = found.clone() {
+        match fetch_route(&url, 0, "") {
+            ROUTE_NETWORK => {
+                let started = now(scope, host)?;
+                let kind = if dest == "object" { J_OBJECT } else { J_EMBED };
+                let arena = realm(scope, cid);
+                let plan = plan_in(arena, kind, Some(el), Some(doc), None);
+                let client = arena.get(el).map(|n| n.realm);
+                let r = Request { cid, kind, url, el: Some(el), doc, plan, client, referrer: None, initiator: dest, started };
+                let resp = from_network(scope, host, &r)?.map(|resp| v8::Local::new(scope, resp));
+                let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
+                if dest == "object" {
+                    let facts = crate::subresource_judge::facts_of(scope, resp, J_OBJECT, SRC_NETWORK);
+                    let consumer = Consumer { kind: J_OBJECT, obtains: 0, module_destination: "", preload_destination: "", integrity: "", body: b"", mode: "navigate", quirks: false };
+                    failed = judge(&consumer, SRC_NETWORK, &facts) & V_OK == 0;
+                }
+                if !failed {
+                    let body = resp.and_then(|resp| member(scope, resp, "body"));
+                    bytes = body.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
+                }
+            }
+            ROUTE_DATA => bytes = crate::data_url::process(&url).map(|(_, body)| body),
+            ROUTE_BLOB => {
+                let u = text(scope, &url);
+                let blob = call(scope, host, H_BLOB, &[u])?.map(|b| v8::Local::new(scope, b));
+                let blob = blob.and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
+                let blob = blob.and_then(|b| member(scope, b, "bytes"));
+                bytes = blob.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned());
+            }
+            _ => {}
+        }
+    }
+    let decoded = bytes.filter(|b| !b.is_empty()).map(|b| std::panic::catch_unwind(|| crate::image_decode::decode(&b, None)).unwrap_or(crate::image_decode::Decoded::Broken));
+    let natural = match decoded {
+        Some(crate::image_decode::Decoded::Bitmap(b)) => Some(b.natural),
+        _ => None,
+    };
+    let arena = realm(scope, cid);
+    arena.set_natural_size(el, natural);
+    let mut done = if found.is_some() { PLUGIN_FOUND } else { 0 };
+    if failed {
+        done |= PLUGIN_FAILED;
+    }
+    if object && crate::subresources::set_object_fallback(arena, el, failed || found.is_none()) {
+        done |= PLUGIN_FALLBACK_CHANGED;
+    }
+    Ok(done)
 }

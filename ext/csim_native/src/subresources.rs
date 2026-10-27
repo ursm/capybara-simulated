@@ -34,12 +34,6 @@ pub(crate) fn timed_destination(code: u32) -> &'static str {
     if code & TRACK != 0 { "track" } else { "image" }
 }
 
-pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "pluginResource", plugin_resource_op, context_id);
-    crate::dom::register(scope, ns, "setObjectFallback", set_object_fallback_op, context_id);
-}
-
-
 // The URL an SVG `<use>` element `id` references in another document — its `href`, else its XLink one, trimmed and
 // parsed against `doc`'s base URL, the fragment (which names the piece, not the resource) dropped — or None for a
 // same-document reference (`#id`), none, or no URL, and in a document with no browsing context, which loads nothing.
@@ -144,7 +138,7 @@ pub(crate) fn timed_cors_request(code: u32) -> (&'static str, &'static str) {
 // showing its fallback content (rendered.rs `object_shows_fallback`) — it shows its resource instead — or of a media
 // element, whose children are no content of its. (Whether it is being rendered, which an `<embed>`'s being potentially
 // active also asks, is not asked: the layout may not be made yet.)
-fn plugin_resource(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<(&'static str, String)> {
+pub(crate) fn plugin_resource(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<(&'static str, String)> {
     if !arena.document_states.has_browsing_context(doc) || !arena.is_connected(id) {
         return None;
     }
@@ -167,24 +161,13 @@ fn plugin_resource(arena: &mut RealmArena, id: NodeId, doc: NodeId) -> Option<(&
     Some((destination, arena.parse_document_url(doc, &raw)?.href().to_owned()))
 }
 
-// __dom.pluginResource(el, docNid) -> `[destination, url]` (`plugin_resource`), or undefined.
-fn plugin_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(id), Some(doc)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return };
-    let Some((destination, url)) = plugin_resource(&mut crate::dom::dom(scope).arena, id, doc) else { return };
-    let (Some(d), Some(u)) = (v8::String::new(scope, destination), v8::String::new(scope, &url)) else { return };
-    rv.set(v8::Array::new_with_elements(scope, &[d.into(), u.into()]).into());
-}
-
-// __dom.setObjectFallback(el, on) -> whether that changed it: the `<object>` shows its fallback content as its
-// processing ends — its resource failed to load, or it has none — or no longer does (`STATE_OBJECT_FALLBACK`).
-fn set_object_fallback_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(id) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    let on = args.get(1).is_true();
-    let arena = &mut crate::dom::dom(scope).arena;
-    let Some(state) = arena.get(id).map(|n| n.state) else { return rv.set_bool(false) };
+// Whether the `<object>` `id` showing its fallback content as its processing ends — its resource failed to load, or it
+// has none — or no longer, `on`, changed it (`STATE_OBJECT_FALLBACK`).
+pub(crate) fn set_object_fallback(arena: &mut RealmArena, id: NodeId, on: bool) -> bool {
+    let Some(state) = arena.get(id).map(|n| n.state) else { return false };
     let was = state & crate::dom::STATE_OBJECT_FALLBACK != 0;
     if was != on {
         arena.set_state(id, state ^ crate::dom::STATE_OBJECT_FALLBACK);
     }
-    rv.set_bool(was != on);
+    was != on
 }

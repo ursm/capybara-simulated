@@ -3009,7 +3009,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::media::install(scope, ns, context_id);
     crate::preload_map::install(scope, ns, context_id);
     crate::realm_identity::install(scope, ns, context_id);
-    crate::subresources::install(scope, ns, context_id);
     crate::select_options::install(scope, ns, context_id);
     crate::text_setters::install(scope, ns, context_id);
     crate::user_activation::install(scope, ns, context_id);
@@ -3725,19 +3724,26 @@ fn set_natural_size(
     let Some(id) = nid_arg(scope, &args, 0) else {
         return;
     };
-    let [w, h, vw, vh] = [1, 2, 3, 4].map(|k| args.get(k).number_value(scope).filter(|v| v.is_finite() && *v >= 0.0));
-    let natural = (args.length() > 1).then(|| NaturalSize {
-        width: w,
-        height: h,
-        view_box: vw.zip(vh).filter(|&(vw, vh)| vw > 0.0 && vh > 0.0),
-    });
+    let [w, h, vw, vh] = [1, 2, 3, 4].map(|k| args.get(k).number_value(scope));
+    let natural = (args.length() > 1).then_some(NaturalSize { width: w, height: h, view_box: vw.zip(vh) });
     let cid = realm_id(scope, &args);
-    // (…an image's divided by its source's pixel density: a `2x` candidate's 100x50 bitmap is 50x25 — HTML's
-    // density-corrected natural size, which lays it out)
-    let density = realm(scope, cid).image_density(id);
-    let natural = natural.map(|n| NaturalSize { width: n.width.map(|w| w / density), height: n.height.map(|h| h / density), ..n });
-    if let Some(node) = realm(scope, cid).get_mut(id) {
-        node.natural_size = natural;
+    realm(scope, cid).set_natural_size(id, natural);
+}
+impl RealmArena {
+    // …element `id`'s, a dimension of no finite size none, nor a view box of no positive one.
+    pub(crate) fn set_natural_size(&mut self, id: NodeId, natural: Option<NaturalSize>) {
+        let size = |v: Option<f64>| v.filter(|v| v.is_finite() && *v >= 0.0);
+        // (…an image's divided by its source's pixel density: a `2x` candidate's 100x50 bitmap is 50x25 — HTML's
+        // density-corrected natural size, which lays it out)
+        let density = self.image_density(id);
+        let natural = natural.map(|n| NaturalSize {
+            width: size(n.width).map(|w| w / density),
+            height: size(n.height).map(|h| h / density),
+            view_box: n.view_box.filter(|&(vw, vh)| vw > 0.0 && vh > 0.0),
+        });
+        if let Some(node) = self.get_mut(id) {
+            node.natural_size = natural;
+        }
     }
 }
 

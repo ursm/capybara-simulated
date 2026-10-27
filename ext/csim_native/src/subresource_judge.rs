@@ -166,26 +166,11 @@ fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, 
     let k = v8::String::new_from_one_byte(scope, key.as_bytes(), v8::NewStringType::Internalized)?;
     obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
-// __dom.subresourceJudge(kind, mode, resp, source, doc, a, b, integrity, bytes) -> `judge` of `resp` — the
-// response as the host, a service worker or a scheme's processor gives it (its `status`, `type`, `redirected`, `tainted`,
-// `body_error`, its `headers`' Content-Type — else its `contentType` — and `X-Content-Type-Options`; `blocked` or
-// `__networkError` a network error, as no response at all is, but for an asset's, whose facts the host may not have
-// kept), its request made in `mode` (null for no-cors), in the document `doc`; `a` and `b` a link's destinations its
-// `as` named as it planned the fetch; `integrity` its request's metadata and `bytes` its response's (a Uint8Array, or a
-// string whose UTF-8 they are; none where it has no integrity) — as its verdict bits.
-fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let packed = args.get(0).uint32_value(scope).unwrap_or(0);
-    let (kind, obtains) = (packed & 0xff, packed >> 8);
-    let source = args.get(3).uint32_value(scope).unwrap_or(0);
-    let mode = if args.get(1).is_null_or_undefined() { "no-cors".to_owned() } else { args.get(1).to_rust_string_lossy(scope) };
-    let quirks = matches!(kind, J_SHEET | J_LINK) && {
-        let doc = crate::dom::nid_arg(scope, &args, 4);
-        let cid = crate::dom::realm_id(scope, &args);
-        crate::dom::realm(scope, cid).document_mode(doc).0
-    };
-    let facts = match v8::Local::<v8::Object>::try_from(args.get(2)) {
-        Err(_) => Facts { network_error: source & SRC_MASK != SRC_ASSET, ..Facts::default() },
-        Ok(resp) => {
+// The facts of `resp` (`judge_op`'s), for a consumer of `kind` from `source` — a network error's for none.
+pub(crate) fn facts_of(scope: &mut v8::PinScope<'_, '_>, resp: Option<v8::Local<'_, v8::Object>>, kind: u32, source: u32) -> Facts {
+    match resp {
+        None => Facts { network_error: source & SRC_MASK != SRC_ASSET, ..Facts::default() },
+        Some(resp) => {
             let flag = |scope: &mut v8::PinScope<'_, '_>, key: &str| member(scope, resp, key).is_some_and(|v| v.boolean_value(scope));
             // (…an asset's no network error, its facts the host's of a response it had; a redirect a fetch event's answer's
             // alone to judge)
@@ -218,7 +203,26 @@ fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
                 nosniff,
             }
         }
+    }
+}
+// __dom.subresourceJudge(kind, mode, resp, source, doc, a, b, integrity, bytes) -> `judge` of `resp` — the
+// response as the host, a service worker or a scheme's processor gives it (its `status`, `type`, `redirected`, `tainted`,
+// `body_error`, its `headers`' Content-Type — else its `contentType` — and `X-Content-Type-Options`; `blocked` or
+// `__networkError` a network error, as no response at all is, but for an asset's, whose facts the host may not have
+// kept), its request made in `mode` (null for no-cors), in the document `doc`; `a` and `b` a link's destinations its
+// `as` named as it planned the fetch; `integrity` its request's metadata and `bytes` its response's (a Uint8Array, or a
+// string whose UTF-8 they are; none where it has no integrity) — as its verdict bits.
+fn judge_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let packed = args.get(0).uint32_value(scope).unwrap_or(0);
+    let (kind, obtains) = (packed & 0xff, packed >> 8);
+    let source = args.get(3).uint32_value(scope).unwrap_or(0);
+    let mode = if args.get(1).is_null_or_undefined() { "no-cors".to_owned() } else { args.get(1).to_rust_string_lossy(scope) };
+    let quirks = matches!(kind, J_SHEET | J_LINK) && {
+        let doc = crate::dom::nid_arg(scope, &args, 4);
+        let cid = crate::dom::realm_id(scope, &args);
+        crate::dom::realm(scope, cid).document_mode(doc).0
     };
+    let facts = facts_of(scope, v8::Local::<v8::Object>::try_from(args.get(2)).ok(), kind, source);
     let destination = |scope: &mut v8::PinScope<'_, '_>, i| {
         let v = args.get(i);
         if v.is_null_or_undefined() { String::new() } else { v.to_rust_string_lossy(scope) }
