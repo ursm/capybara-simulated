@@ -121,7 +121,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "imageUrl", url, context_id);
     crate::dom::register(scope, ns, "imageLoad", current_load, context_id);
     crate::dom::register(scope, ns, "imageBitmap", bitmap_op, context_id);
-    crate::dom::register(scope, ns, "imageFetchBegin", fetch_begin, context_id);
     crate::dom::register(scope, ns, "imageFetchTake", fetch_take, context_id);
     crate::dom::register(scope, ns, "imageFetchRealm", fetch_realm, context_id);
     crate::dom::register(scope, ns, "imageArrival", arrival, context_id);
@@ -218,9 +217,9 @@ pub(crate) fn apply_decoded(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: 
 }
 // What applying a load's result comes to (`imageApply`): nothing, a later load superseding it; else the event the
 // element fires — `load`, or `error` for a broken one.
-const APPLIED_NONE: u32 = 0;
-const APPLIED_LOAD: u32 = 1;
-const APPLIED_ERROR: u32 = 2;
+pub(crate) const APPLIED_NONE: u32 = 0;
+pub(crate) const APPLIED_LOAD: u32 = 1;
+pub(crate) const APPLIED_ERROR: u32 = 2;
 // __dom.imageApply(img, load, r) -> `APPLIED_*` of load `load` applied with what its response decoded to — `r` the
 // decoder's record (`__dom.decodeImage`'s, a host load's): `{width, height, pixels[, pixelsP3, colorSpace], natural,
 // orientation, tainted}` for an image, `{noPixels, …}` for one with none — no area (an SVG whose width or height is 0),
@@ -231,10 +230,14 @@ const APPLIED_ERROR: u32 = 2;
 // draws, and the space drawImage converts from — and its natural size, `natural` (`[width, height, viewBoxWidth,
 // viewBoxHeight]`), none for a broken one.
 fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    use crate::dom::member;
     let Some(id) = element(scope, args.get(0)) else { return rv.set_uint32(APPLIED_NONE) };
     let load = args.get(1).uint32_value(scope).unwrap_or(0);
     let r = v8::Local::<v8::Object>::try_from(args.get(2)).ok();
+    rv.set_uint32(apply_record(scope, id, load, r));
+}
+// …the element `id`'s load `load` applied with the record `r`: `APPLIED_*`.
+pub(crate) fn apply_record(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u32, r: Option<v8::Local<'_, v8::Object>>) -> u32 {
+    use crate::dom::member;
     fn field<'s>(scope: &mut v8::PinScope<'s, '_>, r: Option<v8::Local<'_, v8::Object>>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
         r.and_then(|r| member(scope, r, k))
     }
@@ -266,7 +269,7 @@ fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     });
     let arena = &mut crate::dom::dom(scope).arena;
     if load != arena.image_mut(id).load {
-        return rv.set_uint32(APPLIED_NONE);
+        return APPLIED_NONE;
     }
     arena.set_image_bitmap(id, bitmap);
     let r = arena.image_mut(id);
@@ -276,7 +279,7 @@ fn apply(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'
     r.orientation = if image { orientation as u8 } else { 0 };
     r.tainted = image && tainted;
     arena.set_natural_size(id, natural);
-    rv.set_uint32(if image { APPLIED_LOAD } else { APPLIED_ERROR });
+    if image { APPLIED_LOAD } else { APPLIED_ERROR }
 }
 // __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density]: the current request, as the
 // element's members and a canvas read it — its decoded bitmap's size, and its source's pixel density, which the natural
@@ -329,17 +332,12 @@ fn current_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_uint32(crate::dom::dom(scope).arena.image_load_of(id));
 }
 
-// __dom.imageFetchBegin(img, id, load, src, start) — the host fetches load `load` of `img`'s on a thread of its own, as
-// request `id`, `src` begun at `start` (`HostFetch`).
-fn fetch_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(node) = element(scope, args.get(0)) else { return };
-    let id = args.get(1).uint32_value(scope).unwrap_or(0);
-    let load = args.get(2).uint32_value(scope).unwrap_or(0);
-    let src = args.get(3).to_rust_string_lossy(scope);
-    let start = args.get(4).number_value(scope).unwrap_or(0.0);
-    let realm = crate::dom::realm_id(scope, &args);
-    let element = v8::Global::new(scope, args.get(0));
-    crate::dom::dom(scope).arena.image_fetches.insert(id, HostFetch { realm, node, element, load, src, start });
+// The host fetches load `load` of the `<img>` `node`'s — of realm `realm`'s making — on a thread of its own, as request
+// `id`, `src` begun at `start` (`HostFetch`), its result handed back to the realm that began it (`imageFetchTake`).
+pub(crate) fn begin_host_fetch(scope: &mut v8::PinScope<'_, '_>, realm: i32, id: u32, node: NodeId, load: u32, src: &str, start: f64) {
+    let element = crate::dom::node_value(scope, Some(node));
+    let element = v8::Global::new(scope, element);
+    crate::dom::dom(scope).arena.image_fetches.insert(id, HostFetch { realm, node, element, load, src: src.to_owned(), start });
 }
 // __dom.imageFetchTake(id) -> [img, load, src, start] of the host's request `id`, which it hands back — null where it is
 // no request the calling realm began (the host offers it to each realm in turn), or one whose element is gone.

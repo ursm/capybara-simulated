@@ -29,7 +29,7 @@ const H_LINK_EVENT: u32 = 12;
 pub(crate) const H_ASSET: u32 = 13;
 pub(crate) const H_CONTROLLER: u32 = 14;
 pub(crate) const H_CHARSET: u32 = 15;
-const H_IMAGE_NETWORK: u32 = 16;
+const H_IMAGE_START: u32 = 16;
 const H_IMAGE_EVENT: u32 = 17;
 const H_VIDEO_BYTES: u32 = 18;
 const H_MEDIA_DONE: u32 = 19;
@@ -38,6 +38,8 @@ pub(crate) const H_LOAD_BLOCKER_SETTLED: u32 = 21;
 pub(crate) const H_SW_IMPORT: u32 = 22;
 pub(crate) const H_IMPORT_NETWORK: u32 = 23;
 pub(crate) const H_SW_NOTE_IMPORT: u32 = 24;
+const H_LOAD_IMAGE: u32 = 25;
+const H_IMAGE_BLOB: u32 = 26;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event
@@ -105,6 +107,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "linkPreloadPlan", link_preload_plan_op, context_id);
     register(scope, ns, "linkPreloadId", link_preload_id_op, context_id);
     register(scope, ns, "linkPreloadRun", link_preload_run_op, context_id);
+    register(scope, ns, "imageBlobLoad", image_blob_load_op, context_id);
+    register(scope, ns, "imageArrive", image_arrive_op, context_id);
 }
 
 // `host(step, …args)` on the page side: what it answers, none for null or undefined, or where it throws — Terminated
@@ -1086,10 +1090,9 @@ fn header_of(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Obj
     headers.and_then(|h| crate::fetch_rules::response_header(scope, h, name)).unwrap_or_default()
 }
 
-// What an image's fetch came to (`imageObtain`): its fetch is the bindings' network one, its response applied — its
-// `load` (or `error`) to fire — or a controlling service worker's to answer, the engine's then to apply and fire
-// (constants.js `IMAGE_FETCH_*`).
-const IMAGE_FETCH_NETWORK: u32 = 0;
+// What an image's fetch came to (`imageObtain`): its response applied — its `load` (or `error`) to fire — or pending: a
+// controlling service worker's, a host thread's or a `blob:` URL's store's to answer, the engine's then to apply and
+// fire — or a later load's (constants.js `IMAGE_FETCH_*`).
 const IMAGE_FETCH_LOADED: u32 = 1;
 const IMAGE_FETCH_BROKEN: u32 = 2;
 const IMAGE_FETCH_PENDING: u32 = 3;
@@ -1098,10 +1101,10 @@ const IMAGE_FETCH_PENDING: u32 = 3;
 // of `url` first (`IMAGE_FETCH_*`): the preload of it (Fetch "fetch": "consume a preloaded resource", no worker, no network and
 // no entry of its own) — its response judged (`judge`, J_IMAGE by its request's mode: an opaque one a cors request may
 // not use) and decoded here — else a controlling service worker's `fetch` event (destination `image`), the request
-// pending until it answers; else none, the network's then (the host's thread, a `blob:` URL's store, the bindings').
+// pending until it answers; else the network's (`image_from_network`).
 fn image_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use crate::subresource_judge::{judge, Consumer, J_IMAGE, SRC_NETWORK, V_CROSS_ORIGIN, V_OK};
-    rv.set_uint32(IMAGE_FETCH_NETWORK);
+    rv.set_uint32(IMAGE_FETCH_PENDING);
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let url = args.get(2).to_rust_string_lossy(scope);
@@ -1122,6 +1125,9 @@ fn image_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Ok(ctrl) = call(scope, host, H_CONTROLLER, &[]) else { return };
     let ctrl = ctrl.and_then(|c| v8::Local::new(scope, c).uint32_value(scope)).unwrap_or(0);
     if ctrl == 0 || crate::fetch_rules::fetch_route(&url, crate::fetch_rules::FETCH_CONTROLLED, "") != crate::fetch_rules::ROUTE_SERVICE_WORKER {
+        if let Ok(done) = image_from_network(scope, host, cid, el, &url, load, plan) {
+            rv.set_uint32(done);
+        }
         return;
     }
     let Ok(started) = now(scope, host) else { return };
@@ -1132,10 +1138,134 @@ fn image_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     match dispatch(scope, host, r) {
         Ok(None) => rv.set_uint32(IMAGE_FETCH_PENDING),
         // (…none answered at once: the network's)
-        Ok(Some(_)) => {}
+        Ok(Some(r)) => {
+            if let Ok(done) = image_from_network(scope, host, cid, el, &r.url, load, plan) {
+                rv.set_uint32(done);
+            }
+        }
         Err(_) => rv.set_uint32(IMAGE_FETCH_PENDING),
     }
 }
+// The network's answer to the `<img>` `el`'s load `load` of `url`, its request `plan`'s — what it comes to: pending, an
+// http(s) one fetched and decoded on a host thread and applied as the result is delivered (`imageFetchTake`) — a real
+// browser never blocks the parser on an image, and an in-process request behind an ActiveStorage URL overlaps script
+// instead of serializing with the parse — the request pending until then: `complete` false, its image data DISCARDED
+// (a reload draws nothing until the new data arrives); a `blob:` one its blob, read from this VM's blob URL store (the
+// host has none of its bytes) as "update the image data" parses the URL, after a stable state — one revoked in the same
+// task is gone (Chrome: `error`), its request pending until then (`imageBlobLoad`); else — a data: one (host-local
+// decode, no fetch), a host thread that would not start — fetched and decoded at once, its entry filed (sized by the
+// encoded bytes the host decoded; a broken load a network error), applied (`imageApply`), and loaded or broken — or
+// pending, a later load having superseded it.
+fn image_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, cid: i32, el: NodeId, url: &str, load: u32, plan: u32) -> Result<u32, Terminated> {
+    use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_NETWORK};
+    let route = fetch_route(url, 0, "");
+    fn request<'s>(scope: &mut v8::PinScope<'s, '_>, url: &str, plan: u32, cid: i32) -> [v8::Local<'s, v8::Value>; 3] {
+        [text(scope, url), v8::Integer::new_from_unsigned(scope, plan).into(), v8::Integer::new(scope, cid).into()]
+    }
+    if route == ROUTE_NETWORK {
+        let args = request(scope, url, plan, cid);
+        let id = call(scope, host, H_IMAGE_START, &args)?.and_then(|id| v8::Local::new(scope, id).uint32_value(scope)).unwrap_or(0);
+        if id > 0 {
+            realm(scope, cid).set_image_pending(el);
+            let started = now(scope, host)?;
+            crate::image_requests::begin_host_fetch(scope, cid, id, el, load, url, started);
+            return Ok(IMAGE_FETCH_PENDING);
+        }
+    }
+    if route == ROUTE_BLOB {
+        realm(scope, cid).set_image_pending(el);
+        let (nid, n, u) = (v8::Number::new(scope, el.to_f64()).into(), v8::Integer::new_from_unsigned(scope, load).into(), text(scope, url));
+        call(scope, host, H_IMAGE_BLOB, &[nid, n, u])?;
+        return Ok(IMAGE_FETCH_PENDING);
+    }
+    let started = now(scope, host)?;
+    let args = request(scope, url, plan, cid);
+    let result = call(scope, host, H_LOAD_IMAGE, &args)?.map(|r| v8::Local::new(scope, r));
+    let result = result.and_then(|r| v8::Local::<v8::Object>::try_from(r).ok());
+    file_image(scope, host, el, url, started, result)?;
+    Ok(match crate::image_requests::apply_record(scope, el, load, result) {
+        crate::image_requests::APPLIED_LOAD => IMAGE_FETCH_LOADED,
+        crate::image_requests::APPLIED_ERROR => IMAGE_FETCH_BROKEN,
+        _ => IMAGE_FETCH_PENDING,
+    })
+}
+// …and its entry filed (performance.js `recordResourceTiming`): its initiator, its no-cors-ness and whether it is filed
+// at all the engine's (resource_timing.rs, J_IMAGE); the response's facts the host kept — its Server-Timing, its content
+// encoding, whether its cache served it — else, a response it kept none of, its size alone; a broken load a network
+// error, a response that arrived but decoded to no image one that did arrive.
+fn file_image(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, el: NodeId, url: &str, started: f64, result: Option<v8::Local<'_, v8::Object>>) -> Result<(), Terminated> {
+    let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| result.and_then(|r| member(scope, r, k)).is_some_and(|v| v.boolean_value(scope));
+    let fetched = result.is_some() && !flag(scope, "unsupported");
+    let entry = v8::Object::new(scope);
+    let set = |scope: &mut v8::PinScope<'_, '_>, k: &str, v: v8::Local<'_, v8::Value>| {
+        let k = text(scope, k);
+        entry.set(scope, k, v);
+    };
+    let (name, kind) = (text(scope, url), v8::Integer::new_from_unsigned(scope, crate::subresource_judge::J_IMAGE).into());
+    set(scope, "name", name);
+    set(scope, "kind", kind);
+    let nid = v8::Number::new(scope, el.to_f64()).into();
+    set(scope, "nid", nid);
+    let broken = fetched && flag(scope, "broken");
+    let broken = v8::Boolean::new(scope, broken).into();
+    set(scope, "broken", broken);
+    let start = v8::Number::new(scope, started).into();
+    set(scope, "startTime", start);
+    if let Some(result) = result.filter(|_| fetched) {
+        match member(scope, result, "meta") {
+            Some(meta) => set(scope, "resp", meta),
+            None => {
+                let encoded = member(scope, result, "encoded").and_then(|e| e.int32_value(scope)).unwrap_or(0);
+                let encoded = v8::Integer::new(scope, encoded).into();
+                set(scope, "encoded", encoded);
+                set(scope, "decoded", encoded);
+                let ok = v8::Integer::new(scope, 200).into();
+                set(scope, "status", ok);
+            }
+        }
+    }
+    call(scope, host, H_FILE, &[entry.into()]).map(drop)
+}
+// __dom.imageArrive(img, load, src, start, r, host) -> `imageApply`'s answer for what the host thread fetched and decoded
+// for the `<img>`'s load `load` of `src`, begun at `start` (image_requests.rs `imageFetchTake`) — its entry filed and its
+// record applied — none where a later load superseded it, which files nothing either.
+fn image_arrive_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(crate::image_requests::APPLIED_NONE);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return };
+    let Some(el) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let load = args.get(1).uint32_value(scope).unwrap_or(0);
+    if crate::dom::dom(scope).arena.image_load_of(el) != load {
+        return;
+    }
+    let src = args.get(2).to_rust_string_lossy(scope);
+    let started = args.get(3).number_value(scope).unwrap_or(0.0);
+    let result = v8::Local::<v8::Object>::try_from(args.get(4)).ok();
+    if file_image(scope, host, el, &src, started, result).is_ok() {
+        rv.set_uint32(crate::image_requests::apply_record(scope, el, load, result));
+    }
+}
+// __dom.imageBlobLoad(img, load, url, host) — the `<img>`'s load `load` of the `blob:` URL `url` takes the blob's bytes now
+// (H_BLOB: none for a URL revoked or unknown, a network error)
+// (`image_from_network`), decoded and applied, its `load` or `error` fired — none where a later load superseded it.
+fn image_blob_load_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(3)) else { return };
+    let Some(el) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let load = args.get(1).uint32_value(scope).unwrap_or(0);
+    if crate::dom::dom(scope).arena.image_load_of(el) != load {
+        return;
+    }
+    let Ok(blob) = call(scope, host, H_BLOB, &[args.get(2)]) else { return };
+    let blob = blob.map(|b| v8::Local::new(scope, b)).and_then(|b| v8::Local::<v8::Object>::try_from(b).ok());
+    let bytes = blob.and_then(|b| member(scope, b, "bytes")).and_then(|b| view_bytes(scope, b));
+    let decoded = bytes.as_deref().and_then(decode_image);
+    let broken = decoded.is_none();
+    if !crate::image_requests::apply_decoded(scope, el, load, decoded, false) {
+        return;
+    }
+    let (nid, ok, n) = (v8::Number::new(scope, el.to_f64()).into(), v8::Boolean::new(scope, !broken).into(), v8::Integer::new_from_unsigned(scope, load).into());
+    let _ = call(scope, host, H_IMAGE_EVENT, &[nid, ok, n]);
+}
+
 // …an image's bytes decoded (image_decode.rs `decode`): none where they are no image, or none at all.
 fn decode_image(bytes: &[u8]) -> Option<crate::image_decode::Bitmap> {
     if bytes.is_empty() {
@@ -1159,8 +1289,12 @@ fn image_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Func
     let nid = v8::Number::new(scope, el.to_f64()).into();
     let load = v8::Integer::new_from_unsigned(scope, r.load).into();
     let Some(answer) = answer else {
-        let url = text(scope, &r.url);
-        return call(scope, host, H_IMAGE_NETWORK, &[nid, url, load]).map(drop);
+        let done = image_from_network(scope, host, r.cid, el, &r.url, r.load, r.plan)?;
+        if done == IMAGE_FETCH_PENDING {
+            return Ok(());
+        }
+        let ok = v8::Boolean::new(scope, done == IMAGE_FETCH_LOADED).into();
+        return call(scope, host, H_IMAGE_EVENT, &[nid, ok, load]).map(drop);
     };
     let mut facts = facts_of(scope, Some(answer), J_IMAGE, SRC_SW_EVENT);
     facts.redirected = redirected;
