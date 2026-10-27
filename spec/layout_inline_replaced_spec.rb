@@ -179,10 +179,17 @@ RSpec.describe 'inline replaced elements' do
     end
   end
 
-  # …an image one sized by its image, whatever URL names it: a `data:` one's bytes, a `blob:` one's (Chrome: 100x100 both)
-  it 'sizes an image embed by its image, of a data: or a blob: URL' do
+  # …an image one sized by its image, whatever URL names it: a `data:` one's bytes, a `blob:` one's (Chrome: 100x100
+  # both), the network's — its bytes as they came, which a text decoding of them mangled into no image
+  it 'sizes an image embed by its image, of a data:, a blob: or a network URL' do
     png = File.binread(File.expand_path('wpt/common/square.png', __dir__))
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
+    s = simulated_session(->(env) {
+      if env['PATH_INFO'] == '/square.png'
+        [200, {'content-type' => 'image/png'}, [png]]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']]
+      end
+    })
     s.visit '/'
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -197,6 +204,16 @@ RSpec.describe 'inline replaced elements' do
       })()
     JS
     expect(got).to eq([[100, 100], [100, 100]])
+    s.execute_script(<<~JS)
+      for (const tag of ['embed', 'object']) {
+        const el = document.createElement(tag);
+        el.id = tag;
+        el[tag === 'embed' ? 'src' : 'data'] = '/square.png';
+        document.body.append(el);
+      }
+    JS
+    sizes = %w[embed object].map {|id| s.evaluate_script("(() => { const r = document.getElementById('#{id}').getBoundingClientRect(); return [r.width, r.height]; })()") }
+    expect(sizes).to eq([[100, 100], [100, 100]])
   end
 
   # `<embed>` and `<object>` are replaced only while they HAVE a resource to render. An `<embed>`

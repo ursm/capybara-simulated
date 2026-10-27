@@ -3934,12 +3934,14 @@ module Capybara
         return nil unless key.is_a?(String)
         mode, credentials, policy, _, dest = Native.subresource_plan_fields(plan.to_i)
         client = client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer)
+        # (…and a plugin's its body, which may be an image its element takes its natural size from: its bytes as they
+        # came, which a text body would mangle)
+        plugin = %w[embed object].include?(dest.to_s)
         result = rack_fetch('GET', key, '', {}, 'follow', mode,
                             credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
-                            initiator: client[:initiator], client_origin: client[:origin], client_realm: client[:realm], dest: dest)
-        # (…and a plugin's its body, which may be an image its element takes its natural size from)
+                            initiator: client[:initiator], client_origin: client[:origin], client_realm: client[:realm], dest: dest, body_raw: plugin)
         meta = result && resource_timing_meta(result)
-        meta['body'] = document_payload(result['body']) if meta && %w[embed object].include?(dest.to_s) && image_response?(meta)
+        meta['body'] = document_payload(result['body_raw']) if meta && plugin && image_response?(meta)
         meta
       end
 
