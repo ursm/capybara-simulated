@@ -237,7 +237,7 @@ RSpec.describe 'web fonts' do
   end
 
   # …and a worker's, to its own set (`self.fonts`): its font source, which an OffscreenCanvas there measures with (CSS Font
-  # Loading §2.4).
+  # Loading §4.1, "Worker FontFaceSources").
   it "measures a worker's canvas text with a face added to the worker's set" do
     s = session
     got = s.evaluate_async_script(<<~JS)
