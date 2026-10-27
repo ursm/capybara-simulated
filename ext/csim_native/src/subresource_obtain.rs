@@ -30,9 +30,9 @@ pub(crate) const H_ASSET: u32 = 13;
 pub(crate) const H_CONTROLLER: u32 = 14;
 pub(crate) const H_CHARSET: u32 = 15;
 
-// What a link's fetch came to (`linkObtain`): its resource loads or not — or it is the bindings' to fetch (a style sheet's,
-// a preload's), or a controlling service worker's to answer, the engine's then to fire its event (constants.js
-// `LINK_*`).
+// What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
+// (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event
+// (constants.js `LINK_*`).
 const LINK_ERROR: u32 = 0;
 const LINK_LOAD: u32 = 1;
 const LINK_LEGACY: u32 = 2;
@@ -451,8 +451,9 @@ pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Globa
 // __dom.linkObtain(el, doc, url, kind, plan, integrity, moduleDestination, host) -> what the `<link>` `el`'s fetch of
 // `url` (of document `doc`) comes to, `LINK_*`: `kind` its consumer's (J_LINK, what it obtains in the high bits),
 // `plan` and `integrity` its request's as its fetch began (bridge.entry.js `requestAsItBegins`; a modulepreload's of
-// no `integrity` attribute its import map's), `moduleDestination` a modulepreload's `as` destination. A style sheet's
-// and a preload's are the bindings' still (`LINK_LEGACY`), whose memos the cascade and a preload's consumers share.
+// no `integrity` attribute its import map's), `moduleDestination` a modulepreload's `as` destination:
+//   - a style sheet: the one its owner obtains, which the cascade and `.sheet` read too (`link_sheet`, sheet_fetch.rs);
+//   - a preload of no plan (its URL none the network answers): run as it is obtained, and committed (`run_preload`);
 //   - a modulepreload: a controlling service worker's answer, else the asset cache's that the module loader shares
 //     (HTML "fetch a modulepreload module script graph": a CORS request), else — a URL the cache does not take — the
 //     network's;
@@ -464,7 +465,7 @@ pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Globa
 // its verdict the engine's (`judge`: what the link obtains, its integrity) and its entry filed.
 fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_PREFETCH, OBTAINS_PRELOAD, OBTAINS_STYLESHEET};
-    rv.set_uint32(LINK_LEGACY);
+    rv.set_uint32(LINK_ERROR);
     let kind = args.get(3).uint32_value(scope).unwrap_or(0);
     let obtains = kind >> 8;
     let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };

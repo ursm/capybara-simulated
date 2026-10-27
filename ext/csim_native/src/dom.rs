@@ -1604,6 +1604,16 @@ impl RealmArena {
         if !self.change_baselines.is_empty() {
             self.change_baselines.remove(&id);
         }
+        // (…and a link's or a sheet owner's fetches: what its preload plan, its sheet's readers and its entries kept)
+        if !self.sheet_requests.is_empty() {
+            self.sheet_requests.remove(&id);
+        }
+        if !self.link_preloads.is_empty() {
+            self.link_preloads.remove(&id);
+        }
+        if !self.link_timings.is_empty() {
+            self.link_timings.remove(&id);
+        }
         // (…and the elements set as its references)
         if !self.explicit_elements.is_empty() {
             self.forget_all_explicit_elements(id);

@@ -15,6 +15,7 @@
 // (`RealmArena::sheet_requests`) until it goes; a realm's own (`RealmSheets`) until its page goes (`sheetsForget`).
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use crate::dom::{realm, realm_id, register, NodeId};
 use crate::font_files::Terminated;
@@ -35,7 +36,7 @@ pub(crate) struct SheetRequest {
     integrity: String,
     verdicts: HashMap<u32, u32>,
     // (…the preload it took, by request — `"{plan & PLAN_REQUEST} {url}"` — None for a network error)
-    preload: Option<(String, Option<crate::preload_map::Response>)>,
+    preload: Option<(String, Option<Rc<crate::preload_map::Response>>)>,
     // (…a controlling service worker's answers, by request: none where it let the request through)
     answers: HashMap<String, Option<v8::Global<v8::Value>>>,
     // (…a fetch through the asset cache that failed, and what it answered)
@@ -307,25 +308,24 @@ fn preloaded_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'
     let Some(response) = sheet_preload(scope, cid, host, env, url, owner, referrer)? else { return Ok(None) };
     let Some(resp) = response else { return Ok(Some(Sheet::none(url))) };
     let facts = resp.facts();
-    let body = resp.body().to_vec();
-    let verdict = judge_sheet(scope, cid, env, owner, &facts, SRC_NETWORK, &|| body.clone());
-    let text = if verdict & V_OK != 0 { decode(scope, cid, env, url, &body, resp.header("content-type").unwrap_or(""), owner, environment) } else { String::new() };
+    let verdict = judge_sheet(scope, cid, env, owner, &facts, SRC_NETWORK, &|| resp.body().to_vec());
+    let text = if verdict & V_OK != 0 { decode(scope, cid, env, url, resp.body(), resp.header("content-type").unwrap_or(""), owner, environment) } else { String::new() };
     let location = if resp.url().is_empty() { url.to_owned() } else { resp.url().to_owned() };
     let mut sheet = Sheet::of_verdict(verdict, Some(text), location);
     sheet.policy = resp.header("referrer-policy").map(str::to_owned);
     Ok(Some(sheet))
 }
 // …the response itself: Some(None) for a network error, None where none matched.
-fn sheet_preload(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, env: &Env, url: &str, owner: Option<Owner>, referrer: Option<&str>) -> Result<Option<Option<crate::preload_map::Response>>, Terminated> {
+fn sheet_preload(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, env: &Env, url: &str, owner: Option<Owner>, referrer: Option<&str>) -> Result<Option<Option<Rc<crate::preload_map::Response>>>, Terminated> {
     let plan = sheet_plan(scope, cid, owner, referrer);
     let Some(owner) = owner else {
         let Some(doc) = env.doc else { return Ok(None) };
-        return crate::preload_map::consume(scope, cid, (doc, url, "style", plan), "", host);
+        return Ok(crate::preload_map::consume(scope, cid, (doc, url, "style", plan), "", host)?.map(|r| r.map(Rc::new)));
     };
     owner_preload(scope, cid, host, owner, url, plan)
 }
 // …an owner's, taken once for the sheet it obtains (by its request, `plan`) — kept where one matched.
-pub(crate) fn owner_preload(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: Owner, url: &str, plan: u32) -> Result<Option<Option<crate::preload_map::Response>>, Terminated> {
+pub(crate) fn owner_preload(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: Owner, url: &str, plan: u32) -> Result<Option<Option<Rc<crate::preload_map::Response>>>, Terminated> {
     let key = format!("{} {url}", plan & PLAN_REQUEST);
     let request = request_of(realm(scope, cid), owner.id);
     if let Some((k, resp)) = &request.preload {
@@ -335,7 +335,7 @@ pub(crate) fn owner_preload(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8
     }
     let integrity = request.integrity.clone();
     let Some(doc) = owner.doc else { return Ok(None) };
-    let taken = crate::preload_map::consume(scope, cid, (doc, url, "style", plan), &integrity, host)?;
+    let taken = crate::preload_map::consume(scope, cid, (doc, url, "style", plan), &integrity, host)?.map(|r| r.map(Rc::new));
     if let Some(resp) = &taken {
         request_of(realm(scope, cid), owner.id).preload = Some((key, resp.clone()));
     }
@@ -489,15 +489,11 @@ fn sheet_encoding_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     rv.set(text_value(scope, e));
 }
 
-// __dom.sheetsForget(): the realm's own let go of as its page goes (cascade.js `resetCascadeState`), its owners' `blob:`
-// texts with them.
+// __dom.sheetsForget(): the realm's own let go of as its page goes (cascade.js `resetCascadeState`) — its owners' go with
+// them, a new page's owners new nodes.
 fn sheets_forget_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let arena = realm(scope, cid);
-    if let Some(s) = arena.realm_state_mut(cid) {
+    if let Some(s) = realm(scope, cid).realm_state_mut(cid) {
         s.sheet_fetches = RealmSheets::default();
-    }
-    for request in arena.sheet_requests.values_mut() {
-        request.blob_texts.clear();
     }
 }

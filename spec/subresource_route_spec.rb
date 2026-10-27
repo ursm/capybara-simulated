@@ -60,6 +60,31 @@ RSpec.describe 'a subresource request route' do
     expect(s.evaluate_script("getComputedStyle(document.getElementById('a')).color")).to eq('rgb(0, 0, 0)')
   end
 
+  # …and a frame's document loading meanwhile is none of its sheets': the revoked sheet stays the page's.
+  it "keeps a revoked blob: sheet through a frame's load" do
+    s = simulated_session(lambda {|env|
+      body = env['PATH_INFO'] == '/f.html' ? '<p>frame</p>' : '<p id=a>a</p><p id=q>q</p>'
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\">#{body}"]]
+    })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.done = false;
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = URL.createObjectURL(new Blob(['#a { color: rgb(9, 9, 9) }'], { type: 'text/css' }));
+      l.onload = () => {
+        URL.revokeObjectURL(l.href);
+        const f = document.createElement('iframe');
+        f.src = '/f.html';
+        f.onload = () => { document.head.appendChild(document.createElement('style')).textContent = '#q { color: rgb(1, 2, 3) }'; done = true; };
+        document.body.appendChild(f);
+      };
+      document.head.appendChild(l);
+    JS
+    poll_until { s.evaluate_script('done') }
+    expect(s.evaluate_script("[getComputedStyle(document.getElementById('a')).color, document.querySelector('link').sheet.cssRules.length]")).to eq(['rgb(9, 9, 9)', 1])
+  end
+
   # …and a worker's `importScripts` of a blob: URL runs its blob (Chrome: `b`).
   it 'imports a blob: script into a worker' do
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>']] })
