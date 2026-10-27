@@ -405,6 +405,14 @@ fn attr_write(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     };
     let Some(changed) = change(scope, cid, caller, element, id, &key, value.as_deref(), record) else { return };
     let (steps, old, local) = changed;
+    // (…what the element shows, and what is inside it — a `class` or `style` written, or an attribute a selector reads,
+    // reaches what is measured inside it too — moved in the realm whose tree it is in, and the change observable there and
+    // in the calling realm, whose memos of that tree key on its own generations: a script's write, not one a step of the
+    // engine's makes inside it — a type change's value, a parser's details closed — which the change around it covers)
+    realm(scope, cid).note_shown_changed(1);
+    if caller != cid {
+        realm(scope, caller).note_state_changed();
+    }
     let key_value = v8::String::new(scope, &key).map_or_else(|| v8::undefined(scope).into(), Into::into);
     let old_value = units_or_null(scope, old.as_deref());
     let local_value = v8::String::new(scope, &local).map_or_else(|| v8::undefined(scope).into(), Into::into);
@@ -518,13 +526,6 @@ fn change(
     }
     if let Some((mode, selectable)) = input_type_change.filter(|_| old.as_deref() != value) {
         steps |= type_change(scope, cid, caller, element, id, mode, selectable);
-    }
-    // (…what the element shows, and what is inside it — a `class` or `style` written, or an attribute a selector reads,
-    // reaches what is measured inside it too — moved in the realm whose tree it is in, and the change observable there and
-    // in the calling realm, whose memos of that tree key on its own generations)
-    realm(scope, cid).note_shown_changed(1);
-    if caller != cid {
-        realm(scope, caller).note_state_changed();
     }
     Some((steps, old, local))
 }

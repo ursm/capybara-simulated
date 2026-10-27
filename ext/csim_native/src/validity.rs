@@ -1016,7 +1016,8 @@ fn form_reset(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             crate::node_handle::forget_live_value_of(scope, id);
         }
     }
-    crate::dom::realm(scope, cid).note_state_changed();
+    let home = crate::dom::realm(scope, cid).get(form).map_or(cid, |n| n.realm);
+    crate::dom::realm(scope, home).note_state_changed();
     let lists = [elements, files, followers, options].map(|ids| crate::dom::nodes_value(scope, cid, &ids));
     rv.set(v8::Array::new_with_elements(scope, &lists).into());
 }

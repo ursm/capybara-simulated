@@ -205,7 +205,15 @@ pub(crate) fn apply_decoded(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: 
     r.orientation = orientation;
     r.tainted = result != RESULT_BROKEN && tainted;
     arena.set_natural_size(id, natural);
+    shown_changed(scope, id);
     true
+}
+// (…what an image whose data was applied shows moved, its box and what is in it laid out again — before its `load` or
+// `error` is fired, whose listener reads its size — and an observable change, in the realm whose tree it is in)
+fn shown_changed(scope: &mut v8::PinScope<'_, '_>, id: NodeId) {
+    if let Some(cid) = crate::dom::dom(scope).arena.get(id).map(|n| n.realm) {
+        crate::dom::realm(scope, cid).note_shown_changed(1);
+    }
 }
 // What applying a load's result comes to (`apply_record`): nothing, a later load superseding it; else the event the
 // element fires — `load`, or `error` for a broken one.
@@ -263,11 +271,7 @@ pub(crate) fn apply_record(scope: &mut v8::PinScope<'_, '_>, id: NodeId, load: u
     r.orientation = if image { orientation as u8 } else { 0 };
     r.tainted = image && tainted;
     arena.set_natural_size(id, natural);
-    // (…what it shows moved, its box and what is in it laid out again — before its `load` or `error` is fired, whose
-    // listener reads its size — and an observable change)
-    if let Some(cid) = arena.get(id).map(|n| n.realm) {
-        crate::dom::realm(scope, cid).note_shown_changed(1);
-    }
+    shown_changed(scope, id);
     if image { APPLIED_LOAD } else { APPLIED_ERROR }
 }
 // __dom.imageInfo(img) -> [complete, broken, width, height, tainted, orientation, density]: the current request, as the

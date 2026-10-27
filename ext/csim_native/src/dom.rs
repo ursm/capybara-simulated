@@ -820,13 +820,16 @@ impl Generations {
         u32::from_ne_bytes(bytes)
     }
     pub(crate) fn bump(&self, which: usize) {
+        self.bump_by(which, 1);
+    }
+    pub(crate) fn bump_by(&self, which: usize, by: u32) {
         let Some(buffer) = &self.buffer else { return };
         let cells = &buffer[which * 4..which * 4 + 4];
         let mut bytes = [0u8; 4];
         for (byte, cell) in bytes.iter_mut().zip(cells) {
             *byte = cell.get();
         }
-        for (cell, byte) in cells.iter().zip(u32::from_ne_bytes(bytes).wrapping_add(1).to_ne_bytes()) {
+        for (cell, byte) in cells.iter().zip(u32::from_ne_bytes(bytes).wrapping_add(by).to_ne_bytes()) {
             cell.set(byte);
         }
     }
@@ -1914,12 +1917,11 @@ impl RealmArena {
     }
 
     // …and what one shows moved too: `subtrees` boxes and what is under them to be laid out again — each a SUBTREE mark,
-    // which the diagnostics count (`__csimSubtreeMarks`).
+    // which the diagnostics count (`__csimSubtreeMarks`). Each in the realm whose tree the node is in, whose memos of it
+    // key on its generations (a node another realm's code writes: an adopted one).
     pub(crate) fn note_shown_changed(&mut self, subtrees: u32) {
-        for _ in 0..subtrees {
-            self.generations.bump(GEN_SUBTREE_MARKS);
-            self.generations.bump(GEN_DIRTY);
-        }
+        self.generations.bump_by(GEN_SUBTREE_MARKS, subtrees);
+        self.generations.bump(GEN_DIRTY);
         self.note_state_changed();
     }
 
@@ -3951,18 +3953,16 @@ pub(crate) fn nids_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8
         .filter_map(|i| arr.get_index(scope, i).and_then(|v| v.integer_value(scope)).and_then(NodeId::from_i64))
         .collect()
 }
-// __dom.assignSlots(rootNid, [slotNid, …]): assign the slots of the shadow tree `rootNid` (-1 for none) and the slots
-// listed (ones that left it, assigned what their own tree now gives them), each slot whose assigned nodes changed
+// __dom.assignSlots(rootNid): assign the slots of the shadow tree `rootNid`, each slot whose assigned nodes changed
 // signaled and what it shows marked.
 fn assign_slots(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
     _rv: v8::ReturnValue<'_, v8::Value>,
 ) {
-    let root = nid_arg(scope, &args, 0);
-    let extra = nids_arg(scope, args.get(1));
+    let Some(root) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    let changed = assign_slots_in(scope, cid, root, &extra);
+    let changed = assign_slots_in(scope, cid, Some(root), &[]);
     // (…each slot whose assigned nodes changed, and the nodes that LEFT it: the flat tree changed shape under it — what it
     // lays out is its new assigned set, inheriting from it, which no DOM mutation marks, the light node that moved being
     // under the host — and the nodes that left move with nothing above them that the change marks; the text memos
