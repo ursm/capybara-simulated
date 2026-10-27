@@ -154,7 +154,8 @@ impl RealmArena {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "frameBuildsEagerly", frame_builds_eagerly, context_id);
-    crate::dom::register(scope, ns, "frameNavigatesToBlank", frame_navigates_to_blank, context_id);
+    crate::dom::register(scope, ns, "frameLoadBegin", frame_load_begin, context_id);
+    crate::dom::register(scope, ns, "frameLoadDue", frame_load_due, context_id);
     crate::dom::register(scope, ns, "frameNav", frame_nav, context_id);
     crate::dom::register(scope, ns, "takeSwDeferredFrames", take_sw_deferred_frames, context_id);
     crate::dom::register(scope, ns, "setFrameNav", set_frame_nav, context_id);
@@ -166,7 +167,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
-    crate::dom::register(scope, ns, "frameLoadedAt", frame_loaded_at, context_id);
     crate::dom::register(scope, ns, "setFrameLoadedAt", set_frame_loaded_at, context_id);
     crate::dom::register(scope, ns, "planFrameNavigation", plan_frame_navigation, context_id);
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
@@ -444,14 +444,6 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     }
 }
 
-// __dom.frameLoadedAt(containerNid) -> when the element's last `load` fired, on the virtual clock: -Infinity for none.
-fn frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_double(f64::NEG_INFINITY) };
-    let cid = realm_id(scope, &args);
-    let at = crate::dom::realm(scope, cid).frame_navigations.0.get(&container).and_then(|n| n.loaded_at);
-    rv.set_double(at.unwrap_or(f64::NEG_INFINITY));
-}
-
 // __dom.setFrameLoadedAt(containerNid, time) — the element's `load` fires now.
 fn set_frame_loaded_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
@@ -526,12 +518,15 @@ fn set_load_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // container's load then owed to its parent after it: what the parent's frame load steps leave to it.
 fn owe_container_load(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).filter(|&r| r >= 0).unwrap_or_else(|| realm_id(scope, &args));
+    rv.set_bool(owe_container_load_of(scope, realm));
+}
+fn owe_container_load_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
     let held = load_delay_of(scope, realm);
     let delayed = *held != 0;
     if delayed {
         *held = CONTAINER_LOAD_OWED;
     }
-    rv.set_bool(delayed);
+    delayed
 }
 
 // __dom.loadDelayedHere(page) -> whether something delays the calling realm's document's load event now: its images
@@ -756,6 +751,98 @@ impl RealmArena {
 
 // The URL a container's navigation goes to, as its attributes give it: the one the navigation under way started with,
 // else its `src` — none where it has none.
+// The container's `load` as its navigation's load event steps begin (`frameLoadBegin`): fired or queued already; at once,
+// inside the insertion that navigates it to about:blank; its document built first, on a load gate's task, then its load;
+// or its load as a task — paced, where its last `load` fired this instant, by a nested-timer clamp.
+const LOAD_NONE: u32 = 0;
+const LOAD_NOW: u32 = 1;
+const LOAD_BUILD: u32 = 2;
+const LOAD_TASK: u32 = 3;
+const FRAME_NAV_PACE_MS: f64 = 4.0;
+// …and as it comes to fire (`frameLoadDue`): nothing (a navigation superseded it, or its document's own delayed load
+// fires it after itself), the load it owed paid with no event (its container gone, or a scripted navigation's response
+// awaited, which fires its own), or its `load`.
+const DUE_NONE: u32 = 0;
+const DUE_PAID: u32 = 1;
+const DUE_FIRE: u32 = 2;
+
+// __dom.frameLoadBegin(container, initialInsertion, buildable, allHostsLocal, now, host) -> [step, delay, generation]
+// of the container's `load` (`LOAD_*`, its delay in virtual ms, the navigation it is for): once per navigation — not on
+// every connect step, nor its own build; a removal and a reassigned `src` / `srcdoc` clear the guard — owed from now until
+// it fires, delaying its document's own; at once on its initial insertion where it navigates to about:blank (Chrome and
+// Firefox: inside the `appendChild`, which a listener added after it never sees); else, where its document is built as
+// it connects (`buildable`: the host makes frame realms; `builds_eagerly`), that build — a `blob:` `src` snapshotted now,
+// so a revoke right after the insertion still loads: the navigation took its reference here — then its load. `host`
+// the bindings' (subresource-host.js), `now` the virtual clock.
+fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let answer = |scope: &mut v8::PinScope<'_, '_>, mut rv: v8::ReturnValue<'_, v8::Value>, step: u32, delay: f64, generation: u32| {
+        let items = [v8::Integer::new_from_unsigned(scope, step).into(), v8::Number::new(scope, delay).into(), v8::Integer::new_from_unsigned(scope, generation).into()];
+        rv.set(v8::Array::new_with_elements(scope, &items).into());
+    };
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return answer(scope, rv, LOAD_NONE, 0.0, 0) };
+    let (initial, buildable, all_hosts_local) = (args.get(1).is_true(), args.get(2).is_true(), args.get(3).is_true());
+    let now = args.get(4).number_value(scope).unwrap_or(0.0);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return answer(scope, rv, LOAD_NONE, 0.0, 0) };
+    let doc = node_document(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if arena.frame_nav_has(container, LOAD_FIRED) {
+        return answer(scope, rv, LOAD_NONE, 0.0, 0);
+    }
+    arena.set_frame_nav(container, LOAD_FIRED | LOAD_OWED, true);
+    let nav = arena.frame_navigation(container);
+    let generation = nav.generation;
+    let delay = if nav.loaded_at.is_some_and(|at| now - at < FRAME_NAV_PACE_MS) { FRAME_NAV_PACE_MS } else { 0.0 };
+    if initial && arena.navigates_to_blank(container, doc) {
+        return answer(scope, rv, LOAD_NOW, 0.0, generation);
+    }
+    let frame = arena.get(container).is_some_and(|n| n.is_html_named("iframe") || n.is_html_named("frame"));
+    if !(buildable && frame && arena.builds_eagerly(container, doc, cid, all_hosts_local)) {
+        return answer(scope, rv, LOAD_TASK, delay, generation);
+    }
+    let held = arena.frame_navigations.0.get(&container).is_some_and(|n| n.contents[CONTENT_NAV].is_some());
+    let src = arena.get(container).and_then(|n| n.plain_attr("src")).map(str::to_owned).filter(|_| !held);
+    let url = src.zip(doc).and_then(|(src, doc)| arena.parse_document_url(doc, &src)).map(|u| u.href().to_owned());
+    if let Some(url) = url.filter(|u| crate::fetch_rules::fetch_route(u, 0, "") == crate::fetch_rules::ROUTE_BLOB) {
+        let Ok(response) = crate::subresource_obtain::scheme_response(scope, host, &url) else { return };
+        if let Some((bytes, content_type)) = response {
+            let content_type = if content_type.is_empty() { "text/html".to_owned() } else { content_type };
+            let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+            let content = Content { url: units(&url), bytes, content_type: units(&content_type), referrer: Vec::new(), policy: Vec::new() };
+            crate::dom::realm(scope, cid).frame_navigation(container).contents[CONTENT_NAV] = Some(content);
+        }
+    }
+    answer(scope, rv, LOAD_BUILD, delay, generation);
+}
+// __dom.frameLoadDue(container, generation, now) -> `DUE_*` of the container's `load` for navigation `generation` as it
+// comes to fire, at `now` on the virtual clock (kept as when its last `load` fired, which paces the next).
+fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_uint32(DUE_NONE);
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let generation = args.get(1).uint32_value(scope).unwrap_or(0);
+    let now = args.get(2).number_value(scope).unwrap_or(0.0);
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if !arena.is_connected(container) {
+        return rv.set_uint32(DUE_PAID);
+    }
+    if arena.frame_navigation(container).generation != generation {
+        return;
+    }
+    if arena.frame_nav_has(container, NAV_PENDING) {
+        return rv.set_uint32(DUE_PAID);
+    }
+    // (…none yet where the frame's document has its load delayed — its images fetched — which fires this one with its
+    // own, after it: the container's load comes after its document's)
+    if let Some(frame) = arena.frame_realm(container) {
+        if owe_container_load_of(scope, frame) {
+            return;
+        }
+    }
+    crate::dom::realm(scope, cid).frame_navigation(container).loaded_at = Some(now);
+    rv.set_uint32(DUE_FIRE);
+}
+
 fn navigated_src(nav: Option<&FrameNavigation>, node: &crate::dom::NodeData) -> Option<String> {
     match nav.and_then(|n| n.src.as_ref()) {
         Some(started) => started.as_ref().map(|u| String::from_utf16_lossy(u)),
@@ -763,37 +850,31 @@ fn navigated_src(nav: Option<&FrameNavigation>, node: &crate::dom::NodeData) -> 
     }
 }
 
-// __dom.frameNavigatesToBlank(container) -> whether the container's attributes navigate it to about:blank (HTML "shared
-// attribute processing steps for iframe and frame elements": no `srcdoc`, and a `src` that is none, empty, failing to
-// parse against its node document's base, or a URL that matches about:blank) — on its initial insertion, the iframe
-// load event steps run at once, not on a task ("process the iframe attributes").
-fn frame_navigates_to_blank(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(false);
-    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
-    let doc = crate::node_handle::handle_of(scope, args.get(0))
-        // SAFETY: the handle lives while the object, an argument, does.
-        .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
-        .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let nav = arena.frame_navigations.0.get(&container);
-    if nav.is_some_and(|n| n.contents[CONTENT_NAV].is_some()) {
-        return;
+impl RealmArena {
+    // Whether the frame `container`'s attributes — in `doc`, none for the root of its tree — navigate it to about:blank
+    // (HTML "shared attribute processing steps for iframe and frame elements": no response a navigation carries for it, no
+    // `srcdoc`, and a URL — the one its navigation started with, else its `src` — that is none, empty, failing to parse
+    // against its node document's base, or one that matches about:blank): on its initial insertion, the iframe load event
+    // steps run at once, not on a task ("process the iframe attributes").
+    fn navigates_to_blank(&mut self, container: NodeId, doc: Option<NodeId>) -> bool {
+        let nav = self.frame_navigations.0.get(&container);
+        if nav.is_some_and(|n| n.contents[CONTENT_NAV].is_some()) {
+            return false;
+        }
+        let Some(node) = self.get(container) else { return false };
+        if node.plain_attr("srcdoc").is_some() {
+            return false;
+        }
+        let src = navigated_src(nav, node).unwrap_or_default();
+        if src.is_empty() {
+            return true;
+        }
+        let root = self.root_of(container);
+        let Some(doc) = doc.or_else(|| self.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return false };
+        self.parse_document_url(doc, &src).is_none_or(|url| {
+            url.protocol() == "about:" && url.pathname() == "blank" && url.username().is_empty() && url.password().is_empty() && url.host().is_empty()
+        })
     }
-    let Some(node) = arena.get(container) else { return };
-    if node.plain_attr("srcdoc").is_some() {
-        return;
-    }
-    let src = navigated_src(nav, node).unwrap_or_default();
-    if src.is_empty() {
-        return rv.set_bool(true);
-    }
-    let root = arena.root_of(container);
-    let Some(doc) = doc.or_else(|| arena.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return };
-    let blank = arena.parse_document_url(doc, &src).is_none_or(|url| {
-        url.protocol() == "about:" && url.pathname() == "blank" && url.username().is_empty() && url.password().is_empty() && url.host().is_empty()
-    });
-    rv.set_bool(blank);
 }
 
 // __dom.frameBuildsEagerly(container, allHostsLocal) -> whether a frame container's document is built as it connects,
@@ -806,38 +887,45 @@ fn frame_navigates_to_blank(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 // every host is served in-process (`allHostsLocal`, the WPT runner's): an app's external embed is not run as the app's
 // own page in the frame.
 fn frame_builds_eagerly(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(false);
-    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return rv.set_bool(false) };
     let all_hosts_local = args.get(1).is_true();
-    // (…its node document, the one its URL resolves against)
-    let doc = crate::node_handle::handle_of(scope, args.get(0))
+    let doc = node_document(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).builds_eagerly(container, doc, cid, all_hosts_local));
+}
+// The node document of a node object (its handle's), none for one of no handle.
+fn node_document(scope: &mut v8::PinScope<'_, '_>, node: v8::Local<'_, v8::Value>) -> Option<NodeId> {
+    crate::node_handle::handle_of(scope, node)
         // SAFETY: the handle lives while the object, an argument, does.
         .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
-        .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let nav = arena.frame_navigations.0.get(&container);
-    if nav.is_some_and(|n| n.contents[CONTENT_NAV].is_some()) {
-        return rv.set_bool(true);
+        .and_then(|d| crate::node_handle::nid_of(scope, d.into()))
+}
+impl RealmArena {
+    // …`frameBuildsEagerly` of the frame `container`, in `doc` (none for the root of its tree), of realm `cid`'s document.
+    fn builds_eagerly(&mut self, container: NodeId, doc: Option<NodeId>, cid: i32, all_hosts_local: bool) -> bool {
+        let nav = self.frame_navigations.0.get(&container);
+        if nav.is_some_and(|n| n.contents[CONTENT_NAV].is_some()) {
+            return true;
+        }
+        let Some(node) = self.get(container) else { return false };
+        if node.plain_attr("srcdoc").is_some() {
+            return true;
+        }
+        let Some(src) = navigated_src(nav, node) else { return false };
+        let s = src.trim_matches(|c: char| c.is_whitespace() || c == '\u{FEFF}');
+        let scheme = |prefix: &str| s.get(..prefix.len()).is_some_and(|p| p.eq_ignore_ascii_case(prefix));
+        if scheme("data:") || scheme("blob:") || scheme("javascript:") {
+            return true;
+        }
+        if s.is_empty() || scheme("about:") {
+            return false;
+        }
+        // (…a node of the realm's own document keeps none of its own: that document is its tree's root, a frame built
+        // only as it is connected)
+        let root = self.root_of(container);
+        let Some(doc) = doc.or_else(|| self.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return false };
+        let origin = self.served_origin(cid);
+        let Some(url) = self.parse_document_url(doc, s) else { return false };
+        url.origin() == origin || all_hosts_local
     }
-    let Some(node) = arena.get(container) else { return };
-    if node.plain_attr("srcdoc").is_some() {
-        return rv.set_bool(true);
-    }
-    let Some(src) = navigated_src(nav, node) else { return };
-    let s = src.trim_matches(|c: char| c.is_whitespace() || c == '\u{FEFF}');
-    let scheme = |prefix: &str| s.get(..prefix.len()).is_some_and(|p| p.eq_ignore_ascii_case(prefix));
-    if scheme("data:") || scheme("blob:") || scheme("javascript:") {
-        return rv.set_bool(true);
-    }
-    if s.is_empty() || scheme("about:") {
-        return;
-    }
-    // (…a node of the realm's own document keeps none of its own: that document is its tree's root, a frame built only
-    // as it is connected)
-    let root = arena.root_of(container);
-    let Some(doc) = doc.or_else(|| arena.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return };
-    let origin = arena.served_origin(cid);
-    let Some(url) = arena.parse_document_url(doc, s) else { return };
-    rv.set_bool(url.origin() == origin || all_hosts_local);
 }
