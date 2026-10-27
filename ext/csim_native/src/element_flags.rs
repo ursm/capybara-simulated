@@ -14,6 +14,8 @@ const ELEMENT_FLAGS: u16 = 0b11_1111_1111;
 pub(crate) const SELECT_HAS_SELECTED_CONTENT: u16 = 1 << 0;
 // A `<style>`'s `load` queued for the sheet it has (element-flags.js `STYLE_LOAD_FIRED`): a new sheet owes another.
 pub(crate) const STYLE_LOAD_FIRED: u16 = 1 << 6;
+// A classic script's Resource Timing entry filed (element-flags.js `SCRIPT_TIMING_FILED`): an element's once.
+pub(crate) const SCRIPT_TIMING_FILED: u16 = 1 << 9;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "elementFlags", element_flags, context_id);
