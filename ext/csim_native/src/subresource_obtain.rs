@@ -35,6 +35,9 @@ const H_VIDEO_BYTES: u32 = 18;
 const H_MEDIA_DONE: u32 = 19;
 pub(crate) const H_FRAME_NAVIGATION: u32 = 20;
 pub(crate) const H_LOAD_BLOCKER_SETTLED: u32 = 21;
+pub(crate) const H_SW_IMPORT: u32 = 22;
+pub(crate) const H_IMPORT_NETWORK: u32 = 23;
+pub(crate) const H_SW_NOTE_IMPORT: u32 = 24;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event

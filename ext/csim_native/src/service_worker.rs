@@ -124,35 +124,29 @@ pub(crate) struct ServiceWorkerGlobal {
     installed: bool,
 }
 
+impl ServiceWorkerGlobal {
+    // Whether it is past installing — its install event's lifetime promises settled, whatever came of them: an
+    // `importScripts` of a URL its script resource map does not hold a NetworkError then (Service Workers §4.3
+    // "importScripts(urls)": its state past `parsed` and `installing`).
+    pub(crate) fn installed(&self) -> bool {
+        self.installed
+    }
+    // The cache mode its `importScripts` fetches in: `no-cache` under an updateViaCache of `none` (every import
+    // revalidated), else none (the HTTP cache read).
+    pub(crate) fn import_cache_mode(&self) -> Option<&'static str> {
+        (self.update_via_cache == "none").then_some("no-cache")
+    }
+    // The Update probe's record of the script at `url`, as JSON — taken: a second import of it fetches.
+    pub(crate) fn take_probed_import(&mut self, url: &str) -> Option<String> {
+        self.probed_imports.remove(url)
+    }
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "swGlobalInit", global_init_op, context_id);
     crate::dom::register(scope, ns, "swGlobal", global_op, context_id);
-    crate::dom::register(scope, ns, "swProbedImport", probed_import_op, context_id);
-    crate::dom::register(scope, ns, "swImportCacheMode", import_cache_mode_op, context_id);
     crate::dom::register(scope, ns, "swInstalled", installed_op, context_id);
-    crate::dom::register(scope, ns, "swImportsFetched", imports_fetched_op, context_id);
     crate::dom::register(scope, ns, "swClaims", claims_op, context_id);
-    crate::dom::register(scope, ns, "swScriptResource", script_resource_op, context_id);
-    crate::dom::register(scope, ns, "swScriptResourceSet", script_resource_set_op, context_id);
-}
-
-// __dom.swScriptResource(url) -> `[source, muted]` of the script the calling service worker imported from `url`
-// (`RealmState::script_resources`), or undefined for one it has not; __dom.swScriptResourceSet(url, source, muted) enters
-// one — as it is fetched, before it runs: a re-import from inside it finds it.
-fn script_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some((source, muted)) = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.script_resources.get(&url)).cloned() else { return };
-    let source = crate::dom::utf16_value(scope, &source);
-    let muted = v8::Boolean::new(scope, muted).into();
-    rv.set(v8::Array::new_with_elements(scope, &[source, muted]).into());
-}
-fn script_resource_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (url, source, muted) = (args.get(0).to_rust_string_lossy(scope), crate::dom::utf16_arg(scope, args.get(1)), args.get(2).is_true());
-    let cid = crate::dom::realm_id(scope, &args);
-    if let Some(s) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
-        s.script_resources.insert(url, (source, muted));
-    }
 }
 
 // __dom.swGlobalInit(scope, updateViaCache, importsJson, previousUrl, previousHandle): the calling realm a service worker's,
@@ -187,30 +181,6 @@ fn global_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.swProbedImport(url) -> the Update probe's record of the script at `url`, as JSON — taken: a second import of it
-// fetches — or undefined for none.
-fn probed_import_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(record) = crate::dom::realm(scope, cid).realm_state_mut(cid).and_then(|s| s.service_worker.as_mut()).and_then(|g| g.probed_imports.remove(&url))
-    else {
-        return;
-    };
-    if let Some(s) = v8::String::new(scope, &record) {
-        rv.set(s.into());
-    }
-}
-// __dom.swImportCacheMode() -> the cache mode a service worker's `importScripts` fetches in: `no-cache` under an
-// updateViaCache of `none` (every import revalidated), else undefined (the HTTP cache read) — and undefined for another
-// realm.
-fn import_cache_mode_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let none = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).is_some_and(|g| g.update_via_cache == "none");
-    if let Some(s) = v8::String::new(scope, "no-cache").filter(|_| none) {
-        rv.set(s.into());
-    }
-}
-
 // __dom.swInstalled(): the calling service worker past installing — its install event's lifetime promises settled,
 // whatever came of them.
 fn installed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -219,15 +189,6 @@ fn installed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
         g.installed = true;
     }
 }
-// __dom.swImportsFetched() -> whether an `importScripts` of a URL its script resource map does not hold is fetched — the
-// worker's state `parsed` or `installing` — or a NetworkError (Service Workers §4.3 "importScripts(urls)": its state
-// past those); true for any other realm's.
-fn imports_fetched_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let installed = crate::dom::realm(scope, cid).realm_state(cid).and_then(|s| s.service_worker.as_ref()).is_some_and(|g| g.installed);
-    rv.set_bool(!installed);
-}
-
 // __dom.swClaims(href, scope, scopes) -> `claims`.
 fn claims_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let href = args.get(0).to_rust_string_lossy(scope);

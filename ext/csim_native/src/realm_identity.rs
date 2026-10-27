@@ -7,7 +7,7 @@
 pub(crate) struct RealmIdentity {
     client_id: Option<String>,
     window_key: Option<u32>,
-    worker_handle: u32,
+    pub(crate) worker_handle: u32,
     agent_owner: u64,
     module_worker: bool,
 }

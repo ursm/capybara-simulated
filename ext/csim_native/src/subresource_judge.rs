@@ -51,7 +51,7 @@ pub(crate) struct Consumer<'a> {
     pub(crate) mode: &'a str,
     pub(crate) quirks: bool,
 }
-#[cfg(test)]
+// …a `kind` consumer's of nothing more: a no-cors request of no integrity metadata (a worker's import).
 impl Consumer<'static> {
     pub(crate) fn of(kind: u32) -> Self {
         Consumer { kind, obtains: 0, module_destination: "", preload_destination: "", integrity: "", body: b"", mode: "no-cors", quirks: false }
