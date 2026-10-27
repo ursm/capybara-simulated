@@ -28,6 +28,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         else if (u.pathname === '/scope/refused.css') e.respondWith(new Response('p { color: red }', {status: 404}));
         else if (u.pathname === '/scope/away.mp3') e.respondWith(fetch('http://other.test/a.mp3', {mode: 'no-cors'}));
         else if (u.pathname.startsWith('/scope/away-')) e.respondWith(fetch('http://other.test/' + u.pathname.slice(12), {mode: 'no-cors'}));
+        else if (u.pathname === '/scope/pf-slow') e.respondWith(new Promise(r => setTimeout(() => r(new Response('x')), 200)));
         else if (u.pathname === '/scope/pf-stream') e.respondWith(fetch('/log?pf=' + (e.request.integrity || 'none')).then(() => new Response(new ReadableStream({start(c) { c.enqueue(new TextEncoder().encode('abc')); c.close(); }}))));
         else if (u.pathname.startsWith('/scope/hint')) e.respondWith(fetch('/log?' + u.pathname.slice(7) + '=' + e.request.mode).then(() => new Response('')));
         else if (u.pathname === '/scope/moved.css') e.respondWith(fetch('/other/x.css'));
@@ -401,6 +402,31 @@ RSpec.describe 'Service Worker subresource verdict' do
     JS
     expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq(['load', 3])
     expect(hits).to include('/log?pf=sha256-ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=')
+  end
+  # …and fires its `load` at the link wherever it is once the worker answers: one moved into another realm's document
+  # meanwhile has it there (and loads again, as it connects there).
+  it "fires a prefetch's load at its link moved into another document as its worker answers" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__loads = 0;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          const link = f.contentDocument.createElement('link');
+          link.rel = 'prefetch';
+          link.href = '/scope/pf-slow';
+          link.addEventListener('load', () => { globalThis.__loads++; });
+          f.contentDocument.head.appendChild(link);
+          setTimeout(() => document.head.appendChild(link), 0);
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__loads') == 2 && 2 }).to eq(2)
   end
   # …and as it is referred: under its element's `referrerpolicy` — an image's (a fetch event), a script's and a module
   # script's (the synchronous one) alike — its worker's `event.request` the policy and the referrer it is made with; an

@@ -35,6 +35,9 @@ const LINK_ERROR: u32 = 0;
 const LINK_LOAD: u32 = 1;
 const LINK_LEGACY: u32 = 2;
 const LINK_PENDING: u32 = 3;
+const fn link_done(ok: bool) -> u32 {
+    if ok { LINK_LOAD } else { LINK_ERROR }
+}
 
 // What processing a plugin element came to (`processPlugin`): it had a resource to process, an `<object>`'s that
 // failed, and its fallback content shown or no longer (constants.js `PLUGIN_*`).
@@ -116,7 +119,7 @@ fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, s: Option<&str>) -> v8::Lo
 }
 fn member<'s>(scope: &mut v8::PinScope<'s, '_>, obj: v8::Local<'_, v8::Object>, k: &str) -> Option<v8::Local<'s, v8::Value>> {
     let k = v8::String::new(scope, k)?;
-    obj.get(scope, k.into()).filter(|v| !v.is_undefined())
+    obj.get(scope, k.into()).filter(|v| !v.is_null_or_undefined())
 }
 
 // "Consume a preloaded resource" for `request`: the response the preload of it had, None for a network error — its
@@ -443,7 +446,6 @@ pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Globa
     answer.map(|a| v8::Local::new(scope, a)).filter(|a| a.is_string()).map(|a| a.to_rust_string_lossy(scope))
 }
 
-
 // __dom.linkObtain(el, doc, url, kind, plan, integrity, moduleDestination, host) -> what the `<link>` `el`'s fetch of
 // `url` (of document `doc`) comes to, `LINK_*`: `kind` its consumer's (J_LINK, what it obtains in the high bits),
 // `plan` and `integrity` its request's as its fetch began (bridge.entry.js `requestAsItBegins`; a modulepreload's of
@@ -478,17 +480,17 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
         // (…a preload of no plan — its URL none the network answers — run as it is obtained, and committed)
         let destination = crate::script::preload_destination(&preload_as(scope, el, cid)).unwrap_or("");
         let r = Request { preload: Some((destination, 0)), ..r };
-        run_preload(scope, host, r).map(u32::from)
+        run_preload(scope, host, r).map(link_done)
     } else if obtains & OBTAINS_MODULEPRELOAD != 0 {
-        modulepreload(scope, host, &r, &module_destination).map(u32::from)
+        modulepreload(scope, host, &r, &module_destination).map(link_done)
     } else if obtains & OBTAINS_PREFETCH != 0 {
         match dispatch(scope, host, r) {
             Ok(None) => Ok(LINK_PENDING),
-            Ok(Some(r)) => prefetch_verdict(scope, host, &r, None, false).map(u32::from),
+            Ok(Some(r)) => prefetch_verdict(scope, host, &r, None, false).map(link_done),
             Err(t) => Err(t),
         }
     } else {
-        link_from_network(scope, host, &r, "").map(u32::from)
+        link_from_network(scope, host, &r, "").map(link_done)
     };
     if let Ok(done) = done {
         rv.set_uint32(done);
@@ -497,7 +499,6 @@ fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 
 // The verdict on what answered a link's request (`judge`), from `source` — `bytes` its body's (none asked for where the
 // request has no integrity), `destinations` a modulepreload's and a preload's.
-#[allow(clippy::too_many_arguments)]
 fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, (module_destination, preload_destination): (&str, &str)) -> bool {
     use crate::subresource_judge::{judge, Consumer, V_OK};
     let body = if r.integrity.is_empty() {
@@ -698,7 +699,7 @@ fn link_preload_run_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
             ok
         }
     };
-    rv.set_uint32(if ok { LINK_LOAD } else { LINK_ERROR });
+    rv.set_uint32(link_done(ok));
 }
 
 // A preload's fetch run (`linkPreloadRun`, or a consumer that came first: preload_map.rs `consume`): a controlling

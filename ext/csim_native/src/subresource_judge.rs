@@ -120,7 +120,8 @@ pub(crate) fn judge(consumer: &Consumer<'_>, source: u32, facts: &Facts) -> u32 
         let ok = match kind {
             J_IMAGE | J_FONT => true,
             J_PREFETCH => true,
-            J_LINK if consumer.obtains == crate::link_resource::OBTAINS_PREFETCH => true,
+            // (…a manifest's beside it no load of its own: the prefetch's rule)
+            J_LINK if consumer.obtains & !crate::link_resource::OBTAINS_MANIFEST == crate::link_resource::OBTAINS_PREFETCH => true,
             J_AUDIO | J_VIDEO => status < 400,
             J_CLASSIC_SCRIPT | J_WORKER_IMPORT | J_SHEET | J_CSS_MODULE | J_LINK | J_OBJECT => (200..=299).contains(&status),
             _ => false,
@@ -370,6 +371,9 @@ mod tests {
         assert_eq!(judge(&Consumer::of(J_PREFETCH), SRC_SW_EVENT, &resp("basic", Some(404))), OK);
         assert_eq!(judge(&Consumer::of(J_PREFETCH), SRC_NETWORK, &resp("basic", Some(500))), OK);
         assert_eq!(judge(&Consumer { obtains: OBTAINS_PREFETCH, ..Consumer::of(J_LINK) }, SRC_NETWORK, &resp("basic", Some(404))), OK);
+        // (…a manifest's beside it no load of its own)
+        let manifest = Consumer { obtains: OBTAINS_PREFETCH | crate::link_resource::OBTAINS_MANIFEST, ..Consumer::of(J_LINK) };
+        assert_eq!(judge(&manifest, SRC_SW_EVENT, &resp("basic", Some(404))), OK);
         // (…but a link that is a style sheet too wants an ok status for it)
         let both = Consumer { obtains: OBTAINS_PREFETCH | OBTAINS_STYLESHEET, ..Consumer::of(J_LINK) };
         assert_eq!(judge(&both, SRC_NETWORK, &Facts { content_type: "text/css".to_owned(), ..resp("basic", Some(404)) }), 0);

@@ -20,7 +20,7 @@ pub(crate) const OBTAINS_STYLESHEET: u32 = 1;
 pub(crate) const OBTAINS_PREFETCH: u32 = 1 << 1;
 pub(crate) const OBTAINS_MODULEPRELOAD: u32 = 1 << 2;
 pub(crate) const OBTAINS_PRELOAD: u32 = 1 << 3;
-const OBTAINS_MANIFEST: u32 = 1 << 4;
+pub(crate) const OBTAINS_MANIFEST: u32 = 1 << 4;
 
 pub(crate) struct Plan {
     pub(crate) verdict: u32,
