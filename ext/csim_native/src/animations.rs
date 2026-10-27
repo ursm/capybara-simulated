@@ -352,22 +352,31 @@ impl PromiseState {
     }
 }
 
-// What a handle is to do for an animation: settle a promise (the generation says which), or dispatch an event.
-// `timeline_time` / `current_time` are what an `AnimationPlaybackEvent` carries.
+// What a handle is to do for an animation: settle a promise (the generation says which).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum Signal {
     ReadyResolved { animation: AnimationId, generation: u32 },
     ReadyRejected { animation: AnimationId, generation: u32 },
     FinishedResolved { animation: AnimationId, generation: u32 },
     FinishedRejected { animation: AnimationId, generation: u32 },
-    // (…`finish` scheduled where the effect END is on the timeline, §4.4.15 — which a later event of the same update,
-    // a `remove`, follows)
-    Finish { animation: AnimationId, current_time: Option<f64>, timeline_time: Option<f64>, scheduled: Option<f64> },
-    Cancel { animation: AnimationId, timeline_time: Option<f64> },
-    Remove { animation: AnimationId, current_time: Option<f64>, timeline_time: Option<f64> },
     // A finish notification was queued for the next microtask checkpoint: the handle is to run it then
     // (`finish_notification`).
     FinishNotificationQueued { animation: AnimationId },
+}
+
+// A playback event of an animation a handle holds — `finish`, `cancel` or `remove` — in the document's pending
+// animation event queue (§4.4.2, §4.4.13, §5.5): `current_time` / `timeline_time` what its `AnimationPlaybackEvent`
+// carries, `scheduled` its scheduled event time at the document's time (its timeline's origin time on; negative
+// infinity for none), and `class` its animation's class in composite order as it was when it was queued — 0 a CSS
+// transition, 1 a CSS animation, 2 any other — which places it where the engine no longer can.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) struct PlaybackEvent {
+    pub(crate) animation: AnimationId,
+    pub(crate) kind: &'static str,
+    pub(crate) current_time: Option<f64>,
+    pub(crate) timeline_time: Option<f64>,
+    pub(crate) scheduled: f64,
+    pub(crate) class: u8,
 }
 
 // A script-visible error of an animation method (§4.4): a DOMException's name, or a TypeError.
@@ -417,7 +426,9 @@ pub(crate) struct Animations {
     // The document timeline's current time (ms), None before the page has one.
     pub(crate) timeline_time: Option<f64>,
     pub(crate) signals: Vec<Signal>,
-    // The events the CSS animations owe since the last rendering update took them.
+    // The playback events queued since the last rendering update took them…
+    pub(crate) playback_events: Vec<PlaybackEvent>,
+    // …and the events the CSS animations owe.
     pub(crate) css_events: Vec<CssEvent>,
     // The elements whose animations' properties changed — an effect came or went, or its keyframes changed — since a
     // flush last took them (`take_retargeted`) to look again at what they set (`StyleEngine::reconcile_animated`).
@@ -1032,7 +1043,7 @@ impl Animations {
             }
             a.finished.replace(false);
             a.finish_notification_queued = false;
-            self.signals.push(Signal::Cancel { animation: id, timeline_time });
+            self.queue_playback_event(id, "cancel", None, timeline_time, timeline_time);
         }
         let a = self.animations.get_mut(&id).unwrap();
         a.hold_time = None;
@@ -1181,7 +1192,9 @@ impl Animations {
         }
         a.finished.settled = true;
         self.signals.push(Signal::FinishedResolved { animation: id, generation: a.finished.generation });
-        self.signals.push(Signal::Finish { animation: id, current_time, timeline_time, scheduled });
+        // (…scheduled where the effect END is on the timeline, §4.4.15 — which a later event of the same update, a
+        // `remove`, follows)
+        self.queue_playback_event(id, "finish", current_time, timeline_time, scheduled);
     }
 
     // A frame of the document timeline (§4.2 "update animations and send events", its animation part): the timeline
@@ -1414,13 +1427,42 @@ impl Animations {
             let timeline_time = self.timeline_time_of(&self.animations[&id]);
             self.animations.get_mut(&id).unwrap().replace_state = ReplaceState::Removed;
             self.touch(id);
-            self.signals.push(Signal::Remove { animation: id, current_time, timeline_time });
+            self.queue_playback_event(id, "remove", current_time, timeline_time, timeline_time);
         }
         any
     }
 
     pub(crate) fn take_signals(&mut self) -> Vec<Signal> {
         std::mem::take(&mut self.signals)
+    }
+
+    // A playback event of `id`, scheduled `at` on its timeline, where a handle is to dispatch it.
+    fn queue_playback_event(&mut self, id: AnimationId, kind: &'static str, current_time: Option<f64>, timeline_time: Option<f64>, at: Option<f64>) {
+        let a = &self.animations[&id];
+        if !a.handled {
+            return;
+        }
+        let class = match a.css.as_ref().map(|css| css.transition().is_some()) {
+            Some(true) => 0,
+            Some(false) => 1,
+            None => 2,
+        };
+        let scheduled = at.map_or(f64::NEG_INFINITY, |at| at + a.timeline.unwrap_or(0.0));
+        self.playback_events.push(PlaybackEvent { animation: id, kind, current_time, timeline_time, scheduled, class });
+    }
+
+    // Whether animation `id`'s handle is held, whatever the page holds of it: by its timeline while it plays — not idle,
+    // and not over without a fill — so a page that let go of it still finds it in `getAnimations()`, its promises and
+    // events still reaching their listeners; and by the pending animation event queue while an event of it waits there.
+    pub(crate) fn held(&self, id: AnimationId) -> bool {
+        let Some(a) = self.animations.get(&id) else { return false };
+        let plays = a.timeline.is_some()
+            && match self.play_state(id) {
+                PlayState::Idle => false,
+                PlayState::Finished => a.effect.and_then(|e| self.computed_timing(e)).is_some_and(|t| t.progress.is_some()),
+                _ => true,
+            };
+        plays || self.playback_events.iter().any(|e| e.animation == id)
     }
 }
 
@@ -1640,7 +1682,10 @@ mod tests {
         model.finish_notification(id);
         let signals = model.take_signals();
         assert!(signals.contains(&Signal::FinishedResolved { animation: id, generation: 0 }));
-        assert!(signals.contains(&Signal::Finish { animation: id, current_time: Some(1000.0), timeline_time: Some(1500.0), scheduled: Some(1000.0) }));
+        assert_eq!(
+            model.playback_events,
+            [PlaybackEvent { animation: id, kind: "finish", current_time: Some(1000.0), timeline_time: Some(1500.0), scheduled: 1000.0, class: 2 }]
+        );
         // …and playing it again rewinds it, with a new finished promise.
         model.play(id, true).unwrap();
         assert_eq!(model.current_time(id), Some(0.0));
@@ -1667,10 +1712,10 @@ mod tests {
         let id = playing(&mut model, 1000.0);
         model.finish(id).unwrap();
         assert_eq!((model.play_state(id), model.current_time(id)), (PlayState::Finished, Some(1000.0)));
-        assert!(model.take_signals().iter().any(|s| matches!(s, Signal::Finish { .. })));
+        assert!(std::mem::take(&mut model.playback_events).iter().any(|e| e.kind == "finish"));
         model.cancel(id);
         assert_eq!((model.play_state(id), model.current_time(id)), (PlayState::Idle, None));
-        assert!(model.take_signals().iter().any(|s| matches!(s, Signal::Cancel { .. })));
+        assert!(model.playback_events.iter().any(|e| e.kind == "cancel"));
         let infinite = model.new_effect(EffectTiming { iterations: f64::INFINITY, ..timing(1000.0) });
         let forever = model.new_animation(Some(infinite), Some(0.0));
         assert_eq!(model.finish(forever), Err(AnimationError::InvalidState));

@@ -1,6 +1,7 @@
 // The Web Animations ops (`__dom.anim*`): what a JS `Animation` / `KeyframeEffect` handle asks of the realm's model
 // (`animations.rs`, kept by its style engine). A handle holds an id; the model holds everything else, and what the
-// handle must do in turn — settle a promise, dispatch an event — comes back as signals (`animSignals`).
+// handle must do in turn — settle a promise — comes back as signals (`animSignals`); the events it owes wait in the
+// document's pending animation event queue (`styleTakeAnimationEvents`).
 
 use crate::numbers::to_js_string;
 use style::selector_parser::PseudoElement;
@@ -24,6 +25,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animOverallProgress", anim_overall_progress, context_id);
     register(scope, ns, "animTimingCheck", anim_timing_check, context_id);
     register(scope, ns, "animSignals", anim_signals, context_id);
+    register(scope, ns, "animHeld", anim_held, context_id);
     register(scope, ns, "animDrop", anim_drop, context_id);
     register(scope, ns, "animCommitValues", anim_commit_values, context_id);
     register(scope, ns, "animNextFrameDelay", anim_next_frame_delay, context_id);
@@ -35,7 +37,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "animKeyframes", anim_keyframes, context_id);
     register(scope, ns, "animReconcile", anim_reconcile, context_id);
     register(scope, ns, "animCompositeOrder", anim_composite_order, context_id);
-    register(scope, ns, "animEventOrder", anim_event_order, context_id);
 }
 
 // The document timeline at the realm's clock (`RealmState::clock`), before an op reads or moves an animation.
@@ -590,36 +591,35 @@ fn anim_timing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     });
 }
 
-// __dom.animSignals() -> [kind, animation, a, b, scheduled, …]: what the handles are to do, in order — `ready` /
-// `readyReject` / `finished` / `finishedReject` (a: the promise's generation), `finish` / `remove` (a: current time, b:
-// timeline time), `cancel` (b: timeline time), and `finishNotification` (a microtask to queue for the animation); an
-// event's `scheduled` the timeline time it is scheduled at (its timeline time but for `finish`'s).
+// __dom.animSignals() -> [kind, animation, generation, …]: what the handles are to do, in order — settle a promise
+// (`ready` / `readyReject` / `finished` / `finishedReject`, its generation), or queue a microtask for the animation's
+// finish notification (`finishNotification`, generation null).
 fn anim_signals(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, _arena| {
         let signals = engine.web_animations.take_signals();
-        let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(signals.len() * 5);
+        let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(signals.len() * 3);
         for signal in signals {
-            let (kind, animation, a, b, scheduled) = match signal {
-                Signal::ReadyResolved { animation, generation } => ("ready", animation, Some(generation as f64), None, None),
-                Signal::ReadyRejected { animation, generation } => ("readyReject", animation, Some(generation as f64), None, None),
-                Signal::FinishedResolved { animation, generation } => ("finished", animation, Some(generation as f64), None, None),
-                Signal::FinishedRejected { animation, generation } => {
-                    ("finishedReject", animation, Some(generation as f64), None, None)
-                },
-                Signal::Finish { animation, current_time, timeline_time, scheduled } => {
-                    ("finish", animation, current_time, timeline_time, scheduled)
-                },
-                Signal::Cancel { animation, timeline_time } => ("cancel", animation, None, timeline_time, timeline_time),
-                Signal::Remove { animation, current_time, timeline_time } => ("remove", animation, current_time, timeline_time, timeline_time),
-                Signal::FinishNotificationQueued { animation } => ("finishNotification", animation, None, None, None),
+            let (kind, animation, generation) = match signal {
+                Signal::ReadyResolved { animation, generation } => ("ready", animation, Some(generation as f64)),
+                Signal::ReadyRejected { animation, generation } => ("readyReject", animation, Some(generation as f64)),
+                Signal::FinishedResolved { animation, generation } => ("finished", animation, Some(generation as f64)),
+                Signal::FinishedRejected { animation, generation } => ("finishedReject", animation, Some(generation as f64)),
+                Signal::FinishNotificationQueued { animation } => ("finishNotification", animation, None),
             };
             items.push(string_value(scope, kind));
             items.push(v8::Number::new(scope, animation as f64).into());
-            items.push(optional_number(scope, a));
-            items.push(optional_number(scope, b));
-            items.push(optional_number(scope, scheduled));
+            items.push(optional_number(scope, generation));
         }
         rv.set(v8::Array::new_with_elements(scope, &items).into());
+    });
+}
+
+// __dom.animHeld(animation) -> whether its handle is held whatever the page holds of it (`held`).
+fn anim_held(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    with_engine(scope, &args, |scope, engine, arena| {
+        let Some(id) = number_arg(scope, args.get(0)).map(|n| n as AnimationId) else { return rv.set_bool(false) };
+        at_time(engine, arena);
+        rv.set_bool(engine.web_animations.held(id));
     });
 }
 
@@ -802,27 +802,6 @@ pub(crate) fn event_order(events: &[(f64, AnimationId, u8, bool)], rank: &std::c
     });
     order
 }
-// __dom.animEventOrder([scheduled, animation, class, playback, …]) -> the events' indices in dispatch order
-// (`event_order`).
-fn anim_event_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    with_engine(scope, &args, |scope, engine, arena| {
-        let items = array_arg(scope, args.get(0));
-        let events: Vec<(f64, AnimationId, u8, bool)> = items
-            .chunks_exact(4)
-            .map(|e| {
-                let number = |i: &Item| i.number().unwrap_or(0.0);
-                (e[0].number().unwrap_or(f64::NEG_INFINITY), number(&e[1]) as AnimationId, number(&e[2]) as u8, number(&e[3]) != 0.0)
-            })
-            .collect();
-        let mut ids: Vec<AnimationId> = events.iter().map(|e| e.1).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        let rank: std::collections::HashMap<AnimationId, usize> = engine.in_composite_order(arena, ids).into_iter().enumerate().map(|(i, id)| (id, i)).collect();
-        let order: Vec<v8::Local<v8::Value>> = event_order(&events, &rank).into_iter().map(|i| v8::Number::new(scope, i as f64).into()).collect();
-        rv.set(v8::Array::new_with_elements(scope, &order).into());
-    });
-}
-
 // __dom.animCompositeOrder([animation, …]) -> the ones the engine still has, in composite order.
 fn anim_composite_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     with_engine(scope, &args, |scope, engine, arena| {

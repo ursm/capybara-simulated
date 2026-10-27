@@ -2020,20 +2020,23 @@ impl StyleEngine {
         })
     }
 
-    // A rendering update's events: what each CSS animation and transition owes for where its phase moved (the model
-    // queues them), in the order they were due, and those due together in composite order — transitions before
-    // animations, then by owning element in tree order and pseudo-element, then a transition's style change and
-    // property and an animation's place in `animation-name`.
+    // The document's pending animation events (web-animations §4.2 "update animations and send events", steps 4-5),
+    // taken for the rendering update to dispatch — what each CSS animation and transition owes for where its phase
+    // moved, and the Web Animations' playback events — in the order they are dispatched: by scheduled event time, those
+    // due together by class and the animations' composite order (`animation_ops::event_order`). The CSS events come to
+    // it in the order their own composite order puts them — transitions before animations, then by owning element in
+    // tree order and pseudo-element, then a transition's style change and property and an animation's place in
+    // `animation-name` — which places an animation the engine no longer has (a completed transition nothing holds).
     pub(crate) fn take_animation_events(&mut self, arena: &RealmArena) -> Vec<AnimationEvent> {
-        let mut events = self.web_animations.take_css_events();
-        if events.len() > 1 {
+        let mut css = self.web_animations.take_css_events();
+        if css.len() > 1 {
             let mut paths = std::collections::HashMap::new();
-            for e in &events {
+            for e in &css {
                 paths.entry(e.owner.node).or_insert_with(|| tree_path(arena, e.owner.node));
             }
             // (Stable: one animation's events keep the order it queued them in.)
             let key = |e: &crate::css::CssEvent| to_microseconds(e.scheduled / 1000.0);
-            events.sort_by(|a, b| {
+            css.sort_by(|a, b| {
                 key(a).total_cmp(&key(b)).then_with(|| {
                     (!a.transition, &paths[&a.owner.node], waapi::pseudo_rank(&a.owner.pseudo), a.order, &a.name).cmp(&(
                         !b.transition,
@@ -2045,18 +2048,42 @@ impl StyleEngine {
                 })
             });
         }
-        events
+        let playback = std::mem::take(&mut self.web_animations.playback_events);
+        let mut events: Vec<AnimationEvent> = css
             .into_iter()
             .map(|e| AnimationEvent {
                 kind: e.kind,
-                node: e.owner.node,
+                node: Some(e.owner.node),
                 pseudo: e.owner.pseudo.as_ref().and_then(pseudo_name),
                 name: e.name,
-                elapsed: to_microseconds(e.elapsed),
+                time: Some(to_microseconds(e.elapsed)),
+                timeline_time: None,
                 animation: e.animation,
                 scheduled: e.scheduled,
+                class: if e.transition { 0 } else { 1 },
             })
-            .collect()
+            .chain(playback.into_iter().map(|e| AnimationEvent {
+                kind: e.kind,
+                node: None,
+                pseudo: None,
+                name: String::new(),
+                time: e.current_time,
+                timeline_time: e.timeline_time,
+                animation: e.animation,
+                scheduled: e.scheduled,
+                class: e.class,
+            }))
+            .collect();
+        if events.len() > 1 {
+            let mut ids: Vec<waapi::AnimationId> = events.iter().map(|e| e.animation).collect();
+            ids.sort_unstable();
+            ids.dedup();
+            let rank: std::collections::HashMap<waapi::AnimationId, usize> = self.in_composite_order(arena, ids).into_iter().enumerate().map(|(i, id)| (id, i)).collect();
+            let keys: Vec<_> = events.iter().map(|e| (e.scheduled, e.animation, e.class, e.node.is_none())).collect();
+            let mut slots: Vec<Option<AnimationEvent>> = events.into_iter().map(Some).collect();
+            events = crate::animation_ops::event_order(&keys, &rank).into_iter().filter_map(|i| slots[i].take()).collect();
+        }
+        events
     }
 
     // Move the clock to `now_ms`: every element with an animation the time moves takes its values at it — as a frame
@@ -2273,17 +2300,22 @@ fn export_parts(node: &crate::dom::NodeData) -> impl Iterator<Item = (AtomIdent,
     })
 }
 
-// An animation or transition event the page is owed: its type, the element (and pseudo-element) it concerns, the
-// animation's name or the transition's property, its `elapsedTime` in seconds, and the animation it is about.
+// An animation event the page is owed: its type and the animation it is about — a CSS animation's or transition's, with
+// the element (and pseudo-element) it concerns, the animation's name or the transition's property and its
+// `elapsedTime` in seconds; or a playback event, with the times its `AnimationPlaybackEvent` carries.
 pub(crate) struct AnimationEvent {
     pub(crate) kind: &'static str,
-    pub(crate) node: NodeId,
+    // (…the element a CSS event is fired at, its owner — none for a playback event, which goes to its animation)
+    pub(crate) node: Option<NodeId>,
     pub(crate) pseudo: Option<&'static str>,
     pub(crate) name: String,
-    pub(crate) elapsed: f64,
+    // (…a CSS event's `elapsedTime`, a playback event's `currentTime` and `timelineTime`)
+    pub(crate) time: Option<f64>,
+    pub(crate) timeline_time: Option<f64>,
     pub(crate) animation: waapi::AnimationId,
-    // (its scheduled event time, on the timeline, ms — which sorts it among the Web Animations' playback events)
-    pub(crate) scheduled: f64,
+    // (…its scheduled event time at the document's time, ms, and its animation's class: `take_animation_events`'s order)
+    scheduled: f64,
+    class: u8,
 }
 
 // Where `id` stands in shadow-including tree order, as the child indexes down to it (a shadow root comes before its

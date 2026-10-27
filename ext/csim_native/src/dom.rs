@@ -5698,7 +5698,8 @@ pub(crate) fn threw_verify_failures(scope: &mut v8::PinScope<'_, '_>, failures: 
 
 // __dom.styleFlush() -> [nid, …] | undefined: a style flush at the realm's clock — what a forced
 // `getComputedStyle` or layout read is in a browser: the style engine's animations move to it and the document is
-// styled, starting the animations and transitions a change since the last one owes. The events wait for `styleTick`;
+// styled, starting the animations and transitions a change since the last one owes. The events wait for the rendering
+// update (`styleTakeAnimationEvents`);
 // what comes back is the elements whose animations' properties changed since the JS side was last told, if any.
 fn style_flush(
     scope: &mut v8::PinScope<'_, '_>,
@@ -5725,11 +5726,9 @@ fn style_flush(
     });
 }
 
-// __dom.styleTick() -> [retargeted count, nid…, then type, nid, pseudo, name, elapsedTime, animation, scheduled, …]:
-// a rendering update at the realm's clock: a style flush — the elements whose animations' properties
-// changed first, as `styleFlush` gives them — and the animation / transition events the state changes since the last
-// update owe, handed back in order (`pseudo` null for an element's own; `animation` the engine's id of the CSS
-// animation or transition it is about; `scheduled` its scheduled event time on the timeline).
+// __dom.styleTick() -> [nid, …]: a rendering update at the realm's clock: the Web Animations' frame, then a style flush —
+// the elements whose animations' properties changed, as `styleFlush` gives them. The events the update owes stay
+// queued for `styleTakeAnimationEvents`.
 fn style_tick(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -5754,7 +5753,6 @@ fn style_tick_unguarded(
     // decides — §4.4 "update animations and send events")
     engine.remove_replaced_animations(arena);
     let failures = engine.take_verify_failures();
-    let events = engine.take_animation_events(arena);
     let retargeted = engine.web_animations.take_retargeted();
     if engine.reconcile_animated(arena, &retargeted) {
         arena.generations.bump(GEN_CASCADE);
@@ -5762,18 +5760,17 @@ fn style_tick_unguarded(
     if threw_verify_failures(scope, failures) {
         return;
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(1 + retargeted.len() + events.len() * ANIMATION_EVENT_STRIDE);
-    items.push(v8::Number::new(scope, retargeted.len() as f64).into());
-    items.extend(retargeted.iter().map(|n| -> v8::Local<v8::Value> { v8::Number::new(scope, n.to_f64()).into() }));
-    push_animation_events(scope, &mut items, events);
-    let array = v8::Array::new_with_elements(scope, &items);
-    rv.set(array.into());
+    let items: Vec<v8::Local<v8::Value>> = retargeted.iter().map(|n| v8::Number::new(scope, n.to_f64()).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleTakeAnimationEvents() -> [type, nid, pseudo, name, elapsedTime, animation, scheduled, …]: the CSS
-// animation and transition events queued since the last update, as `styleTick` hands them back, without moving
-// anything — what a script queued in that update's microtask checkpoint (a `cancel()` in a `ready` reaction) is due in
-// the same update (web-animations §4.2 step 4).
+// __dom.styleTakeAnimationEvents() -> [type, nid, pseudo, name, time, animation, timelineTime, …]: the document's
+// pending animation events, taken in the order the rendering update dispatches them (`take_animation_events`) — after
+// its microtask checkpoint, so what a script queued there (a `cancel()` in a `ready` reaction) is due in the same update
+// (web-animations §4.2 step 4). A CSS animation's or transition's: the element it is fired at (`pseudo` null for an
+// element's own), the animation's name or the transition's property, its `elapsedTime` (`time`); a playback event's
+// (`finish`, `cancel`, `remove`): nid -1, its `currentTime` (`time`) and `timelineTime`, null for none. `animation` the
+// engine's id of the animation it is about.
 fn style_take_animation_events(
     scope: &mut v8::PinScope<'_, '_>,
     args: v8::FunctionCallbackArguments<'_>,
@@ -5783,29 +5780,20 @@ fn style_take_animation_events(
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let events = engine.take_animation_events(arena);
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * ANIMATION_EVENT_STRIDE);
-    push_animation_events(scope, &mut items, events);
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-
-const ANIMATION_EVENT_STRIDE: usize = 7;
-fn push_animation_events<'s>(
-    scope: &mut v8::PinScope<'s, '_>,
-    items: &mut Vec<v8::Local<'s, v8::Value>>,
-    events: Vec<crate::style::AnimationEvent>,
-) {
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(events.len() * 7);
     for e in events {
         items.push(v8::String::new(scope, e.kind).map_or_else(|| v8::undefined(scope).into(), Into::into));
-        items.push(v8::Number::new(scope, e.node.to_f64()).into());
+        items.push(v8::Number::new(scope, e.node.map_or(-1.0, |n| n.to_f64())).into());
         items.push(match e.pseudo.and_then(|p| v8::String::new(scope, p)) {
             Some(p) => p.into(),
             None => v8::null(scope).into(),
         });
         items.push(v8::String::new(scope, &e.name).map_or_else(|| v8::undefined(scope).into(), Into::into));
-        items.push(v8::Number::new(scope, e.elapsed).into());
+        items.push(e.time.map_or_else(|| v8::null(scope).into(), |t| v8::Number::new(scope, t).into()));
         items.push(v8::Number::new(scope, e.animation as f64).into());
-        items.push(v8::Number::new(scope, e.scheduled).into());
+        items.push(e.timeline_time.map_or_else(|| v8::null(scope).into(), |t| v8::Number::new(scope, t).into()));
     }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.resetArena() — the CALLING REALM starts a new page (a navigation): its state afresh (`RealmArena::reset`), and
