@@ -27,6 +27,15 @@ const H_FONT_NETWORK: u32 = 9;
 pub(crate) const H_LOCAL_FONT: u32 = 10;
 const H_FETCH: u32 = 11;
 const H_LINK_EVENT: u32 = 12;
+const H_ASSET: u32 = 13;
+
+// What a link's fetch came to (`linkObtain`): its resource loads or not — or it is the bindings' to fetch (a style sheet's,
+// a preload's), or a controlling service worker's to answer, the engine's then to fire its event (constants.js
+// `LINK_*`).
+const LINK_ERROR: u32 = 0;
+const LINK_LOAD: u32 = 1;
+const LINK_LEGACY: u32 = 2;
+const LINK_PENDING: u32 = 3;
 
 // What processing a plugin element came to (`processPlugin`): it had a resource to process, an `<object>`'s that
 // failed, and its fallback content shown or no longer (constants.js `PLUGIN_*`).
@@ -68,7 +77,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "fetchTimedResources", fetch_timed_resources_op, context_id);
     register(scope, ns, "obtainResume", resume_op, context_id);
     register(scope, ns, "processPlugin", process_plugin_op, context_id);
-    register(scope, ns, "linkPrefetch", link_prefetch_op, context_id);
+    register(scope, ns, "linkObtain", link_obtain_op, context_id);
 }
 
 // `host(step, …args)` on the page side: what it answers, none for null or undefined, or where it throws — Terminated
@@ -433,66 +442,151 @@ pub(crate) fn text_of(scope: &mut v8::PinScope<'_, '_>, answer: Option<v8::Globa
     answer.map(|a| v8::Local::new(scope, a)).filter(|a| a.is_string()).map(|a| a.to_rust_string_lossy(scope))
 }
 
-// __dom.linkPrefetch(el, doc, url, plan, integrity, host) -> whether a controlling service worker's `fetch` event takes
-// the `<link rel=prefetch>` `el`'s request (of document `doc`) — `plan` and `integrity` the request's as its fetch began
-// (bridge.entry.js `requestAsItBegins`): the engine's then to judge its answer, file its entry and fire its element's
-// `load` or `error` (`prefetch_answered`); false where none controls the document, whose fetch is the bindings' network
-// one.
-fn link_prefetch_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(false);
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return };
+
+// __dom.linkObtain(el, doc, url, kind, plan, integrity, moduleDestination, host) -> what the `<link>` `el`'s fetch of
+// `url` (of document `doc`) comes to, `LINK_*`: `kind` its consumer's (J_LINK, what it obtains in the high bits),
+// `plan` and `integrity` its request's as its fetch began (bridge.entry.js `requestAsItBegins`; a modulepreload's of
+// no `integrity` attribute its import map's), `moduleDestination` a modulepreload's `as` destination. A style sheet's
+// and a preload's are the bindings' still (`LINK_LEGACY`), whose memos the cascade and a preload's consumers share.
+//   - a modulepreload: a controlling service worker's answer, else the asset cache's that the module loader shares
+//     (HTML "fetch a modulepreload module script graph": a CORS request), else — a URL the cache does not take — the
+//     network's;
+//   - a prefetch: a controlling service worker's `fetch` event's, whose answer the engine takes later and fires the
+//     link's event for (`LINK_PENDING`), else the network's;
+//   - any other (a manifest's): the network's;
+// its verdict the engine's (`judge`: what the link obtains, its integrity) and its entry filed.
+fn link_obtain_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    use crate::link_resource::{OBTAINS_MODULEPRELOAD, OBTAINS_PREFETCH, OBTAINS_PRELOAD, OBTAINS_STYLESHEET};
+    rv.set_uint32(LINK_LEGACY);
+    let kind = args.get(3).uint32_value(scope).unwrap_or(0);
+    let obtains = kind >> 8;
+    if obtains & (OBTAINS_STYLESHEET | OBTAINS_PRELOAD) != 0 {
+        return;
+    }
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(7)) else { return };
     let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
     let url = args.get(2).to_rust_string_lossy(scope);
-    let plan = args.get(3).uint32_value(scope).unwrap_or(0);
-    let integrity = args.get(4).to_rust_string_lossy(scope);
+    let plan = args.get(4).uint32_value(scope).unwrap_or(0);
+    let integrity = args.get(5).to_rust_string_lossy(scope);
+    let module_destination = if args.get(6).is_string() { args.get(6).to_rust_string_lossy(scope) } else { String::new() };
     let cid = realm_id(scope, &args);
     let Ok(started) = now(scope, host) else { return };
     let client = realm(scope, cid).get(el).map(|n| n.realm);
-    let kind = crate::subresource_judge::J_LINK | crate::link_resource::OBTAINS_PREFETCH << 8;
     let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client, referrer: None, integrity, initiator: "link", started };
-    if let Ok(back) = dispatch(scope, host, r) {
-        rv.set_bool(back.is_none());
+    let done = if obtains & OBTAINS_MODULEPRELOAD != 0 {
+        modulepreload(scope, host, &r, &module_destination).map(u32::from)
+    } else if obtains & OBTAINS_PREFETCH != 0 {
+        match dispatch(scope, host, r) {
+            Ok(None) => Ok(LINK_PENDING),
+            Ok(Some(r)) => prefetch_verdict(scope, host, &r, None, false).map(u32::from),
+            Err(t) => Err(t),
+        }
+    } else {
+        link_from_network(scope, host, &r, "").map(u32::from)
+    };
+    if let Ok(done) = done {
+        rv.set_uint32(done);
     }
 }
 
-// …its answer: `answer` the worker's, as an entry reads it (`redirected` whether the response it answered with says it
-// was), or none where it let the request through, which the network answers then — the request as it was made. A
-// prefetch loads where its answer is a response Fetch lets answer it, whatever its status (HTML's prefetch "process the
-// linked resource"), and its bytes match its integrity: its entry what answered (a refused answer's a network error),
-// and its element's `load` or `error` fired.
-fn prefetch_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool) -> Result<(), Terminated> {
-    use crate::subresource_judge::{facts_of, judge, Consumer, SRC_NETWORK, SRC_SW_EVENT, V_OK};
-    let (source, response) = match answer {
-        Some(answer) => (SRC_SW_EVENT, Some(answer)),
-        None => {
-            let args = request_args(scope, r);
-            let resp = call(scope, host, H_FETCH, &args)?.map(|resp| v8::Local::new(scope, resp));
-            (SRC_NETWORK, resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok()))
-        }
-    };
-    let mut facts = facts_of(scope, response, r.kind & 0xff, source);
-    facts.redirected = source == SRC_SW_EVENT && redirected;
+// The verdict on what answered a link's request (`judge`), from `source` — `bytes` its body's (none asked for where the
+// request has no integrity), `module_destination` a modulepreload's.
+#[allow(clippy::too_many_arguments)]
+fn link_verdict(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, bytes: Option<v8::Local<'_, v8::Value>>, mode: &str, module_destination: &str) -> bool {
+    use crate::subresource_judge::{judge, Consumer, V_OK};
     let body = if r.integrity.is_empty() {
         Vec::new()
     } else {
-        let bytes = response.and_then(|resp| member(scope, resp, if source == SRC_SW_EVENT { "bytes" } else { "body_bytes" }));
-        bytes.and_then(|b| crate::canvas::bytes_read(b, None)).map(|b| b.into_owned()).unwrap_or_default()
-    };
-    let mode = if source == SRC_SW_EVENT { fields(r.plan).0 } else { "no-cors" };
-    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination: "", preload_destination: "", integrity: &r.integrity, body: &body, mode, quirks: false };
-    let ok = judge(&consumer, source, &facts) & V_OK != 0;
-    let answered = match (source, response) {
-        (SRC_SW_EVENT, Some(answer)) if ok => Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(answer))),
-        (SRC_SW_EVENT, _) => {
-            let refused = v8::Object::new(scope);
-            let (k, yes) = (text(scope, "blocked"), v8::Boolean::new(scope, true).into());
-            refused.set(scope, k, yes);
-            Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(refused)))
+        match bytes {
+            Some(b) if b.is_string() => b.to_rust_string_lossy(scope).into_bytes(),
+            Some(b) => crate::canvas::bytes_read(b, None).map(|b| b.into_owned()).unwrap_or_default(),
+            None => Vec::new(),
         }
-        (_, resp) => Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))),
     };
-    file(scope, host, r, answered)?;
+    let quirks = realm(scope, r.cid).document_mode(r.doc).0;
+    let consumer = Consumer { kind: r.kind & 0xff, obtains: r.kind >> 8, module_destination, preload_destination: "", integrity: &r.integrity, body: &body, mode, quirks };
+    judge(&consumer, source, facts) & V_OK != 0
+}
+
+// …a link's request answered by the network (its response's body's bytes with it): whether it loads, its entry filed.
+fn link_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, module_destination: &str) -> Result<bool, Terminated> {
+    use crate::subresource_judge::{facts_of, SRC_NETWORK};
+    let args = request_args(scope, r);
+    let resp = call(scope, host, H_FETCH, &args)?.map(|resp| v8::Local::new(scope, resp));
+    let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
+    let facts = facts_of(scope, resp, r.kind & 0xff, SRC_NETWORK);
+    let bytes = resp.and_then(|resp| member(scope, resp, "body_bytes"));
+    let ok = link_verdict(scope, r, &facts, SRC_NETWORK, bytes, "no-cors", module_destination);
+    file(scope, host, r, Answered::Network(resp.map(|resp| v8::Global::new(scope, v8::Local::<v8::Value>::from(resp)))))?;
+    Ok(ok)
+}
+
+// …a modulepreload's: a controlling service worker's answer (a script's request: `event.request.integrity` its
+// metadata), else the asset cache's (`[body, meta, bytes]`, judged by the response facts it kept — none for one cached
+// before they were — its body none of a response it refused), else the network's.
+fn modulepreload(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, module_destination: &str) -> Result<bool, Terminated> {
+    use crate::subresource_judge::{facts_of, SRC_ASSET, SRC_SW_SYNC, S_NO_BODY};
+    let mut args = request_args(scope, r).to_vec();
+    let (binary, integrity) = (v8::Boolean::new(scope, false).into(), text(scope, &r.integrity));
+    args.extend([binary, integrity]);
+    if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
+        let local = v8::Local::new(scope, &answer);
+        let obj = v8::Local::<v8::Object>::try_from(local).ok();
+        let body = obj.and_then(|a| member(scope, a, "body_bytes").or_else(|| member(scope, a, "body")));
+        let no_body = if obj.and_then(|a| member(scope, a, "body")).is_none() { S_NO_BODY } else { 0 };
+        let facts = facts_of(scope, obj, r.kind & 0xff, SRC_SW_SYNC);
+        let ok = link_verdict(scope, r, &facts, SRC_SW_SYNC | no_body, body, "no-cors", module_destination);
+        file(scope, host, r, Answered::Worker(answer))?;
+        return Ok(ok);
+    }
+    if crate::fetch_rules::fetch_route(&r.url, 0, "") != crate::fetch_rules::ROUTE_NETWORK {
+        return link_from_network(scope, host, r, module_destination);
+    }
+    let args = request_args(scope, r);
+    let got = call(scope, host, H_ASSET, &args)?.map(|g| v8::Local::new(scope, g));
+    let got = got.and_then(|g| v8::Local::<v8::Array>::try_from(g).ok());
+    let mut at = [None; 3];
+    if let Some(g) = got {
+        for (k, slot) in at.iter_mut().enumerate() {
+            *slot = g.get_index(scope, k as u32).filter(|v| !v.is_null_or_undefined());
+        }
+    }
+    let [body, meta, bytes] = at;
+    let meta = meta.and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
+    let facts = facts_of(scope, meta, r.kind & 0xff, SRC_ASSET);
+    let no_body = if body.is_none() { S_NO_BODY } else { 0 };
+    let ok = link_verdict(scope, r, &facts, SRC_ASSET | no_body, bytes.or(body), "no-cors", module_destination);
+    file(scope, host, r, Answered::Network(meta.map(|m| v8::Global::new(scope, v8::Local::<v8::Value>::from(m)))))?;
+    Ok(ok)
+}
+
+// A controlled prefetch's answer (`obtainResume`): its verdict and entry (`prefetch_verdict`), and its element's `load`
+// or `error` fired.
+fn prefetch_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool) -> Result<(), Terminated> {
+    let ok = prefetch_verdict(scope, host, r, answer, redirected)?;
     let Some(el) = r.el else { return Ok(()) };
     let (nid, ok) = (v8::Number::new(scope, el.to_f64()).into(), v8::Boolean::new(scope, ok).into());
     call(scope, host, H_LINK_EVENT, &[nid, ok]).map(drop)
+}
+// …whether a prefetch loads: its answer — the worker's, as an entry reads it (`redirected` whether the response it
+// answered with says it was), or none where it let the request through, which the network answers then, the request as
+// it was made — a response Fetch lets answer it, whatever its status (HTML's prefetch "process the linked resource"),
+// whose bytes match its integrity; its entry what answered, a refused answer's a network error.
+fn prefetch_verdict(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool) -> Result<bool, Terminated> {
+    use crate::subresource_judge::{facts_of, SRC_SW_EVENT};
+    let Some(answer) = answer else { return link_from_network(scope, host, r, "") };
+    let mut facts = facts_of(scope, Some(answer), r.kind & 0xff, SRC_SW_EVENT);
+    facts.redirected = redirected;
+    let bytes = member(scope, answer, "bytes");
+    let ok = link_verdict(scope, r, &facts, SRC_SW_EVENT, bytes, fields(r.plan).0, "");
+    let answered = if ok {
+        answer
+    } else {
+        let refused = v8::Object::new(scope);
+        let (k, yes) = (text(scope, "blocked"), v8::Boolean::new(scope, true).into());
+        refused.set(scope, k, yes);
+        refused
+    };
+    file(scope, host, r, Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(answered))))?;
+    Ok(ok)
 }
