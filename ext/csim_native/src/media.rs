@@ -390,7 +390,11 @@ fn media_invoke(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn media_current(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return rv.set_bool(false) };
     let load = args.get(1).uint32_value(scope).unwrap_or(0);
-    rv.set_bool(crate::dom::dom(scope).arena.media(id).load == load);
+    rv.set_bool(is_current(&crate::dom::dom(scope).arena, id, load));
+}
+// Whether `load` is the element `id`'s current one, no later load superseding it.
+pub(crate) fn is_current(arena: &crate::dom::RealmArena, id: NodeId, load: u32) -> bool {
+    arena.media(id).load == load
 }
 
 // __dom.mediaSelect(media, load) -> what the resource selection algorithm does as the stable state comes, its mode
@@ -538,18 +542,43 @@ const AUDIO_USABLE: u32 = 2;
 fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = element(scope, args.get(0)) else { return };
     let outcome = args.get(1).uint32_value(scope).unwrap_or(RESOURCE_FAILED);
-    let [w, h, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
+    let [width, height, duration] = [2, 3, 4].map(|k| args.get(k).number_value(scope).unwrap_or(f64::NAN));
     let tainted = args.get(5).boolean_value(scope);
-    let frame = (outcome == VIDEO_DECODED).then(|| crate::image_requests::Pixels::of(scope, args.get(6))).flatten();
+    let resource = match outcome {
+        VIDEO_DECODED => MediaResource::Video { width, height, duration, tainted, frame: crate::image_requests::Pixels::of(scope, args.get(6)) },
+        AUDIO_USABLE => MediaResource::Audio,
+        _ => MediaResource::Failed,
+    };
+    let events = resource_loaded(scope, id, resource);
+    rv.set(events_value(scope, &events));
+}
+// …the events as names, for the bindings to fire.
+pub(crate) fn events_value<'s>(scope: &mut v8::PinScope<'s, '_>, events: &[&str]) -> v8::Local<'s, v8::Value> {
+    let items: Vec<v8::Local<v8::Value>> = events.iter().filter_map(|e| v8::String::new(scope, e)).map(Into::into).collect();
+    v8::Array::new_with_elements(scope, &items).into()
+}
+// What a media element's resource came to: a video's decoded (its size, duration, CORS-cross-origin taint and first
+// frame), an audio's usable (not decoded), or a failure.
+pub(crate) enum MediaResource {
+    Video { width: f64, height: f64, duration: f64, tainted: bool, frame: Option<crate::image_requests::Pixels> },
+    Audio,
+    Failed,
+}
+// The element `id`'s resource loaded as `resource` came to: its state the engine's, and the events it owes (`resource_events`).
+pub(crate) fn resource_loaded(scope: &mut v8::PinScope<'_, '_>, id: NodeId, resource: MediaResource) -> Vec<&'static str> {
     let autoplay = crate::dom::dom(scope).arena.get(id).is_some_and(|n| n.plain_attr("autoplay").is_some());
     let arena = &mut crate::dom::dom(scope).arena;
+    let frame = match &resource {
+        MediaResource::Video { frame, .. } => frame.clone(),
+        _ => None,
+    };
     match frame {
         Some(frame) => arena.video_frames.insert(id, frame),
         None => arena.video_frames.remove(&id),
     };
     let m = arena.media_mut(id);
-    let events = match outcome {
-        VIDEO_DECODED => {
+    match resource {
+        MediaResource::Video { width: w, height: h, duration, tainted, .. } => {
             let had_duration = m.duration;
             m.video_size = [w as u32, h as u32];
             m.tainted = tainted;
@@ -572,11 +601,11 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             resource_events(!same_number(had_duration, duration), w > 0.0 && h > 0.0, seeked, playing)
         }
         // (…an audio's resource is not decoded: it stays HAVE_NOTHING, its events the ladder all the same)
-        AUDIO_USABLE => {
+        MediaResource::Audio => {
             m.network = NETWORK_IDLE;
             resource_events(false, false, false, if m.playing { Playing::Already } else { Playing::Paused })
         }
-        _ => {
+        MediaResource::Failed => {
             m.duration = f64::NAN;
             m.ready = HAVE_NOTHING;
             m.tainted = false;
@@ -585,9 +614,7 @@ fn media_resource(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
             m.network = NETWORK_NO_SOURCE;
             Vec::new()
         }
-    };
-    let items: Vec<v8::Local<v8::Value>> = events.iter().filter_map(|e| v8::String::new(scope, e)).map(Into::into).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+    }
 }
 
 // __dom.mediaFrame(video) -> [pixels, width, height] — a view on its decoded frame's RGBA pixels, and its size — or null

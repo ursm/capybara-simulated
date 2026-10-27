@@ -31,6 +31,8 @@ pub(crate) const H_CONTROLLER: u32 = 14;
 pub(crate) const H_CHARSET: u32 = 15;
 const H_IMAGE_NETWORK: u32 = 16;
 const H_IMAGE_EVENT: u32 = 17;
+const H_VIDEO_BYTES: u32 = 18;
+const H_MEDIA_DONE: u32 = 19;
 
 // What a link's fetch came to (`linkObtain`, `linkPreloadRun`): its resource loads or not — or it has no preload planned
 // (`linkPreloadRun`), or it is a controlling service worker's to answer, the engine's then to fire its event
@@ -90,6 +92,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "processPlugin", process_plugin_op, context_id);
     register(scope, ns, "fetchClassicScript", fetch_classic_script_op, context_id);
     register(scope, ns, "imageObtain", image_obtain_op, context_id);
+    register(scope, ns, "mediaFetchResource", media_fetch_resource_op, context_id);
     register(scope, ns, "linkObtain", link_obtain_op, context_id);
     register(scope, ns, "linkPreloadPlan", link_preload_plan_op, context_id);
     register(scope, ns, "linkPreloadId", link_preload_id_op, context_id);
@@ -323,6 +326,11 @@ fn resume_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let token = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     let Some(r) = realm(scope, cid).obtains.remove(&token) else { return };
+    if r.kind & 0xff == crate::subresource_judge::J_AUDIO {
+        let render = view_bytes(scope, args.get(3));
+        let _ = audio_answered(scope, host, &r, v8::Local::<v8::Object>::try_from(args.get(1)).ok(), args.get(2).is_true(), render);
+        return;
+    }
     if r.kind & 0xff == crate::subresource_judge::J_IMAGE {
         let render = view_bytes(scope, args.get(3));
         let _ = image_answered(scope, host, &r, v8::Local::<v8::Object>::try_from(args.get(1)).ok(), args.get(2).is_true(), render);
@@ -1170,4 +1178,158 @@ fn image_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Func
     }
     let ok = v8::Boolean::new(scope, !broken).into();
     call(scope, host, H_IMAGE_EVENT, &[nid, ok, load]).map(drop)
+}
+
+// __dom.mediaFetchResource(media, doc, url, load, host) -> what fetching the selected resource `url` of the media element
+// `media` (of document `doc`) under its load `load` came to: the events its resource owes (media.rs `resource_loaded`),
+// false for a failure (the bindings' to go on from: the next candidate, the element's error), true where a controlling
+// service worker's `fetch` event is to answer it — the engine's then (`obtainResume`), handing the outcome back
+// (`H_MEDIA_DONE`).
+//   - a video's: a controlling service worker's answer (destination `video`), whose empty body is a failed decode, never
+//     the network's; else the network's (the host's, as an image's: its CORS verdict and taint); else a scheme's; its
+//     first frame decoded (video.rs `decode`);
+//   - an audio's, fetched but not decoded: a controlling service worker's `fetch` event (the fetch IS the observable),
+//     else the network's, else a scheme's — its verdict (`judge`: one Fetch allows its mode, no HTTP 4xx / 5xx, and one
+//     with no media data at all errs too) its readiness, to `canplaythrough`;
+// its entry the answer's or the response's.
+fn media_fetch_resource_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(4)) else { return };
+    let (Some(el), Some(doc)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
+    let url = args.get(2).to_rust_string_lossy(scope);
+    let load = args.get(3).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let video = realm(scope, cid).get(el).is_some_and(|n| n.is_html_named("video"));
+    let kind = if video { crate::subresource_judge::J_VIDEO } else { crate::subresource_judge::J_AUDIO };
+    let Ok(started) = now(scope, host) else { return };
+    let plan = plan_in(realm(scope, cid), kind, Some(el), Some(doc), None);
+    let r = Request { cid, kind, url, el: Some(el), doc: Some(doc), plan, client: None, referrer: None, integrity: String::new(), preload: None, load, initiator: if video { "video" } else { "audio" }, started };
+    let done = if video { fetch_video(scope, host, &r).map(MediaFetched::Done) } else { fetch_audio(scope, host, r) };
+    match done {
+        Ok(MediaFetched::Done(Some(events))) => rv.set(crate::media::events_value(scope, &events)),
+        Ok(MediaFetched::Pending) => rv.set_bool(true),
+        Ok(MediaFetched::Done(None)) | Err(_) => {}
+    }
+}
+
+// What fetching a media element's resource came to: its events, or a failure (None) — or a worker's to answer.
+enum MediaFetched {
+    Done(Option<Vec<&'static str>>),
+    Pending,
+}
+
+fn fetch_video(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<Option<Vec<&'static str>>, Terminated> {
+    use crate::subresource_judge::{facts_of, judge, Consumer, J_VIDEO, SRC_SW_SYNC, S_EMPTY, V_CROSS_ORIGIN, V_OK};
+    let Some(el) = r.el else { return Ok(None) };
+    let mut args = request_args(scope, r).to_vec();
+    let (binary, integrity) = (v8::Boolean::new(scope, true).into(), text(scope, ""));
+    args.extend([binary, integrity]);
+    let (bytes, tainted) = if let Some(answer) = call(scope, host, H_SW_ANSWER, &args)? {
+        let local = v8::Local::new(scope, &answer);
+        let obj = v8::Local::<v8::Object>::try_from(local).ok();
+        file(scope, host, r, Answered::Worker(answer))?;
+        // (…an intercepted response with an empty body a failed decode — never the network's for bytes the worker
+        // answered — as a refused one is)
+        let bytes = obj.and_then(|o| member(scope, o, "bytes")).and_then(|b| view_bytes(scope, b));
+        let empty = bytes.as_ref().is_none_or(Vec::is_empty);
+        let facts = facts_of(scope, obj, J_VIDEO, SRC_SW_SYNC);
+        let consumer = Consumer { kind: J_VIDEO, obtains: 0, module_destination: "", preload_destination: "", integrity: "", body: b"", mode: fields(r.plan).0, quirks: false };
+        let verdict = judge(&consumer, SRC_SW_SYNC | if empty { S_EMPTY } else { 0 }, &facts);
+        if verdict & V_OK == 0 {
+            return Ok(None);
+        }
+        (bytes, verdict & V_CROSS_ORIGIN != 0)
+    } else if crate::fetch_rules::fetch_route(&r.url, 0, "") == crate::fetch_rules::ROUTE_NETWORK {
+        // (…the network's, with the CORS verdict and taint the host's image loader makes: `{bytes, tainted, meta}`, none
+        // for a failed load)
+        let args = request_args(scope, r);
+        let got = call(scope, host, H_VIDEO_BYTES, &args)?.map(|g| v8::Local::new(scope, g));
+        let got = got.and_then(|g| v8::Local::<v8::Object>::try_from(g).ok());
+        let meta = got.and_then(|g| member(scope, g, "meta")).map(|m| v8::Global::new(scope, m));
+        file(scope, host, r, Answered::Network(meta))?;
+        let bytes = got.and_then(|g| member(scope, g, "bytes")).and_then(|b| view_bytes(scope, b));
+        (bytes, got.and_then(|g| member(scope, g, "tainted")).is_some_and(|t| t.is_true()))
+    } else {
+        // (…a scheme's, which never taints)
+        (scheme_response(scope, host, &r.url)?.map(|(body, _)| body), false)
+    };
+    let Some(bytes) = bytes.filter(|b| !b.is_empty()) else { return Ok(None) };
+    let Some(video) = std::panic::catch_unwind(|| crate::video::decode(&bytes)).ok().flatten() else { return Ok(None) };
+    let frame = crate::dom::u8_clamped_array(scope, video.rgba);
+    let frame = crate::image_requests::Pixels::of(scope, frame);
+    let resource = crate::media::MediaResource::Video { width: f64::from(video.width), height: f64::from(video.height), duration: video.duration, tainted, frame };
+    Ok(Some(crate::media::resource_loaded(scope, el, resource)))
+}
+
+fn fetch_audio(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: Request) -> Result<MediaFetched, Terminated> {
+    let ctrl = call(scope, host, H_CONTROLLER, &[])?.and_then(|c| v8::Local::new(scope, c).uint32_value(scope)).unwrap_or(0);
+    let r = if ctrl != 0 && crate::fetch_rules::fetch_route(&r.url, crate::fetch_rules::FETCH_CONTROLLED, "") == crate::fetch_rules::ROUTE_SERVICE_WORKER {
+        match dispatch(scope, host, r)? {
+            None => return Ok(MediaFetched::Pending),
+            Some(r) => r,
+        }
+    } else {
+        r
+    };
+    audio_from_network(scope, host, &r).map(MediaFetched::Done)
+}
+// …from the network (or a scheme): its readiness, or a failure.
+fn audio_from_network(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request) -> Result<Option<Vec<&'static str>>, Terminated> {
+    use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA, ROUTE_NETWORK};
+    use crate::subresource_judge::{facts_of, Facts, SRC_NETWORK, SRC_SCHEME};
+    let blocked = || Facts { network_error: true, ..Default::default() };
+    match fetch_route(&r.url, 0, "") {
+        ROUTE_DATA | ROUTE_BLOB => {
+            let bytes = scheme_response(scope, host, &r.url)?.map(|(b, _)| b);
+            let empty = bytes.as_ref().is_none_or(Vec::is_empty);
+            let facts = if bytes.is_some() { Facts { status: Some(200), ..Default::default() } } else { blocked() };
+            Ok(audio_settled(scope, r, &facts, SRC_SCHEME, empty))
+        }
+        ROUTE_NETWORK => {
+            let args = request_args(scope, r);
+            let meta = call(scope, host, H_NETWORK, &args)?;
+            file(scope, host, r, Answered::Network(meta.clone()))?;
+            let local = meta.map(|m| v8::Local::new(scope, m)).and_then(|m| v8::Local::<v8::Object>::try_from(m).ok());
+            let empty = local.is_some_and(|m| member(scope, m, "bytes").is_none_or(|b| b.integer_value(scope).unwrap_or(0) == 0));
+            let facts = if local.is_some() { facts_of(scope, local, r.kind & 0xff, SRC_NETWORK) } else { blocked() };
+            Ok(audio_settled(scope, r, &facts, SRC_NETWORK, empty))
+        }
+        _ => Ok(audio_settled(scope, r, &blocked(), SRC_NETWORK, true)),
+    }
+}
+// …its verdict: a usable one's readiness ladder, a refused one a failure — for the load no later one superseded.
+fn audio_settled(scope: &mut v8::PinScope<'_, '_>, r: &Request, facts: &crate::subresource_judge::Facts, source: u32, empty: bool) -> Option<Vec<&'static str>> {
+    use crate::subresource_judge::{judge, Consumer, J_AUDIO, S_EMPTY, V_OK};
+    let el = r.el?;
+    if !crate::media::is_current(realm(scope, r.cid), el, r.load) {
+        return Some(Vec::new());
+    }
+    let consumer = Consumer { kind: J_AUDIO, obtains: 0, module_destination: "", preload_destination: "", integrity: "", body: b"", mode: fields(r.plan).0, quirks: false };
+    if judge(&consumer, source | if empty { S_EMPTY } else { 0 }, facts) & V_OK == 0 {
+        return None;
+    }
+    Some(crate::media::resource_loaded(scope, el, crate::media::MediaResource::Audio))
+}
+// A controlled audio's answer (`obtainResume`): none — the request let through — the network's; else the answer's
+// verdict (an empty one's no media data), its entry filed; the outcome handed back to the bindings.
+fn audio_answered(scope: &mut v8::PinScope<'_, '_>, host: v8::Local<'_, v8::Function>, r: &Request, answer: Option<v8::Local<'_, v8::Object>>, redirected: bool, render: Option<Vec<u8>>) -> Result<(), Terminated> {
+    use crate::subresource_judge::{facts_of, SRC_SW_EVENT};
+    let done = match answer {
+        None => audio_from_network(scope, host, r)?,
+        Some(answer) => {
+            file(scope, host, r, Answered::Worker(v8::Global::new(scope, v8::Local::<v8::Value>::from(answer))))?;
+            let bytes = render.filter(|b| !b.is_empty()).or_else(|| member(scope, answer, "bytes").and_then(|b| view_bytes(scope, b)));
+            let mut facts = facts_of(scope, Some(answer), r.kind & 0xff, SRC_SW_EVENT);
+            facts.redirected = redirected;
+            audio_settled(scope, r, &facts, SRC_SW_EVENT, bytes.as_ref().is_none_or(Vec::is_empty))
+        }
+    };
+    let Some(el) = r.el else { return Ok(()) };
+    let nid = v8::Number::new(scope, el.to_f64()).into();
+    let load = v8::Integer::new_from_unsigned(scope, r.load).into();
+    let done = match done {
+        Some(events) => crate::media::events_value(scope, &events),
+        None => v8::Boolean::new(scope, false).into(),
+    };
+    call(scope, host, H_MEDIA_DONE, &[nid, load, done]).map(drop)
 }
