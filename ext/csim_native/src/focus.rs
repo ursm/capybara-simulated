@@ -22,12 +22,17 @@ const FOCUSABLE_TAGS: [&str; 10] = ["input", "textarea", "select", "button", "if
 
 // Is `id` a focusable area: an element not actually disabled, with a valid `tabindex` — else focusable by its kind, a
 // hyperlink, or editable — in no `inert` subtree, and being rendered or the fallback content of a rendered `<canvas>`,
-// which generates no box of its own yet stays focusable. Rendered as a box that can take focus: not skipped (a closed
+// which generates no box of its own yet stays focusable. Nothing is rendered in a document that is not fully active —
+// one a navigation replaced, or its frame's removal discarded, its realm's script still running (Chrome and Firefox,
+// measured: its `focus()` focuses nothing). Rendered as a box that can take focus: not skipped (a closed
 // `<details>`'s content) and not `visibility: hidden`, whose boxes "cannot receive focus" (CSS Display 3 §4; Chrome and
 // Firefox, measured).
 pub(crate) fn focusable(engine: &mut StyleEngine, arena: &RealmArena, id: NodeId, now: f64) -> bool {
     let Some(n) = arena.get(id).filter(|n| n.kind == NodeKind::Element) else { return false };
     if arena.is_actually_disabled(id) || !candidate(arena, id, n) || arena.is_inert(id) {
+        return false;
+    }
+    if !arena.navigables.document_fully_active(arena.shadow_including_root(id)) {
         return false;
     }
     let rendered = |engine: &mut StyleEngine, id| crate::rendered::rendered(engine, arena, id, false, true, None, now);

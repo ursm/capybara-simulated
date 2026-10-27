@@ -45,7 +45,6 @@ RSpec.describe 'a hyperlink in a discarded frame' do
       window.oldLocation = f.contentWindow.location;
       f.src = '/g';
     JS
-    sleep 0.2
     got = s.evaluate_script("[oldOpen('/next', '_top'), (() => { try { oldLocation.href = '/next'; } catch (e) {} return 1; })()]")
     s.evaluate_script('1')
     expect([got.first, s.title, requests.include?('/next')]).to eq([nil, 'top', false])

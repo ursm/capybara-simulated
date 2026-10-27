@@ -5,7 +5,8 @@ require_relative 'support/session_teardown'
 # `#out`), every figure Chrome's (chromedriver, 2026-10-10): a dialog gives focus back only to an element still in a
 # document (d6), and does so for a dialog one realm made and another's document holds (d7); a removed frame's autofocus
 # candidate leaves the top-level document's its turn (a4), one moved into a frame keeps its place (a6), and a document
-# at a fragment anywhere up the navigables passes its candidates over (a3).
+# at a fragment anywhere up the navigables passes its candidates over (a3). An element in a document that is not fully
+# active — its frame removed, or navigated away from — is focused by nothing (f1; Firefox's too).
 RSpec.describe 'Focus across documents' do
   let(:dir) { File.expand_path('fixtures/focus_pages', __dir__) }
   let(:session) {
@@ -20,7 +21,8 @@ RSpec.describe 'Focus across documents' do
     'd7' => 'f:q f:db f:q f:db f:q',
     'a4' => 'top',
     'a6' => 'f/i',
-    'a3' => 'BODY/BODY/BODY tgt=true'
+    'a3' => 'BODY/BODY/BODY tgt=true',
+    'f1' => 'BODY/0 BODY/0'
   }.each do |page, want|
     it "#{page}: #{want}" do
       session.visit "/#{page}.html"

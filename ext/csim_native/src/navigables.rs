@@ -102,7 +102,7 @@ impl Navigables {
         !self.discarded.contains(&cid)
     }
     // …and whether `doc` is: the document of some realm whose document is.
-    fn document_fully_active(&self, doc: NodeId) -> bool {
+    pub(crate) fn document_fully_active(&self, doc: NodeId) -> bool {
         self.documents.iter().any(|(&cid, &d)| d == doc && self.fully_active(cid))
     }
 }
