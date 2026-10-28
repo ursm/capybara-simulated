@@ -10076,16 +10076,16 @@ module Capybara
           status, resp_headers, resp_body = response
           Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(resp_headers)
           # Transparent HTTP Basic auth (RFC 7617; http_auth.rs `answers_challenge`): a request carrying CHALLENGE
-          # credentials (open() user/pass / URL userinfo) that gets a 401 "Basic" challenge — including credentials, its
-          # response tainting not "cors", and not having sent an Authorization already (an explicit setRequestHeader / a
-          # pre-emptively-attached entry) — is re-sent ONCE with them; only the authenticated response reaches script,
-          # the 401 never does (send-authentication-basic / -existing-session).
+          # credentials (open() user/pass / URL userinfo) that gets a 401 "Basic" challenge — including credentials (the
+          # hop's, its cookies' too), its response tainting not "cors" (a CORS request whose chain left its origin), and
+          # not having sent an Authorization already (an explicit setRequestHeader / a pre-emptively-attached entry) — is
+          # re-sent ONCE with them; only the authenticated response reaches script, the 401 never does
+          # (send-authentication-basic / -existing-session).
           answered = Native.http_auth_answers(
             status.to_i,
             !challenge_authz.nil?,
-            cors == true,
-            crossed,
-            credentials.to_s,
+            cors && crossed,
+            send_cookies,
             env.key?('HTTP_AUTHORIZATION'),
             (www = header_field(resp_headers, 'www-authenticate')) && header_text(www)
           )

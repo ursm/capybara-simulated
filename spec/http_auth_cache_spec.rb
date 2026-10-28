@@ -11,6 +11,8 @@ RSpec.describe 'HTTP authentication entries' do
   let(:session) {
     simulated_session(lambda {|env|
       seen << [env['PATH_INFO'], env['HTTP_AUTHORIZATION']]
+      next [302, {'location' => 'http://other.example.com/guarded'}, ['']] if env['PATH_INFO'] == '/away'
+
       if env['PATH_INFO'] == '/guarded' && env['HTTP_AUTHORIZATION'].nil?
         [401, {'www-authenticate' => 'Basic realm="r"', 'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['no']]
       else
@@ -19,9 +21,15 @@ RSpec.describe 'HTTP authentication entries' do
     })
   }
 
-  def xhr(path, user = nil)
+  def xhr(path, user = nil, with_credentials: false)
     session.evaluate_script(<<~JS)
-      (() => { const x = new XMLHttpRequest(); x.open('GET', #{path.to_json}, false#{", #{user.to_json}, 'p'" if user}); x.send(); return x.status; })()
+      (() => {
+        const x = new XMLHttpRequest();
+        x.open('GET', #{path.to_json}, false#{", #{user.to_json}, 'p'" if user});
+        x.withCredentials = #{with_credentials};
+        try { x.send(); } catch (e) { return e.name; }
+        return x.status;
+      })()
     JS
   end
 
@@ -40,7 +48,10 @@ RSpec.describe 'HTTP authentication entries' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
     session.visit '/'
     expect(xhr('http://other.example.com/guarded', 'u')).to eq(401)
-    expect(seen.drop(1)).to eq([['/guarded', nil]])
+    expect(xhr('http://other.example.com/guarded', 'u', with_credentials: true)).to eq('NetworkError')
+    # (…and a same-origin request led off its origin, whatever its credentials mode: its response tainting is "cors")
+    expect(xhr('/away', 'u')).to eq(401)
+    expect(seen.drop(1)).to eq([['/guarded', nil], ['/guarded', nil], ['/away', nil], ['/guarded', nil]])
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end

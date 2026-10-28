@@ -6380,10 +6380,6 @@ xhr/abort-after-stop.window.js:
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
 - Preflight cache should be invalidated on timeout
 - "[dedicatedworker] Preflight cache should be invalidated on timeout"
-xhr/access-control-preflight-credential-async.htm:
-- CORS async request with URL credentials
-xhr/access-control-preflight-credential-sync.htm:
-- CORS sync request with URL credentials
 xhr/event-error.sub.any.js:
 - "[dedicatedworker] error while reading body should report zeros for loaded and total"
 - error while reading body should report zeros for loaded and total
