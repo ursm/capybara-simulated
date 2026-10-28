@@ -50,7 +50,7 @@ pub(crate) struct NavigationPlan {
     navigation: Option<Navigation>,
     submission: Option<Submission>,
     download: Option<(String, String)>,
-    // (…a reload, by whether the document had transient activation as it began)
+    // (…its own: a location navigation, and a reload — by whether the document had transient activation as it began)
     own: Own,
     // What the plan was as the host began running the tasks due before a navigation of the document — kept apart while
     // they run (`flushBegin`) — and what they planned, kept once they ran (`flushEnd`): for the host to put back where
@@ -127,8 +127,9 @@ fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan(scope, &args).download = Some((url, filename));
 }
 
-// __dom.supersedePlanned(): a navigation of the top-level document planned elsewhere (a location's) — the navigation
-// and the submission planned before it taken by none.
+// __dom.supersedePlanned(): a navigation of the top-level document planned elsewhere (a frame's submission to it, a
+// traversal making its document again, a location's) — the navigation, the submission, the location navigation and the
+// reload planned before it taken by none.
 fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     plan(scope, &args).supersede();
 }
@@ -247,9 +248,9 @@ fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 }
 // __dom.flushBegin(): the tasks due before a navigation of the document about to run — what it planned kept apart, so
 // they plan anew. __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
-// __dom.flushRestore() -> whether any was: the navigation committed no document — what the flushed tasks planned put
-// back where nothing was planned since. (One that commits a document drops it with the rest of the plan: the page
-// load's reset.)
+// __dom.flushRestore(drop) -> whether any was: the navigation committed no document — what the flushed tasks planned
+// put back where nothing was planned since — or (`drop`) what they planned let go. (One that commits a document drops it
+// with the rest of the plan: the page load's reset.)
 fn flush_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let plan = plan(scope, &args);
     plan.saved = Some(std::mem::take(&mut plan.own));
@@ -260,8 +261,9 @@ fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     plan.flushed = Some(std::mem::replace(&mut plan.own, saved));
 }
 fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let drop = args.get(0).is_true();
     let plan = plan(scope, &args);
-    let Some(flushed) = plan.flushed.take() else { return rv.set_bool(false) };
+    let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { return rv.set_bool(false) };
     let restored = (plan.own.location.is_none() && flushed.location.is_some()) || (plan.own.reload.is_none() && flushed.reload.is_some());
     if plan.own.location.is_none() {
         plan.own.location = flushed.location;

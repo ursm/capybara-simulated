@@ -3219,12 +3219,12 @@ module Capybara
         @worker_outbox_head = pop_with_timeout(@worker_outbox, WORKER_POLL_INTERVAL)
       end
 
-      # Drain the Ruby-side async / navigation / form-submit / download chains a
+      # Drain the async / navigation / form-submit / download chains a
       # `run_loop_step` (passed as `r`) may have queued, and report whether this
       # step+drain made observable progress. Shared by both phases of
       # `run_event_loop_frame`.
       #
-      # A pending Ruby-side navigation/submit/reload intent counts as progress:
+      # A pending navigation/submit/reload intent counts as progress:
       # draining it rebuilds a child frame realm and fires that iframe's `onload`
       # synchronously, whose handler can queue the NEXT hop (submit-entity-body's
       # `run_simple_test` chain: form.submit() → realm rebuild → onload → next
@@ -3254,7 +3254,7 @@ module Capybara
         dom_call('__csimEvalScript', expr.to_s, marshal_args([]))
       end
 
-      # Any Ruby-side navigation intent queued and waiting for `drain_pending_navigation`
+      # Any navigation intent queued and waiting for `drain_pending_navigation`
       # to act on it — the same set that method drains (location / frame nav / frame
       # submit / frame reload / reload / history traverse). The quiescence loop treats
       # a queued intent as progress because draining it does cross-realm work (rebuild
@@ -10620,7 +10620,6 @@ module Capybara
       end
       # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload.
       OWN_LOCATION = 1
-      OWN_RELOAD   = 2
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
       # document that began it where that is another's than the page's with the Referer it sends, its source's
@@ -12658,7 +12657,6 @@ module Capybara
         @flush_traversal_mark = @session_history.last_token
         saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
         NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
-        @runtime.call('__csimFlushBegin')
         # A same-document `history.back()` from the flushed page takes effect INLINE
         # (`history_go`), moving the history step under the navigation now committing —
         # the document would end up being the incoming page while the step pointed at
@@ -12670,6 +12668,7 @@ module Capybara
         # the traversal is discarded — the same last-wins rule planned navigations use.
         @flushing_outgoing_page = true
         begin
+          @runtime.call('__csimFlushBegin')
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
           # (…and the traversals the page asked for before the navigation began, whose tasks a browser would have run by
           # now: the driver took the navigation first)
@@ -12696,11 +12695,14 @@ module Capybara
       # intent the live page has set since wins; the per-realm Hash / Array slots
       # merge, so neither side's entries are lost.
       def restore_flushed_nav_intents
-        intents = @flushed_nav_intents || {}
+        intents = @flushed_nav_intents
         @flushed_nav_intents = nil
-        return if @restoring_flushed_nav_intents
-        # (…the page's own plan's, the engine's: navigation_plan.rs `flushRestore`)
-        own = @runtime.call('__csimFlushRestore') == true
+        return if intents.nil?
+        # (…the page's own plan's, the engine's — let go with the rest where a restore is under way: navigation_plan.rs
+        # `flushRestore`)
+        return @runtime.call('__csimFlushRestore', true) if @restoring_flushed_nav_intents
+
+        own = @runtime.call('__csimFlushRestore', false) == true
         return if intents.empty? && !own
 
         intents.each do |slot, flushed|

@@ -22,6 +22,7 @@ RSpec.describe 'a window open() made, navigated' do
       when '/sj' then [200, {'content-type' => 'text/html; charset=shift_jis'}, ["<!DOCTYPE html><title>\x93\xFA\x96\x7B</title>".b]]
       when '/dl' then [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename=x.txt'}, ['x']]
       when '/i.png' then (seen << env['HTTP_REFERER']) && [200, {'content-type' => 'image/png'}, ['']]
+      when '/r' then (seen << env['PATH_INFO']) && html.('<!DOCTYPE html><title>R</title>')
       else html.('')
       end
     })
@@ -41,6 +42,19 @@ RSpec.describe 'a window open() made, navigated' do
     session.execute_script('w.location.href = "/sj"')
     expect(poll_until { session.evaluate_script('w.document.characterSet') == 'Shift_JIS' }).to be(true)
     expect(session.evaluate_script('w.document.title')).to eq('日本')
+  end
+
+  # …and its reload reloads its document — `location.reload()`'s and `history.go(0)`'s — not the page's.
+  it 'reloads its own document' do
+    session.visit '/'
+    session.execute_script('w.location.href = "/r"')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'R' }).to be(true)
+    session.execute_script('w.document.title = "changed"; w.location.reload()')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'R' }).to be(true)
+    session.execute_script('w.document.title = "changed"; w.eval("history.go(0)")')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'R' }).to be(true)
+    expect(seen).to eq(%w[/r /r /r])
+    expect(session.current_path).to eq('/')
   end
 
   it 'stays at its document for a download, and navigates no more once closed' do
