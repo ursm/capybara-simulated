@@ -10611,7 +10611,6 @@ module Capybara
       # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload, a frame's
       # submission to it — and whether the host plans a navigation of a frame.
       OWN_LOCATION = 1
-      OWN_FRAMES   = 8
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
       # document that began it where that is another's than the page's with the Referer it sends, its source's
@@ -10668,11 +10667,7 @@ module Capybara
       def consume_pending_frame_nav
         # Window-realm self-navs are realm navs too — drain them at every frame-nav drain point.
         consume_pending_window_nav
-        return unless own_planned.anybits?(OWN_FRAMES)
-
         @runtime.call('__csimTakeFrameNavigations', FRAME_NAVIGATE).each do |_, realm_id, url, replace, initiator, source, policy, sandbox, activated|
-          next if realm_id.negative?
-
           referrer = [source, policy]
           invalidate_find_cache
           # (…sandboxed as the container said when the navigation began: what its document's seed and a download its
@@ -10800,10 +10795,7 @@ module Capybara
       end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends.
       def consume_pending_frame_reload
-        return unless own_planned.anybits?(OWN_FRAMES)
-
         @runtime.call('__csimTakeFrameNavigations', FRAME_RELOAD).each do |_, realm_id|
-          next if realm_id.negative?
 
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps

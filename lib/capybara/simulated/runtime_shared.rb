@@ -49,8 +49,8 @@ module Capybara
           b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
         # A <form> submitted from inside a nested browsing context (a[0] = the
-        # initiating frame's realm id). Deferred + applied against that realm,
-        # like __csimFrameNavigate — see Browser#frame_submit_self.
+        # initiating frame's realm id). Deferred + applied against that realm —
+        # see Browser#frame_submit_self.
         '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i, a[1].to_s, a[2]) },
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees

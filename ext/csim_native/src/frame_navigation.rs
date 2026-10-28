@@ -595,7 +595,7 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let policy = args.get(4).to_rust_string_lossy(scope);
     let activated = args.get(5).is_true();
     let arena = &mut crate::dom::dom(scope).arena;
-    let Some(container) = arena.container_of(target) else { return rv.set_uint32(PLANNED_NONE) };
+    let Some(container) = arena.live_container(target) else { return rv.set_uint32(PLANNED_NONE) };
     let here = arena.enter_known(target).map(|a| a.location.href().to_owned());
     if here.is_some_and(|here| crate::url_ops::is_fragment_navigation(&here, &url)) {
         return rv.set_uint32(PLANNED_FRAGMENT);
@@ -614,7 +614,7 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
-    let Some(container) = arena.container_of(cid) else { return };
+    let Some(container) = arena.live_container(cid) else { return };
     arena.frame_navigation(container).host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload));
 }
 // __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of — a
@@ -622,14 +622,14 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let arena = &mut crate::dom::dom(scope).arena;
-    if let Some(nav) = arena.container_of(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
+    if let Some(nav) = arena.live_container(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
         nav.host = None;
     }
 }
 // __dom.takeFrameNavigations(kinds) -> the navigations the host planned of frames, of the kinds `kinds` names
 // (HOST_NAVIGATE, HOST_RELOAD), in the order they were planned, which none plans any more: `[HOST_NAVIGATE, realm, url,
 // replace, initiatorRealm, referrerSource, referrerPolicy, [sandbox], activated]`, `[HOST_RELOAD, realm]` — realm the
-// frame's now (-1 for none made), sandbox null where the container had no attribute.
+// frame's now, sandbox null where the container had no attribute.
 fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let kinds = args.get(0).uint32_value(scope).unwrap_or(HOST_NAVIGATE | HOST_RELOAD);
     let arena = &mut crate::dom::dom(scope).arena;
@@ -640,9 +640,12 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
     let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| kind(h) & kinds != 0)).map(|(&c, _)| c).collect();
     for c in containers {
-        let realm = arena.frame_realm(c).unwrap_or(-1);
+        let realm = arena.frame_realm(c);
         if let Some((at, host)) = arena.frame_navigations.0.get_mut(&c).and_then(|n| n.host.take()) {
-            taken.push((at, realm, host));
+            // (…none of a container whose navigable has no document now, nothing to navigate)
+            if let Some(realm) = realm {
+                taken.push((at, realm, host));
+            }
         }
     }
     taken.sort_by_key(|&(at, ..)| at);
@@ -672,12 +675,14 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 }
 
 // __dom.cancelFrameNavigation(containerNid) — another navigation of the container's navigable replaces the one a form
-// planned (its `location` set): the form's response, when it comes, loads into nothing.
+// planned and the one the host planned (its `src` set — a navigation of whatever navigable it has then — or the navigable
+// destroyed with the container's removal): the form's response, when it comes, loads into nothing.
 fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
         nav.planned = 0;
+        nav.host = None;
     }
 }
 

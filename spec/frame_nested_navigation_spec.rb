@@ -50,6 +50,20 @@ RSpec.describe 'a nested document navigating itself' do
     expect(text.('f')).to eq('a')
   end
 
+  # …and the host's navigation of it let go where another navigation of its container replaces it — its `src` set, the
+  # container removed and inserted again with a navigable of its own (Chrome: the later document's, not the location's).
+  it 'lets the navigation it planned go where its container navigates anew' do
+    s = session
+    text = -> { s.evaluate_script('document.getElementById("f").contentDocument?.body?.textContent') }
+    poll_until { text.() == 'o' }
+    s.execute_script("const f = document.getElementById('f'); frames[0].location = '/a'; f.remove(); document.body.append(f)")
+    expect(poll_until { text.() == 'o' && text.() }).to eq('o')
+    s.evaluate_script('1')
+    expect(text.()).to eq('o')
+    s.execute_script("const f = document.getElementById('f'); frames[0].location = '/a'; f.src = '/b'")
+    expect(poll_until { text.() == 'b' && text.() }).to eq('b')
+  end
+
   # …and a reload reloads the document it navigated to, not that `src`.
   it 'reloads the URL it navigated to' do
     s = session
