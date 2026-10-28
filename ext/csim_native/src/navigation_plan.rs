@@ -49,16 +49,27 @@ pub(crate) struct FrameSubmission {
     referrer: (String, String),
 }
 
-// A top-level document's location navigation, reload and a frame's submission to it — the page's, or a window's
-// `window.open` made in this isolate — as a flush of the page's tasks stashes them (`flushBegin`); and when the later of
+// A top-level document's location navigation, reload and a frame's submission to it — the page's (a window's
+// `window.open` made in this isolate plans the first two, as its frames' submissions to it are not modeled) — as a flush of the page's tasks stashes them (`flushBegin`); and when the later of
 // them was planned (`PLANNED`), which orders the windows' as the host takes them.
 #[derive(Default)]
 struct Own {
     location: Option<Location>,
-    reload: Option<bool>,
+    reload: Option<Reload>,
     submission: Option<FrameSubmission>,
     planned: u64,
 }
+
+// A reload: whether the document had transient activation as it began, and — one of a document at a `blob:` URL — the
+// blob it was made of, taken then (a window's, whose document no session history entry of the host keeps).
+pub(crate) struct Reload {
+    activated: bool,
+    blob: Option<v8::Global<v8::Value>>,
+}
+
+// The kinds of a window's navigation `takeWindowNavigations` answers.
+const WINDOW_LOCATION: i32 = 1;
+const WINDOW_RELOAD: i32 = 2;
 static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 fn next_planned() -> u64 {
     PLANNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
@@ -247,13 +258,15 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
     plan.own.planned = next_planned();
 }
-// __dom.planReload(activated): the calling realm's document's reload planned, superseding what it planned before —
-// `activated` whether its window had transient activation as it began.
+// __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
+// `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
+// `blob:` URL, else undefined (`Reload`).
 fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let activated = args.get(0).is_true();
+    let blob = (!args.get(1).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(1)));
     let plan = plan(scope, &args);
     plan.supersede();
-    plan.own.reload = Some(activated);
+    plan.own.reload = Some(Reload { activated, blob });
     plan.own.planned = next_planned();
 }
 // __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob] of the location
@@ -285,8 +298,8 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
     ]
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
-// in the order they were planned, which they plan no more: `[realm, WINDOW_LOCATION (1), …takeLocation's]` and
-// `[realm, WINDOW_RELOAD (2), activated]`. A window closed is stepped no more, and plans none the host takes.
+// in the order they were planned, which they plan no more: `[realm, WINDOW_LOCATION, …takeLocation's]` and `[realm,
+// WINDOW_RELOAD, activated, blob]`. A window closed is stepped no more, and plans none the host takes.
 fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
@@ -301,8 +314,13 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     for (_, w, own) in taken {
         let realm = v8::Integer::new(scope, w).into();
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload) {
-            (Some(l), _) => [vec![realm, v8::Integer::new(scope, 1).into()], location_items(scope, l)].concat(),
-            (None, Some(activated)) => vec![realm, v8::Integer::new(scope, 2).into(), v8::Boolean::new(scope, activated).into()],
+            (Some(l), _) => [vec![realm, v8::Integer::new(scope, WINDOW_LOCATION).into()], location_items(scope, l)].concat(),
+            (None, Some(r)) => vec![
+                realm,
+                v8::Integer::new(scope, WINDOW_RELOAD).into(),
+                v8::Boolean::new(scope, r.activated).into(),
+                r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
+            ],
             (None, None) => continue,
         };
         items.push(v8::Array::new_with_elements(scope, &item).into());
@@ -312,8 +330,8 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
 // more — undefined for none.
 fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    if let Some(activated) = plan(scope, &args).own.reload.take() {
-        rv.set_bool(activated);
+    if let Some(reload) = plan(scope, &args).own.reload.take() {
+        rv.set_bool(reload.activated);
     }
 }
 // __dom.submitToTop(): the calling frame realm's planned submission handed to the page's plan, as its target is the

@@ -469,8 +469,8 @@ RSpec.describe 'Sandboxing' do
     s.visit '/'
     s.execute_script("document.getElementById('f').contentWindow.open('javascript:top.ran = 5; void 0', '_top')")
     expect(poll_until { s.evaluate_script('window.ran') }).to eq(5)
-    # (…the popup's own navigation to an http URL is a window realm's, which the host drops: browser.rb
-    # `window_realm_navigate_self` — so what holds is that the opener's page stays)
+    # (…the popup's own navigation is its own window's — browser.rb `consume_pending_window_nav` — so what holds is that
+    # the opener's page stays)
     s.execute_script("window.w = open(); w.name = 'p'; w.eval(\"open('/landed?p', 'p')\")")
     s.evaluate_script('1')
     expect(s.current_path).to eq('/')

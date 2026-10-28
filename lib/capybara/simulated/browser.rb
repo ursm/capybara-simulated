@@ -10746,16 +10746,20 @@ module Capybara
       # as the page's are (navigation_plan.rs `takeWindowNavigations`: none of a window closed since, HTML "cannot
       # navigate") — taken in the order they were planned, each window's document made again in place: a location's to
       # its URL, by the document that began it (its own where no other did), a `blob:` one's of the blob it began with; a
-      # reload's to the URL its document is at.
+      # reload's to the URL its document is at, a `blob:` one's of its blob. (None asked for where no window was opened.)
       WINDOW_LOCATION = 1
+      WINDOW_RELOAD   = 2
       def consume_pending_window_nav
+        return if @runtime.window_realm_meta.empty?
+
         @runtime.call('__csimTakeWindowNavigations').each do |realm_id, kind, *plan|
           invalidate_find_cache
-          if kind == WINDOW_LOCATION
+          case kind
+          when WINDOW_LOCATION
             url, _replace, initiator, _source, _policy, activated, blob = plan
-          else
-            activated = plan[0]
-            url       = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+          when WINDOW_RELOAD
+            activated, blob = plan
+            url = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
           end
           initiator ||= realm_id
           made = {}

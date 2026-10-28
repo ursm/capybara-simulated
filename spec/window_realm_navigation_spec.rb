@@ -63,6 +63,11 @@ RSpec.describe 'a window open() made, navigated' do
     expect(poll_until { session.evaluate_script('w.document.title') == 'R' }).to be(true)
     expect(seen).to eq(%w[/r /r /r])
     expect(session.current_path).to eq('/')
+    # (…one at a `blob:` URL made again of its blob)
+    session.execute_script("w.location.href = URL.createObjectURL(new Blob(['<title>B</title>'], {type: 'text/html'}))")
+    expect(poll_until { session.evaluate_script('w.document.title') == 'B' }).to be(true)
+    session.execute_script('w.document.title = "changed"; w.location.reload()')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'B' }).to be(true)
   end
 
   it 'stays at its document for a download, and navigates no more once closed' do
