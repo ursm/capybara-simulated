@@ -2,11 +2,11 @@
 // user's action — ends: a navigation (a hyperlink followed, its target and opener, the referrer policy its `rel` sets,
 // a `blob:` one's bytes taken as it is planned for a new window, whose page may revoke the URL first), a form's
 // submission (its request as it was submitted: HTML "submit" builds it before it plans the navigation, so a page that
-// changes the form or moves it to another document after `submit()` changes nothing it sends), a download — and, the
-// top-level document's own, a navigation its `location` began (its URL, whether it replaces the current entry, the
-// document that began it and the Referer that one sends, a `blob:` one's blob), a reload, and a frame's form submission
-// that navigates it. A navigation of the
-// top-level document supersedes the navigation, submission, location navigation or reload planned before it: the later
+// changes the form or moves it to another document after `submit()` changes nothing it sends), a download — and, a
+// top-level document's own (the page's, a window's `window.open` made in this isolate), a navigation its `location`
+// began (its URL, whether it replaces the current entry, the document that began it and the Referer that one sends, a
+// `blob:` one's blob), a reload, and a frame's form submission that navigates it. A navigation of a top-level document
+// supersedes the navigation, submission, location navigation, reload or frame's submission planned before it: the later
 // is taken (Chrome navigates to `/b` for `form.submit(); location.href = '/b'`, to the form's for the other order, and
 // reloads for `location.href = '/b'; location.reload()`). A frame's are its container's (frame_navigation.rs).
 
@@ -49,13 +49,19 @@ pub(crate) struct FrameSubmission {
     referrer: (String, String),
 }
 
-// The top-level document's location navigation, reload and a frame's submission to it, as a flush of its tasks stashes
-// them (`flushBegin`).
+// A top-level document's location navigation, reload and a frame's submission to it — the page's, or a window's
+// `window.open` made in this isolate — as a flush of the page's tasks stashes them (`flushBegin`); and when the later of
+// them was planned (`PLANNED`), which orders the windows' as the host takes them.
 #[derive(Default)]
 struct Own {
     location: Option<Location>,
     reload: Option<bool>,
     submission: Option<FrameSubmission>,
+    planned: u64,
+}
+static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn next_planned() -> u64 {
+    PLANNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
 
 #[derive(Default)]
@@ -63,13 +69,36 @@ pub(crate) struct NavigationPlan {
     navigation: Option<Navigation>,
     submission: Option<Submission>,
     download: Option<(String, String)>,
-    // (…its own: a location navigation, and a reload — by whether the document had transient activation as it began)
+    // (…its own: a location navigation, a reload, a frame's submission to it)
     own: Own,
     // What the plan was as the host began running the tasks due before a navigation of the document — kept apart while
     // they run (`flushBegin`) — and what they planned, kept once they ran (`flushEnd`): for the host to put back where
     // the navigation commits no document after all (`flushRestore`).
     saved: Option<Own>,
     flushed: Option<Own>,
+}
+
+impl Own {
+    // What a flush planned, `flushed`, put back where nothing was planned since — whether any was.
+    fn restore(&mut self, flushed: Own) -> bool {
+        let mut restored = false;
+        if self.location.is_none() && flushed.location.is_some() {
+            self.location = flushed.location;
+            restored = true;
+        }
+        if self.reload.is_none() && flushed.reload.is_some() {
+            self.reload = flushed.reload;
+            restored = true;
+        }
+        if self.submission.is_none() && flushed.submission.is_some() {
+            self.submission = flushed.submission;
+            restored = true;
+        }
+        if restored {
+            self.planned = self.planned.max(flushed.planned);
+        }
+        restored
+    }
 }
 
 impl NavigationPlan {
@@ -93,6 +122,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "planReload", plan_reload, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
+    register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
     register(scope, ns, "submitToTop", submit_to_top, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
@@ -215,6 +245,7 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let plan = &mut realm(scope, cid).navigation_plan;
     plan.supersede();
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
+    plan.own.planned = next_planned();
 }
 // __dom.planReload(activated): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began.
@@ -223,6 +254,7 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let plan = plan(scope, &args);
     plan.supersede();
     plan.own.reload = Some(activated);
+    plan.own.planned = next_planned();
 }
 // __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob] of the location
 // navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none), which it plans
@@ -230,6 +262,10 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(l) = plan(scope, &args).own.location.take() else { return };
+    let items = location_items(scope, l);
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::Local<'s, v8::Value>> {
     let (realm, source, policy) = match l.initiator {
         Some((realm, source, policy)) => (
             v8::Integer::new(scope, realm).into(),
@@ -238,7 +274,7 @@ fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         ),
         None => (v8::null(scope).into(), v8::null(scope).into(), v8::null(scope).into()),
     };
-    let items = [
+    vec![
         v8::String::new(scope, &l.url).unwrap().into(),
         v8::Boolean::new(scope, l.replace).into(),
         realm,
@@ -246,7 +282,31 @@ fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         policy,
         v8::Boolean::new(scope, l.activated).into(),
         l.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
-    ];
+    ]
+}
+// __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
+// in the order they were planned, which they plan no more: `[realm, WINDOW_LOCATION (1), …takeLocation's]` and
+// `[realm, WINDOW_RELOAD (2), activated]`. A window closed is stepped no more, and plans none the host takes.
+fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let windows = crate::dom::dom(scope).arena.stepped_windows();
+    let mut taken = Vec::new();
+    for w in windows {
+        let own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
+        if own.location.is_some() || own.reload.is_some() {
+            taken.push((own.planned, w, own));
+        }
+    }
+    taken.sort_by_key(|&(planned, ..)| planned);
+    let mut items = Vec::new();
+    for (_, w, own) in taken {
+        let realm = v8::Integer::new(scope, w).into();
+        let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload) {
+            (Some(l), _) => [vec![realm, v8::Integer::new(scope, 1).into()], location_items(scope, l)].concat(),
+            (None, Some(activated)) => vec![realm, v8::Integer::new(scope, 2).into(), v8::Boolean::new(scope, activated).into()],
+            (None, None) => continue,
+        };
+        items.push(v8::Array::new_with_elements(scope, &item).into());
+    }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
@@ -292,35 +352,36 @@ fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     let own = &plan(scope, &args).own;
     rv.set_uint32(u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2));
 }
-// __dom.flushBegin(): the tasks due before a navigation of the document about to run — what it planned kept apart, so
-// they plan anew. __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
+// __dom.flushBegin(): the tasks due before a navigation of the page about to run — what it planned kept apart, so they
+// plan anew, and what each window `window.open` made in this isolate planned (they run on the page's event loop).
+// __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
 // __dom.flushRestore(drop) -> whether any was: the navigation committed no document — what the flushed tasks planned
-// put back where nothing was planned since — or (`drop`) what they planned let go. (One that commits a document drops it
-// with the rest of the plan: the page load's reset.)
+// put back where nothing was planned since — or (`drop`) what they planned let go. (One that commits a document drops
+// the page's with the rest of its plan: the page load's reset.)
+fn traversables(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Vec<i32> {
+    let cid = realm_id(scope, args);
+    std::iter::once(cid).chain(crate::dom::dom(scope).arena.stepped_windows()).collect()
+}
 fn flush_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let plan = plan(scope, &args);
-    plan.saved = Some(std::mem::take(&mut plan.own));
+    for r in traversables(scope, &args) {
+        let plan = &mut realm(scope, r).navigation_plan;
+        plan.saved = Some(std::mem::take(&mut plan.own));
+    }
 }
 fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let plan = plan(scope, &args);
-    let saved = plan.saved.take().unwrap_or_default();
-    plan.flushed = Some(std::mem::replace(&mut plan.own, saved));
+    for r in traversables(scope, &args) {
+        let plan = &mut realm(scope, r).navigation_plan;
+        let saved = plan.saved.take().unwrap_or_default();
+        plan.flushed = Some(std::mem::replace(&mut plan.own, saved));
+    }
 }
 fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let drop = args.get(0).is_true();
-    let plan = plan(scope, &args);
-    let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { return rv.set_bool(false) };
-    let restored = (plan.own.location.is_none() && flushed.location.is_some())
-        || (plan.own.reload.is_none() && flushed.reload.is_some())
-        || (plan.own.submission.is_none() && flushed.submission.is_some());
-    if plan.own.location.is_none() {
-        plan.own.location = flushed.location;
-    }
-    if plan.own.reload.is_none() {
-        plan.own.reload = flushed.reload;
-    }
-    if plan.own.submission.is_none() {
-        plan.own.submission = flushed.submission;
+    let mut restored = false;
+    for r in traversables(scope, &args) {
+        let plan = &mut realm(scope, r).navigation_plan;
+        let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { continue };
+        restored |= plan.own.restore(flushed);
     }
     rv.set_bool(restored);
 }

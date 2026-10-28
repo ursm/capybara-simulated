@@ -375,6 +375,10 @@ impl RealmArena {
         }
         self.note_linked();
     }
+    // The windows `window.open` made in this isolate that are stepped now, in the order they were made.
+    pub(crate) fn stepped_windows(&self) -> Vec<i32> {
+        self.navigables.windows.clone()
+    }
     // The key of realm `realm`'s window: its own, for a realm that is no window's or its first document's.
     fn window_key(&self, realm: i32) -> i32 {
         self.navigables.window_keys.get(&realm).copied().unwrap_or(realm)

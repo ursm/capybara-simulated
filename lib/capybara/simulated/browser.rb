@@ -10742,40 +10742,35 @@ module Capybara
           @navigation_sandbox = saved_sandbox
         end
       end
-      # A same-origin WINDOW realm (window.open in this isolate) navigating itself
-      # via `win.location = …`. Like frame_navigate_self, defer (the call lands here
-      # from the realm's own location setter, mid-flight) and drain after the action.
-      # A blob: URL is resolved to bytes NOW — before the opener's typical immediate
-      # `revokeObjectURL` — since the realm reload happens later (url-in-tags-revoke).
-      def window_realm_navigate_self(url, realm_id, initiator = nil, user_activated: false)
-        return if realm_id.nil? || realm_id.zero?
-        # (…the document that navigates it — another realm's whose script navigated it cross-origin, else its own — and
-        # whether that one had transient activation as it began)
-        spec = {url: url.to_s, initiator: initiator.nil? ? realm_id : initiator.to_i, user_activated: user_activated}
-        if url.to_s.start_with?('blob:') && (b = read_blob_for_window(url.to_s))
-          spec[:body]  = document_payload(b[:bytes])
-          spec[:ctype] = b[:type].to_s.empty? ? 'text/html' : b[:type]
-        end
-        (@pending_window_nav ||= {})[realm_id] = spec
-      end
+      # The navigations the windows `window.open` made in this isolate planned of their own — each in its realm's plan,
+      # as the page's are (navigation_plan.rs `takeWindowNavigations`: none of a window closed since, HTML "cannot
+      # navigate") — taken in the order they were planned, each window's document made again in place: a location's to
+      # its URL, by the document that began it (its own where no other did), a `blob:` one's of the blob it began with; a
+      # reload's to the URL its document is at.
+      WINDOW_LOCATION = 1
       def consume_pending_window_nav
-        return if @pending_window_nav.nil? || @pending_window_nav.empty?
-        navs = @pending_window_nav
-        @pending_window_nav = nil
-        navs.each do |realm_id, spec|
+        @runtime.call('__csimTakeWindowNavigations').each do |realm_id, kind, *plan|
           invalidate_find_cache
-          # (…none of a window closed since: HTML "cannot navigate")
-          next if @runtime.window_realm_closed?(realm_id)
-
-          body, ctype, url = spec[:body], spec[:ctype], spec[:url]
+          if kind == WINDOW_LOCATION
+            url, _replace, initiator, _source, _policy, activated, blob = plan
+          else
+            activated = plan[0]
+            url       = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+          end
+          initiator ||= realm_id
           made = {}
+          body, ctype = nil
+          if (blob = host_blob(blob))
+            body  = document_payload(blob[:bytes])
+            ctype = blob[:type].to_s.empty? ? 'text/html' : blob[:type]
+          end
           # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
           # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
           # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
           # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
           # sent its referrer, its reserved client its own.
           if body.nil? && http_url?(url)
-            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: spec[:initiator], download_realm: spec[:initiator], user_activated: spec[:user_activated])
+            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: initiator, download_realm: initiator, user_activated: activated)
             next if resp.nil? || resp['no_document']
 
             headers = resp['headers'] || {}
@@ -10897,9 +10892,9 @@ module Capybara
       # frame plans.)
       # (…a frame still being built — its realm not yet one the host can ask — has its request taken as it is
       # (SUBMIT_TAKEN: the frame's plan of it the frame's to drop), routed as it is drained, its navigables known by then)
-      SUBMIT_KEPT    = 0
-      SUBMIT_TAKEN   = 1
-      SUBMIT_TO_TOP  = 2
+      SUBMIT_KEPT   = 0
+      SUBMIT_TAKEN  = 1
+      SUBMIT_TO_TOP = 2
       def frame_submit_self(realm_id, target = '', request = nil)
         return SUBMIT_KEPT if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
@@ -12635,13 +12630,12 @@ module Capybara
       # duration of the flush and restored after, so the outgoing page's intents
       # neither leak into the incoming page nor clobber the live one. Listed here
       # (rather than saved individually) because a re-assignment does NOT restore a
-      # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
+      # slot mutated IN PLACE — `@pending_frame_nav` / `@pending_frame_submit` are
       # Hashes keyed by realm and the frame-reload slot is an Array.
-      # (The page's own plan — its location navigation, its reload, a frame's submission to it — is stashed alike, in the
-      # engine: navigation_plan.rs
-      # `flushBegin`.)
+      # (The page's own plan — its location navigation, its reload, a frame's submission to it — and its windows' are
+      # stashed alike, in the engine: navigation_plan.rs `flushBegin`.)
       NAV_INTENT_SLOTS = %i[
-        @pending_history_traverse @pending_window_nav @pending_frame_nav @pending_frame_submit
+        @pending_history_traverse @pending_frame_nav @pending_frame_submit
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS

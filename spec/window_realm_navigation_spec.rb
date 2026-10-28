@@ -44,6 +44,14 @@ RSpec.describe 'a window open() made, navigated' do
     expect(session.evaluate_script('w.document.title')).to eq('日本')
   end
 
+  # …each window planning its own: two navigated in one task both go, in the order they were planned, the page staying.
+  it 'navigates each of two windows planned in one task' do
+    session.visit '/'
+    session.execute_script('window.v = open("", "pop2"); v.location.href = "/r"; w.location.href = "/p2"')
+    expect(poll_until { session.evaluate_script('[w.document.title, v.document.title]') == %w[P2 R] }).to be(true)
+    expect(session.current_path).to eq('/')
+  end
+
   # …and its reload reloads its document — `location.reload()`'s and `history.go(0)`'s — not the page's.
   it 'reloads its own document' do
     session.visit '/'

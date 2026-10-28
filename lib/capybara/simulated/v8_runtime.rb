@@ -538,13 +538,6 @@ module Capybara
       end
       # The realms that may hold a WindowProxy of another's window: every live one.
       def proxy_holders = [0] + frame_realms.keys + loading_frame_realms.keys
-      # Whether the window of window realm `id` is closed (navigables.rs `window_closed`, by its key).
-      def window_realm_closed?(id)
-        key = window_realm_meta.dig(id.to_i, :window_key) or return false
-        ctx.call('__csimWindowRealmClosed', key.to_i) == true
-      rescue StandardError
-        false
-      end
 
       # Tear down a single frame realm (e.g. a descendant frame destroyed when an
       # ancestor frame re-navigates). No-op for nil/0/unknown ids. `keep_proxies`: its navigable goes on to another
@@ -1254,9 +1247,8 @@ module Capybara
         refresh: nil
       )
         realm = seed_realm_bridge(ctx.create_context)
-        # Mark it a top-level window realm so its location setter routes to
-        # __csimWindowRealmNavigate (reload THIS realm) rather than the frame-nav or
-        # top-page path — top === self here, so neither default branch fits. That a script may close it, and the
+        # Mark it a top-level window realm: its location's navigations planned in its own realm's plan, which the host
+        # takes for it (`consume_pending_window_nav`), as the page's are its own. That a script may close it, and the
         # realm that opened it (its `window.opener`), are the engine's (`setSteppedWindow` below), by the window's key:
         # the realm of its first document, which a document it navigates to keeps (window.js `windowKey`).
         window_key ||= realm.id
