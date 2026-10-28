@@ -4689,12 +4689,9 @@ module Capybara
       # the pipe). The JS-side XHR checks the return shape to pick
       # between inline processing and waiting for `__csim_
       # deliverHijackedFetches`.
-      def rack_fetch_async(method, url, body, headers_json, credentials: 'same-origin', client_url: nil, client_origin: nil, client_realm: nil, referrer_policy: nil, referrer: nil)
-        headers = begin
-          JSON.parse(headers_json.to_s)
-        rescue JSON::ParserError
-          {}
-        end
+      # (…`request` an XHR's, described by name as a realm's every request to the host is: `rack_fetch_request`)
+      def rack_fetch_async(request, body)
+        request = request.to_h
         # `rack_fetch` already handles redirects, cookie merge, the asset cache shortcut and download detection — an async
         # XHR stays on that single source of truth, its Rack call offered `rack.hijack` as a server (Puma) offers every
         # request: middleware that takes it holds the connection open until something publishes through it (a long poll),
@@ -4716,20 +4713,19 @@ module Capybara
         }
         Thread.current[:csim_fetch_env] = nil
         # (…a CORS request as an XHR's is, by its client)
-        resp = rack_fetch(method, url, body, headers, 'follow', 'cors', credentials: credentials, env_extras: env_extras, client_url: client_url,
-                          client_origin: client_origin, client_realm: client_realm, referrer_policy: referrer_policy, referrer: referrer)
+        resp = rack_fetch_request(request, body, env_extras: env_extras)
         # (…nil, a network error, as `rack_fetch` answers one)
         return resp unless hijacked
         # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is)
         env = Thread.current[:csim_fetch_env] || {}
         cookie_env = env.slice('csim.cookie_site', 'csim.cookie_cross_site', 'csim.cookie_top_level', 'HTTP_SEC_FETCH_SITE', 'HTTP_SEC_FETCH_MODE', 'HTTP_SEC_FETCH_DEST')
-        requested = resolve_against_current(url.to_s).to_s
+        requested = resolve_against_current(request['url'].to_s).to_s
         query = env['QUERY_STRING'].to_s
         # (…as text: an env's values may be BINARY-tagged, and a binary string crosses to the page as bytes)
         answered = env.empty? ? requested : RuntimeShared.utf8_text(env_request_url(env) + (query.empty? ? '' : "?#{query}"))
         # (…the request's own where no redirect led elsewhere — an env keeps no empty query's `?`)
         answered = requested if answered == requested.chomp('?')
-        @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, credentials: credentials, cookie_env: cookie_env, realm: client_realm.to_i}
+        @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, credentials: request['credentials'] || 'same-origin', cookie_env: cookie_env, realm: request['clientRealm'].to_i}
         {'handle' => id}
       end
 
@@ -5573,9 +5569,7 @@ module Capybara
       # quota, the caller rejects with TypeError synchronously, like a browser.
       KEEPALIVE_QUOTA = 65_536
 
-      def keepalive_start(method, url, body, headers, redirect, mode, credentials, referrer_policy, referrer, cache_mode, client_url, realm = nil)
-        # (…its site for cookies worked out here, on the main thread its realm's URL is asked on, for the thread it runs on)
-        cookie_cross = realm.to_i.positive? && container_cross_site?(realm, url.to_s)
+      def keepalive_start(request, body)
         # The quota reserves the PAYLOAD size: a text body arrives as its UTF-8 String and
         # any other as its BINARY bytes, so either way that is the String's byte count.
         size = body.to_s.bytesize
@@ -5592,10 +5586,10 @@ module Capybara
           spawn_app_request_thread do
             r = nil
             begin
+              # (…its site for cookies the request's client's, its frame's ancestors named in it: nothing asked of a realm
+              # off the main thread)
               r = begin
-                rack_fetch(method.to_s, url.to_s, body.to_s, headers || {}, redirect.to_s.empty? ? 'follow' : redirect.to_s,
-                           mode, credentials: credentials || 'same-origin', referrer_policy: referrer_policy,
-                           referrer: referrer, cache_mode: cache_mode || 'default', client_url: client_url, cookie_cross_site: cookie_cross)
+                rack_fetch_request(request, body.to_s)
               rescue StandardError
                 nil
               end
@@ -9775,7 +9769,7 @@ module Capybara
       # A request a realm's script makes the host fetch (`__rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
       # worker's imported script), described by name (document-origin.js `hostRequest`) — its client the realm's own
       # document, its frame's ancestors given — and `body` its bytes.
-      def rack_fetch_request(request, body)
+      def rack_fetch_request(request, body, env_extras: nil)
         r = request.to_h
         rack_fetch(
           r['method'],
@@ -9798,7 +9792,8 @@ module Capybara
           nav_dest:          r['navDest'],
           navigation:        r['navigation'] == true,
           dest:              r['dest'],
-          user_activated:    r['userActivated'] == true
+          user_activated:    r['userActivated'] == true,
+          env_extras:        env_extras
         )
       end
 

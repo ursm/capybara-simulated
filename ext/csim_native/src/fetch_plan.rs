@@ -142,7 +142,9 @@ impl FetchPlan {
             return Ok(None);
         }
         let mode = text("mode")?;
-        let credentials = text("credentials")?.unwrap_or_else(|| "same-origin".to_owned());
+        // (…a mode, credentials, redirect and cache mode named '' its default, as none)
+        let named = |key: &str| -> Result<Option<String>, Error> { Ok(text(key)?.filter(|v| !v.is_empty())) };
+        let credentials = named("credentials")?.unwrap_or_else(|| "same-origin".to_owned());
         // The CLIENT: the realm that called fetch/XHR — its own document's URL, a service worker's script URL — and, where
         // that is no HTTP(S) URL (an about:blank / javascript: / data: realm's), the page's; its origin the realm's where
         // it says (a sandboxed document's opaque `null` its URL does not carry), else its URL's.
@@ -203,8 +205,8 @@ impl FetchPlan {
             doc_origin,
             client_origin,
             credentials,
-            redirect_mode: text("redirect")?.unwrap_or_else(|| "follow".to_owned()),
-            cache_mode: text("cache")?.unwrap_or_else(|| "default".to_owned()),
+            redirect_mode: named("redirect")?.unwrap_or_else(|| "follow".to_owned()),
+            cache_mode: named("cache")?.unwrap_or_else(|| "default".to_owned()),
             skip_cache,
             navigation,
             challenge,

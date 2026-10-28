@@ -40,7 +40,7 @@ module Capybara
         '__csimSubresourceFetch'     => ->(b, *a) { b.subresource_fetch(a[0], a[1].to_i, a[2]) },
         '__csimAssetDocumentStarted' => ->(b, *_a) { b.asset_document_started },
         # fetch(…, {keepalive}) — eager detached-thread dispatch + one-shot result poll.
-        '__csim_keepaliveStart'      => ->(b, *a) { b.keepalive_start(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9], a[10], a[11]) },
+        '__csim_keepaliveStart'      => ->(b, *a) { b.keepalive_start(a[0], a[1]) },
         '__csim_keepaliveTake'       => ->(b, *a) { b.keepalive_take(a[0]) },
         # A controlled document's subresource → its controller's fetch event, synchronously, its
         # request the plan's (its destination too). See sw_script_subresource_fetch.
@@ -77,7 +77,7 @@ module Capybara
         '__csim_wsOpen'              => ->(b, *a) { b.ws_open(a[0], a[1]) },
         '__csim_wsSend'              => ->(b, *a) { b.ws_send(a[0], a[1], a[2]); nil },
         '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
-        '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1], a[2], a[3], credentials: a[4] || 'same-origin', client_url: a[5], client_origin: a[6], client_realm: a[7], referrer_policy: a[8], referrer: a[9]) },
+        '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
         # Cross-window references (window.open / opener / postMessage). A separate-VM
         # aux window forwards to the Driver; a same-origin window realm lives in this
