@@ -135,7 +135,7 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
     let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count && !m.failed).and_then(|m| Some((m.text.clone()?, m.base.clone(), m.id)));
     let (text, location, clean) = match kept {
         Some((text, location, id)) => {
-            let clean = arena.sheets.stored_mut(id).is_none_or(|s| !s.origin_dirty);
+            let clean = arena.sheets.stored_mut(id).is_some_and(|s| !s.origin_dirty);
             (text, location, Some((clean, false)))
         }
         None => {

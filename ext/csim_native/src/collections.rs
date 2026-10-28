@@ -517,10 +517,10 @@ fn name_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> Op
 // class names (`kind` 0: `a` the list, `b` the nid of the document whose mode they match in), a namespace and local
 // name (1: `a` the namespace, null for none, `b` the local name; "*" any), a qualified name (2: `a`, "*" any; `b` an
 // HTML document), a legacy document collection (3 forms, 4 images, 5 links, 6 scripts, 7 anchors, 8 embeds), a `name`
-// (9: `a`), the stylesheets' owners (10) — or the shadow hosts among its shadow-including descendants (11:
-// shadow-including tree order, a host before its shadow tree's own), those with a state bit of a mask (12: `a`), those
-// a custom element definition could be for (13), or every element of its shadow-including inclusive descendants (14: in
-// the shadow hosts' order, the scope itself first where it is one) — or its children that are elements (15: what its
+// (9: `a`), the stylesheets' owners (10) — or those with a state bit of a mask (12: `a`), those a custom element
+// definition could be for (13), or every element of its shadow-including inclusive descendants (14: in shadow-including
+// tree order, a host before its shadow tree's own, the scope itself first where it is one) — or its children that are
+// elements (15: what its
 // `children` holds) — or the image elements of its shadow-including inclusive descendants, in that order (16: an HTML
 // `<img>` or `<input>`, an SVG `<image>` — what loads an image, an input once its type is Image).
 fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
