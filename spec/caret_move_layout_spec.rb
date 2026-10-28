@@ -10,7 +10,7 @@ require_relative 'support/session_teardown'
 RSpec.describe 'a caret move that reads no line' do
   it 'lays nothing out' do
     paragraphs = Array.new(300) {|i| "<p>paragraph #{i}</p>" }.join
-    html = %(<!DOCTYPE html><meta charset="utf-8"><input id=i value="abc"><textarea id=t>one\ntwo</textarea>#{paragraphs})
+    html = %(<!DOCTYPE html><meta charset="utf-8"><input id=i value="abc"><textarea id=t>one\ntwo</textarea><div id=e contenteditable>edit me</div>#{paragraphs})
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     s.visit '/'
     passes = -> { s.evaluate_script('globalThis.__csimLayoutPasses()') }
@@ -30,7 +30,15 @@ RSpec.describe 'a caret move that reads no line' do
       textarea.send_keys(keys)
       passes.call - before
     }
-    expect([moves, edges]).to eq([[0, 0, 0, 0], [0, 0]])
+    host = s.find('#e')
+    host.click
+    host_edges = [[:control, :home], [:control, :end]].map {|keys|
+      s.execute_script("document.body.append(document.createElement('p'))")
+      before = passes.call
+      host.send_keys(keys)
+      passes.call - before
+    }
+    expect([moves, edges, host_edges]).to eq([[0, 0, 0, 0], [0, 0], [0, 0]])
     expect(s.evaluate_script("[document.getElementById('i').selectionStart, document.getElementById('t').selectionStart]")).to eq([3, 7])
   end
 end
