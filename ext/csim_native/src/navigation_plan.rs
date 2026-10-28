@@ -2,10 +2,12 @@
 // user's action — ends: a navigation (a hyperlink followed, its target and opener, the referrer policy its `rel` sets,
 // a `blob:` one's bytes taken as it is planned for a new window, whose page may revoke the URL first), a form's
 // submission (its request as it was submitted: HTML "submit" builds it before it plans the navigation, so a page that
-// changes the form or moves it to another document after `submit()` changes nothing it sends), and a download. A navigation of
-// the top-level document supersedes the navigation or submission planned before it: the later is taken (Chrome navigates
-// to `/b` for `form.submit(); location.href = '/b'`, to the form's for the other order). A frame's are its container's
-// (frame_navigation.rs).
+// changes the form or moves it to another document after `submit()` changes nothing it sends), a download — and, the
+// top-level document's own, a navigation its `location` began (its URL, whether it replaces the current entry, the
+// document that began it and the Referer that one sends, a `blob:` one's blob) and a reload. A navigation of the
+// top-level document supersedes the navigation, submission, location navigation or reload planned before it: the later
+// is taken (Chrome navigates to `/b` for `form.submit(); location.href = '/b'`, to the form's for the other order, and
+// reloads for `location.href = '/b'; location.reload()`). A frame's are its container's (frame_navigation.rs).
 
 use crate::dom::{realm, realm_id, register};
 
@@ -23,21 +25,45 @@ pub(crate) struct Navigation {
 // (…its request the bindings' record of it — action, method, enctype, target, rel, encoding and entries — held as made)
 pub(crate) struct Submission(v8::Global<v8::Value>);
 
+// A navigation of the top-level document its `location` began: its URL; whether it replaces the current entry (a
+// `location.replace`); the realm whose script began it where that is another's than the document's own (a frame's
+// `open(url, '_top')`, a `_top` link), with the Referer that document sends — its URL and policy, taken as the navigation
+// began, when it is there to ask (HTML: the source document snapshotted); whether the source document had transient
+// activation; and a `blob:` URL's blob, taken as it began (a revoke after it does not take it back).
+pub(crate) struct Location {
+    url: String,
+    replace: bool,
+    initiator: Option<(i32, String, String)>,
+    activated: bool,
+    blob: Option<v8::Global<v8::Value>>,
+}
+
+// The top-level document's location navigation and reload, as a flush of its tasks stashes them (`flushBegin`).
+#[derive(Default)]
+struct Own {
+    location: Option<Location>,
+    reload: Option<bool>,
+}
+
 #[derive(Default)]
 pub(crate) struct NavigationPlan {
     navigation: Option<Navigation>,
     submission: Option<Submission>,
     download: Option<(String, String)>,
-    // The blob a location's navigation to a `blob:` URL began with, by that URL — the host's to take as it navigates
-    // (HTML resolves the URL's blob URL entry as it parses it: a revoke after the navigation began does not take it back).
-    location_blob: Option<(String, v8::Global<v8::Value>)>,
+    // (…a reload, by whether the document had transient activation as it began)
+    own: Own,
+    // What the plan was as the host began running the tasks due before a navigation of the document — kept apart while
+    // they run (`flushBegin`) — and what they planned, kept once they ran (`flushEnd`): for the host to put back where
+    // the navigation commits no document after all (`flushRestore`).
+    saved: Option<Own>,
+    flushed: Option<Own>,
 }
 
 impl NavigationPlan {
     fn supersede(&mut self) {
         self.navigation = None;
         self.submission = None;
-        self.location_blob = None;
+        self.own = Own::default();
     }
 }
 
@@ -50,8 +76,14 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeNavigation", take_navigation, context_id);
     register(scope, ns, "takeSubmission", take_submission, context_id);
     register(scope, ns, "takeDownload", take_download, context_id);
-    register(scope, ns, "holdLocationBlob", hold_location_blob, context_id);
-    register(scope, ns, "takeLocationBlob", take_location_blob, context_id);
+    register(scope, ns, "planLocation", plan_location, context_id);
+    register(scope, ns, "planReload", plan_reload, context_id);
+    register(scope, ns, "takeLocation", take_location, context_id);
+    register(scope, ns, "takeReload", take_reload, context_id);
+    register(scope, ns, "ownPlanned", own_planned, context_id);
+    register(scope, ns, "flushBegin", flush_begin, context_id);
+    register(scope, ns, "flushEnd", flush_end, context_id);
+    register(scope, ns, "flushRestore", flush_restore, context_id);
 }
 
 fn plan<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> &'a mut NavigationPlan {
@@ -148,19 +180,94 @@ fn take_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(v8::Array::new_with_elements(scope, &[url.into(), filename.into()]).into());
 }
 
-// __dom.holdLocationBlob(url, blob): the location's navigation to the `blob:` URL `url` began with `blob` (its bytes and
-// type)…
-fn hold_location_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.planLocation(url, replace, initiatorRealm, policy, activated, blob): the calling realm's document's own
+// navigation planned by its `location` (`Location`), superseding what it planned before — `initiatorRealm` the realm
+// whose script began it, undefined for the document's own, whose Referer under `policy` (a link's, '' its document's) is
+// taken now (referrer.rs `navigation_referrer`); `blob` a `blob:` URL's bytes and type, or undefined.
+fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
-    let blob = v8::Global::new(scope, args.get(1));
-    plan(scope, &args).location_blob = Some((url, blob));
+    let replace = args.get(1).is_true();
+    let initiator = args.get(2).int32_value(scope).filter(|_| !args.get(2).is_null_or_undefined());
+    let policy = args.get(3).to_rust_string_lossy(scope);
+    let activated = args.get(4).is_true();
+    let blob = (!args.get(5).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(5)));
+    let cid = realm_id(scope, &args);
+    let initiator = initiator.map(|r| {
+        let (source, policy) = crate::referrer::navigation_referrer(&mut crate::dom::dom(scope).arena, r, &policy);
+        (r, source, policy)
+    });
+    let plan = &mut realm(scope, cid).navigation_plan;
+    plan.supersede();
+    plan.own.location = Some(Location { url, replace, initiator, activated, blob });
 }
-// __dom.takeLocationBlob(url) -> …and that blob, as the navigation to `url` runs, which the realm holds no more —
-// undefined where it holds none for that URL.
-fn take_location_blob(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let Some((held, blob)) = plan(scope, &args).location_blob.take() else { return };
-    if held == url {
-        rv.set(v8::Local::new(scope, blob));
+// __dom.planReload(activated): the calling realm's document's reload planned, superseding what it planned before —
+// `activated` whether its window had transient activation as it began.
+fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let activated = args.get(0).is_true();
+    let plan = plan(scope, &args);
+    plan.supersede();
+    plan.own.reload = Some(activated);
+}
+// __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob] of the location
+// navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none), which it plans
+// no more — or null.
+fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(l) = plan(scope, &args).own.location.take() else { return };
+    let (realm, source, policy) = match l.initiator {
+        Some((realm, source, policy)) => (
+            v8::Integer::new(scope, realm).into(),
+            v8::String::new(scope, &source).unwrap().into(),
+            v8::String::new(scope, &policy).unwrap().into(),
+        ),
+        None => (v8::null(scope).into(), v8::null(scope).into(), v8::null(scope).into()),
+    };
+    let items = [
+        v8::String::new(scope, &l.url).unwrap().into(),
+        v8::Boolean::new(scope, l.replace).into(),
+        realm,
+        source,
+        policy,
+        v8::Boolean::new(scope, l.activated).into(),
+        l.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
+// more — undefined for none.
+fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if let Some(activated) = plan(scope, &args).own.reload.take() {
+        rv.set_bool(activated);
     }
+}
+// __dom.ownPlanned() -> which of a location navigation (1) and a reload (2) is planned, 0 for neither.
+fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let own = &plan(scope, &args).own;
+    rv.set_uint32(u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1));
+}
+// __dom.flushBegin(): the tasks due before a navigation of the document about to run — what it planned kept apart, so
+// they plan anew. __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
+// __dom.flushRestore() -> whether any was: the navigation committed no document — what the flushed tasks planned put
+// back where nothing was planned since. (One that commits a document drops it with the rest of the plan: the page
+// load's reset.)
+fn flush_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let plan = plan(scope, &args);
+    plan.saved = Some(std::mem::take(&mut plan.own));
+}
+fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let plan = plan(scope, &args);
+    let saved = plan.saved.take().unwrap_or_default();
+    plan.flushed = Some(std::mem::replace(&mut plan.own, saved));
+}
+fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let plan = plan(scope, &args);
+    let Some(flushed) = plan.flushed.take() else { return rv.set_bool(false) };
+    let restored = (plan.own.location.is_none() && flushed.location.is_some()) || (plan.own.reload.is_none() && flushed.reload.is_some());
+    if plan.own.location.is_none() {
+        plan.own.location = flushed.location;
+    }
+    if plan.own.reload.is_none() {
+        plan.own.reload = flushed.reload;
+    }
+    rv.set_bool(restored);
 }

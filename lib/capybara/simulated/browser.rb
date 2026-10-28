@@ -1427,7 +1427,7 @@ module Capybara
           # navigate landed during a timer fire), skip the form submit
           # entirely — its form handle is in a stale VM by now.
           consume_pending_frame_nav
-          if @pending_location
+          if own_planned.anybits?(OWN_LOCATION)
             consume_pending_location
           elsif @current_url != submit_baseline_url
             # Already navigated; nothing more to do.
@@ -2344,8 +2344,8 @@ module Capybara
           # on the still-executing Context and terminate the current
           # call with `ScriptTerminatedError` (terminating the
           # in-flight call on the isolate). Stash the intent
-          # and drain after the call returns — mirrors
-          # `location_assign` / `location_reload`.
+          # and drain after the call returns — as a location's
+          # navigation and a reload are (navigation_plan.rs).
           @pending_history_traverse = delta
           :cross_document
         end
@@ -3265,12 +3265,11 @@ module Capybara
         !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals?
       end
       private def pending_navigation_besides_traversals?
-        !@pending_location.nil? ||
-          @pending_reload ||
-          !(@pending_frame_nav || {}).empty? ||
+        !(@pending_frame_nav || {}).empty? ||
           !(@pending_frame_submit || []).empty? ||
           !@pending_page_submission.nil? ||
-          !(@pending_frame_reload || []).empty?
+          !(@pending_frame_reload || []).empty? ||
+          !own_planned.zero?
       end
 
       # Pull every background async channel (Worker / EventSource / hijacked fetch
@@ -10603,39 +10602,35 @@ module Capybara
         body
       end
 
-      # Defer the navigation: doing it from inside the running V8 call
-      # would dispose the Context mid-call. tick_real_time drains
-      # after the call returns. Same pattern as a planned submission (navigation_plan.rs).
-      # (…`replace`: a `location.replace`, whose navigation replaces the current history entry rather than adding one)
-      # …navigated by the top-level document's own script, or (`initiator_realm`) by a frame's — `open(url, '_top')`, a
-      # `_top` link — its Referer that frame's document under the policy a link sets (`policy`), taken now: the frame may
-      # be gone by the time the navigation runs (HTML: the source document the navigation's, snapshotted as it begins).
-      # (…`user_activated` whether its source document had transient activation as it began: location.js `dispatchNav`)
-      def location_assign(url, replace: false, initiator_realm: nil, policy: '', user_activated: false)
-        @pending_location           = resolve_against_current(url.to_s)
-        @pending_location_replace   = replace
-        @pending_location_initiator = initiator_realm && [initiator_realm.to_i, navigation_referrer(initiator_realm.to_i, policy)]
-        @pending_location_activated = user_activated
+      # A navigation of the page planned by the driver (another window's `navigate_window`) — the page's own plan
+      # (navigation_plan.rs `planLocation`), as its `location`'s are: taken, as the task ends, by `consume_pending_location`.
+      # (…`user_activated` whether its source document had transient activation as it began)
+      def location_assign(url, user_activated: false)
+        @runtime.call('__csimPlanLocation', resolve_against_current(url.to_s), false, user_activated)
       end
       # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
       # any policy.
       def navigation_referrer(realm, policy = '') = request_client(realm, policy).values_at(4, 1)
-      # …and none — nor a reload: a navigation the page planned since (a location's, a link's, a form's, a reload) replaces
-      # it (HTML "plan to navigate": the later is the one taken).
+      # A frame's submission to the page, which was the page's navigation planned last (`frame_submit_self`), planned no
+      # more: a navigation the page planned since (a location's, a link's, a form's, a reload) replaces it (HTML "plan to
+      # navigate": the later is the one taken) — the page's own plan its own to supersede (navigation_plan.rs).
       def cancel_planned_navigation
-        @pending_location = nil
-        @pending_reload   = nil
-        # (…a frame's submission to the page as well, which was the page's navigation planned last: `frame_submit_self`)
         @pending_page_submission = nil
       end
+      # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload.
+      OWN_LOCATION = 1
+      OWN_RELOAD   = 2
+      private def own_planned = @runtime.call('__csimOwnPlanned').to_i
+      # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
+      # document that began it where that is another's than the page's with the Referer it sends, its source's
+      # activation, a `blob:` one's blob as it began (location.js `dispatchNav`).
       def consume_pending_location
-        return unless (url = @pending_location)
-        # (…its replace flag and initiator taken with it: a location the page plans after it is its own)
-        replace, initiator, activated = @pending_location_replace, @pending_location_initiator, @pending_location_activated
-        @pending_location = @pending_location_replace = @pending_location_initiator = @pending_location_activated = nil
-        # (…a `blob:` URL's blob the one the navigation began with, which the page's plan holds: location.js `dispatchNav`)
-        blob = host_blob(@runtime.call('__csimTakeLocationBlob', url)) if url.match?(/\Ablob:/i)
+        url, replace, initiator_realm, source, policy, activated, blob = @runtime.call('__csimTakeLocation')
+        return unless url
+
+        initiator = initiator_realm && [initiator_realm.to_i, [source, policy]]
+        blob = host_blob(blob)
         # The page's `location` navigates the page, whichever realm's script set it — a frame's own is its container's to
         # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates.
         in_top_context do
@@ -10659,7 +10654,7 @@ module Capybara
       # A nested browsing context navigating its OWN `location` (the frame's
       # `location.href`/assign/replace/`location=`, incl. cross-frame
       # `iframe.contentWindow.location.href = …`). `realm_id` is the frame's realm.
-      # Deferred like location_assign: applying it re-navigates the owning iframe,
+      # Deferred like the page's own: applying it re-navigates the owning iframe,
       # which disposes that realm — illegal while the frame's location setter is
       # still on the V8 stack — so we stash and drain from `tick_real_time`.
       # …navigated by its own document, or (`initiator_realm`) by another's — a link whose target names it, under the
@@ -10811,20 +10806,12 @@ module Capybara
           log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
       end
-      # Mirror of `location_assign`'s deferral for `location.reload()`:
-      # the JS call lands here from `__locationReload`; running
-      # `browser.refresh` directly would `navigate` (rebuilding the
-      # Context) while we're still inside the V8 call, which V8
-      # terminates with a `ScriptTerminatedError`. Stash the intent
-      # and drain it from `tick_real_time` after the call returns.
-      # (…`user_activated` whether the page had transient activation as `location.reload()` was called)
-      def location_reload(user_activated: false)
-        @pending_reload = [user_activated]
-      end
+      # The page's reload its `location.reload()` planned (navigation_plan.rs `planReload`), taken after the call returns:
+      # running it inside the V8 call would rebuild the Context under it, which V8 terminates with a
+      # `ScriptTerminatedError`. (…`activated` whether the page had transient activation as it was called)
       def consume_pending_reload
-        return unless (reload = @pending_reload)
-        @pending_reload = nil
-        refresh(user_activated: reload[0])
+        activated = @runtime.call('__csimTakeReload')
+        refresh(user_activated: activated) unless activated.nil?
       end
       # `frame.contentWindow.location.reload()` from a nested browsing context.
       # Like `frame_navigate_self`, the JS side flags the initiating realm here
@@ -12637,9 +12624,9 @@ module Capybara
       #    '/home'>`, and a `visit` of a profile URL came back reporting — and
       #    rendering — `/home`.
       #
-      # `location.* / reload` only STASH a Ruby-side intent, which IS moot once we
-      # are leaving (the next find's `tick_real_time` would otherwise consume a
-      # stray `@pending_location` and navigate off the freshly-loaded page), so
+      # `location.* / reload` only PLAN a navigation, which IS moot once we
+      # are leaving (the next find's `tick_real_time` would otherwise take a
+      # stray planned location and navigate off the freshly-loaded page), so
       # those slots are cleared for the step and restored after — except on the
       # paths where nothing commits, which put them back (`restore_flushed_nav_intents`).
       # Any throw is swallowed: a flaky outgoing-page timer must not abort loading
@@ -12659,19 +12646,19 @@ module Capybara
       # (rather than saved individually) because a re-assignment does NOT restore a
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
       # Hashes keyed by realm and the frame-reload slot is an Array.
+      # (The page's own plan — its location navigation, its reload — is stashed alike, in the engine: navigation_plan.rs
+      # `flushBegin`.)
       NAV_INTENT_SLOTS = %i[
-        @pending_location @pending_location_replace @pending_location_initiator @pending_location_activated @pending_reload @pending_history_traverse
-        @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
+        @pending_history_traverse @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS
-      LOCATION_PLAN_SLOTS = %i[@pending_location_replace @pending_location_initiator @pending_location_activated].freeze
-      private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init
         @flush_traversal_mark = @session_history.last_token
         saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
         NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
+        @runtime.call('__csimFlushBegin')
         # A same-document `history.back()` from the flushed page takes effect INLINE
         # (`history_go`), moving the history step under the navigation now committing —
         # the document would end up being the incoming page while the step pointed at
@@ -12699,6 +12686,7 @@ module Capybara
             h[slot] = v unless v.nil?
           }
           saved.each {|slot, value| instance_variable_set(slot, value) }
+          @runtime.call('__csimFlushEnd')
         end
       end
 
@@ -12708,15 +12696,14 @@ module Capybara
       # intent the live page has set since wins; the per-realm Hash / Array slots
       # merge, so neither side's entries are lost.
       def restore_flushed_nav_intents
-        intents = @flushed_nav_intents
+        intents = @flushed_nav_intents || {}
         @flushed_nav_intents = nil
-        return if intents.nil? || intents.empty? || @restoring_flushed_nav_intents
+        return if @restoring_flushed_nav_intents
+        # (…the page's own plan's, the engine's: navigation_plan.rs `flushRestore`)
+        own = @runtime.call('__csimFlushRestore') == true
+        return if intents.empty? && !own
 
-        # (…a location's replace flag and initiator restored with the location they were planned with, whichever is taken)
-        flushed_location = @pending_location.nil? && intents.key?(:@pending_location)
         intents.each do |slot, flushed|
-          next if LOCATION_PLAN_SLOTS.include?(slot)
-
           current = instance_variable_get(slot)
           merged =
             case current
@@ -12727,7 +12714,6 @@ module Capybara
             end
           instance_variable_set(slot, merged)
         end
-        LOCATION_PLAN_SLOTS.each {|slot| instance_variable_set(slot, intents[slot]) } if flushed_location
         # And run them. The flush consumed the task that stashed them, so the
         # settle that follows a user action sees nothing left to do and would
         # leave the page sitting on a redirect it has already asked for.

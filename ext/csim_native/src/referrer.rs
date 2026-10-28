@@ -207,6 +207,16 @@ fn creator_url(arena: &mut RealmArena, mut r: i32, mut url: String) -> String {
     }
 }
 
+// The Referer a navigation the document of realm `r` begins sends: [the URL it refers by, its policy — `policy` (a link's
+// `referrerpolicy`, `no-referrer` for its `rel=noreferrer`), else its document's; `no-referrer` for one of an opaque
+// origin, which no link lifts].
+pub(crate) fn navigation_referrer(arena: &mut RealmArena, r: i32, policy: &str) -> (String, String) {
+    let doc = document(arena, r);
+    let (source, own) = referrer_source(arena, doc.realm);
+    let policy = if doc.opaque { "no-referrer" } else if policy.is_empty() { own } else { policy };
+    (source, policy.to_owned())
+}
+
 // __dom.requestClient(realm, elementPolicy, opaque) -> [url, policy, opaque, realm, source]: the client a subresource
 // request of realm `realm`'s document — the calling realm's for undefined — is made as (Fetch "client"): the URL its
 // site and origin are judged by (`creator_url`), the policy it refers by — the element's (`elementPolicy`), else its
