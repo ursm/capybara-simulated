@@ -142,7 +142,7 @@ impl FetchPlan {
             return Ok(None);
         }
         let mode = text("mode")?;
-        // (…a mode, credentials, redirect and cache mode named '' its default, as none)
+        // (…a credentials, redirect and cache mode named '' its default, as none)
         let named = |key: &str| -> Result<Option<String>, Error> { Ok(text(key)?.filter(|v| !v.is_empty())) };
         let credentials = named("credentials")?.unwrap_or_else(|| "same-origin".to_owned());
         // The CLIENT: the realm that called fetch/XHR — its own document's URL, a service worker's script URL — and, where
