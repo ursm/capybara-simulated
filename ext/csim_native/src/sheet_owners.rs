@@ -101,7 +101,11 @@ impl RealmArena {
     // `nodes` were inserted into `parent` or removed from it: every owner among their shadow-including inclusive
     // descendants obtains a new sheet, and so does `parent`, a style element whose block changed.
     pub(crate) fn sheet_owners_moved(&mut self, parent: NodeId, nodes: &[NodeId]) {
-        let mut renewed = self.style_block_changed(parent);
+        // (…and a document given a document element — or losing it — has a cascade to make, or none: its own to rebuild,
+        // as a sheet's renewal is, sheet_feed.rs `fresh` having made none without one)
+        let document_element = self.get(parent).is_some_and(|p| p.kind == NodeKind::Document)
+            && nodes.iter().any(|&n| self.get(n).is_some_and(|n| n.kind == NodeKind::Element));
+        let mut renewed = self.style_block_changed(parent) || document_element;
         let mut stack: Vec<NodeId> = nodes.to_vec();
         while let Some(id) = stack.pop() {
             let Some(n) = self.get(id) else { continue };

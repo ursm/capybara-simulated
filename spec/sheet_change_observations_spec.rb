@@ -33,4 +33,26 @@ RSpec.describe 'a style sheet change with no DOM change' do
     s.execute_script('document.adoptedStyleSheets = []')
     expect(poll_until { last.call > 77 && last.call }).to be > 77
   end
+
+  # (…and a document with no document element has no cascade, its marks settled — reads ask the engine nothing — until
+  # one is inserted, a sheet owner or none: sheet_owners.rs `sheet_owners_moved`)
+  it "makes a document given a document element again its cascade, as it was one with none" do
+    html = '<!DOCTYPE html><meta charset="utf-8"><style>p { color: rgb(1, 2, 3) }</style><p id=p>p</p>'
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.__html = document.documentElement;
+      document.documentElement.remove();
+      window.__none = getComputedStyle(__html.querySelector('p')).color;
+      const html = document.createElement('html');
+      html.innerHTML = '<body><p id=q style="color: rgb(4, 5, 6)">q</p></body>';
+      document.appendChild(html);
+    JS
+    expect(s.evaluate_script("[window.__none, getComputedStyle(document.getElementById('q')).color]")).to eq(['', 'rgb(4, 5, 6)'])
+    s.execute_script(<<~JS)
+      document.documentElement.remove();
+      document.appendChild(__html);
+    JS
+    expect(s.evaluate_script("getComputedStyle(document.getElementById('p')).color")).to eq('rgb(1, 2, 3)')
+  end
 end

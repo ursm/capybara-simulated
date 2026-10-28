@@ -43,7 +43,14 @@ impl RealmArena {
 pub(crate) fn fresh(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>) -> Result<(), Terminated> {
     let arena = realm(scope, cid);
     let Some(shadow_hosts) = arena.realm_state(cid).map(|s| s.shadow_hosts) else { return Ok(()) };
-    let Some(doc) = arena.realm_document(cid).filter(|&d| arena.first_element_child(d).is_some()) else { return Ok(()) };
+    // (…a document with no document element has no cascade to make: its marks settled, a document element inserted
+    // making it stale again — sheet_owners.rs `sheet_owners_moved`)
+    let Some(doc) = arena.realm_document(cid).filter(|&d| arena.first_element_child(d).is_some()) else {
+        let g = &realm(scope, cid).generations;
+        g.set(GEN_STYLE_STALE, 0);
+        g.set(GEN_STYLE_FED, g.get(GEN_CASCADE));
+        return Ok(());
+    };
     let g = &realm(scope, cid).generations;
     if g.get(GEN_STYLE_STALE) != 0 {
         g.set(GEN_STYLE_STALE, 0);
