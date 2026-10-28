@@ -9823,8 +9823,9 @@ module Capybara
         # The fetch, step by step (fetch_plan.rs `FetchPlan`), of the request this describes: its client the realm that
         # called fetch/XHR (`client_url`, `client_origin`: its document's, a service worker's script's — the page's where
         # that is no HTTP(S) URL), its origin and referrer and the origin Sec-Fetch-Site measures from worked out there;
-        # its hops' headers and cookie site of that client (fetch_hop.rs: a frame document's by its ancestors' — `client_realm`,
-        # which the bindings name — a dedicated worker's by the site for cookies it was made with). None for a URL no fetch
+        # its hops' headers and cookie site of that client (fetch_hop.rs: a frame document's by its ancestors' — the
+        # `ancestors` a realm's request names, else those of the `client_realm` a host caller names — a dedicated
+        # worker's by the site for cookies it was made with). None for a URL no fetch
         # goes to (no HTTP(S) one; a blocked port, Fetch "port blocking" — request-bad-port). A SW re-fetch seeds
         # Sec-Fetch-Site with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts
         # tainted where they had (`origin_null`). The method's case AS GIVEN: the JS callers normalized it already
