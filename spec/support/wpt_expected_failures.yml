@@ -6033,6 +6033,21 @@ shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
+wasm/serialization/module/cross-origin-module-sharing-fails.html:
+- "[harness] TIMEOUT"
+- postMessaging a wasm module to a cross-origin iframe in the same agent cluster fails
+- postMessaging a wasm module to an iframe in a different agent cluster fails
+wasm/serialization/module/serialization-via-notifications-api.any.js:
+- 'WebAssembly.Module cloning via the Notifications API''s data member: basic case'
+- 'WebAssembly.Module cloning via the Notifications API''s data member: is interleaved
+  correctly'
+- "[dedicatedworker] WebAssembly.Module cloning via the Notifications API's data member:
+  basic case"
+- "[dedicatedworker] WebAssembly.Module cloning via the Notifications API's data member:
+  is interleaved correctly"
+wasm/serialization/module/share-module-cross-origin-fails.sub.html:
+- "[harness] TIMEOUT"
+- postMessaging a wasm module to a cross-origin iframe fails
 web-animations/animation-model/animation-types/accumulation-per-property-002.html:
 - 'list-style: "outside url("http://localhost/test-2") square" onto "inside url("http://localhost/test-1")
   circle"'

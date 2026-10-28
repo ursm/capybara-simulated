@@ -60552,6 +60552,34 @@ urlpattern/urlpattern-generate.tentative.any.js:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+wasm/serialization/memory/messageport-via-sharedworker-success.tentative.https.html:
+- name: Shared WebAssembly.Memory cloned through a MessagePort that round-tripped
+    via a SharedWorker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+wasm/serialization/memory/window-nested-dedicated-worker-failure.tentative.https.html:
+- name: Shared WebAssembly.Memory sent to a dedicated worker in a SharedWorker's agent
+    cluster fires messageerror
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+wasm/serialization/memory/window-sharedworker-failure.tentative.https.html:
+- name: Shared WebAssembly.Memory from SharedWorker to window fires messageerror on
+    the window
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Shared WebAssembly.Memory from window to SharedWorker fires messageerror on
+    the SharedWorker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+wasm/serialization/memory/window-success.tentative.https.html:
+- name: postMessaging a shared WebAssembly.Memory to a dedicated worker
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 web-animations/animation-trigger/event-trigger-before-handlers.tentative.html:
 - name: Animation triggers are handled before registered event listeners
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

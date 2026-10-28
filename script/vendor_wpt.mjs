@@ -244,6 +244,10 @@ const TREES = [
                                        // natural one overridden or kept (`auto`) — the box layout sizes an
                                        // `aspect-video` / `aspect-square` card from it. Reftests and
                                        // testharness tests both: the painter renders either.
+  'wasm/serialization',                // a WebAssembly.Module / Memory through the structured clone: shared in
+                                       // its agent cluster, a `messageerror` in another, refused for storage
+                                       // (clone.rs `ModuleRule`) — what a worker pool (emscripten pthreads)
+                                       // posts its module by. No layout.
 ];
 
 // Trees vendored HARNESS-ONLY: everything under `support/` plus the `.html` tests that actually
