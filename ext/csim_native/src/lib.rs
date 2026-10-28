@@ -187,6 +187,7 @@ mod activation;
 mod cookie_jar;
 mod http_auth;
 mod http_cache;
+mod civil;
 mod cors;
 mod text;
 mod text_codec;

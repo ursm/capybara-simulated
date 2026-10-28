@@ -3,6 +3,8 @@
 // keeps the stored responses (their bodies never cross); these say what it does with them. A private cache's view — this
 // is a browser's — but for `private`, which the host's cache, shared across the test sessions of a process, does not store.
 
+use crate::civil::{civil_from_days, days_from_civil};
+
 // RFC 9111 §3 / §4.2.2: the statuses stored. 302 and 307 only with explicit freshness or a validator (no heuristic
 // lifetime: a temporary redirect served stale is a redirect that has moved on).
 const CACHEABLE: [u32; 14] = [200, 203, 204, 206, 300, 301, 302, 307, 308, 404, 405, 410, 414, 501];
@@ -104,12 +106,14 @@ pub(crate) fn http_date(value: &str, now: f64) -> Option<f64> {
             if it.next().is_some() {
                 return None;
             }
-            let (yy, this_year) = (digits(y, 2..=2)?, civil_year(now));
-            let mut year = this_year - this_year.rem_euclid(100) + yy;
-            if year > this_year + 50 {
-                year -= 100;
-            }
-            (year, month(m)?, digits(d, 1..=2)?, clock(t)?)
+            let (mon, day, time) = (month(m)?, digits(d, 1..=2)?, clock(t)?);
+            // (…in this century, else the last: a timestamp more than 50 years ahead of now is the one 100 years before)
+            let (today, secs) = ((now / 86_400.0).floor() as i64, now.rem_euclid(86_400.0) as i64);
+            let (this_year, this_month, this_day) = civil_from_days(today);
+            let limit = days_from_civil(this_year + 50, this_month, this_day) * 86_400 + secs;
+            let year = this_year - this_year.rem_euclid(100) + digits(y, 2..=2)?;
+            let year = if days_from_civil(year, mon, day) * 86_400 + time > limit { year - 100 } else { year };
+            (year, mon, day, time)
         }
         // Sun Nov  6 08:49:37 1994
         [_, m, d, t, y] => (digits(y, 4..=4)?, month(m)?, digits(d, 1..=2)?, clock(t)?),
@@ -120,25 +124,6 @@ pub(crate) fn http_date(value: &str, now: f64) -> Option<f64> {
     }
     Some((days_from_civil(year, mon, day) * 86_400 + time) as f64)
 }
-// (…the days from the epoch to a civil date, and the year of an epoch time: Howard Hinnant's algorithms, a year of four
-// digits at most)
-fn days_from_civil(year: i64, mon: i64, day: i64) -> i64 {
-    let (y, m) = if mon <= 2 { (year - 1, mon + 9) } else { (year, mon - 3) };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let doy = (153 * m + 2) / 5 + day - 1;
-    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
-}
-fn civil_year(t: f64) -> i64 {
-    let z = (t / 86_400.0).floor() as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    yoe + era * 400 + i64::from(mp >= 10)
-}
-
 // §4.2.1 the freshness lifetime — max-age, else Expires less Date (an invalid Expires, "0" the common one, in the past:
 // §5.3), else, for a status heuristically cacheable, a tenth of the time since Last-Modified — less §4.2.3's age the
 // response had when it came (`now`): the greater of how long it was since its Date and its Age.
@@ -248,13 +233,15 @@ mod tests {
 
     #[test]
     fn a_two_digit_year_is_the_latest_not_more_than_fifty_years_ahead() {
-        let year = |y: &str| http_date(&format!("Thursday, 01-Jan-{y} 00:00:00 GMT"), NOW).map(|t| civil_year(t + 1.0));
-        assert_eq!(year("26"), Some(2026));
-        assert_eq!(year("76"), Some(2076));
-        assert_eq!(year("77"), Some(1977));
-        assert_eq!(year("70"), Some(2070));
-        assert_eq!(civil_year(NOW), 2026);
-        assert_eq!(civil_year(0.0), 1970);
+        let year = |date: &str| http_date(&format!("Thursday, {date} 00:00:00 GMT"), NOW).map(|t| civil_from_days((t / 86_400.0) as i64).0);
+        assert_eq!(year("01-Jan-26"), Some(2026));
+        assert_eq!(year("01-Jan-76"), Some(2076));
+        assert_eq!(year("01-Jan-77"), Some(1977));
+        assert_eq!(year("01-Jan-70"), Some(2070));
+        // (…the timestamp measured, not its year: the last day of the fiftieth year ahead is past the limit)
+        assert_eq!(year("29-Oct-76"), Some(2076));
+        assert_eq!(year("30-Oct-76"), Some(1976));
+        assert_eq!(year("31-Dec-76"), Some(1976));
     }
 
     #[test]

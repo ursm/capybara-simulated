@@ -108,7 +108,7 @@ fn cookie_date(value: &str) -> Option<f64> {
     if year < 1601 || h > 23 || mi > 59 || s > 59 || day < 1 || day > days_in_month(year, month) {
         return None;
     }
-    let days = days_from_civil(i64::from(year), month, day);
+    let days = crate::civil::days_from_civil(i64::from(year), i64::from(month), i64::from(day));
     Some((days * 86_400 + i64::from(h) * 3600 + i64::from(mi) * 60 + i64::from(s)) as f64 * 1000.0)
 }
 // A token of `min`-`max` digits, perhaps followed by anything but a digit: its number.
@@ -136,17 +136,6 @@ fn days_in_month(year: u32, month: u32) -> u32 {
         _ => 31,
     }
 }
-// Days since 1970-01-01 of a proleptic Gregorian date.
-fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let m = i64::from(month);
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + i64::from(day) - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
-}
-
 // ── Matching (§5.1.3, §5.1.4) ────────────────────────────────────────────────────────────────────────────────────────
 // Whether `host` domain-matches `domain`: it is it, or a host name (no IP address) ending in it after a dot.
 fn domain_match(host: &str, domain: &str) -> bool {
