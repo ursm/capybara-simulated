@@ -356,6 +356,15 @@ pub(crate) fn handle_of(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v
     unsafe { v8::Object::unwrap::<TAG, CanvasStateHandle>(scope, obj) }
 }
 
+// What a canvas context's state `value` says of its bitmap as an image source (canvas_image.rs): whether it is
+// origin-clean, and whether anything was drawn into it (none: transparent black) — None for no context state.
+pub(crate) fn source_facts(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(bool, bool)> {
+    let h = handle_of(scope, value)?;
+    // SAFETY: the handle lives while its object, the argument, does.
+    let h = unsafe { &*(h.as_ref() as *const CanvasStateHandle) };
+    Some((h.origin_clean.get(), !h.bitmap(scope).is_undefined()))
+}
+
 // `__dom.CanvasStateBase`: the constructor of the isolate's template, made once per isolate.
 fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Function>> {
     scope.get_cpp_heap()?;

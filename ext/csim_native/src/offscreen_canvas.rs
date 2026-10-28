@@ -30,9 +30,6 @@ impl OffscreenHandle {
     pub(crate) fn size(&self) -> [u32; 2] {
         self.size.get()
     }
-    pub(crate) fn detached(&self) -> bool {
-        self.detached.get()
-    }
 }
 
 // `new __dom.OffscreenCanvasStateBase(width, height)` — an OffscreenCanvas of that size, not detached.

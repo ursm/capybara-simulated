@@ -102,6 +102,12 @@ impl Media {
 }
 
 impl RealmArena {
+    // What a video element says of itself as an image source (canvas_image.rs): its decoded frame's size — none where it
+    // has none — and whether that frame taints a canvas.
+    pub(crate) fn video_source_facts(&self, id: NodeId) -> (Option<[u32; 2]>, bool) {
+        let m = self.media(id);
+        (self.video_frames.contains_key(&id).then_some(m.video_size), m.tainted)
+    }
     fn media(&self, id: NodeId) -> &Media {
         self.media.get(&id).unwrap_or(&INITIAL)
     }
@@ -239,8 +245,6 @@ const VIDEO_WIDTH: u32 = 10;
 const VIDEO_HEIGHT: u32 = 11;
 const CURRENT_SRC: u32 = 12;
 const ERROR: u32 = 13;
-// (…not an IDL member: whether a canvas the video's frame is drawn into is tainted by it)
-const TAINTED: u32 = 14;
 
 fn element(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<NodeId> {
     crate::node_handle::nid_of(scope, value)
@@ -270,7 +274,6 @@ fn media_get(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         VIDEO_WIDTH => rv.set_uint32(m.video_size[0]),
         VIDEO_HEIGHT => rv.set_uint32(m.video_size[1]),
         ERROR => rv.set_uint32(if m.error == 0 { 0 } else { m.failures }),
-        TAINTED => rv.set_bool(m.tainted),
         _ => {}
     }
 }

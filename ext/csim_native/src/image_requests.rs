@@ -72,6 +72,11 @@ const RESULT_IMAGE: u32 = 1;
 const RESULT_NO_PIXELS: u32 = 2;
 
 impl RealmArena {
+    // What an image element's current request says of it as an image source (canvas_image.rs): whether it is broken,
+    // its size, whether it is tainted and whether it has decoded pixels.
+    pub(crate) fn image_source_facts(&self, id: NodeId) -> (bool, [u32; 2], bool, bool) {
+        self.image(id).map_or((false, [0, 0], false, false), |r| (r.broken, r.size, r.tainted, r.bitmap.is_some()))
+    }
     fn image(&self, id: NodeId) -> Option<&ImageRequest> {
         self.images.get(&id)
     }

@@ -89,6 +89,14 @@ fn handle<'h>(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>)
     Some(unsafe { &*(ptr.as_ref() as *const BitmapHandle) })
 }
 
+// What an ImageBitmap's state `value` says of it as an image source (canvas_image.rs): whether it is closed, its size,
+// whether it is tainted and whether it has pixels — None for no bitmap state.
+pub(crate) fn source_facts(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<(bool, [u32; 2], bool, bool)> {
+    let h = handle(scope, value)?;
+    let pixels = !h.pixels(scope, 0).is_null();
+    Some((h.closed.get(), h.size.get(), h.tainted.get(), pixels))
+}
+
 // `__dom.ImageBitmapStateBase`: the constructor of the isolate's template, made once per isolate.
 fn base_function<'s>(scope: &mut v8::PinScope<'s, '_>) -> Option<v8::Local<'s, v8::Function>> {
     scope.get_cpp_heap()?;

@@ -226,6 +226,12 @@ fn reflected(value: Option<&str>, kind: u32, default: f64, min: f64, max: f64) -
     }
 }
 
+// A `<canvas>`'s width and height (HTML §4.12.5): its `width` and `height` attributes as `unsigned long`s, 300 × 150 by
+// default — what its bitmap is the size of.
+pub(crate) fn canvas_size(n: &crate::dom::NodeData) -> [u32; 2] {
+    [("width", 300.0), ("height", 150.0)].map(|(name, default)| reflected(n.plain_attr(name), UNSIGNED, default, 0.0, 0.0) as u32)
+}
+
 // HTML "rules for parsing floating-point number values": past leading ASCII whitespace, a sign, digits with a
 // fraction, an exponent — as much of them as there is — or None; a zero is +0, and a value too large for a double none.
 fn parse_float_value(s: &str) -> Option<f64> {
