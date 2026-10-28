@@ -2286,7 +2286,6 @@ module Capybara
         @frame_history_saved_for = nil
         @frame_leaving_entries   = nil
         @pending_history_traverse = nil
-        @planned_traversals       = nil
       end
 
       # Traverse the page's session history by `delta` steps — the joint history of the page and its frames
@@ -2353,40 +2352,29 @@ module Capybara
       end
 
       # A traversal a page's `history` asked for (history.js `traverse`): appended to the traversable's session history
-      # traversal queue now, applied as the task it is runs (`apply_planned_traversal`) — or, before that, as the driver
-      # takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation planned with it, which a
-      # traversal making a document again cancels (`cancel_navigations_for`). `[token, delay]`: the token its task applies
-      # it by, and the delay of that task — none for one making a document again, whose task goes ahead of a navigation
-      # the script plans after it (a frame's `src` set, Chrome and Firefox: never requested), a turn for one within the
-      # documents, whose `popstate` comes after what is due as the script ends (history.js `traverse`).
+      # traversal queue now (session_history.rs `queue`), applied as the task it is runs (`apply_planned_traversal`) — or,
+      # before that, as the driver takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation
+      # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). `[token, delay]`:
+      # the token its task applies it by, and the delay of that task.
       def plan_history_traverse(delta, realm)
         return [0, 0] if delta.to_i.zero? || !history_of_page?(realm)
 
-        token = (@traversal_tokens = @traversal_tokens.to_i + 1)
-        # (…judged from the step those queued before it reach: the steps from here to where it goes, theirs and its own)
-        ahead     = (@planned_traversals || []).sum {|_, d, *| d }
-        documents = history_plan(ahead + delta.to_i)&.last&.any? {|_, _, same_document| !same_document }
-        (@planned_traversals ||= []) << [token, delta.to_i, realm.to_i, documents]
-        [token, documents ? 0 : 1]
+        @session_history.queue(delta.to_i, realm.to_i)
       end
-      # …the traversal of `token` applied, and those planned before it: none where the driver took them already.
+      # …the traversal of `token` applied, and those queued before it: none where the driver took them already.
       def apply_planned_traversal(token)
-        return unless (at = @planned_traversals&.index {|t, *| t == token })
-
-        @planned_traversals.shift(at + 1).each {|t, delta, realm, _| history_go(delta, realm: realm, token: t) }
+        @session_history.take_queued(token).each {|t, delta, realm| history_go(delta, realm: realm, token: t) }
       end
       def apply_planned_traversals
-        return if @planned_traversals.nil? || @planned_traversals.empty?
-
-        apply_planned_traversal(@planned_traversals.last[0])
+        @session_history.take_all_queued.each {|t, delta, realm| history_go(delta, realm: realm, token: t) }
       end
       # …those, as the driver takes the navigations the page planned with them — the traversal they make first, its
       # cancelling of the ones it cancels in (HTML "apply the history step") — where one makes a document again (whose
       # task would have gone ahead of the page's own navigations) or the host has a navigation of the page's to take; else
       # they wait for their task, which runs after what is due now.
       private def apply_planned_traversals_before_navigations
-        return if @planned_traversals.nil? || @planned_traversals.empty?
-        return unless @planned_traversals.any? {|*, documents| documents } || pending_navigation_besides_traversals?
+        return unless @session_history.queued?
+        return unless @session_history.queued_documents? || pending_navigation_besides_traversals?
 
         apply_planned_traversals
         consume_pending_history_traverse
@@ -2401,18 +2389,8 @@ module Capybara
         log_console('warn', "history traversal failed: #{e.message}")
       end
 
-      # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `plan`) — past
-      # one whose frame's entry a traversal cannot make again alone (a srcdoc or a blob document it left, a data: one's,
-      # which have no bytes to come back to: `recordable_frame_url?`), on to the next step.
-      private def history_plan(delta)
-        step = delta.positive? ? 1 : -1
-        loop do
-          plan = @session_history.plan(delta) or return nil
-          return plan unless plan[1].any? {|nav, id, same_document| !nav.zero? && !same_document && !recordable_frame_url?(@session_history.url(id)) }
-
-          delta += step
-        end
-      end
+      # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `traversal`).
+      private def history_plan(delta) = @session_history.traversal(delta)
 
       private def perform_history_traverse(delta)
         return unless (plan = history_plan(delta))
@@ -3280,7 +3258,7 @@ module Capybara
       # fired-timer signals can't see. Aux-window opens are intentionally excluded:
       # they build a separate Browser, not a hop in a same-page chain.
       private def pending_nav_intent?
-        !@pending_history_traverse.nil? || !(@planned_traversals || []).empty? || pending_navigation_besides_traversals?
+        !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals?
       end
       private def pending_navigation_besides_traversals?
         !@pending_location.nil? ||
@@ -3718,7 +3696,6 @@ module Capybara
         # never drained (the page navigated away first) must not survive the reset
         # — otherwise the stale target replays against the NEXT page's fresh history.
         @pending_history_traverse = nil
-        @planned_traversals       = nil
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
         # running after `reset_session!` (Capybara's per-test teardown
@@ -11064,8 +11041,9 @@ module Capybara
         id = initial ? @session_history.replace(nav, parent_nav, new_url.to_s, false) : @session_history.push(nav, parent_nav, new_url.to_s, false)
         set_history_entry(id, entry_for_frame_nav(post))
       end
-      # …whether a frame's session history entry for `url` can be made again by a traversal alone (`history_plan`).
-      def recordable_frame_url?(url) = http_url?(url) || url.to_s.match?(ABOUT_BLANK)
+      # …whether a frame's session history entry for `url` can be made again by a traversal alone (session_history.rs
+      # `recordable`).
+      def recordable_frame_url?(url) = Native.history_recordable_url(url)
       def entry_for_frame_nav(post)
         post ? {method: :post, body: post[:body], content_type: post[:content_type]} : {}
       end
@@ -12437,7 +12415,7 @@ module Capybara
         # This IS the commit, so whatever that page stashed dies with it.
         @flushed_nav_intents = nil
         # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
-        @planned_traversals = nil
+        @session_history.clear_queued
         # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
         # a leg delivering after this point would resolve the NEW page's same-
         # numbered fetch with the old page's response.
@@ -12690,7 +12668,7 @@ module Capybara
       private_constant :LOCATION_PLAN_SLOTS
 
       def flush_outgoing_page_init
-        @flush_traversal_mark = @traversal_tokens.to_i
+        @flush_traversal_mark = @session_history.last_token
         saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
         NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
         # A same-document `history.back()` from the flushed page takes effect INLINE

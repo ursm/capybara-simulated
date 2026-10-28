@@ -52,10 +52,35 @@ struct Traversable {
     // The history as it stood before a navigation that may end in no document (a download, a hand-off), by slot: the
     // page's (0) and a frame's (1).
     saved: [Option<State>; 2],
+    // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
+    // its task runs, in order — and the token the next one is given.
+    queued: Vec<Queued>,
+    tokens: u64,
+}
+
+// A traversal queued: its token, its delta, the realm whose `history` asked for it, and whether it makes a document
+// again (one it moves within the documents waits a turn: its `popstate` after what is due as the script ends).
+#[derive(Clone, Copy)]
+struct Queued {
+    token: u64,
+    delta: i64,
+    realm: i32,
+    documents: bool,
 }
 
 // The navigable a list belongs to: 0 the traversable's own.
 const TOP: u32 = 0;
+
+// Whether a frame's entry at `url` can be made again by a traversal alone: one of an http(s) URL, or about:blank's —
+// what a frame's document at another records no entry for.
+pub(crate) fn recordable(url: &str) -> bool {
+    let scheme = url.split_once(':').map_or("", |(s, _)| s);
+    if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") {
+        return url[scheme.len()..].starts_with("://");
+    }
+    let rest = url.get(..11).filter(|s| s.eq_ignore_ascii_case("about:blank")).map(|_| &url[11..]);
+    rest.is_some_and(|rest| rest.is_empty() || rest.starts_with(['?', '#']))
+}
 
 // One navigable's change of active entry a traversal makes: its navigable, the entry, and whether that is of the same
 // document as the entry it leaves (a popstate, not a document made again).
@@ -294,6 +319,42 @@ impl Traversable {
         Some((target, changes))
     }
 
+    // …the plan of a traversal by `delta` as the host applies it: past a step whose frame's entry it cannot make again
+    // alone — a srcdoc or a blob document it left, a data: one's, which have no bytes to come back to (`recordable`) —
+    // on to the next step that way.
+    fn traversal(&self, mut delta: i64) -> Option<(i64, Vec<Change>)> {
+        let way = delta.signum();
+        loop {
+            let plan = self.plan(delta)?;
+            let stuck = plan.1.iter().any(|&(nav, id, same_document)| {
+                nav != TOP && !same_document && !self.state.entry(id).is_some_and(|e| recordable(&e.url))
+            });
+            if !stuck {
+                return Some(plan);
+            }
+            delta += way;
+        }
+    }
+
+    // A traversal by `delta` that realm `realm`'s `history` asked for queued: [its token, the delay of its task] — none
+    // for one making a document again, whose task goes ahead of a navigation the script plans after it (a frame's `src`
+    // set, Chrome and Firefox: never requested), a turn for one within the documents. Judged from the step those queued
+    // before it reach.
+    fn queue(&mut self, delta: i64, realm: i32) -> (u64, u32) {
+        self.tokens += 1;
+        let token = self.tokens;
+        let ahead: i64 = self.queued.iter().map(|q| q.delta).sum();
+        let documents = self.traversal(ahead + delta).is_some_and(|(_, changes)| changes.iter().any(|&(_, _, same)| !same));
+        self.queued.push(Queued { token, delta, realm, documents });
+        (token, if documents { 0 } else { 1 })
+    }
+    // …those queued up to and with the one of `token`, taken off the queue to be applied in order: none where it is not
+    // queued (the host applied it already).
+    fn take_queued(&mut self, token: u64) -> Vec<Queued> {
+        let Some(at) = self.queued.iter().position(|q| q.token == token) else { return Vec::new() };
+        self.queued.drain(..=at).collect()
+    }
+
     // HTML "destroy a child navigable": navigable `nav`'s nested history removed from its parent's document state — its
     // steps, and its own frames' with it, counted no more.
     fn destroy(&mut self, nav: u32) {
@@ -360,6 +421,39 @@ impl SessionHistory {
     fn length(&self) -> usize {
         self.0.borrow().state.used_steps().len().max(1)
     }
+    // #traversal(delta) -> [step, [[navigable, entry, same_document], …]] of a traversal by `delta` as the host applies
+    // it (`Traversable::traversal`), or nil for none.
+    fn traversal(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
+        self.0.borrow().traversal(delta)
+    }
+    // #queue(delta, realm) -> [token, delay] (`Traversable::queue`).
+    fn queue(&self, delta: i64, realm: i32) -> (u64, u32) {
+        self.0.borrow_mut().queue(delta, realm)
+    }
+    // #take_queued(token) -> [[token, delta, realm], …] (`Traversable::take_queued`); #take_all_queued -> every one.
+    fn take_queued(&self, token: u64) -> Vec<(u64, i64, i32)> {
+        self.0.borrow_mut().take_queued(token).into_iter().map(|q| (q.token, q.delta, q.realm)).collect()
+    }
+    fn take_all_queued(&self) -> Vec<(u64, i64, i32)> {
+        let mut t = self.0.borrow_mut();
+        let Some(last) = t.queued.last().map(|q| q.token) else { return Vec::new() };
+        t.take_queued(last).into_iter().map(|q| (q.token, q.delta, q.realm)).collect()
+    }
+    // #queued? -> whether a traversal is queued; #queued_documents? -> whether one queued makes a document again.
+    fn is_queued(&self) -> bool {
+        !self.0.borrow().queued.is_empty()
+    }
+    fn queued_documents(&self) -> bool {
+        self.0.borrow().queued.iter().any(|q| q.documents)
+    }
+    // #last_token -> the token of the traversal queued last, 0 for none ever: those up to it were asked for by now.
+    fn last_token(&self) -> u64 {
+        self.0.borrow().tokens
+    }
+    // #clear_queued: the queue emptied — the page's document gone, whose traversals go with it.
+    fn clear_queued(&self) {
+        self.0.borrow_mut().queued.clear();
+    }
     // #plan(delta) -> [step, [[navigable, entry, same_document], …]] of a traversal by `delta`, or nil for none.
     fn plan(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
         self.0.borrow().plan(delta)
@@ -415,11 +509,12 @@ impl SessionHistory {
             *s = None;
         }
     }
-    // #clear: no entries at all.
+    // #clear: no entries at all, nor traversals queued.
     fn clear(&self) {
         let mut t = self.0.borrow_mut();
         t.state = State::new();
         t.saved = Default::default();
+        t.queued.clear();
     }
     // #ids -> the ids of every entry there is, a saved history's included: the ones whose host data is still wanted.
     fn ids(&self) -> Vec<u64> {
@@ -427,8 +522,13 @@ impl SessionHistory {
     }
 }
 
+pub(crate) fn recordable_for_ruby(url: Option<String>) -> bool {
+    url.as_deref().is_some_and(recordable)
+}
+
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
     use magnus::{function, method, Module, Object};
+    native.define_module_function("history_recordable_url", function!(recordable_for_ruby, 1))?;
     let class = native.define_class("SessionHistory", ruby.class_object())?;
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
     class.define_method("seed", method!(SessionHistory::seed, 3))?;
@@ -439,6 +539,14 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("plan", method!(SessionHistory::plan, 1))?;
+    class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
+    class.define_method("queue", method!(SessionHistory::queue, 2))?;
+    class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
+    class.define_method("take_all_queued", method!(SessionHistory::take_all_queued, 0))?;
+    class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
+    class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
+    class.define_method("last_token", method!(SessionHistory::last_token, 0))?;
+    class.define_method("clear_queued", method!(SessionHistory::clear_queued, 0))?;
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
     class.define_method("hold", method!(SessionHistory::hold, 3))?;
     class.define_method("step", method!(SessionHistory::step, 0))?;
@@ -490,6 +598,33 @@ mod tests {
         assert_eq!((changes[0].0, changes[0].2), (1, true));
         h.go_to(step);
         assert!(h.plan(-1).is_none());
+    }
+
+    // A traversal skips a step whose frame's entry no traversal can make again alone (a srcdoc one left), on to the
+    // next that way; the queue is applied up to a token, in order, and judges a traversal by where those before it go.
+    #[test]
+    fn a_traversal_skips_an_entry_it_cannot_make_and_queues_in_order() {
+        let h = history();
+        h.push(TOP, TOP, "http://a.test/".into(), false).unwrap();
+        h.seed(1, TOP, "http://a.test/f".into()).unwrap();
+        h.push(1, TOP, "about:srcdoc".into(), false).unwrap();
+        h.push(1, TOP, "http://a.test/g".into(), false).unwrap();
+        assert_eq!(h.length(), 3);
+        // (…back from /g: past the srcdoc entry, to /f)
+        let (_, changes) = h.traversal(-1).unwrap();
+        assert_eq!(h.url(changes[0].1).as_deref(), Some("http://a.test/f"));
+        assert!(h.plan(-1).is_some_and(|(_, c)| h.url(c[0].1).as_deref() == Some("about:srcdoc")));
+        let (t1, delay1) = h.queue(-1, 0);
+        let (t2, _) = h.queue(-1, 0);
+        // (…a document made again goes at once; one past the history's start is none, judged from where the first goes)
+        assert_eq!(delay1, 0);
+        assert!(h.queued_documents());
+        assert_eq!(h.take_queued(t1), vec![(t1, -1, 0)]);
+        assert!(h.take_queued(t1).is_empty());
+        assert_eq!(h.take_all_queued(), vec![(t2, -1, 0)]);
+        assert!(!h.is_queued());
+        assert_eq!(h.last_token(), t2);
+        assert!(recordable("about:blank#x") && recordable("HTTPS://a.test/") && !recordable("about:blanky") && !recordable("data:,x"));
     }
 
     // The page navigated to a new document: its frames' entries stay steps of the one it left; traversing back to that
