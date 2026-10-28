@@ -1,10 +1,12 @@
 // The Geolocation API's steps (W3C Geolocation §6.5 "request a position", §6.6 "acquire a position") and the
-// Permissions API's states (W3C Permissions §5): a realm's watch ids, and what a request answers from the position the
-// driver emulates — `{"coords": {latitude, longitude, accuracy, …}}`, `{"denied": true}` or none (browser.rb
+// Permissions API's states (W3C Permissions §5): a realm's watch ids, and what a request answers from the position a
+// driver session emulates — `{"coords": {latitude, longitude, accuracy, …}}`, `{"denied": true}` or none (browser.rb
 // `set_geolocation`, the WebDriver BiDi "set emulated position data" it stands for, a denial the permission's state), as
-// JSON. The bindings call back with what it answers in a task (geolocation.js).
+// JSON: one for every window and worker of the session, by its partition (lib.rs `session_partition_new`), until the
+// session's storage is cleared. The bindings call back with what it answers in a task (geolocation.js).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 
 use crate::dom::{realm, realm_id, register};
 
@@ -28,6 +30,20 @@ pub(crate) struct Position {
 pub(crate) struct Geolocation {
     watches: BTreeSet<i32>,
     last_watch: i32,
+}
+
+// The sessions' emulated positions, by partition, as JSON.
+static SOURCES: LazyLock<Mutex<HashMap<u64, String>>> = LazyLock::new(Default::default);
+fn sources() -> MutexGuard<'static, HashMap<u64, String>> {
+    SOURCES.lock().unwrap_or_else(|e| e.into_inner())
+}
+// A session's forgotten (its storage cleared).
+pub(crate) fn clear(partition: u64) {
+    sources().remove(&partition);
+}
+// …and its, as a request reads it.
+fn session_source(partition: u64) -> Source {
+    sources().get(&partition).map_or(Source::None, |json| source(json))
 }
 
 // The emulated source: a position — its coordinates, timed when acquired — the permission denied, or none.
@@ -162,21 +178,24 @@ fn state<'s>(scope: &'s mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
     let cid = realm_id(scope, args);
     realm(scope, cid).realm_state_mut(cid).map(|s| &mut s.geolocation)
 }
+fn partition_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> u64 {
+    args.get(i).integer_value(scope).unwrap_or(0) as u64
+}
 fn text_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<String> {
     let v = args.get(i);
     v.is_string().then(|| v.to_rust_string_lossy(scope))
 }
 
-// __dom.geolocationRequest(sourceJson, watchId, timeout, now) -> [accuracy, latitude, longitude, altitude,
+// __dom.geolocationRequest(partition, watchId, timeout, now) -> [accuracy, latitude, longitude, altitude,
 // altitudeAccuracy, heading, speed, timestamp] of the position a request acquires (`Geolocation::request`) — null for
 // each of the nullable coordinates it has none of — or the code of the error it meets.
 fn request_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let json = text_arg(scope, &args, 0).unwrap_or_default();
+    let partition = partition_arg(scope, &args, 0);
     let watch = args.get(1).int32_value(scope).unwrap_or(0);
     let timeout = args.get(2).uint32_value(scope).unwrap_or(0);
     let now = args.get(3).number_value(scope).unwrap_or(0.0);
     let Some(geolocation) = state(scope, &args) else { return rv.set_uint32(POSITION_UNAVAILABLE) };
-    let p = match geolocation.request(source(&json), watch, timeout, now) {
+    let p = match geolocation.request(session_source(partition), watch, timeout, now) {
         Ok(p) => p,
         Err(code) => return rv.set_uint32(code),
     };
@@ -222,11 +241,13 @@ fn watches_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // The notice a realm that watches a position or holds a PermissionStatus — an agent of the session's (agents.rs) — is
 // told as the emulated position moves: a task of its own (geolocation.js).
 const MOVED: u32 = 32;
-// __dom.geolocationMoved(partition): every agent of the session told the emulated position moved — a "significant
-// change" (Geolocation §12): each window's watches, and each window's and each worker's PermissionStatus, its own to
-// act on.
+// __dom.geolocationMoved(partition, sourceJson): the session's emulated position this, and every agent of the session
+// told it moved — a "significant change" (Geolocation §12): each window's watches, and each window's and each worker's
+// PermissionStatus, its own to act on.
 fn moved_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let partition = args.get(0).integer_value(scope).unwrap_or(0) as u64;
+    let partition = partition_arg(scope, &args, 0);
+    let json = text_arg(scope, &args, 1).unwrap_or_default();
+    sources().insert(partition, json);
     crate::agents::tell_session(partition, MOVED, [0.0; 4], true);
 }
 
@@ -244,14 +265,14 @@ fn permission_member_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.permissionState(name, sourceJson, member) -> the state of the permission `name` names, its descriptor saying
+// __dom.permissionState(name, partition, member) -> the state of the permission `name` names, its descriptor saying
 // `member` of what it needs ("true" / "false" for a boolean one) — or [isNotSupported, words] of the error it is
 // rejected with (`permission_state`), words '' for a name that is no powerful feature's.
 fn permission_state_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = text_arg(scope, &args, 0).unwrap_or_default();
-    let json = text_arg(scope, &args, 1).unwrap_or_default();
+    let partition = partition_arg(scope, &args, 1);
     let member = text_arg(scope, &args, 2);
-    match permission_state(&name, member.as_deref(), &source(&json)) {
+    match permission_state(&name, member.as_deref(), &session_source(partition)) {
         Ok(state) => {
             if let Some(s) = v8::String::new(scope, state) {
                 rv.set(s.into());

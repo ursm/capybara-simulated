@@ -309,4 +309,19 @@ RSpec.describe 'navigator.geolocation' do
     session.driver.set_geolocation(denied: true)
     expect(poll_until { session.evaluate_script('window.__seen.length') == 2 && session.evaluate_script('window.__seen') }).to eq(['init prompt', 'change denied'])
   end
+
+  it "answers a popup's watch from the session's position, whichever window set it" do
+    popup = session.window_opened_by { session.execute_script("window.open('/p')") }
+    session.within_window(popup) do
+      session.execute_script(<<~JS)
+        window.__seen = [];
+        navigator.geolocation.watchPosition((p) => window.__seen.push('ok ' + p.coords.latitude), (e) => window.__seen.push('err ' + e.code));
+      JS
+      expect(session.evaluate_script('window.__seen')).to eq(['err 2'])
+    end
+    session.driver.set_geolocation(latitude: 4, longitude: 5)
+    session.within_window(popup) do
+      expect(poll_until { session.evaluate_script('window.__seen.length') == 2 && session.evaluate_script('window.__seen') }).to eq(['err 2', 'ok 4'])
+    end
+  end
 end

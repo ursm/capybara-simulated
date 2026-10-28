@@ -319,11 +319,6 @@ module Capybara
         @restoring_history_state      = nil
         @cors_preflight_cache         = {}
         @modal_handlers               = []
-        # Geolocation override (CDP-ish). nil = no override configured →
-        # navigator.geolocation reports POSITION_UNAVAILABLE. Ruby-backed so
-        # it survives the per-call VM rebuilds, like web storage. Read by the
-        # `__csimGeolocationState` host fn.
-        @geolocation                  = nil
         # Per-test action trace. `@trace` is the live recorder; `reset!`
         # moves it to `@pending_trace` so an after-hook running after
         # session reset still has access. `@trace_mode` is cached at
@@ -2819,38 +2814,27 @@ module Capybara
         @runtime.call('__csimSettleIdleStyle')
       end
 
-      # The session's emulated position (WebDriver BiDi "set emulated position data", Geolocation §12): kept on
-      # `@geolocation`, which every request and permission query reads through the `__csimGeolocationState` host fn —
-      # a denial the geolocation permission's state.
+      # The session's emulated position (WebDriver BiDi "set emulated position data", Geolocation §12) — the engine's,
+      # by the session's partition (geolocation.rs), every window and worker of it reading it — a denial the
+      # geolocation permission's state. A significant change of position: each window and worker told
+      # (geolocation.js `__csimGeolocationChanged`), its watches called back again and each PermissionStatus whose
+      # state moved told — the windows' notices taken at once (a worker takes its own as its loop steps).
       #
       #   set_geolocation(latitude: 35.6, longitude: 139.7)
       #   set_geolocation(latitude: 1, longitude: 2, accuracy: 5, altitude: 10)
       #   set_geolocation(denied: true)  # report PERMISSION_DENIED
       #   set_geolocation                # clear -> report POSITION_UNAVAILABLE
       def set_geolocation(latitude: nil, longitude: nil, accuracy: 10, denied: false, **rest)
-        @geolocation =
+        source =
           if denied
             {'denied' => true}
-          elsif latitude.nil? || longitude.nil?
-            nil
-          else
+          elsif latitude && longitude
             {'coords' => {'latitude' => latitude, 'longitude' => longitude, 'accuracy' => accuracy}.merge(rest.transform_keys(&:to_s))}
           end
-
-        # A significant change of position (Geolocation §12 "set emulated position data"), the session's — every window
-        # and worker of it told (geolocation.js `__csimGeolocationChanged`): its watches called back again, and each
-        # PermissionStatus whose state moved told, each reading the fresh @geolocation — the windows' notices taken at once
-        # (a worker takes its own as its loop steps).
         invalidate_find_cache
-        @runtime.call('__csimGeolocationChanged')
+        @runtime.call('__csimGeolocationChanged', JSON.generate(source))
         deliver_agent_notices
         nil
-      end
-
-      # Backs the `__csimGeolocationState` host fn: the emulated position as JSON ('null' for none), which every request
-      # and permission query reads (geolocation.rs `source`).
-      def geolocation_state_json
-        JSON.generate(@geolocation)
       end
 
       # Capybara passes Node instances directly as script args

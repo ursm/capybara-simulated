@@ -91,7 +91,6 @@ module Capybara
         '__csimDeleteAllCookies'     => ->(b, *_) { b.delete_all_cookies; nil },
         '__csimStoragePartitions'    => ->(b, *_a) { b.storage_partitions },
         '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
-        '__csimGeolocationState'     => ->(b, *_) { b.geolocation_state_json },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },
         '__csim_logConsole'          => ->(b, *a) { b.log_console(a[0], a[1]); nil },
