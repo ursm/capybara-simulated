@@ -347,6 +347,20 @@ RSpec.describe 'Structured clone of platform objects' do
     poll_until { s.evaluate_script('got.length') == 4 }
 
     expect(s.evaluate_script('got').sort).to eq(['port message true', 'port messageerror null', 'port ready', 'port ready'])
+    # (…one posted BEFORE the port went to the frame too: it is read as its task runs, by the realm holding the port then
+    # — Chrome: "port messageerror")
+    s.execute_script(<<~JS)
+      got.length = 0;
+      const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      for (const id of ['same', 'other']) {
+        const channel = new MessageChannel();
+        channel.port1.postMessage(m);
+        document.getElementById(id).contentWindow.postMessage('take', '*', [channel.port2]);
+      }
+    JS
+    poll_until { s.evaluate_script('got.length') == 4 }
+
+    expect(s.evaluate_script('got').sort).to eq(['port message true', 'port messageerror null', 'port ready', 'port ready'])
   end
 
   # (…a gap: to another isolate — a worker — it is a DataCloneError, but refused as it is serialized, before the transfer
