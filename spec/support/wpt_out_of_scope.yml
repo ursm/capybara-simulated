@@ -60583,8 +60583,8 @@ wasm/serialization/memory/window-success.tentative.https.html:
 wasm/serialization/module/cross-origin-module-sharing-fails.html:
 - name: "[harness] TIMEOUT"
   reason: >-
-    Assumes Chrome's ORIGIN-keyed agent clusters by default (M106+): the iframe it calls 'a
-    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN / {{domains[www1]}}).
+    Assumes Chrome's ORIGIN-keyed agent clusters by default (Chrome 156: originAgentCluster true, a frame on another port a messageerror): the iframe it calls 'a
+    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN, {{domains[www2]}}; {{domains[www1]}} in share-module-cross-origin-fails).
     Current HTML keys by SITE: 'Without web developer action to achieve origin-keyed agent
     clusters, it will be a site' (obtain a similar-origin window agent), so the module is
     shared, as the WebAssembly JS API's deserialization steps have it; spec over Blink. Re-check
@@ -60596,8 +60596,8 @@ wasm/serialization/module/cross-origin-module-sharing-fails.html:
     here too).
 - name: postMessaging a wasm module to an iframe in a different agent cluster fails
   reason: >-
-    Assumes Chrome's ORIGIN-keyed agent clusters by default (M106+): the iframe it calls 'a
-    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN / {{domains[www1]}}).
+    Assumes Chrome's ORIGIN-keyed agent clusters by default (Chrome 156: originAgentCluster true, a frame on another port a messageerror): the iframe it calls 'a
+    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN, {{domains[www2]}}; {{domains[www1]}} in share-module-cross-origin-fails).
     Current HTML keys by SITE: 'Without web developer action to achieve origin-keyed agent
     clusters, it will be a site' (obtain a similar-origin window agent), so the module is
     shared, as the WebAssembly JS API's deserialization steps have it; spec over Blink. Re-check
@@ -60605,16 +60605,16 @@ wasm/serialization/module/cross-origin-module-sharing-fails.html:
 wasm/serialization/module/share-module-cross-origin-fails.sub.html:
 - name: "[harness] TIMEOUT"
   reason: >-
-    Assumes Chrome's ORIGIN-keyed agent clusters by default (M106+): the iframe it calls 'a
-    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN / {{domains[www1]}}).
+    Assumes Chrome's ORIGIN-keyed agent clusters by default (Chrome 156: originAgentCluster true, a frame on another port a messageerror): the iframe it calls 'a
+    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN, {{domains[www2]}}; {{domains[www1]}} in share-module-cross-origin-fails).
     Current HTML keys by SITE: 'Without web developer action to achieve origin-keyed agent
     clusters, it will be a site' (obtain a similar-origin window agent), so the module is
     shared, as the WebAssembly JS API's deserialization steps have it; spec over Blink. Re-check
     if HTML adopts the origin-keyed default.
 - name: postMessaging a wasm module to a cross-origin iframe fails
   reason: >-
-    Assumes Chrome's ORIGIN-keyed agent clusters by default (M106+): the iframe it calls 'a
-    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN / {{domains[www1]}}).
+    Assumes Chrome's ORIGIN-keyed agent clusters by default (Chrome 156: originAgentCluster true, a frame on another port a messageerror): the iframe it calls 'a
+    different agent cluster' is a same-site subdomain (get_host_info().OTHER_ORIGIN, {{domains[www2]}}; {{domains[www1]}} in share-module-cross-origin-fails).
     Current HTML keys by SITE: 'Without web developer action to achieve origin-keyed agent
     clusters, it will be a site' (obtain a similar-origin window agent), so the module is
     shared, as the WebAssembly JS API's deserialization steps have it; spec over Blink. Re-check
