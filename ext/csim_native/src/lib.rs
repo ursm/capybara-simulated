@@ -50,6 +50,7 @@ mod document_encoding;
 mod document_state;
 mod dom;
 mod dom_matrix;
+mod downloads;
 mod easing;
 mod editing;
 mod element_flags;
@@ -298,6 +299,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("redirect_taints_origin", magnus::function!(referrer::redirect_taints_for_ruby, 4))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
     native.define_module_function("cross_site_for_cookies", magnus::function!(referrer::cross_site_for_cookies_for_ruby, 2))?;
+    // Whether a response downloads, and the name it is saved under (downloads.rs).
+    native.define_module_function("download_response", magnus::function!(downloads::is_download_for_ruby, 1))?;
+    native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;
     native.define_module_function("target_keyword", magnus::function!(navigables::target_keyword_for_ruby, 1))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;

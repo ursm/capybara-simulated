@@ -1450,16 +1450,8 @@ module Capybara
         response = dispatch_rack_or_http(url, env) or return
         status, headers, body = response
         return unless status.to_i == 200
-        # Fall back to the link's `download="filename"` value or the
-        # URL path tail when Content-Disposition is absent — `<a download>`
-        # is the spec hook for naming a download independently of the
-        # response headers.
-        forced_headers = headers.dup
-        if content_disposition_header(forced_headers).to_s.empty?
-          name = filename_hint.empty? ? File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) : filename_hint
-          forced_headers['Content-Disposition'] = %(attachment; filename="#{name}") unless name.empty?
-        end
-        save_downloaded_response(url, forced_headers, body)
+        # (…named by the link's `download` value where its Content-Disposition names nothing)
+        save_downloaded_response(url, headers, body, hint: filename_hint)
       end
 
       # HTML "navigate": a navigation to `url` is one to a fragment of the current document where `url` has a fragment
@@ -12773,75 +12765,31 @@ module Capybara
         end
       end
 
-      # `Content-Disposition: attachment` (or any explicit filename
-      # in inline form) is the canonical "save to disk" signal that
-      # browsers honour. Tests that exercise CSV / PDF / etc. exports
-      # use Redmine's `downloaded_file` helper to read the bytes
-      # back from `tmp/downloads/`; routing the response through the
-      # save path here keeps the page state unchanged (no rebuild),
-      # mirroring what a real browser does after a download.
-      # The filename a Content-Disposition gives (RFC 6266 §4.3): `filename*`'s ext-value (RFC 8187: its charset's bytes,
-      # percent-encoded) where it decodes — in a charset Ruby knows, to valid text with no NUL — else `filename`'s, a
-      # quoted-string's backslash escapes undone, its bytes UTF-8 where they are (Chrome: a raw UTF-8 name), else each
-      # byte the code point it is; trimmed, and no directory of it (`../x` is `x`). '' for none, and for a name no file
-      # can have (`.`, `..`, one holding a NUL). `cd` the header's text, each byte a code point (`header_text`).
-      def disposition_filename(cd)
-        params = disposition_params(cd.encode(Encoding::ISO_8859_1, invalid: :replace, undef: :replace).b)
-        name = ext_value_text(params['filename*']) || params['filename']&.then {|plain|
-          utf8 = plain.dup.force_encoding(Encoding::UTF_8)
-          utf8.valid_encoding? ? utf8 : plain.dup.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
-        }
-        return '' if name.nil? || name.include?("\0")
-        name = File.basename(name.tr('\\', '/')).strip
-        name == '.' || name == '..' ? '' : name
-      end
-      # …the header's parameters (after its disposition type), by name lowercased — the first of each — their values a
-      # quoted-string's unescaped, a `;` or `=` inside one no separator.
-      def disposition_params(bytes)
-        params = {}
-        bytes.scan(/;\s*([^\s=;]+)\s*=\s*("(?:[^"\\]|\\.)*"?|[^;]*)/n) do |name, value|
-          value = value.strip
-          value = value.delete_prefix('"').delete_suffix('"').gsub(/\\(.)/n, '\\1') if value.start_with?('"')
-          params[name.downcase] ||= value
-        end
-        params
-      end
-      # …and an ext-value's text (RFC 8187): `charset'language'value`, its bytes percent-decoded in the charset — nil
-      # where it is none, or its charset one Ruby does not know, or its bytes no text in it.
-      def ext_value_text(ext)
-        m = ext&.match(/\A([\w!#$%&+^`{}~-]+)'[^']*'(.*)\z/n) or return nil
-        encoding = Encoding.find(m[1]) rescue nil
-        return nil unless encoding && m[2].match?(/\A(?:[^%]|%\h\h)*\z/n)
-        text = m[2].gsub(/%(\h\h)/n) { $1.hex.chr }.force_encoding(encoding)
-        text.valid_encoding? && !text.include?("\0") ? text.encode(Encoding::UTF_8) : nil
-      rescue EncodingError
-        nil
-      end
+      # `Content-Disposition: attachment` (or any explicit filename) is the "save to disk" signal (downloads.rs
+      # `is_download`). Tests that exercise CSV / PDF / etc. exports use Redmine's `downloaded_file` helper to read the
+      # bytes back from `tmp/downloads/`; routing the response through the save path here keeps the page state unchanged
+      # (no rebuild), as a browser does after a download.
+      def download_response?(headers) = Native.download_response(content_disposition_header(headers))
 
       def content_disposition_header(headers)
         value = header_field(headers, 'content-disposition')
         value && header_text(value)
       end
 
-      def download_response?(headers)
-        cd = content_disposition_header(headers)
-        cd && cd.to_s.match?(/(?:^|;)\s*(attachment|filename\s*=)/i)
-      end
-
       # …refused where the navigation's source — the realm whose document made it (`@download_source`, none for the
       # driver's own) — or its target — a frame's (`realm`, the frame realm), none for the top-level one — is sandboxed
       # against downloads: no `allow-downloads` (HTML "allowed to download", navigables.rs `download_allowed`).
       # (…`sandbox` the `[attribute]` a frame's navigation began with where the frame has no document of its own to ask)
-      def save_downloaded_response(url, headers, body, realm: nil, sandbox: nil)
+      # (…saved under the name its Content-Disposition gives, else the one a `<a download>` suggests (`hint`), else its URL's
+      # last path segment: downloads.rs `filename`)
+      def save_downloaded_response(url, headers, body, realm: nil, sandbox: nil, hint: nil)
         # (…a frame's session history as it stood before: a download is no navigation of it)
         frame_navigation_made_no_document(realm) if realm
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         source = @download_source || realm
         return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox || navigation_sandbox(realm))
 
-        filename = disposition_filename(content_disposition_header(headers).to_s)
-        filename = File.basename(parse_url(url.to_s)&.fetch(:pathname).to_s) if filename.empty?
-        filename = 'download' if filename.empty?
+        filename = Native.download_filename(content_disposition_header(headers), url.to_s, hint)
         dir = downloads_directory
         FileUtils.mkdir_p(dir)
         File.binwrite(File.join(dir, filename), read_rack_body(body))
