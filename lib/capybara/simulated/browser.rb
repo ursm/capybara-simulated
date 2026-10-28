@@ -9976,14 +9976,13 @@ module Capybara
               if redirect_mode != 'follow'
                 return opaque_redirect_hash(target, cache_entry.status, cache_entry.headers, cache_entry.body)
               end
-              if (loc = redirect_location(cache_entry.status, cache_entry.headers))
+              case (followed = follow_redirect(cache_entry.status, method, target, cache_entry.headers, cors, crossed, req_origin, effective_origin))
+              when String then return nil
+              when Array
                 trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
                 widen_cookie_site.(target) unless reissued   # (…a hop the cache answered a hop all the same)
                 redirected = true
-                next_url   = resolve_against(loc, target)
-                return nil unless http_url?(next_url)
-                target = carry_fragment(target, next_url)
-                return nil if bad_port?(target)   # a cached redirect to a blocked port is still a network error
+                target     = followed.first
                 next
               end
             end
@@ -10187,7 +10186,15 @@ module Capybara
             # as the document when a navigation renders them.
             return opaque_redirect_hash(target, status, resp_headers, decode_content_encoding(read_rack_body(resp_body), resp_headers))
           end
-          if (loc = redirect_location(status, resp_headers))
+          # Fetch "HTTP-redirect fetch" (fetch_rules.rs `follow_redirect`): the next request — its URL, its method and body,
+          # its `Authorization`, its origin — or a network error; a redirect with no `Location` answers as it is.
+          followed = REDIRECT_STATUSES.include?(status.to_i) && follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
+          case followed
+          when String
+            resp_body.close if resp_body.respond_to?(:close)
+            return nil
+          when Array
+            next_url, bits = followed
             # Log this hop (3xx) before method/body are rewritten for the next.
             trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
             # Cache the redirect itself (a cacheable 3xx with freshness) BEFORE following it —
@@ -10200,60 +10207,20 @@ module Capybara
             # A redirect response's Referrer-Policy overrides the policy for the next hop
             # (redirect-referrer-override): the last valid token of the header wins.
             ref_policy = referrer_policy_header(resp_headers) || ref_policy
-            next_url = resolve_against(loc, target)
-            # The UA only follows http(s) redirects: a Location that resolves to a
-            # non-HTTP(S) URL (data:, an `invalidurl:` scheme, …) is a network error
-            # (redirect-location data/invalid in follow mode).
-            unless http_url?(next_url)
-              resp_body.close if resp_body.respond_to?(:close)
-              return nil
-            end
-            # A cross-origin redirect taints the request's origin to opaque ("null") only
-            # once the request was ALREADY cross-origin (response tainting "cors", i.e.
-            # `crossed`) and the hop changes origin — so a subsequent hop sends Origin: null
-            # and the CORS check demands the server allow "null"/"*". The FIRST cross-origin
-            # hop out of a same-origin request keeps the real origin (redirect-origin
-            # "same origin to other origin" sends the document origin, not null).
-            effective_origin = 'null' if cors && crossed && url_origin(next_url) != url_origin(target)
-            # (…a document's navigation request tainted as every mode is — Fetch "HTTP-redirect fetch": a redirect to
-            # another origin from a URL not of the request's own)
-            effective_origin = 'null' if navigation && Native.redirect_taints_origin(effective_origin == 'null', req_origin, target, next_url)
-            # Fetch "HTTP-redirect fetch": a CROSS-ORIGIN redirect strips the request's
-            # `Authorization` — credentials sent to the first origin must not be replayed to a
-            # different one (nor seed that origin's auth cache below).
-            if url_origin(next_url) != url_origin(target) && headers.is_a?(Hash)
+            # (…its origin, once tainted, serialized "null": the Origin header the next hops send, and what the CORS check
+            # and the preflight compare against — the server must allow 'null' or '*')
+            effective_origin = 'null' if bits & REDIRECT_TAINTS_ORIGIN != 0
+            if bits & REDIRECT_DROPS_AUTHORIZATION != 0 && headers.is_a?(Hash)
               headers = headers.reject {|k, _| k.to_s.casecmp?('authorization') }
             end
-            target = carry_fragment(target, next_url)
-            if bad_port?(target)   # a redirect to a blocked port is a network error too
-              resp_body.close if resp_body.respond_to?(:close)
-              return nil
-            end
-            # Fetch "HTTP-redirect fetch": the method changes to GET (dropping the
-            # body + its Content-* headers) ONLY for 301/302 of a POST, or 303 of a
-            # non-GET/HEAD. Otherwise method, body, and headers are preserved — so a
-            # GET/HEAD redirected via 301/302/303 keeps its method and Content-Type,
-            # and 307/308 always preserve (xhr send-redirect basics).
-            up = method.to_s.upcase
-            if Native.redirect_to_get(status.to_i, up)
+            if bits & REDIRECT_TO_GET != 0
               method  = 'GET'
               body    = nil
               headers = headers.reject {|k, _| REDIRECT_DROPPED_HEADERS.include?(k.to_s.downcase) } if headers.is_a?(Hash)
             end
+            target = next_url
             resp_body.close if resp_body.respond_to?(:close)
             next
-          end
-          # A follow-mode redirect whose Location header IS present but EMPTY parses to the
-          # request URL — a self-redirect that would loop until the redirect limit trips a
-          # network error. redirect_location returns nil for it (empty ⇒ no followable
-          # target, so navigation keeps rendering the 3xx), so recognize it here and fail
-          # directly — fetch-only (redirect-empty-location follow mode).
-          if REDIRECT_STATUSES.include?(status.to_i)
-            raw_loc = location_field(resp_headers)
-            if raw_loc && raw_loc.to_s.empty?
-              resp_body.close if resp_body.respond_to?(:close)
-              return nil
-            end
           end
           # (…a body the wire cut short read as far as it came, and then fails — no response the cache keeps)
           cut_short = resp_body.is_a?(CutShortBody)
@@ -13134,14 +13101,39 @@ module Capybara
       NULL_BODY_STATUSES = [204, 205, 304].freeze
       # Request-body headers removed when a redirect nulls the body (method → GET).
       REDIRECT_DROPPED_HEADERS = %w[content-encoding content-language content-location content-type content-length].freeze
+
+      # `Native.follow_redirect`'s bits: the next request a bodyless GET, its `Authorization` gone, its origin tainted.
+      REDIRECT_TO_GET              = 1
+      REDIRECT_DROPS_AUTHORIZATION = 2
+      REDIRECT_TAINTS_ORIGIN       = 4
+
+      # Fetch "HTTP-redirect fetch" over a redirect response of `status` with `resp_headers` to the request at `target`
+      # (fetch_rules.rs `follow_redirect`): nil to answer with it, a network error's reason, or [next URL, bits]. Its
+      # response tainting is "cors" for a CORS request whose chain has been at another origin (`crossed`); its origin is
+      # `req_origin`, tainted where `effective_origin` is already 'null'.
+      def follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
+        Native.follow_redirect(
+          status.to_i,
+          method.to_s,
+          target,
+          target,
+          location_field(resp_headers),
+          cors == true,
+          req_origin,
+          cors == true && crossed,
+          effective_origin == 'null'
+        )
+      end
+
+      # A navigation's redirect target: the response's Location where it is a redirect status.
       def redirect_location(status, headers)
         return nil unless REDIRECT_STATUSES.include?(status.to_i)
         loc = location_field(headers)
         # A blank (or absent) Location has no FOLLOWABLE target: an empty value parses back
         # to the current URL, so following it would just self-redirect. Return nil so a
         # caller renders the 3xx as-is rather than looping — the several navigation handlers
-        # rely on this. (The fetch redirect loop recognizes a present-but-empty Location
-        # separately and turns it into a network error per Fetch — see rack_fetch.)
+        # rely on this. (A fetch follows it as Fetch does — `follow_redirect` — to its own URL, until the redirect limit
+        # makes it a network error.)
         loc unless loc.to_s.empty?
       end
 

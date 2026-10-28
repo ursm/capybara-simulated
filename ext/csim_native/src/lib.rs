@@ -318,6 +318,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
+    native.define_module_function("follow_redirect", magnus::function!(fetch_rules::follow_redirect_for_ruby, 9))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;
     native.define_module_function("default_accept", magnus::function!(fetch_rules::default_accept_for_ruby, 1))?;
     native.define_module_function("sw_subresource_usable", magnus::function!(fetch_rules::sw_subresource_usable_for_ruby, 5))?;
