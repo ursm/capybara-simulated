@@ -8915,7 +8915,7 @@ module Capybara
         # Tag this thread so blob URLs created by the worker's script are owned by
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
-        # …and with its record, whose site for cookies its fetches are judged by (rack_fetch's `FetchHops`): a navigation
+        # …and with its record, whose site for cookies its fetches are judged by (rack_fetch's `FetchPlan`): a navigation
         # removes the registry's entry without waiting for the thread, and a fetch still in flight is the worker's all the
         # same.
         Thread.current[:csim_worker_record] = record
@@ -9793,6 +9793,8 @@ module Capybara
       FETCH_HOP_USER_ACTIVATED   = 2
       FETCH_HOP_CROSS_SITE_FRAME = 4
       FETCH_HOP_WORKER           = 8
+      # The request modes whose fetch is of its client's origin (a mode-less internal load is of none).
+      FETCH_MODES_WITH_ORIGIN = %w[cors no-cors same-origin].freeze
 
       # URLs we won't even try to route through Rack: anything that
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
@@ -9812,19 +9814,6 @@ module Capybara
         # every caller resolves it first, JS-side or through parse_url / resolve_against.)
         target = http_url?(url) ? url.to_s : resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && http_url?(target)
-        # Fetch "port blocking" (https://fetch.spec.whatwg.org/#port-blocking): a
-        # request to a blocked port is a network error before any connection —
-        # fetch() rejects with TypeError, a sync XHR throws NetworkError
-        # (request-bad-port). Re-checked per redirect hop below ("HTTP-redirect fetch"
-        # re-runs the block), so a 3xx Location to a bad port is refused too.
-        return nil if bad_port?(target)
-        # CORS enforcement (preflight + Access-Control checks) applies only to cors_mode
-        # 'cors' — sent by XHR and by fetch()'s default mode. fetch() also threads
-        # 'no-cors' / 'same-origin' (mode semantics below), and a form-submission
-        # navigation threads 'navigate'; other callers (sendBeacon, ESM, workers, the
-        # internal asset GET) pass nil → no CORS and no mode semantics. The document's
-        # origin is the request's origin; a different target origin is cross-origin.
-        cors        = cors_mode == 'cors'
         # The CLIENT is the realm that called fetch/XHR — its own location (a Service
         # Worker's script URL, a frame document's URL), threaded from JS; the top-level
         # @current_url is only the fallback. It is the request's SINGLE origin identity:
@@ -9842,171 +9831,97 @@ module Capybara
         # …and its ORIGIN, where the realm says it (`client_origin`, its document's): a sandboxed document at a real URL
         # is of an opaque origin ("null") its URL does not carry — every request it makes cross-origin, as Fetch has it.
         client_origin = client_origin.to_s.empty? ? url_origin(client) : client_origin.to_s
-        # The request's origin for EVERY fetch mode — Fetch appends an Origin header to
-        # every non-GET/HEAD request regardless of mode (a same-origin or no-cors
-        # POST/PUT still carries it, for the server's CSRF/Origin check). CORS
-        # enforcement itself stays gated on `cors` below; a nil-mode internal caller
-        # (navigation / asset GET) has no origin semantics. An explicit `initiator` (a SW
-        # re-issuing a navigation via `fetch(event.request)`) is the request's origin for
-        # ALL modes — so a passthrough 'navigate'-mode POST still carries its Origin — and a document's own navigation
-        # request (`navigation`: a form submission's of a frame) is of its document's origin.
-        req_origin  = initiator || (navigation || %w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil)
-        # Fetch request "mode" (fetch threads it; XHR is always 'cors'; a non-fetch/xhr
-        # caller passes nil → no mode semantics, a plain 'basic' response). `no-cors`
-        # filters a cross-origin response to opaque; `same-origin` makes a cross-origin
-        # request a network error. `doc_origin` detects cross-origin for the response
-        # TYPE regardless of whether CORS enforcement (cors) runs; `crossed` latches once
-        # any hop leaves the document origin.
-        no_cors_mode     = cors_mode == 'no-cors'
-        same_origin_mode = cors_mode == 'same-origin'
-        doc_origin       = %w[cors no-cors same-origin].include?(cors_mode) ? client_origin : nil
-        crossed          = false
-        # (…and, whatever the mode, whether a hop left the client's origin: what a no-mode caller's response is tainted by —
-        # an element's no-cors load through the asset cache, whose resource is not CORS-same-origin then: a sheet's
-        # origin-clean flag unset, sheet_fetch.rs `fetch`)
-        tainted          = false
-        marked           = ->(out) { out['tainted'] = true if out && tainted && !crossed; out }
-        # A request is "credentialed" (cookies + the credentialed CORS check) only in
-        # `include` mode; `same-origin` (default) and `omit` are uncredentialed for the
-        # CORS check, while the cookie decision below distinguishes all three.
-        with_credentials = credentials == 'include'
-        # Use the method's case AS GIVEN: the JS callers already applied the spec
-        # normalization (XHR open() / Fetch upper-case the known methods, preserving
-        # an unknown method's case — open-method-case-sensitive). Upper-casing here
-        # would clobber a custom method like `xUNIcorn`.
-        method = (method || 'GET').to_s
-        redirected = false
-        # CHALLENGE credentials for transparent HTTP Basic auth — set by the XHR authentication path
-        # (open() user/password / URL userinfo), NOT a raw setRequestHeader('Authorization'). They are
-        # NOT sent proactively; a 401 "Basic" challenge triggers a single re-send with them (below).
-        # Strip the marker so it never reaches the server.
-        challenge_authz = nil
-        if headers.is_a?(Hash) && (mk = headers.keys.find {|k| k.to_s.casecmp?('x-csim-auth-challenge') })
-          challenge_authz = 'Basic ' + headers[mk].to_s
-          headers = headers.reject {|k, _| k == mk }
-        end
-        # The request's origin starts as the document origin; a cross-origin REDIRECT
-        # taints it to an opaque origin (serialized "null") per Fetch "HTTP-redirect
-        # fetch". `effective_origin` IS that origin — it's what the Origin header
-        # carries and what the CORS check / preflight compare against from that hop on
-        # ('null' once tainted, so the server must then allow 'null' or '*'). A SW re-fetch whose
-        # navigation ALREADY crossed origin via a network redirect starts tainted (origin_null).
-        effective_origin = origin_null ? 'null' : req_origin
-        # Virtual server delay (a handler's `time.sleep`, see wpt_py_handler.py) accumulated across
-        # EVERY sub-request this fetch makes — the CORS preflight AND every redirect hop — since the
-        # `timeout` a client applies spans them all and a redirect/preflight must not reset it
-        # (timeout-multiple-fetches). Reset per fetch; the final response carries the total.
-        # THREAD-LOCAL: keepalive/race legs run rack_fetch concurrently with the main
-        # thread — a shared ivar would cross-contaminate their delay totals.
-        Thread.current[:csim_fetch_server_delay_ms] = 0
-        # An author conditional (If-None-Match / …) means the caller is doing its own
-        # revalidation, so the UA cache must step aside (computed once — the headers
-        # carrying it survive every redirect hop unchanged).
-        skip_cache = request_has_conditional_headers?(headers)
-        ref_policy = referrer_policy   # may be overridden per hop by a response Referrer-Policy
-        # The referrer is stripped PROGRESSIVELY: each hop applies its (possibly
-        # overridden) policy to the referrer the PREVIOUS hop sent, not to the original
-        # document — so once a hop reduces it to an origin (or drops it), a later, laxer
-        # policy can't widen it back (redirect-referrer-override). The initial source is
-        # the request's referrer: an explicit `init.referrer` URL when given, else the
-        # document URL ("client"); an empty referrer means no-referrer (referrer.rs `request_referrer`
-        # maps a blank source to nil).
+        # The request's origin for EVERY fetch mode — Fetch appends an Origin header to every non-GET/HEAD request
+        # regardless of mode — and the document origin its response's type is judged by, for a mode's request; a nil-mode
+        # internal caller (navigation / asset GET) has no origin semantics. An explicit `initiator` (a SW re-issuing a
+        # navigation via `fetch(event.request)`) is the request's origin for ALL modes — so a passthrough 'navigate'-mode
+        # POST still carries its Origin — and a document's own navigation request (`navigation`: a form submission's of a
+        # frame) is of its document's origin.
+        moded      = FETCH_MODES_WITH_ORIGIN.include?(cors_mode)
+        req_origin = initiator || (navigation || moded ? client_origin : nil)
+        doc_origin = moded ? client_origin : nil
+        # The request's referrer: an explicit `init.referrer` URL when given, else the document URL ("client"); an empty
+        # one is no-referrer (referrer.rs `request_referrer` maps a blank source to none).
         ref_source = referrer.nil? ? client : referrer
-        # The request's INITIATOR origin for Sec-Fetch-Site — captured ONCE (loop-invariant), before
-        # the per-hop referrer reassignment (5927 below) degrades ref_source, and independent of
-        # Referrer-Policy: the initiator is the referrer's origin (a SW's `fetch(event.request)`
-        # carries the navigating frame's origin here, so a cross-origin passthrough is same-/cross-site
-        # correctly), falling back to the client's origin when the referrer was policy-emptied or has
-        # none (an about:blank document's: its creator's) — never 'none' for a request that has a real
-        # initiator. An explicit `initiator` is authoritative:
-        # it survives the referrer reset a `new Request(event.request, init)` performs (referrer →
-        # about:client), so a SW's change-request re-fetch is same-origin to the SW's own script.
+        # The request's INITIATOR origin for Sec-Fetch-Site — independent of Referrer-Policy: the referrer's origin (a
+        # SW's `fetch(event.request)` carries the navigating frame's origin here, so a cross-origin passthrough is same-/
+        # cross-site correctly), falling back to the client's origin when the referrer was policy-emptied or has none (an
+        # about:blank document's: its creator's). An explicit `initiator` is authoritative: it survives the referrer
+        # reset a `new Request(event.request, init)` performs (referrer → about:client), so a SW's change-request
+        # re-fetch is same-origin to the SW's own script.
         sec_initiator = initiator || url_origin(ref_source) || client_origin
-        # What each hop carries — whether it is a CORS hop to another origin, whether it sends cookies, its Origin, its
-        # Sec-Fetch-* and the site its cookies are judged by (fetch_hop.rs `FetchHops`) — of the request's client: its
-        # cookies by its document (or origin), a mode-less load's by the top-level document too, a frame document's by its
-        # ancestors' (`client_realm`, which the bindings name), a dedicated worker's by the site for cookies it was made with.
-        # Sec-Fetch-Site and the cookie site latch the widest relation across the chain; a SW re-fetch seeds the former with
-        # the site the network hops accumulated BEFORE the SW intercepted the final hop (a same-site redirect the
-        # passthrough must keep reporting).
+        # The fetch, step by step (fetch_plan.rs `FetchPlan`) — its hops' headers and cookie site of the request's client
+        # (fetch_hop.rs `FetchHops`: its cookies by its document (or origin), a mode-less load's by the top-level document
+        # too, a frame document's by its ancestors' — `client_realm`, which the bindings name — a dedicated worker's by
+        # the site for cookies it was made with); none for a URL no fetch goes to (no HTTP(S) one; a blocked port, Fetch
+        # "port blocking": a network error before any connection — request-bad-port). A SW re-fetch seeds Sec-Fetch-Site
+        # with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts tainted where
+        # they had (`origin_null`). Use the method's case AS GIVEN: the JS callers already normalized it
+        # (open-method-case-sensitive).
         worker = Thread.current[:csim_worker_record]
-        hops   = Native::FetchHops.new(
-          cors_mode,
-          dest,
-          nav_dest,
-          (navigation ? FETCH_HOP_NAVIGATION : 0) | (user_activated ? FETCH_HOP_USER_ACTIVATED : 0) |
-            (cookie_cross_site ? FETCH_HOP_CROSS_SITE_FRAME : 0) | (worker&.key?(:site_for_cookies) ? FETCH_HOP_WORKER : 0),
-          credentials.to_s,
-          [req_origin, doc_origin, client_origin, sec_initiator],
-          [client_url, @current_url],
-          # (…none where the page's realm cannot answer: a context being torn down)
-          (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
-          worker&.dig(:site_for_cookies)
-        )
-        hops.seed(site_seed) if site_seed
-        (MAX_FETCH_REDIRECTS + 1).times do
-          t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          # Cross-origin-ness for the request mode/type, latched across hops. Computed
-          # BEFORE the cache so a cross-origin request never takes the cache fast path
-          # (which would bypass the opaque filter / same-origin-mode error / cors type).
-          crossed ||= !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
-          tainted ||= client_origin == 'null' || url_origin(target) != client_origin
-          return nil if same_origin_mode && crossed   # 'same-origin' mode forbids a cross-origin hop
-          # HTTP cache (RFC 9111 + Fetch "HTTP-network-or-cache fetch"), gated by the request's
-          # cache MODE. GET-only, same-origin (a cross-origin hop always redispatches so the mode
-          # filtering below runs), and stepped aside when the author sent their own conditional.
-          #   - no-store / reload    : never read the store — always hit the network, no conditional
-          #   - force-cache / only-if-cached : serve a stored response even when STALE, no revalidation
-          #                                    (only-if-cached with nothing stored is a network error)
-          #   - no-cache             : always revalidate, even a fresh entry
-          #   - default              : serve fresh; revalidate stale (fall through with conditionals)
-          read_cache  = method == 'GET' && !skip_cache && !crossed && !CACHE_MODES_SKIP_READ.include?(cache_mode)
-          cache_entry = read_cache ? @@asset_cache.lookup(target) : nil
-          serve_stored = cache_entry &&
-            (CACHE_MODES_SERVE_STALE.include?(cache_mode) || (cache_entry.fresh? && cache_mode != 'no-cache'))
-          if serve_stored
-            if REDIRECT_STATUSES.include?(cache_entry.status.to_i)
-              # A cached REDIRECT obeys the redirect mode exactly like a fresh one: `error` is a
-              # network error, `manual` is an opaque-redirect, and `follow` follows it THROUGH
-              # the cache — resolve the Location and continue so the next hop serves the cached
-              # target (request-cache "uses cached … redirects"). only-if-cached / force-cache
-              # reach this only same-origin GET (read_cache excludes cross-origin), so there's no
-              # method rewrite / origin taint.
-              raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode' if redirect_mode == 'error'
-              if redirect_mode != 'follow'
-                return opaque_redirect_hash(target, cache_entry.status, cache_entry.headers, cache_entry.body)
-              end
-              case (followed = follow_redirect(cache_entry.status, method, target, cache_entry.headers, cors, crossed, req_origin, effective_origin))
-              when String then return nil
-              when Array
-                trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
-                hops.cached(target)   # (…a hop the cache answered a hop all the same)
-                redirected = true
-                target     = followed.first
-                next
-              end
-            end
+        plan   = Native::FetchPlan.new(
+          [
+            cors_mode,
+            dest,
+            nav_dest,
+            (navigation ? FETCH_HOP_NAVIGATION : 0) | (user_activated ? FETCH_HOP_USER_ACTIVATED : 0) |
+              (cookie_cross_site ? FETCH_HOP_CROSS_SITE_FRAME : 0) | (worker&.key?(:site_for_cookies) ? FETCH_HOP_WORKER : 0),
+            credentials.to_s,
+            [req_origin, doc_origin, client_origin, sec_initiator],
+            [client_url, @current_url],
+            # (…none where the page's realm cannot answer: a context being torn down)
+            (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
+            worker&.dig(:site_for_cookies)
+          ],
+          [
+            (method || 'GET').to_s,
+            target,
+            request_header_pairs(headers),
+            body.to_s.empty?,
+            redirect_mode.to_s,
+            cache_mode.to_s,
+            referrer_policy,
+            ref_source,
+            origin_null == true,
+            navigation == true
+          ],
+          [@cors_preflight_cache, @auth_cache]
+        ) or return nil
+        plan.seed(site_seed) if site_seed
+        loop do
+          t0          = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          method      = plan.request_method
+          target      = plan.target
+          # The stored response for the hop's URL, the plan's to judge (the HTTP cache keeps it; http_cache.rs its policy).
+          cache_entry = @@asset_cache.lookup(target)
+          stored      = cache_entry && [cache_entry.status.to_i, cache_entry.fresh?, location_fields(cache_entry.headers)]
+          step, *args = plan.begin_hop(stored, Process.clock_gettime(Process::CLOCK_MONOTONIC))
+          case step
+          when 'error'
+            raise StandardError, args[0] if args[0]
+
+            return nil
+          when 'serve_cache'
             # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
-            return marked.(response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded))
+            out = response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded)
+            return tainted_response(out, args[0])
+          when 'cache_follow'
+            # (…a redirect the cache answered followed through it, to the next hop the cache may answer too)
+            trace_network(method, args[0], cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
+            next
+          when 'opaque_redirect_cached'
+            return opaque_redirect_hash(target, cache_entry.status, cache_entry.headers, cache_entry.body)
           end
-          # only-if-cached forbids the network: no usable stored response → a network error.
-          return nil if cache_mode == 'only-if-cached'
-
+          (method, target, hop_headers, drop_length, hop_referer, send_cookies, authorization, origin_value, sec_fetch, cookie_site,
+           lax_ok, revalidate), preflight = args
           env = rack_env_for(target, method: method, input: body || '')
           env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
-          # env_for always sets Content-Length to the input bytesize (0 for an empty body).
-          # Fetch adds Content-Length: 0 for a bodyless request ONLY when the method is
-          # POST or PUT; GET/HEAD and every other method (incl. a custom one like `Chicken`)
-          # send no Content-Length when the body is empty (send-entity-body-none;
-          # request-headers custom-method). A non-empty body keeps its real length.
-          env.delete('CONTENT_LENGTH') if body.to_s.empty? && !%w[POST PUT].include?(method.to_s.upcase)
-          apply_request_headers(env, headers) if headers
-          apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if cache_entry
-          # The Referer follows the request's Referrer-Policy (a redirect response can
-          # override the policy for the next hop — see below). `hop_referer` also becomes
-          # the source the NEXT hop strips from.
-          hop_referer = Native.request_referrer(ref_policy, ref_source, target)
+          # (…env_for sets Content-Length to the input's size, 0 for none: a bodyless request sends 0 only where its method
+          # is POST or PUT — send-entity-body-none)
+          env.delete('CONTENT_LENGTH') if drop_length
+          apply_request_headers(env, hop_headers.to_h) unless hop_headers.empty?
+          apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if revalidate
           # The ancestor-chain cookie verdict (a SW-re-fetched navigation into a frame
           # with a cross-site ancestor): flag the env BEFORE cookies attach so the
           # SameSite gate in apply_default_request_env sees it, like a navigation would.
@@ -10017,36 +9932,17 @@ module Capybara
           # a frame navigation's has its own already: fetch_rules.rs `defaultRequestHeaders`.)
           env['HTTP_ACCEPT'] ||= Native.default_accept(dest.to_s)
           apply_default_request_env(env, referer: hop_referer, force: false)
-          # What this hop carries (fetch_hop.rs `FetchHops#hop`): whether it is a CORS hop to another origin — a tainted
-          # (opaque) origin is cross-origin to every target — which drives the preflight and the CORS check; whether it
-          # sends cookies (the credentials mode: `omit` never, `include` always, `same-origin` only to the document's
-          # origin, so an uncredentialed cross-origin hop of any mode leaks none — cors-redirect-credentials / cors-cookies);
-          # its Origin; its Sec-Fetch-* (`[site, mode, dest, user, top-level]`, for a mode's request and every load that
-          # names its destination); the site its cookies are judged by; and whether a cross-site one keeps its Lax cookies.
-          cross_origin, send_cookies, origin_value, sec_fetch, cookie_site, lax_ok = hops.hop(target, method.to_s, effective_origin, ref_policy)
+          # (…cookies as the credentials mode lets the hop send them: `omit` never, `include` always, `same-origin` only to
+          # the document's origin — cors-redirect-credentials / cors-cookies)
           env.delete('HTTP_COOKIE') unless send_cookies
-          # HTTP auth caching (RFC 7617 §2.2): once credentials succeed for an origin (cached below),
-          # the UA sends them pre-emptively for later credentialed requests to it — so a Basic-auth
-          # resource loads without a fresh 401 challenge (the login helper authenticates first, then
-          # the guarded image/XHR requests carry the cached header). Gated on the same credential
-          # decision as cookies; the caller's own Authorization (an explicit user:pass) always wins.
-          # Skip the pre-emptive cache when THIS request brought its own challenge credentials (open()
-          # user/pass) — those must win over a cached session, so the request goes out unauthenticated
-          # and the 401-retry below applies the caller's credentials, not a stale cached pair
-          # (send-authentication-competing-names-passwords).
-          if send_cookies && !env.key?('HTTP_AUTHORIZATION') && !challenge_authz && (cached = Native.http_auth_entry(@auth_cache, target))
-            env['HTTP_AUTHORIZATION'] = cached
-          end
-          # A CORS request to a URL carrying credentials (`user:pass@`) is a network
-          # error (access-control-and-redirects "user info" subtest).
-          return nil if cross_origin && url_has_userinfo?(target)
-          # CORS-preflight, re-evaluated PER HOP: a cross-origin non-simple request (a
-          # non-safelisted method / header / Content-Type) must pass an OPTIONS preflight
-          # first — so a same-origin request redirected cross-origin to an unsafe resource
-          # is preflighted on the NEW origin (send-redirect-to-cors), not just an initially
-          # cross-origin one (access-control-basic-get-fail-non-simple / preflight-*).
-          if cross_origin && cors_unsafe_request?(method, headers)
-            return nil unless cors_preflight_ok?(target, method, headers, effective_origin, with_credentials, hop_referer)
+          # (…and an authentication entry sent ahead of a challenge, the caller's own Authorization winning)
+          env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
+          # The CORS-preflight a cross-origin CORS-unsafe hop sends first, unless the cache covers it (cors.rs).
+          if preflight
+            unsafe, preflight_origin = preflight
+            status, ph = cors_run_preflight(target, method, unsafe, preflight_origin, hop_referer)
+            answer = [status.to_i, *PREFLIGHT_RESPONSE_HEADERS.map {|name| cors_value(ph, name) }, server_delay_ms_of(ph)]
+            return nil unless plan.preflight_answer(answer, Process.clock_gettime(Process::CLOCK_MONOTONIC))
           end
           env['HTTP_ORIGIN'] = origin_value if origin_value
           if sec_fetch
@@ -10074,170 +9970,99 @@ module Capybara
           end
           response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
           status, resp_headers, resp_body = response
-          Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(resp_headers)
+          step, *args = plan.response(status.to_i, response_fields(resp_headers), env.key?('HTTP_AUTHORIZATION'))
           # Transparent HTTP Basic auth (RFC 7617; http_auth.rs `answers_challenge`): a request carrying CHALLENGE
-          # credentials (open() user/pass / URL userinfo) that gets a 401 "Basic" challenge — including credentials (the
-          # hop's, its cookies' too), its response tainting not "cors" (a CORS request whose chain left its origin), and
-          # not having sent an Authorization already (an explicit setRequestHeader / a pre-emptively-attached entry) — is
-          # re-sent ONCE with them; only the authenticated response reaches script, the 401 never does
-          # (send-authentication-basic / -existing-session).
-          answered = Native.http_auth_answers(
-            status.to_i,
-            !challenge_authz.nil?,
-            cors && crossed,
-            send_cookies,
-            env.key?('HTTP_AUTHORIZATION'),
-            (www = header_field(resp_headers, 'www-authenticate')) && header_text(www)
-          )
-          if answered
+          # credentials (open() user/pass / URL userinfo) re-sent ONCE with them where a 401 "Basic" challenge asks; only
+          # the authenticated response reaches script (send-authentication-basic / -existing-session).
+          if step == 'retry_auth'
             resp_body.close if resp_body.respond_to?(:close)
-            env['HTTP_AUTHORIZATION'] = challenge_authz
+            env['HTTP_AUTHORIZATION'] = args[0]
             response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
             status, resp_headers, resp_body = response
+            step, *args = plan.response(status.to_i, response_fields(resp_headers), true)
           end
           # Fetch credentials mode "omit" ignores credentials the response sends back too —
           # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
           merge_set_cookie(resp_headers, target, env) unless credentials == 'omit'
-          # Cache the challenge credential the 401-retry above just supplied, where the origin ACCEPTED it
-          # (no 401 again), for the pre-emptive send above — an authentication entry exists only once a
-          # challenge was answered (Fetch "HTTP-network-or-cache fetch"; Chrome sends nothing pre-emptively
-          # for credentials a server never asked for, measured). Only the request's OWN origin is cached:
-          # Authorization is stripped on a cross-origin redirect hop (above), so origin A's credentials
-          # can't seed origin B's cache. (A non-2xx same-origin response — an opaque status-0 no-cors
-          # fetch, a same-origin 3xx — still establishes them, so the gate is "not a 401", not "is a 2xx".)
-          Native.http_auth_accepted(@auth_cache, target, challenge_authz) if answered && status.to_i != 401
-          if status == 304 && cache_entry
-            trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
+          case step
+          when 'revalidated'
+            trace_network(method, target, cache_entry.status, hop_headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
             @@asset_cache.refresh(target, cache_entry, resp_headers)
             # The cache stores the RAW response headers, so a cross-origin cached entry must
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.
-            cached_headers = cross_origin ? cors_exposed_headers(cache_entry.headers, with_credentials) : cache_entry.headers
-            return marked.(response_hash(cache_entry.status, cached_headers, cache_entry.body, target, redirected, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers, encoded: cache_entry.encoded))
-          end
-          # Fetch "CORS check" runs on EVERY cross-origin response — including a 3xx the
-          # UA is about to follow (a redirect whose response lacks a valid Access-Control
-          # -Allow-Origin is itself a network error: access-control-and-redirects). A
-          # credentialed request additionally forbids `*` and needs Allow-Credentials.
-          # (…and a request that took the CORS-preflight path — its grant from the cache or a fresh one — lets the cache's
-          # entries for its origin and URL go: Fetch "main fetch" clears them where corsWithPreflightResponse is a network
-          # error, as Firefox does)
-          if cross_origin && !cors_response_ok?(resp_headers, effective_origin, with_credentials)
+            expose, tainted = args
+            cached_headers = expose.nil? ? cache_entry.headers : cors_exposed_headers(cache_entry.headers, expose)
+            out = response_hash(cache_entry.status, cached_headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers, encoded: cache_entry.encoded)
+            return tainted_response(out, tainted)
+          when 'error'
+            message, store_redirect = args
+            # (…a redirect that fails to be followed logged and stored all the same: HTTP-network-or-cache fetch stores
+            # it before the redirect is handled)
+            unless store_redirect.nil?
+              trace_network(method, target, status, hop_headers, body, resp_headers, nil, t0, true)
+              @@asset_cache.store(target, status, resp_headers, '') if store_redirect
+            end
             resp_body.close if resp_body.respond_to?(:close)
-            Native.cors_preflight_cache_forget(@cors_preflight_cache, effective_origin.to_s, target.to_s) if cors_unsafe_request?(method, headers)
+            raise StandardError, message if message
+
             return nil
-          end
-          # A redirect-status response in a NON-follow mode is handled without following,
-          # keyed on the status ALONE (the Location is never parsed): `error` is a network
-          # error; `manual` is an opaque-redirect filtered response (status 0, empty
-          # statusText/headers, the ORIGINAL request URL, type 'opaqueredirect'). The CORS
-          # check above runs first, so a cross-origin redirect that fails CORS is a network
-          # error either way (redirect-mode / -location).
-          if redirect_mode != 'follow' && REDIRECT_STATUSES.include?(status.to_i)
-            if redirect_mode == 'error'
-              resp_body.close if resp_body.respond_to?(:close)
-              raise StandardError, '[capybara-simulated] fetch: redirect blocked by redirect=error mode'
-            end
-            # A no-cors request may not even opaquely expose a CROSS-origin redirect — a
-            # no-cors non-follow redirect to a cross-origin target is a network error,
-            # while a same-origin one still yields an opaque-redirect.
-            if no_cors_mode && crossed
-              resp_body.close if resp_body.respond_to?(:close)
-              return nil
-            end
+          when 'opaque_redirect'
             # The render bytes must be the DECODED body (like the terminal hop below) — a
             # no-Location 3xx served with Content-Encoding otherwise commits gzip bytes
             # as the document when a navigation renders them.
             return opaque_redirect_hash(target, status, resp_headers, decode_content_encoding(read_rack_body(resp_body), resp_headers))
-          end
-          # Fetch "HTTP-redirect fetch" (fetch_rules.rs `follow_redirect`): the next request — its URL, its method and body,
-          # its `Authorization`, its origin — or a network error; a redirect with no `Location` answers as it is.
-          followed = REDIRECT_STATUSES.include?(status.to_i) && follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
-          if followed
-            # Log this hop (3xx) before method/body are rewritten for the next.
-            trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
-            # Cache the redirect itself (a cacheable 3xx with freshness) BEFORE following it — HTTP-network-or-cache
-            # fetch stores it before the redirect is handled, one that fails included — so a later only-if-cached /
-            # force-cache request can follow the redirect chain from the cache (request-cache "uses cached …
-            # redirects"). Same store gate as the terminal hop.
-            @@asset_cache.store(target, status, resp_headers, '') if method == 'GET' && cache_mode != 'no-store' && !skip_cache
-          end
-          case followed
-          when String
-            resp_body.close if resp_body.respond_to?(:close)
-            return nil
-          when Array
-            next_url, bits = followed
-            redirected = true
-            ref_source = hop_referer   # the next hop strips from what THIS hop sent
-            # A redirect response's Referrer-Policy overrides the policy for the next hop
-            # (redirect-referrer-override): the last valid token of the header wins.
-            ref_policy = referrer_policy_header(resp_headers) || ref_policy
-            # (…its origin, once tainted, serialized "null": the Origin header the next hops send, and what the CORS check
-            # and the preflight compare against — the server must allow 'null' or '*')
-            effective_origin = 'null' if bits & REDIRECT_TAINTS_ORIGIN != 0
-            if bits & REDIRECT_DROPS_AUTHORIZATION != 0 && headers.is_a?(Hash)
-              headers = headers.reject {|k, _| k.to_s.casecmp?('authorization') }
-            end
-            if bits & REDIRECT_TO_GET != 0
-              method  = 'GET'
-              body    = nil
-              headers = headers.reject {|k, _| REDIRECT_DROPPED_HEADERS.include?(k.to_s.downcase) } if headers.is_a?(Hash)
-            end
-            target = next_url
+          when 'follow'
+            store_redirect, to_get = args
+            # Log this hop (3xx) before method/body are rewritten for the next, and store the redirect itself (a
+            # cacheable 3xx with freshness) BEFORE following it, so a later only-if-cached / force-cache request can follow
+            # the chain from the cache (request-cache "uses cached … redirects").
+            trace_network(method, target, status, hop_headers, body, resp_headers, nil, t0, true)
+            @@asset_cache.store(target, status, resp_headers, '') if store_redirect
+            body = nil if to_get
             resp_body.close if resp_body.respond_to?(:close)
             next
           end
+          kind, null_body, store, expose, total_delay, tainted, nav = args
           # (…a body the wire cut short read as far as it came, and then fails — no response the cache keeps)
           cut_short = resp_body.is_a?(CutShortBody)
           body_str  = read_rack_body(resp_body)
           # A HEAD response, and a null-body status (204/205/304), have NO body — the UA
           # discards whatever the server sent and exposes response.body as null
-          # (response-method HEAD; response-null-body). `null_body` flags it so the JS
-          # Response reports a null body + empty text.
-          null_body = method.to_s.upcase == 'HEAD' || NULL_BODY_STATUSES.include?(status.to_i)
+          # (response-method HEAD; response-null-body).
           body_str = '' if null_body
           # The UA transparently decodes a Content-Encoding'd body (gzip/deflate); the
           # header stays, the bytes are inflated (response-data-gzip / -deflate). The size on
           # the wire is what Resource Timing's `encodedBodySize` reports.
           encoded_size = body_str.bytesize
-          body_str = decode_content_encoding(body_str, resp_headers)
-          # A cross-origin response only EXPOSES (getResponseHeader / getAllResponseHeaders)
-          # the CORS-safelisted response headers plus those named in Access-Control-Expose
-          # -Headers (`*` = all). content-type stays safelisted, so response decoding is
-          # unaffected. (Filtered for script exposure only — trace / set-cookie / cache see
-          # the full set.) The CORS check itself already ran above (incl. on 3xx hops).
-          # The virtual server delay is EPHEMERAL processing time (accumulated across the preflight +
-          # every redirect hop): the client reads the TOTAL to time its async deferral, but it must
-          # never be cached or replayed on a cache hit — strip it from the traced/stored response and
-          # expose the total to the CLIENT only (added after CORS filtering, so it always survives).
-          total_delay      = Thread.current[:csim_fetch_server_delay_ms].to_i
-          resp_headers      = resp_headers.reject {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
-          exposed_headers   = cross_origin ? cors_exposed_headers(resp_headers, with_credentials) : resp_headers
-          exposed_headers   = exposed_headers.merge('X-Csim-Server-Delay-Ms' => total_delay.to_s) if total_delay > 0
-          trace_network(method, target, status, headers, body, resp_headers, body_str, t0, false)
-          # A no-store request must not write the cache (RFC 9111 §5.2.1.5); a request carrying
-          # the author's own conditional bypasses the UA cache entirely (read AND write) — it's
-          # "treated similarly to no-store" (request-cache-default-conditional). Every other mode
-          # (incl. reload, which refreshes it) stores a cacheable GET response.
-          @@asset_cache.store(target, status, resp_headers, body_str, encoded: encoded_size) if method == 'GET' && cache_mode != 'no-store' && !skip_cache && !cut_short
-          # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed
-          # headers, empty URL (cors-basic "Opaque filter"). Otherwise the type is 'cors'
-          # for a cross-origin (CORS-allowed) response, else 'basic'.
-          if no_cors_mode && crossed
+          body_str     = decode_content_encoding(body_str, resp_headers)
+          # A cross-origin response only EXPOSES the CORS-safelisted response headers plus those its
+          # Access-Control-Expose-Headers names (`*` all); trace, Set-Cookie and the cache see the full set. The virtual
+          # server delay (a handler's `time.sleep`, wpt_py_handler.py) the preflight and every hop accumulated is the
+          # client's alone — its `timeout` spans them all (timeout-multiple-fetches) — never cached or replayed: stripped
+          # from the traced and stored response, the total added after the CORS filter.
+          resp_headers    = resp_headers.reject {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
+          exposed_headers = expose.nil? ? resp_headers : cors_exposed_headers(resp_headers, expose)
+          exposed_headers = exposed_headers.merge('X-Csim-Server-Delay-Ms' => total_delay.to_s) if total_delay.positive?
+          trace_network(method, target, status, hop_headers, body, resp_headers, body_str, t0, false)
+          @@asset_cache.store(target, status, resp_headers, body_str, encoded: encoded_size) if store && !cut_short
+          # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed headers, empty URL (cors-basic
+          # "Opaque filter").
+          if kind == 'opaque'
             return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size,
                                                                                     opaque_render_meta: [status, header_text(header_field(resp_headers, 'content-type'))])
           end
-          out = marked.(response_hash(status, exposed_headers, body_str, target, redirected, type: crossed ? 'cors' : 'basic', body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers))
-          # (…a document's navigation request's the method its last hop went with, which its session history entry
-          # keeps: a POST's through a 307 / 308 still one, a 303's a GET)
-          out['method'] = method.to_s if navigation && out
-          # (…and the Referer it sent, the referrer of the document it makes)
-          out['referrer'] = hop_referer if navigation && out && hop_referer
-          return out
+          out = response_hash(status, exposed_headers, body_str, target, plan.redirected?, type: kind, body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
+          # (…a document's navigation request's the method its last hop went with, which its session history entry keeps —
+          # a POST's through a 307 / 308 still one, a 303's a GET — and the Referer it sent, the referrer of the document
+          # it makes)
+          if nav && out
+            out['method']   = nav[0]
+            out['referrer'] = nav[1] if nav[1]
+          end
+          return tainted_response(out, tainted)
         end
-        raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
       rescue StandardError => e
         warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
         nil
@@ -13047,39 +12872,6 @@ module Capybara
       # choice), 304 (not modified), 305/306 (deprecated) are NOT redirects: the 3xx
       # response is returned to the caller as-is (xhr send-redirect basics).
       REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
-      # Statuses whose response has no body (Fetch "null body status") — the body is dropped
-      # and response.body is null (response-null-body). (101 is unreachable here.)
-      NULL_BODY_STATUSES = [204, 205, 304].freeze
-      # Request-body headers removed when a redirect nulls the body (method → GET).
-      REDIRECT_DROPPED_HEADERS = %w[content-encoding content-language content-location content-type content-length].freeze
-
-      # `Native.follow_redirect`'s bits: the next request a bodyless GET, its `Authorization` gone, its origin tainted.
-      REDIRECT_TO_GET              = 1
-      REDIRECT_DROPS_AUTHORIZATION = 2
-      REDIRECT_TAINTS_ORIGIN       = 4
-
-      # Fetch "HTTP-redirect fetch" over a redirect response of `status` with `resp_headers` to the request at `target`
-      # (fetch_rules.rs `follow_redirect`): nil to answer with it, a network error's reason, or [next URL, bits]. Its
-      # response tainting is "cors" for a CORS request whose chain has been at another origin (`crossed`); its origin is
-      # `req_origin`, tainted where `effective_origin` is already 'null'. A `Location` given more than once, differently,
-      # is a network error (Fetch "extract header list values": a single header's list of more than one is failure); its
-      # bytes no UTF-8 are percent-encoded, as Chrome sends them (`url_text`).
-      def follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
-        locations = location_fields(resp_headers)
-        return 'more than one Location' if locations.size > 1
-
-        Native.follow_redirect(
-          status.to_i,
-          method.to_s,
-          target,
-          target,
-          url_text(locations.first),
-          cors == true,
-          req_origin,
-          cors == true && crossed,
-          effective_origin == 'null'
-        )
-      end
 
       # A navigation's redirect target: the response's Location where it is a redirect status.
       def redirect_location(status, headers)
@@ -13126,70 +12918,7 @@ module Capybara
         url.empty? ? nil : url
       end
 
-      # Fetch "CORS-safelisted method" / "…request-header", the engine's (fetch_rules.rs) as the page's are: a request is
-      # "simple" (no preflight) iff its method is safelisted AND every author header is — a safelisted name with a value
-      # that keeps it so (Content-Type only a urlencoded / multipart / text/plain one, no CORS-unsafe byte, 128 bytes at
-      # most).
-
-      # The sorted, lowercased author header names that are NOT CORS-safelisted (a safelisted NAME whose VALUE fails the
-      # safelisting included): what Access-Control-Request-Headers echoes and a grant must cover (cors.rs).
-      def cors_unsafe_headers(headers) = Native.cors_unsafe_headers((headers || {}).map {|k, v| [k.to_s, v.to_s] })
-
-      def cors_unsafe_request?(method, headers)
-        !Native.cors_safelisted_method(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
-      end
-
-      # Fetch "CORS check" on a cross-origin response (cors.rs `check`): its Access-Control-Allow-Origin `*` or the
-      # request's (effective) origin — that origin alone, and Access-Control-Allow-Credentials `true`, for a credentialed
-      # one (withCredentials).
-      def cors_response_ok?(resp_headers, origin, credentialed)
-        Native.cors_check(
-          cors_value(resp_headers, 'access-control-allow-origin'),
-          cors_value(resp_headers, 'access-control-allow-credentials'),
-          origin,
-          credentialed == true
-        )
-      end
-
-      # Whether a URL carries userinfo (`user[:password]@`). A CORS request to such a
-      # URL is a network error (access-control-and-redirects "user info" subtest).
-      def url_has_userinfo?(url)
-        u = parse_url(url.to_s)
-        !u.nil? && !(u[:username].empty? && u[:password].empty?)
-      end
-
-      # An author-set conditional header means the CALLER is doing its own revalidation,
-      # so the UA cache must step aside: the request reaches the origin and the server's
-      # own 304/200 decision is returned (send-conditional), not a cached hit.
-      CONDITIONAL_REQUEST_HEADERS = %w[if-none-match if-modified-since if-match if-unmodified-since if-range].freeze
-      def request_has_conditional_headers?(headers)
-        headers.is_a?(Hash) && headers.any? {|k, _| CONDITIONAL_REQUEST_HEADERS.include?(k.to_s.downcase) }
-      end
-
-      # Run the CORS preflight unless the window's CORS-preflight cache already covers this request (cors.rs: an entry
-      # for its method and each of its unsafe header names, by origin, URL and credentials, within its max-age), its grant
-      # stored for the requests after it. Returns false (= network error) only when a fresh preflight is needed AND fails —
-      # and then the cache's entries for the request's origin and URL go (Fetch "clear cache entries").
-      # (…on the REAL monotonic clock, not the virtual one)
-      def cors_preflight_ok?(target, method, headers, req_origin, credentialed, referer)
-        unsafe = cors_unsafe_headers(headers)
-        now    = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        return true if Native.cors_preflight_cached(@cors_preflight_cache, req_origin.to_s, target.to_s, credentialed == true, method.to_s, unsafe, now)
-
-        status, ph = cors_run_preflight(target, method, unsafe, req_origin, referer)
-        granted    = status && Native.cors_preflight(
-          @cors_preflight_cache,
-          [status.to_i, *PREFLIGHT_RESPONSE_HEADERS.map {|name| cors_value(ph, name) }],
-          req_origin.to_s,
-          target.to_s,
-          credentialed == true,
-          method.to_s,
-          unsafe,
-          now
-        )
-        Native.cors_preflight_cache_forget(@cors_preflight_cache, req_origin.to_s, target.to_s) unless granted
-        granted
-      end
+      # The fields of a CORS-preflight's response its verdict reads (fetch_plan.rs `preflight_answer`, cors.rs `preflight`).
       PREFLIGHT_RESPONSE_HEADERS = %w[
         access-control-allow-origin access-control-allow-credentials access-control-allow-methods access-control-allow-headers
         access-control-max-age
@@ -13220,8 +12949,6 @@ module Capybara
         response = dispatch_rack_or_http(target, env, method: 'OPTIONS', body: nil) or return nil
         status, ph, pbody = response
         pbody.close if pbody.respond_to?(:close)
-        # A slow preflight counts toward the client's timeout too (timeout-multiple-fetches).
-        Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(ph) if Thread.current[:csim_fetch_server_delay_ms]
         [status, ph]
       end
 
@@ -13230,6 +12957,29 @@ module Capybara
         return 0 unless headers.is_a?(Hash)
         pair = headers.find {|k, _| k.to_s.casecmp?('x-csim-server-delay-ms') }
         pair ? header_text(pair.last).to_i : 0
+      end
+
+      # A request's author headers as [name, value] pairs, the plan's to carry across its hops (fetch_plan.rs).
+      def request_header_pairs(headers) = headers.is_a?(Hash) ? headers.map {|k, v| [k.to_s, v.to_s] } : []
+      # …and the fields of a hop's response it reads: WWW-Authenticate, Access-Control-Allow-Origin and -Credentials,
+      # Referrer-Policy (parsed), the virtual server delay, and the Location fields.
+      def response_fields(headers)
+        www = header_field(headers, 'www-authenticate')
+        [
+          www && header_text(www),
+          cors_value(headers, 'access-control-allow-origin'),
+          cors_value(headers, 'access-control-allow-credentials'),
+          referrer_policy_header(headers),
+          server_delay_ms_of(headers),
+          location_fields(headers)
+        ]
+      end
+      # A response the fetch answers with marked tainted, where its chain left its client's origin though its mode makes
+      # it no CORS one: what a mode-less load's resource is not CORS-same-origin by (a sheet's origin-clean flag unset,
+      # sheet_fetch.rs `fetch`).
+      def tainted_response(out, tainted)
+        out['tainted'] = true if out && tainted
+        out
       end
 
       # The response headers a cross-origin "cors" response exposes to getResponseHeader / getAllResponseHeaders

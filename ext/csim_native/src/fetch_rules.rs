@@ -653,39 +653,11 @@ pub(crate) fn bad_port_for_ruby(port: u32) -> bool {
 pub(crate) fn redirect_to_get_for_ruby(status: u32, method: magnus::RString) -> bool {
     redirect_to_get(status, &ruby_bytes(method))
 }
-// `follow_redirect` for the host's fetch: nil to answer with the redirect response, a network error's reason, or
-// [next URL, bits] to follow (bits: 1 a bodyless GET, 2 its Authorization dropped, 4 its origin tainted) — `origin` nil
-// for a request of none.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn follow_redirect_for_ruby(
-    ruby: &magnus::Ruby,
-    status: u32,
-    method: magnus::RString,
-    current: String,
-    response_url: String,
-    location: Option<String>,
-    cors_mode: bool,
-    origin: Option<String>,
-    tainting_cors: bool,
-    tainted_origin: bool,
-) -> magnus::Value {
-    use magnus::IntoValue;
-    let method = ruby_bytes(method);
-    let request = Redirecting { method: &method, current: &current, cors_mode, origin: origin.as_deref().unwrap_or(""), tainting_cors, tainted_origin };
-    match follow_redirect(&request, status, &response_url, location.as_deref()) {
-        Redirected::Answer => ruby.qnil().into_value_with(ruby),
-        Redirected::Fail(why) => why.into_value_with(ruby),
-        Redirected::Follow(r) => (r.url, r.to_get as u32 | (r.drop_authorization as u32) << 1 | (r.tainted_origin as u32) << 2).into_value_with(ruby),
-    }
-}
 pub(crate) fn service_worker_response_allowed_for_ruby(mode: String, redirect: String, response_type: String, redirected: bool) -> bool {
     service_worker_response_allowed(&mode, &redirect, &response_type, redirected)
 }
 pub(crate) fn sw_subresource_usable_for_ruby(destination: String, mode: String, response_type: String, redirected: bool, status: u32) -> bool {
     sw_subresource_usable(&destination, &mode, &response_type, redirected, status)
-}
-pub(crate) fn cors_safelisted_method_for_ruby(method: magnus::RString) -> bool {
-    cors_safelisted_method(&ruby_bytes(method))
 }
 pub(crate) fn cors_safelisted_request_header_for_ruby(name: magnus::RString, value: magnus::RString) -> bool {
     cors_safelisted_request_header(&ruby_bytes(name), &ruby_bytes(value))

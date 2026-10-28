@@ -1,12 +1,12 @@
 // What each hop of a fetch the host makes carries (Fetch "HTTP-network-or-cache fetch" over its request; RFC 6265bis's
 // site for cookies): whether it is a CORS hop to another origin, whether it sends cookies, its `Origin`, its
 // `Sec-Fetch-*` (Fetch Metadata), and the site its cookies are judged by — the chain's widest so far, latched across
-// the hops as the Sec-Fetch-Site one is. The host makes one `FetchHops` per fetch, with what its client is, and asks it
-// at each hop; it sends the request and keeps what comes back.
+// the hops as the Sec-Fetch-Site one is. A fetch's plan (fetch_plan.rs) makes one, with what its client is, and asks it
+// at each hop.
 
 use std::cell::RefCell;
 
-use magnus::{function, method, prelude::*, Error, RArray, RModule, Ruby};
+use magnus::{prelude::*, Error, RArray};
 
 use crate::referrer::{cross_site_for_cookies, fetch_site, http_origin, origin_header, wider_site};
 
@@ -45,7 +45,7 @@ struct Client {
 }
 
 // What a hop carries (`FetchHops#hop`).
-type Hop = (bool, bool, Option<String>, Option<(&'static str, String, String, bool, bool)>, Option<&'static str>, bool);
+pub(crate) type Hop = (bool, bool, Option<String>, Option<(&'static str, String, String, bool, bool)>, Option<&'static str>, bool);
 
 // The chain's latches: the widest Sec-Fetch-Site and cookie site so far.
 #[derive(Default)]
@@ -54,7 +54,6 @@ struct Latches {
     cookie_site: Option<&'static str>,
 }
 
-#[magnus::wrap(class = "Capybara::Simulated::Native::FetchHops", free_immediately)]
 pub(crate) struct FetchHops {
     client: Client,
     latches: RefCell<Latches>,
@@ -101,7 +100,7 @@ impl FetchHops {
     // (…the client's cookie judge its origin's where it is a mode's request — its document's or its initiator's — else
     // its document's URL, an opaque one's `null`)
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub(crate) fn new(
         mode: Option<String>,
         dest: Option<String>,
         nav_dest: Option<String>,
@@ -143,14 +142,14 @@ impl FetchHops {
     }
 
     // #seed(site): the chain's Sec-Fetch-Site so far — a worker's re-fetch of a navigation its network hops widened.
-    fn seed(&self, site: Option<String>) {
+    pub(crate) fn seed(&self, site: Option<String>) {
         self.latches.borrow_mut().sec_site = site.as_deref().map(static_site);
     }
 
     // #hop(target, method, origin, policy) -> [cross-origin CORS hop, sends cookies, Origin (nil none), Sec-Fetch
     // ([site, mode, dest, user, top-level]; nil none), cookie site (nil none), Lax exception] for the hop to `target` of
     // a request of `method` whose origin is `origin` ('null' tainted) under referrer policy `policy`.
-    fn hop(&self, target: String, method: String, origin: Option<String>, policy: Option<String>) -> Hop {
+    pub(crate) fn hop(&self, target: String, method: String, origin: Option<String>, policy: Option<String>) -> Hop {
         let c = &self.client;
         let mut latches = self.latches.borrow_mut();
         let tainted = origin.as_deref() == Some("null");
@@ -186,7 +185,7 @@ impl FetchHops {
 
     // #cached(target): a hop the HTTP cache answered — a redirect it followed from the cache — is in the chain all the
     // same: its URL widens the Sec-Fetch-Site and cookie site latches as a network hop's does.
-    fn cached(&self, target: String) {
+    pub(crate) fn cached(&self, target: String) {
         self.client.advance(&mut self.latches.borrow_mut(), &target);
     }
 }
@@ -206,14 +205,6 @@ const USER_ACTIVATED: u32 = 2;
 const CROSS_SITE_FRAME: u32 = 4;
 const WORKER: u32 = 8;
 
-pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
-    let class = native.define_class("FetchHops", ruby.class_object())?;
-    class.define_singleton_method("new", function!(FetchHops::new, 9))?;
-    class.define_method("seed", method!(FetchHops::seed, 1))?;
-    class.define_method("hop", method!(FetchHops::hop, 4))?;
-    class.define_method("cached", method!(FetchHops::cached, 1))?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

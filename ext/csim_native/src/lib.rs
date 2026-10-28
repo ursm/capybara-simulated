@@ -102,6 +102,7 @@ mod search_params;
 mod select_options;
 mod session_history;
 mod fetch_hop;
+mod fetch_plan;
 mod sw_router;
 mod system_clipboard;
 mod text_setters;
@@ -283,29 +284,21 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
-    // What each hop of a fetch carries (fetch_hop.rs).
-    fetch_hop::define(native, ruby)?;
+    // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
+    // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).
+    fetch_plan::define(native, ruby)?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
-    // CORS: a request's unsafe header names, the CORS check, a preflight's verdict and each session's preflight cache, the
-    // headers a CORS response exposes (cors.rs).
-    native.define_module_function("cors_unsafe_headers", magnus::function!(cors::unsafe_header_names_for_ruby, 1))?;
-    native.define_module_function("cors_check", magnus::function!(cors::check_for_ruby, 4))?;
-    native.define_module_function("cors_preflight", magnus::function!(cors::preflight_for_ruby, 8))?;
+    // Each session's CORS-preflight cache, and the headers a CORS response exposes (cors.rs).
     native.define_module_function("cors_preflight_cache_new", magnus::function!(cors::cache_new_for_ruby, 0))?;
     native.define_module_function("cors_preflight_cache_clear", magnus::function!(cors::cache_clear_for_ruby, 1))?;
-    native.define_module_function("cors_preflight_cache_forget", magnus::function!(cors::cache_forget_for_ruby, 3))?;
     native.define_module_function("cors_preflight_cache_drop", magnus::function!(cors::cache_drop_for_ruby, 1))?;
-    native.define_module_function("cors_preflight_cached", magnus::function!(cors::cache_covers_for_ruby, 7))?;
     native.define_module_function("cors_exposed_names", magnus::function!(cors::exposed_names_for_ruby, 3))?;
     // Each session's cookie store (cookie_jar.rs).
     native.define_module_function("cookie_jar_new", magnus::function!(cookie_jar::new_for_ruby, 0))?;
-    // …and its HTTP authentication entries, and whether a 401 is answered (http_auth.rs).
+    // …and its HTTP authentication entries (http_auth.rs).
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
     native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;
-    native.define_module_function("http_auth_entry", magnus::function!(http_auth::entry_for_ruby, 2))?;
-    native.define_module_function("http_auth_accepted", magnus::function!(http_auth::accepted_for_ruby, 3))?;
-    native.define_module_function("http_auth_answers", magnus::function!(http_auth::answers_challenge_for_ruby, 6))?;
     // The HTTP cache's policy (http_cache.rs): what is stored, for how long, and what a 304 updates.
     native.define_module_function("http_cache_storable", magnus::function!(http_cache::storable_for_ruby, 3))?;
     native.define_module_function("http_cache_refreshed", magnus::function!(http_cache::refreshed_for_ruby, 3))?;
@@ -332,9 +325,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;
     native.define_module_function("target_keyword", magnus::function!(navigables::target_keyword_for_ruby, 1))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
-    native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
-    native.define_module_function("follow_redirect", magnus::function!(fetch_rules::follow_redirect_for_ruby, 9))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;
     native.define_module_function("default_accept", magnus::function!(fetch_rules::default_accept_for_ruby, 1))?;
     native.define_module_function("sw_subresource_usable", magnus::function!(fetch_rules::sw_subresource_usable_for_ruby, 5))?;

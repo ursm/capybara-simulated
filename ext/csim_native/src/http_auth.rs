@@ -31,7 +31,7 @@ pub(crate) fn answers_challenge(status: u32, challenge: bool, tainting_cors: boo
     status == 401 && challenge && !tainting_cors && include_credentials && !sent_authorization && basic
 }
 
-// — for the host —
+// A session's entries made (the host's), cleared, read and kept (a fetch's plan's: fetch_plan.rs).
 pub(crate) fn new_for_ruby() -> u64 {
     let mut reg = lock();
     reg.0 += 1;
@@ -46,20 +46,17 @@ pub(crate) fn clear_for_ruby(id: u64) {
     }
 }
 // The entry for `url`'s origin, sent before it asks: none where it has none.
-pub(crate) fn entry_for_ruby(id: u64, url: String) -> Option<String> {
+pub(crate) fn entry(id: u64, url: String) -> Option<String> {
     let origin = origin(&url)?;
     lock().1.get(&id)?.0.get(&origin).cloned()
 }
 // `authorization`, which `url`'s origin accepted, kept for it. (Fetch creates the entry whatever the answered request
 // gets back; the host keeps only one the origin did not refuse with another 401, as no browser keeps credentials refused.)
-pub(crate) fn accepted_for_ruby(id: u64, url: String, authorization: String) {
+pub(crate) fn accepted(id: u64, url: String, authorization: String) {
     let Some(origin) = origin(&url) else { return };
     if let Some(entries) = lock().1.get_mut(&id) {
         entries.0.insert(origin, authorization);
     }
-}
-pub(crate) fn answers_challenge_for_ruby(status: u32, challenge: bool, tainting_cors: bool, include_credentials: bool, sent_authorization: bool, www_authenticate: Option<String>) -> bool {
-    answers_challenge(status, challenge, tainting_cors, include_credentials, sent_authorization, www_authenticate.as_deref())
 }
 
 #[cfg(test)]
@@ -84,11 +81,11 @@ mod tests {
     #[test]
     fn an_entry_is_its_origins() {
         let id = new_for_ruby();
-        accepted_for_ruby(id, "http://a.test/x".into(), "Basic a".into());
-        assert_eq!(entry_for_ruby(id, "http://a.test/y?z".into()).as_deref(), Some("Basic a"));
-        assert_eq!(entry_for_ruby(id, "http://a.test:81/".into()), None);
-        assert_eq!(entry_for_ruby(id, "data:,x".into()), None);
+        accepted(id, "http://a.test/x".into(), "Basic a".into());
+        assert_eq!(entry(id, "http://a.test/y?z".into()).as_deref(), Some("Basic a"));
+        assert_eq!(entry(id, "http://a.test:81/".into()), None);
+        assert_eq!(entry(id, "data:,x".into()), None);
         clear_for_ruby(id);
-        assert_eq!(entry_for_ruby(id, "http://a.test/".into()), None);
+        assert_eq!(entry(id, "http://a.test/".into()), None);
     }
 }

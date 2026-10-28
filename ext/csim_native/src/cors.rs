@@ -159,18 +159,6 @@ impl PreflightCache {
     }
 }
 
-// (…`pairs` [[name, value], …] of byte strings)
-pub(crate) fn unsafe_header_names_for_ruby(pairs: magnus::RArray) -> Result<Vec<String>, magnus::Error> {
-    let mut headers = Vec::with_capacity(pairs.len());
-    for pair in pairs.into_iter() {
-        let pair = magnus::RArray::try_convert(pair)?;
-        headers.push((ruby_bytes(pair.entry(0)?), ruby_bytes(pair.entry(1)?)));
-    }
-    Ok(unsafe_header_names(&headers))
-}
-pub(crate) fn check_for_ruby(acao: Option<String>, acac: Option<String>, origin: Option<String>, credentialed: bool) -> bool {
-    check(acao.as_deref(), acac.as_deref(), origin.as_deref(), credentialed)
-}
 // …a session's cache: made, emptied (the session reset), asked whether it covers a request, given a preflight's grant —
 // `now` the host's monotonic seconds. Its grant (`preflight`) made and stored at once; whether one was.
 pub(crate) fn cache_new_for_ruby() -> u64 {
@@ -190,18 +178,19 @@ pub(crate) fn cache_drop_for_ruby(id: u64) {
     caches().1.remove(&id);
 }
 // …its entries of a request of `origin` to `url` whose preflight or response failed let go (`clear_for`)…
-pub(crate) fn cache_forget_for_ruby(id: u64, origin: String, url: String) {
+pub(crate) fn forget(id: u64, origin: String, url: String) {
     if let Some(cache) = caches().1.get_mut(&id) {
         cache.clear_for(&origin, &url);
     }
 }
-pub(crate) fn cache_covers_for_ruby(id: u64, origin: String, url: String, credentials: bool, method: String, unsafe_names: Vec<String>, now: f64) -> bool {
+// …whether its entries cover a request of `origin` to `url` (`PreflightCache::covers`)…
+pub(crate) fn covers_request(id: u64, origin: String, url: String, credentials: bool, method: String, unsafe_names: Vec<String>, now: f64) -> bool {
     caches().1.get(&id).is_some_and(|c| c.covers(&origin, &url, credentials, &method, &unsafe_names, now))
 }
 // (…[status, acao, acac, methods, headers, max-age] of the preflight's response, [origin, url, credentials, method,
 // unsafe names] of the request)
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn preflight_for_ruby(
+pub(crate) fn grant_preflight(
     id: u64,
     response: (u32, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>),
     origin: String,
