@@ -575,6 +575,9 @@ module Capybara
         # thread — hence the lock) and `transferDrop` the lot on `reset!`
         # (idempotent: an already-imported token no-ops).
         @transfer_tokens      = []
+        # (…and the tokens of the compiled WebAssembly modules a message carried out of its isolate: clone.rs `MODULES`,
+        # process-wide too, read by every import that names one — a broadcast's — and dropped the same way)
+        @module_tokens        = []
         @transfer_tokens_lock = Mutex.new
         # Cross-window `postMessage` inbox. Another window's `target.postMessage`
         # routes through the Driver and lands here; this window drains it into a
@@ -4825,7 +4828,9 @@ module Capybara
       # worker's `__csim_workerPostMessage` host fn closes over its
       # handle and routes outgoing messages onto a shared outbox the
       # main settle drains.
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '')
+      # (…`cluster_key` the agent cluster key of the context making it, which a dedicated worker's is: realm_location.rs
+      # `agent_cluster_key`)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -4921,7 +4926,7 @@ module Capybara
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
-        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, rt: nil, rt_lock: Mutex.new}
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, rt: nil, rt_lock: Mutex.new}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -8805,6 +8810,11 @@ module Capybara
         @transfer_tokens_lock.synchronize { @transfer_tokens << t } if t > 0
         nil
       end
+      def module_token_issued(token)
+        t = token.to_i
+        @transfer_tokens_lock.synchronize { @module_tokens << t } if t > 0
+        nil
+      end
 
       # Release every outstanding transfer token's backing store. The transfer
       # registry is process-wide (it bridges isolates) and survives isolate
@@ -8812,7 +8822,8 @@ module Capybara
       # them on `reset!` via the (still-live) main context — `transferDrop` is
       # idempotent, so dropping already-imported tokens is a harmless no-op.
       def drop_pending_transfers
-        toks = @transfer_tokens_lock.synchronize { ts = @transfer_tokens; @transfer_tokens = []; ts }
+        toks, modules = @transfer_tokens_lock.synchronize { ts = [@transfer_tokens, @module_tokens]; @transfer_tokens = []; @module_tokens = []; ts }
+        Native.wasm_modules_drop(modules) unless modules.empty?
         return if toks.empty?
         @runtime.call('__csimTransferDropAll', toks) rescue nil
       end
@@ -9059,6 +9070,10 @@ module Capybara
             "opaque:worker#{handle}"
           end
         rt.eval_void("globalThis.__dom.setOriginKey(#{JSON.generate(worker_origin_key)});") if worker_origin_key
+        # …and its agent cluster (HTML "obtain a dedicated/shared worker agent"): a dedicated worker's its owner's, a shared
+        # or service worker's one of its own — what a WebAssembly.Module it is sent is read back in (clone.rs).
+        cluster = shared || service ? "worker:#{handle}" : record&.dig(:cluster_key)
+        rt.eval_void("globalThis.__dom.setAgentClusterKey(#{JSON.generate(cluster)});") if cluster
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The
         # registration SCOPE rides in first — `self.registration.scope` must be the

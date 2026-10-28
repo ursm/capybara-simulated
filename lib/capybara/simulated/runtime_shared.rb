@@ -121,7 +121,7 @@ module Capybara
         # a[3] is the CREATING realm (the worker dies when it is discarded); a[4] that context's
         # CURRENT controller handle, which a DEDICATED worker inherits rather than scope-matching
         # its own — often opaque (blob:/data:) — script URL. 0 when the creator is uncontrolled.
-        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s) },
+        '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s, cluster_key: a[7]) },
         # A register(), update() or unregister(), scheduled as a job at its scope (see sw_schedule_job), and the job run, the task
         # queued for it — and the registration's updateViaCache mode, REGISTRATION-wide state (a frame's
         # registration object must see the mode the top window set).
@@ -207,6 +207,7 @@ module Capybara
         '__csim_transferFetch'       => ->(b, *a) { b.transfer_buffer_fetch(a[0]) },
         # Zero-copy postMessage transfer-token bookkeeping (see Browser#drop_pending_transfers).
         '__csim_transferIssued'      => ->(b, *a) { b.transfer_token_issued(a[0]); nil },
+        '__csim_moduleIssued'        => ->(b, *a) { b.module_token_issued(a[0]); nil },
         # Universal-server context (WPT runner)? Gates cross-origin eager frame
         # building: only there is a cross-origin iframe's content served locally,
         # so an ordinary app leaves cross-origin frames lazy (= baseline) and never

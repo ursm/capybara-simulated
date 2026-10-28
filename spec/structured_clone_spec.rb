@@ -138,6 +138,8 @@ RSpec.describe 'Structured clone of platform objects' do
     )
   end
 
+  # (…a WebAssembly.Memory's buffer, which cannot be detached, DetachArrayBuffer's TypeError: HTML lets it through —
+  # WPT wasm/serialization/arraybuffer/transfer.window.js)
   it 'checks a transfer list before and after serializing, and moves nothing it refuses' do
     session.visit '/'
     out = probe(<<~JS)
@@ -149,7 +151,7 @@ RSpec.describe 'Structured clone of platform objects' do
         detached: err(() => structuredClone({ get x() { structuredClone(late, { transfer: [late] }); return 1; } }, { transfer: [late] }))
       };
     JS
-    expect(out).to eq('wasm' => ['DataCloneError', false], 'fake' => ['DataCloneError', false], 'detached' => 'DataCloneError')
+    expect(out).to eq('wasm' => ['TypeError', false], 'fake' => ['DataCloneError', false], 'detached' => 'DataCloneError')
   end
 
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
@@ -307,6 +309,42 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(s.evaluate_script('got').sort).to eq(['message true', 'message true', 'messageerror null', 'messageerror null'])
   end
 
+  # …keyed by ORIGIN in a cross-origin isolated group (HTML "obtain a similar-origin window agent"): a same-site frame of
+  # another origin is another agent cluster there.
+  it 'keys the agent cluster by origin in a cross-origin isolated page' do
+    isolated = {
+      'cross-origin-opener-policy'   => 'same-origin',
+      'cross-origin-embedder-policy' => 'require-corp',
+      'cross-origin-resource-policy' => 'cross-origin'
+    }
+    coi_app = lambda do |env|
+      case env['PATH_INFO']
+      when '/child'
+        [200, {'content-type' => 'text/html', **isolated}, [<<~HTML]]
+          <!doctype html><script>
+            addEventListener('message', (e) => parent.postMessage('message ' + (e.data instanceof WebAssembly.Module), '*'));
+            addEventListener('messageerror', () => parent.postMessage('messageerror', '*'));
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html', **isolated}, [<<~HTML]]
+          <!doctype html><script>window.got = []; addEventListener('message', (e) => got.push(e.data));</script>
+          <iframe id="same" src="/child"></iframe><iframe id="sibling" src="http://other.example.com/child"></iframe>
+        HTML
+      end
+    end
+    s = simulated_session(coi_app)
+    s.visit '/'
+    expect(s.evaluate_script('crossOriginIsolated')).to be(true)
+    s.execute_script(<<~JS)
+      const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      for (const id of ['same', 'sibling']) document.getElementById(id).contentWindow.postMessage(m, '*');
+    JS
+    poll_until { s.evaluate_script('got.length') == 2 }
+
+    expect(s.evaluate_script('got').sort).to eq(['message true', 'messageerror'])
+  end
+
   # …and over a MessagePort whose other end a frame of another site holds, read back in THAT frame's realm (Chrome:
   # "port messageerror").
   it 'posts a WebAssembly.Module over a port to the agent cluster of the realm holding its other end' do
@@ -363,21 +401,37 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(s.evaluate_script('got').sort).to eq(['port message true', 'port messageerror null', 'port ready', 'port ready'])
   end
 
-  # (…a gap: to another isolate — a worker — it is a DataCloneError, but refused as it is serialized, before the transfer
-  # list is moved)
-  it 'refuses a WebAssembly.Module to a worker before it moves the transfer list' do
-    session.visit '/'
-    got = session.evaluate_script(<<~JS)
-      (() => {
-        const w = new Worker('/echo.js');
-        const buffer = new ArrayBuffer(8);
-        const { port1 } = new MessageChannel();
-        const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
-        let name;
-        try { w.postMessage({m, buffer}, [buffer, port1]) } catch (e) { name = e.name }
-        return [name, buffer.byteLength];
-      })()
+  # …and to another isolate by its compiled module's token (clone.rs `MODULES`): a dedicated worker, of its owner's
+  # agent cluster, reads it back and posts it home; a shared worker, an agent cluster of its own, gets a `messageerror`
+  # (WPT wasm/serialization/module window-sharedworker-failure).
+  it 'carries a WebAssembly.Module to a dedicated worker and back, and not to a shared one' do
+    worker_app = lambda do |env|
+      case env['PATH_INFO']
+      when '/shared.js'
+        [200, {'content-type' => 'text/javascript'}, [<<~JS]]
+          onconnect = (e) => {
+            const port = e.ports[0];
+            port.onmessage = () => port.postMessage('message');
+            port.onmessageerror = () => port.postMessage('messageerror');
+          };
+        JS
+      else app.call(env)
+      end
+    end
+    s = simulated_session(worker_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.got = [];
+      const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      const w = new Worker('/echo.js');
+      w.onmessage = (e) => got.push('dedicated ' + (e.data[0].m instanceof WebAssembly.Module && e.data[0].m !== m));
+      w.postMessage({m});
+      const shared = new SharedWorker('/shared.js');
+      shared.port.onmessage = (e) => got.push('shared ' + e.data);
+      shared.port.postMessage({m});
     JS
-    expect(got).to eq(['DataCloneError', 8])
+    poll_until { s.evaluate_script('got.length') == 2 }
+
+    expect(s.evaluate_script('got').sort).to eq(['dedicated true', 'shared messageerror'])
   end
 end

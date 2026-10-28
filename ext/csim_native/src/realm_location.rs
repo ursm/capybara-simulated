@@ -20,6 +20,11 @@ pub(crate) struct RealmLocation {
     // Its document's active sandboxing flag set (sandbox.rs), which every frame it makes inherits — its origin a NEW
     // opaque one where that has the sandboxed origin flag.
     pub(crate) sandbox: u32,
+    // Whether its agent cluster is keyed by its origin, not its site: its browsing context group cross-origin isolated
+    // (`setOriginKeyedCluster`); and a worker's, the key the host gives it (`setAgentClusterKey`): a dedicated one's its
+    // owner's, a shared or service one's its own.
+    origin_keyed: bool,
+    cluster_key: Option<String>,
 }
 
 const HREF: usize = 0;
@@ -41,6 +46,8 @@ impl Default for RealmLocation {
             document_origin: None,
             origin_key: None,
             sandbox: 0,
+            origin_keyed: false,
+            cluster_key: None,
         }
     }
 }
@@ -108,11 +115,16 @@ impl RealmLocation {
         }
         self.origin_key.insert(format!("{OPAQUE_KEY}realm{cid}")).clone()
     }
-    // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"): its origin's site — an
-    // opaque origin its own key — what a WebAssembly.Module serialized in one is read back by in another of it alone.
+    // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"): its origin's site — its
+    // origin where its group is cross-origin isolated, an opaque origin its own key — what a WebAssembly.Module
+    // serialized in one is read back by in another of it alone. (`Origin-Agent-Cluster`, which may key it by origin
+    // too, is not modelled: a gap.)
     pub(crate) fn agent_cluster_key(&mut self, cid: i32) -> String {
+        if let Some(key) = &self.cluster_key {
+            return key.clone();
+        }
         let key = self.origin_key(cid);
-        if key.starts_with(OPAQUE_KEY) {
+        if self.origin_keyed || key.starts_with(OPAQUE_KEY) {
             return key;
         }
         site(&key).unwrap_or(key)
@@ -170,6 +182,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "realmOriginKey", realm_origin_key, context_id);
     register(scope, ns, "sameOriginRealm", same_origin_realm, context_id);
     register(scope, ns, "setOriginKey", set_origin_key, context_id);
+    register(scope, ns, "setOriginKeyedCluster", set_origin_keyed_cluster, context_id);
+    register(scope, ns, "setAgentClusterKey", set_agent_cluster_key, context_id);
+    register(scope, ns, "agentClusterKey", agent_cluster_key_op, context_id);
     register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
     register(scope, ns, "setDomain", set_domain_op, context_id);
     register(scope, ns, "ipHost", ip_host_op, context_id);
@@ -397,6 +412,27 @@ fn set_origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let key = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
     realm(scope, cid).location.origin_key = key;
+}
+
+// __dom.setOriginKeyedCluster(keyed) — whether the calling realm's agent cluster is keyed by its origin
+// (`agent_cluster_key`): its group cross-origin isolated.
+fn set_origin_keyed_cluster(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let keyed = args.get(0).boolean_value(scope);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.origin_keyed = keyed;
+}
+
+// __dom.setAgentClusterKey(key) — the calling realm's agent cluster key, a worker's (`agent_cluster_key`).
+fn set_agent_cluster_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let key = (!args.get(0).is_null_or_undefined()).then(|| args.get(0).to_rust_string_lossy(scope));
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.cluster_key = key;
+}
+// __dom.agentClusterKey() -> the calling realm's agent cluster key: what a dedicated worker it makes is of too.
+fn agent_cluster_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let key = realm(scope, cid).location.agent_cluster_key(cid);
+    rv.set(v8::String::new(scope, &key).unwrap().into());
 }
 
 // __dom.locationPart(part) -> the realm's URL's part number `part` (url_ops.rs `parts`' order) — its origin the one a

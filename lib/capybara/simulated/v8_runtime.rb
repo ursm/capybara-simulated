@@ -38,6 +38,11 @@ begin
   # `memory_limit` needed — the default protection catches at the cap.
   max_old_mb = (ENV['CSIM_V8_MAX_OLD_SPACE_MB'] || '4096').to_i
   RustyRacer::Platform.set_flags!('max-old-space-size': max_old_mb) if max_old_mb > 0
+  # `WebAssembly.compile` / `instantiate` compile on the calling thread, their promise settled as any other: V8's
+  # asynchronous compilation finishes on platform tasks of its own, which this driver's event loop — its own task
+  # queues on a virtual clock — never runs as tasks (it pumps V8's message loop once a settle), so a page awaiting
+  # its module waited for good.
+  RustyRacer::Platform.set_flags!(:'no-wasm-async-compilation')
   # `CSIM_V8_PROF=1` turns on V8's tick-sampling profiler. Output
   # lands in `isolate-*-v8.log`; process with:
   #   node --prof-process isolate-*-v8.log > prof.txt
