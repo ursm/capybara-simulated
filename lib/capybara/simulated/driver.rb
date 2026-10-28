@@ -521,7 +521,10 @@ module Capybara
         # the registry, for its workers' threads to read — Browser#partition_blob)
         ([@browser] + @aux_windows.map {|w| w[:browser] }).each {|b| b.fill_blob_markers unless b.nil? || b.equal?(aux) }
         # (…in its opener's browsing context group, where it has one: its about:blank, cross-origin isolated as it is)
-        aux.inherit_cross_origin_isolation(source) if opener_handle && source
+        if opener_handle && source
+          aux.inherit_cross_origin_isolation(source)
+          aux.inherit_browsing_context_group(source)
+        end
         # (…and its initial about:blank document its creator's origin and base URL — the document that called
         # `window.open`: a window it opens at about:blank stays that document, its origin no new opaque one)
         aux.inherit_creator(**creator) if creator && opener_handle

@@ -214,6 +214,7 @@ mod viewport;
 mod walk;
 mod walk_ops;
 mod walk_reuse;
+mod wasm;
 mod web_locks;
 mod xml_parse;
 mod xpath;

@@ -2598,6 +2598,11 @@ pub(crate) struct Dom {
     // The values serialized and not yet read back or let go, by their numbers (clone.rs).
     pub(crate) serialized: std::collections::HashMap<u32, crate::clone::Serialized>,
     pub(crate) next_serialized: u32,
+    // The WebAssembly promise resolutions queued as tasks and not yet run, by their numbers (wasm.rs).
+    pub(crate) wasm_resolutions: std::collections::HashMap<u32, crate::wasm::Pending>,
+    pub(crate) next_wasm_resolution: u32,
+    // The browsing context group of the isolate's window, and the window's name (realm_location.rs `agent_cluster_key`).
+    pub(crate) browsing_context_group: (String, String),
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's hook a clone of a shadow host attaches the copy's shadow root through (cloning.rs
@@ -3172,6 +3177,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::resource_timing::install(scope, ns, context_id);
     crate::multipart::install(scope, ns, context_id);
     crate::idb::install(scope, ns, context_id);
+    crate::wasm::install(scope);
     crate::agents::install(scope, ns, context_id);
     crate::idb_databases::install(scope, ns, context_id);
     crate::web_locks::install(scope, ns, context_id);

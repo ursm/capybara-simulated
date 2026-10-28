@@ -852,7 +852,9 @@ module Capybara
       # set, which its navigator answers — the top-level window's and every frame's and pop-up's alike.
       # …and whether it is cross-origin isolated: its top-level document's, which a frame's shares (`cross_origin_isolated`,
       # the browser's to set as a document commits).
+      # (…and in its window's browsing context group: realm_location.rs `agent_cluster_key`)
       def init_realm(c)
+        c.call('__csimSetBrowsingContextGroup', @browser.browsing_context_group, "w#{@browser.object_id}")
         c.call('__csimInitRealm', @cross_origin_isolated == true)
         c.call('__csimSetUserAgent', @browser.default_user_agent) if @browser.default_user_agent
       end

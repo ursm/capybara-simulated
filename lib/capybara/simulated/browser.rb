@@ -205,6 +205,7 @@ module Capybara
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
+        @browsing_context_group       = "g#{object_id}"
         @runtime                      = V8Runtime.new(self)
         # The wall-sync escape hatch, cached at construction (CLAUDE.md rule 3 — the env is fixed
         # for the session).
@@ -2193,6 +2194,14 @@ module Capybara
       def cross_origin_isolated? = @runtime&.cross_origin_isolated == true
       # …which a pop-up its opener keeps takes from it, ahead of its initial about:blank document (`boot_response_into_ctx`).
       def inherit_cross_origin_isolation(opener) = (@runtime.cross_origin_isolated = opener.cross_origin_isolated?)
+      # The browsing context group this window is of — a new one's own (named by the window: `initialize`), a pop-up with
+      # an opener its opener's (`inherit_browsing_context_group`) — which keys its agent clusters (realm_location.rs
+      # `agent_cluster_key`): a WebAssembly.Module crosses to another group's realm as a `messageerror`.
+      attr_reader :browsing_context_group
+      def inherit_browsing_context_group(opener)
+        @browsing_context_group = opener.browsing_context_group
+        @runtime.call('__csimSetBrowsingContextGroup', @browsing_context_group, "w#{object_id}")
+      end
       # …and the origin and base URL of the document that opened it, which its about:blank document takes (HTML "create a
       # new browsing context": the creator's origin), the next one the window boots — an opaque one none: a separate VM
       # has no way to share its key, and a new opaque origin is what it would be otherwise.
@@ -3712,8 +3721,9 @@ module Capybara
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
         # reset, so without this they'd cross into the next test untouched).
         drain_app_request_threads
-        drop_pending_transfers
         reset_workers
+        # (…after its workers stopped, so none issues a token past it)
+        drop_pending_transfers
         reset_event_sources
         reset_hijacked_fetches
         reset_websockets
@@ -9072,7 +9082,7 @@ module Capybara
         rt.eval_void("globalThis.__dom.setOriginKey(#{JSON.generate(worker_origin_key)});") if worker_origin_key
         # …and its agent cluster (HTML "obtain a dedicated/shared worker agent"): a dedicated worker's its owner's, a shared
         # or service worker's one of its own — what a WebAssembly.Module it is sent is read back in (clone.rs).
-        cluster = shared || service ? "worker:#{handle}" : record&.dig(:cluster_key)
+        cluster = shared || service ? "#{@browsing_context_group}|worker:#{handle}" : record&.dig(:cluster_key)
         rt.eval_void("globalThis.__dom.setAgentClusterKey(#{JSON.generate(cluster)});") if cluster
         # A service worker runs in a ServiceWorkerGlobalScope: adjust the worker scope
         # (no blob-URL minting; SW lifecycle stubs) BEFORE its script runs. The

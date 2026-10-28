@@ -138,20 +138,32 @@ RSpec.describe 'Structured clone of platform objects' do
     )
   end
 
-  # (…a WebAssembly.Memory's buffer, which cannot be detached, DetachArrayBuffer's TypeError: HTML lets it through —
-  # WPT wasm/serialization/arraybuffer/transfer.window.js)
+  # (…a WebAssembly.Memory's buffer, which cannot be detached, DetachArrayBuffer's TypeError as the transfer reaches it —
+  # after the value is serialized, those before it in the list moved: HTML StructuredSerializeWithTransfer; Chrome 156
+  # the same; WPT wasm/serialization/arraybuffer/transfer.window.js)
   it 'checks a transfer list before and after serializing, and moves nothing it refuses' do
     session.visit '/'
     out = probe(<<~JS)
       const memory = new WebAssembly.Memory({ initial: 1 }), kept = new ArrayBuffer(4), late = new ArrayBuffer(4);
+      const before = new ArrayBuffer(8), after = new ArrayBuffer(8);
       const fake = { [Symbol.toStringTag]: 'ArrayBuffer' };
+      let ran = false;
       return {
         wasm:     [err(() => structuredClone(memory.buffer, { transfer: [memory.buffer] })), memory.buffer.detached],
+        order:    [err(() => structuredClone({ get x() { ran = true; return 1; } }, { transfer: [before, memory.buffer, after] })),
+                   ran, before.detached, after.detached],
+        first:    err(() => structuredClone(() => 1, { transfer: [memory.buffer] })),
         fake:     [err(() => structuredClone(1, { transfer: [kept, fake] })), kept.detached],
         detached: err(() => structuredClone({ get x() { structuredClone(late, { transfer: [late] }); return 1; } }, { transfer: [late] }))
       };
     JS
-    expect(out).to eq('wasm' => ['TypeError', false], 'fake' => ['DataCloneError', false], 'detached' => 'DataCloneError')
+    expect(out).to eq(
+      'wasm'     => ['TypeError', false],
+      'order'    => ['TypeError', true, true, false],
+      'first'    => 'DataCloneError',
+      'fake'     => ['DataCloneError', false],
+      'detached' => 'DataCloneError'
+    )
   end
 
   it "keeps a FileList's files the Files the value holds, and builds its descriptors as data" do
@@ -343,6 +355,39 @@ RSpec.describe 'Structured clone of platform objects' do
     poll_until { s.evaluate_script('got.length') == 2 }
 
     expect(s.evaluate_script('got').sort).to eq(['message true', 'messageerror'])
+  end
+
+  # …in its browsing context group alone (HTML keeps an agent cluster map per group): a pop-up opened with an opener
+  # shares the page's, one opened `noopener` is a group of its own — its BroadcastChannel gets a `messageerror`.
+  it 'shares a WebAssembly.Module with a pop-up of its browsing context group alone' do
+    popup_app = lambda do |env|
+      case env['PATH_INFO']
+      when '/popup'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><script>
+            const report = new BroadcastChannel('report'), wasm = new BroadcastChannel('wasm');
+            const who = location.search.slice(1);
+            wasm.onmessage = (e) => report.postMessage(who + ' message ' + (e.data instanceof WebAssembly.Module));
+            wasm.onmessageerror = () => report.postMessage(who + ' messageerror');
+            report.postMessage(who + ' ready');
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html'}, ['<!doctype html><script>window.got = []; new BroadcastChannel("report").onmessage = (e) => got.push(e.data);</script>']]
+      end
+    end
+    s = simulated_session(popup_app)
+    s.visit '/'
+    s.execute_script("window.open('/popup?opener'); window.open('/popup?noopener', '', 'noopener')")
+    poll_until { s.evaluate_script('got.length') == 2 }
+    s.execute_script("new BroadcastChannel('wasm').postMessage(new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])))")
+    # (…each pop-up's event loop run as its window is: a background window's turns are the driver's to take)
+    poll_until do
+      s.windows.each {|w| s.within_window(w) { s.evaluate_script('1') } }
+      s.evaluate_script('got.length') == 4
+    end
+
+    expect(s.evaluate_script('got').sort).to eq(['noopener messageerror', 'noopener ready', 'opener message true', 'opener ready'])
   end
 
   # …and over a MessagePort whose other end a frame of another site holds, read back in THAT frame's realm (Chrome:

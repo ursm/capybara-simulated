@@ -8,7 +8,7 @@
 // and the key its origin is matched by (`originKey`), which for an opaque origin is the realm's own unless it inherited
 // one. The realm's for as long as it lives: a page load sets each anew.
 
-use crate::dom::{nid_arg, realm, realm_id, register, NodeId, RealmArena};
+use crate::dom::{dom, nid_arg, realm, realm_id, register, NodeId, RealmArena};
 
 pub(crate) struct RealmLocation {
     parts: [String; 11],
@@ -115,19 +115,21 @@ impl RealmLocation {
         }
         self.origin_key.insert(format!("{OPAQUE_KEY}realm{cid}")).clone()
     }
-    // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"): its origin's site — its
-    // origin where its group is cross-origin isolated, an opaque origin its own key — what a WebAssembly.Module
-    // serialized in one is read back by in another of it alone. (`Origin-Agent-Cluster`, which may key it by origin
-    // too, is not modelled: a gap.)
-    pub(crate) fn agent_cluster_key(&mut self, cid: i32) -> String {
+    // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"), in browsing context
+    // group `group` of window `window` (the Dom's): its origin's site — its origin where its group is cross-origin
+    // isolated, an opaque origin its own key, its window's (an opaque key is the isolate's alone) — what a
+    // WebAssembly.Module serialized in one is read back by in another of it alone. (`Origin-Agent-Cluster`, which may
+    // key it by origin too, is not modelled: a gap.)
+    pub(crate) fn agent_cluster_key(&mut self, cid: i32, (group, window): (&str, &str)) -> String {
         if let Some(key) = &self.cluster_key {
             return key.clone();
         }
         let key = self.origin_key(cid);
-        if self.origin_keyed || key.starts_with(OPAQUE_KEY) {
-            return key;
+        if key.starts_with(OPAQUE_KEY) {
+            return format!("{window}|{key}");
         }
-        site(&key).unwrap_or(key)
+        let key = if self.origin_keyed { key } else { site(&key).unwrap_or(key) };
+        format!("{group}|{key}")
     }
     // The fragments to look for the target element by: the target fragment as it stands, then percent-decoded and UTF-8
     // decoded (the one when they say the same) — none for an empty fragment.
@@ -185,6 +187,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setOriginKeyedCluster", set_origin_keyed_cluster, context_id);
     register(scope, ns, "setAgentClusterKey", set_agent_cluster_key, context_id);
     register(scope, ns, "agentClusterKey", agent_cluster_key_op, context_id);
+    register(scope, ns, "setBrowsingContextGroup", set_browsing_context_group, context_id);
     register(scope, ns, "effectiveDomain", effective_domain_op, context_id);
     register(scope, ns, "setDomain", set_domain_op, context_id);
     register(scope, ns, "ipHost", ip_host_op, context_id);
@@ -431,8 +434,20 @@ fn set_agent_cluster_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 // __dom.agentClusterKey() -> the calling realm's agent cluster key: what a dedicated worker it makes is of too.
 fn agent_cluster_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let key = realm(scope, cid).location.agent_cluster_key(cid);
+    let key = agent_cluster_key(scope, cid);
     rv.set(v8::String::new(scope, &key).unwrap().into());
+}
+// …realm `cid`'s, in its isolate's browsing context group.
+pub(crate) fn agent_cluster_key(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> String {
+    let (group, window) = dom(scope).browsing_context_group.clone();
+    realm(scope, cid).location.agent_cluster_key(cid, (&group, &window))
+}
+// __dom.setBrowsingContextGroup(group, window) — the browsing context group of the isolate's window (its realms', its
+// frames' and pop-ups' that share it: a window the session opens, or one opened with no opener, is a new one), and
+// the window's own name.
+fn set_browsing_context_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let (group, window) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
+    dom(scope).browsing_context_group = (group, window);
 }
 
 // __dom.locationPart(part) -> the realm's URL's part number `part` (url_ops.rs `parts`' order) — its origin the one a

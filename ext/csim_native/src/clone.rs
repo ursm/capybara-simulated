@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use v8::{ValueDeserializerHelper, ValueSerializerHelper};
 
-use crate::dom::{dom, realm, realm_id, register};
+use crate::dom::{dom, realm_id, register};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "structuredSerialize", structured_serialize, context_id);
@@ -334,7 +334,7 @@ fn structured_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     };
     let cluster = (!modules.is_empty()).then(|| {
         let cid = realm_id(scope, &args);
-        realm(scope, cid).location.agent_cluster_key(cid)
+        crate::realm_location::agent_cluster_key(scope, cid)
     });
     let buffers = transfer.into_iter().map(|b| v8::Global::new(scope, b)).collect();
     let d = dom(scope);
@@ -344,12 +344,15 @@ fn structured_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     rv.set(v8::Integer::new_from_unsigned(scope, number).into());
 }
 
-// __dom.structuredTransfer(number): the ArrayBuffers its transfer list names detached, their memory the serialization's
-// — the bindings having checked again that each is still there to detach.
+// __dom.structuredTransfer(number, count): the ArrayBuffers its transfer list names detached — its first `count` of
+// them, all for none given — their memory the serialization's: the bindings having checked again that each is still
+// there to detach, and stopped at one that cannot be (a WebAssembly.Memory's).
 fn structured_transfer(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(number) = args.get(0).uint32_value(scope) else { return };
+    let count = if args.get(1).is_undefined() { None } else { args.get(1).uint32_value(scope) };
     let Some(serialized) = dom(scope).serialized.get_mut(&number) else { return };
-    let buffers = std::mem::take(&mut serialized.buffers);
+    let mut buffers = std::mem::take(&mut serialized.buffers);
+    buffers.truncate(count.map_or(buffers.len(), |c| c as usize));
     let mut transferred = Vec::with_capacity(buffers.len());
     for buffer in buffers {
         let buffer = v8::Local::new(scope, buffer);
@@ -371,7 +374,7 @@ fn structured_deserialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     // a DataCloneError — the WebAssembly JS API's deserialization steps — a message's `messageerror`)
     if let Some(cluster) = &serialized.cluster {
         let cid = realm_id(scope, &args);
-        if realm(scope, cid).location.agent_cluster_key(cid) != *cluster {
+        if crate::realm_location::agent_cluster_key(scope, cid) != *cluster {
             let Some(message) = v8::String::new(scope, "A WebAssembly.Module could not be read back in another agent cluster.") else { return };
             return throw_dom_exception(scope, message, "DataCloneError");
         }
@@ -446,18 +449,20 @@ fn structured_export(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &[bytes, buffers, tokens, cluster]).into());
 }
 
-// __dom.structuredImport(bytes, buffers, modules, cluster) -> the number of a serialization another isolate exported:
-// its bytes, its transferred ArrayBuffers' memory taken from `buffers` (each detached), and the compiled modules
-// `modules` names by their tokens, of agent cluster `cluster` — to be read back as one serialized here (a token no
-// longer held makes it one that cannot be).
+// __dom.structuredImport(bytes, buffers, modules, cluster, once) -> the number of a serialization another isolate
+// exported: its bytes, its transferred ArrayBuffers' memory taken from `buffers` (each detached), and the compiled
+// modules `modules` names by their tokens — let go of from `MODULES` where it is read `once` (a broadcast's is read by
+// every channel) — of agent cluster `cluster`: to be read back as one serialized here (a token no longer held makes it
+// one that cannot be).
 fn structured_import(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(bytes) = v8::Local::<v8::ArrayBuffer>::try_from(args.get(0)) else { return };
     let Some(buffers) = buffers(scope, args.get(1)) else { return };
     let tokens = tokens(scope, args.get(2));
     let cluster = (!args.get(3).is_null_or_undefined()).then(|| args.get(3).to_rust_string_lossy(scope));
+    let once = args.get(4).boolean_value(scope);
     let Some(modules) = ({
-        let registry = modules();
-        tokens.iter().map(|token| registry.1.get(token).cloned()).collect::<Option<Vec<_>>>()
+        let mut registry = modules();
+        tokens.iter().map(|token| if once { registry.1.remove(token) } else { registry.1.get(token).cloned() }).collect::<Option<Vec<_>>>()
     }) else {
         return;
     };
