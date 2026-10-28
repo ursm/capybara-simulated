@@ -10803,19 +10803,22 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "nested-context form submission failed: #{e.message}")
       end
-      # The submissions frames' documents made that the host routes, taken as the task ends in the order they were made
-      # (navigation_plan.rs `takeFrameSubmissions`): each its realm, its request, the navigable its target chose — its
-      # own, the page, another frame's (made now where its navigable had no document: location.js), a window's or a new
-      # one (not modeled), none — and its Referer. (Never while the form's `submit()` is still on the V8 stack.)
+      # The submissions frames' documents made that the host routes, taken as the task ends one at a time in the order
+      # they were made (navigation_plan.rs `takeRoutedSubmission`: the frame one chose may have a new document by the next):
+      # each its realm, its request, the navigable its target chose — its own, the page, another frame's (made now where
+      # its navigable had no document: location.js), a window's or a new one (not modeled), none — and its Referer.
+      # (Never while the form's `submit()` is still on the V8 stack.)
       FRAME_SUBMISSION_ROUTES = {1 => :self, 2 => :top, 5 => :window, 6 => nil, 7 => :blocked}.freeze
       ROUTE_FRAME = 3
       def consume_pending_frame_submit
-        @runtime.call('__csimTakeFrameSubmissions').each do |realm_id, spec, kind, chosen_realm, _container, source, policy|
+        while (realm_id, spec, kind, chosen_realm, _container, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
           chosen = kind == ROUTE_FRAME ? chosen_realm : FRAME_SUBMISSION_ROUTES[kind]
           invalidate_find_cache
-          submit_frame_route(realm_id, spec, [chosen, [source, policy]])
-        rescue StandardError => e
-          log_console('warn', "nested-context form submission failed: #{e.message}")
+          begin
+            submit_frame_route(realm_id, spec, [chosen, [source, policy]])
+          rescue StandardError => e
+            log_console('warn', "nested-context form submission failed: #{e.message}")
+          end
         end
       end
       # ── Frame session history ──────────────────────────────────────────────

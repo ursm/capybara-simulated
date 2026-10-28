@@ -668,6 +668,11 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         }
     }
     taken.sort_by_key(|&(at, ..)| at);
+    // (…each frame's navigable navigated now: the submission of its document the host routes taken out with its route
+    // first, before its realm makes way — navigation_plan.rs)
+    for &(_, realm, _) in &taken {
+        crate::navigation_plan::supersede_routed(scope, realm);
+    }
     let mut items = Vec::with_capacity(taken.len());
     for (_, realm, host) in taken {
         let realm = v8::Integer::new(scope, realm).into();
