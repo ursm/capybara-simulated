@@ -143,6 +143,7 @@ mod navigator;
 mod node_handle;
 mod numbers;
 mod node_iterators;
+mod offscreen_canvas;
 mod ranges;
 mod reflect;
 mod reflect_keywords;
