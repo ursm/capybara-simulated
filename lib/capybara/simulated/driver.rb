@@ -95,7 +95,8 @@ module Capybara
         # Browser still has its own sessionStorage + DOM + JS VM.
         # Cookies: the session's cookie store in the engine (cookie_jar.rs), every window's.
         @cookie_jar      = Native.cookie_jar_new
-        @auth_cache      = {}
+        # HTTP authentication: the session's entries in the engine (http_auth.rs), every window's.
+        @auth_cache      = Native.http_auth_new
         # localStorage: the session's storage shed in the engine (storage_areas.rs), an area per origin, every window's.
         @local_storage   = Native.storage_partition_new
         # …and IndexedDB, Cache Storage and the system clipboard, the session's partition of the engine's registries,

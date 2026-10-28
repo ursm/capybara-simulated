@@ -12,7 +12,7 @@ RSpec.describe 'HTTP authentication entries' do
     simulated_session(lambda {|env|
       seen << [env['PATH_INFO'], env['HTTP_AUTHORIZATION']]
       if env['PATH_INFO'] == '/guarded' && env['HTTP_AUTHORIZATION'].nil?
-        [401, {'www-authenticate' => 'Basic realm="r"', 'content-type' => 'text/plain'}, ['no']]
+        [401, {'www-authenticate' => 'Basic realm="r"', 'content-type' => 'text/plain', 'access-control-allow-origin' => '*'}, ['no']]
       else
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>']]
       end
@@ -31,5 +31,17 @@ RSpec.describe 'HTTP authentication entries' do
 
     basic = "Basic #{['u:p'].pack('m0')}"
     expect(seen.drop(1)).to eq([['/open', nil], ['/after', nil], ['/guarded', nil], ['/guarded', basic], ['/later', basic]])
+  end
+
+  # (…but a CORS request off its origin prompts for none: Fetch answers a 401 only where the response tainting is not
+  # "cors", so the challenge reaches script as it is)
+  it 'answers no challenge to a CORS request of another origin' do
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+    session.visit '/'
+    expect(xhr('http://other.example.com/guarded', 'u')).to eq(401)
+    expect(seen.drop(1)).to eq([['/guarded', nil]])
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 end

@@ -185,6 +185,7 @@ mod nonce;
 mod popovers;
 mod activation;
 mod cookie_jar;
+mod http_auth;
 mod cors;
 mod text;
 mod text_codec;
@@ -297,6 +298,12 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("cors_exposed_names", magnus::function!(cors::exposed_names_for_ruby, 3))?;
     // Each session's cookie store (cookie_jar.rs).
     native.define_module_function("cookie_jar_new", magnus::function!(cookie_jar::new_for_ruby, 0))?;
+    // …and its HTTP authentication entries, and whether a 401 is answered (http_auth.rs).
+    native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
+    native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;
+    native.define_module_function("http_auth_entry", magnus::function!(http_auth::entry_for_ruby, 2))?;
+    native.define_module_function("http_auth_accepted", magnus::function!(http_auth::accepted_for_ruby, 3))?;
+    native.define_module_function("http_auth_answers", magnus::function!(http_auth::answers_challenge_for_ruby, 7))?;
     native.define_module_function("cookie_jar_clear", magnus::function!(cookie_jar::clear_for_ruby, 1))?;
     native.define_module_function("cookie_jar_set", magnus::function!(cookie_jar::set_for_ruby, 5))?;
     native.define_module_function("cookie_jar_get", magnus::function!(cookie_jar::get_for_ruby, 4))?;

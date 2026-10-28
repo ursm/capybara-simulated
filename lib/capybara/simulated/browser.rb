@@ -242,12 +242,11 @@ module Capybara
         # as the primary. Tests without a Driver (gem-internal callers)
         # get fresh jars. (localStorage's shed likewise, below.)
         @cookie_jar                   = cookie_jar    || Native.cookie_jar_new
-        # HTTP Basic-auth credential cache, keyed by target origin: once credentials authenticate an
-        # origin, the UA sends them pre-emptively for later credentialed requests to it (RFC 7617
-        # §2.2), so a Basic-auth resource loads without re-challenging. Session-scoped (cleared on
-        # reset) and Driver-injected like the cookie jar, so target=_blank aux windows share one
-        # session's auth state (a real browser shares the HTTP auth cache across a session's tabs).
-        @auth_cache                   = auth_cache     || {}
+        # HTTP Basic authentication entries (http_auth.rs), by origin: once credentials authenticate an origin, the UA
+        # sends them pre-emptively for later credentialed requests to it (RFC 7617 §2.2), so a Basic-auth resource loads
+        # without re-challenging. Session-scoped (cleared on reset) and Driver-injected like the cookie jar, so
+        # target=_blank aux windows share one session's auth state (a real browser shares it across a session's tabs).
+        @auth_cache                   = auth_cache     || Native.http_auth_new
         # localStorage and sessionStorage: storage sheds in the engine (storage_areas.rs), an area per storage key
         # (origin and top-level site) — the session's (the Driver's, every window's) and this top-level browsing context's own.
         @local_storage                = local_storage || Native.storage_partition_new
@@ -3656,7 +3655,7 @@ module Capybara
           @image_load_pending = 0
         end
         Native.cookie_jar_clear(@cookie_jar)
-        @auth_cache.clear
+        Native.http_auth_clear(@auth_cache)
         Native.storage_clear(@local_storage)
         Native.session_partition_clear(@session_partition)
         Native.storage_clear(@session_storage)
@@ -10035,7 +10034,7 @@ module Capybara
           # user/pass) — those must win over a cached session, so the request goes out unauthenticated
           # and the 401-retry below applies the caller's credentials, not a stale cached pair
           # (send-authentication-competing-names-passwords).
-          if send_cookies && !env.key?('HTTP_AUTHORIZATION') && !challenge_authz && (cached = @auth_cache[url_origin(target)])
+          if send_cookies && !env.key?('HTTP_AUTHORIZATION') && !challenge_authz && (cached = Native.http_auth_entry(@auth_cache, target))
             env['HTTP_AUTHORIZATION'] = cached
           end
           # A CORS request to a URL carrying credentials (`user:pass@`) is a network
@@ -10076,13 +10075,20 @@ module Capybara
           response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
           status, resp_headers, resp_body = response
           Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(resp_headers)
-          # Transparent HTTP Basic auth (RFC 7617): a request carrying CHALLENGE credentials (open()
-          # user/pass / URL userinfo) that gets a 401 "Basic" challenge — and hasn't already sent an
-          # Authorization (an explicit setRequestHeader / a pre-emptively-attached cached credential) —
-          # is re-sent ONCE with them; only the authenticated response reaches script, the 401 never does
-          # (send-authentication-basic / -existing-session). `omit` sends no credentials at all.
-          answered = challenge_authz && status.to_i == 401 && credentials != 'omit' &&
-                     !env.key?('HTTP_AUTHORIZATION') && www_authenticate_basic?(resp_headers)
+          # Transparent HTTP Basic auth (RFC 7617; http_auth.rs `answers_challenge`): a request carrying CHALLENGE
+          # credentials (open() user/pass / URL userinfo) that gets a 401 "Basic" challenge — including credentials, its
+          # response tainting not "cors", and not having sent an Authorization already (an explicit setRequestHeader / a
+          # pre-emptively-attached entry) — is re-sent ONCE with them; only the authenticated response reaches script,
+          # the 401 never does (send-authentication-basic / -existing-session).
+          answered = Native.http_auth_answers(
+            status.to_i,
+            !challenge_authz.nil?,
+            cors == true,
+            crossed,
+            credentials.to_s,
+            env.key?('HTTP_AUTHORIZATION'),
+            (www = header_field(resp_headers, 'www-authenticate')) && header_text(www)
+          )
           if answered
             resp_body.close if resp_body.respond_to?(:close)
             env['HTTP_AUTHORIZATION'] = challenge_authz
@@ -10099,7 +10105,7 @@ module Capybara
           # Authorization is stripped on a cross-origin redirect hop (above), so origin A's credentials
           # can't seed origin B's cache. (A non-2xx same-origin response — an opaque status-0 no-cors
           # fetch, a same-origin 3xx — still establishes them, so the gate is "not a 401", not "is a 2xx".)
-          @auth_cache[url_origin(target)] = challenge_authz if answered && status.to_i != 401
+          Native.http_auth_accepted(@auth_cache, target, challenge_authz) if answered && status.to_i != 401
           if status == 304 && cache_entry
             trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
@@ -12970,17 +12976,6 @@ module Capybara
         :network_error
       rescue Exception  # WebMock::NetConnectNotAllowedError descends from Exception, not StandardError
         nil
-      end
-
-      # Store a response's Set-Cookie headers under the RESPONDING host's jar (`url` is
-      # the hop that produced `headers`). A cross-origin hop therefore writes its own
-      # host's jar, never the document's (cors-cookies isolation).
-      # True if the response carries a `WWW-Authenticate: Basic …` challenge — the only scheme the
-      # transparent-auth retry in rack_fetch answers.
-      def www_authenticate_basic?(headers)
-        return false unless headers.is_a?(Hash)
-        headers.each {|k, v| return true if k.to_s.casecmp?('www-authenticate') && header_text(v).strip.downcase.start_with?('basic') }
-        false
       end
 
       # Whether a URL is of a potentially trustworthy origin (Secure Contexts, the engine's: url_ops.rs
