@@ -2355,7 +2355,7 @@ module Capybara
       # traversal queue now (session_history.rs `queue`), applied as the task it is runs (`apply_planned_traversal`) — or,
       # before that, as the driver takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation
       # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). `[token, delay]`:
-      # the token its task applies it by, and the delay of that task.
+      # the token its task applies it by, and the delay of that task (session_history.rs `queue`).
       def plan_history_traverse(delta, realm)
         return [0, 0] if delta.to_i.zero? || !history_of_page?(realm)
 
@@ -2363,10 +2363,14 @@ module Capybara
       end
       # …the traversal of `token` applied, and those queued before it: none where the driver took them already.
       def apply_planned_traversal(token)
-        @session_history.take_queued(token).each {|t, delta, realm| history_go(delta, realm: realm, token: t) }
+        @session_history.take_queued(token).each do |t, delta, realm|
+          history_go(delta, realm: realm, token: t)
+        end
       end
       def apply_planned_traversals
-        @session_history.take_all_queued.each {|t, delta, realm| history_go(delta, realm: realm, token: t) }
+        @session_history.take_all_queued.each do |t, delta, realm|
+          history_go(delta, realm: realm, token: t)
+        end
       end
       # …those, as the driver takes the navigations the page planned with them — the traversal they make first, its
       # cancelling of the ones it cancels in (HTML "apply the history step") — where one makes a document again (whose
@@ -11024,7 +11028,7 @@ module Capybara
       # so a later reload / history traversal re-POSTs it (with the body) rather than GET-ing the URL.
       # (…whatever its URL, so the entry a reload reads is the document's the frame is at: one a traversal cannot make
       # again alone — a blob's, a data: one's, whose bytes are its document's — passed over by a traversal,
-      # `history_plan`)
+      # session_history.rs `traversal`)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
         # (…none of a javascript: URL's, which runs in the document it is at — HTML "navigate", its result at most
@@ -11041,9 +11045,6 @@ module Capybara
         id = initial ? @session_history.replace(nav, parent_nav, new_url.to_s, false) : @session_history.push(nav, parent_nav, new_url.to_s, false)
         set_history_entry(id, entry_for_frame_nav(post))
       end
-      # …whether a frame's session history entry for `url` can be made again by a traversal alone (session_history.rs
-      # `recordable`).
-      def recordable_frame_url?(url) = Native.history_recordable_url(url)
       def entry_for_frame_nav(post)
         post ? {method: :post, body: post[:body], content_type: post[:content_type]} : {}
       end
@@ -11087,7 +11088,7 @@ module Capybara
       # (Chrome). The snapshot taken now stands when the navigation never commits.
       def leave_frame_entry(realm_id)
         # (…a document no entry was recorded for — a blob's, a data: one's — leaving the entry before it as it is)
-        return unless recordable_frame_url?(url = frame_realm_url(realm_id))
+        return unless Native.history_recordable_url(url = frame_realm_url(realm_id))
         return unless (id = frame_history_id(realm_id))
 
         @session_history.set_url(id, url)

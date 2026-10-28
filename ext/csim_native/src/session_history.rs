@@ -323,7 +323,7 @@ impl Traversable {
     // alone — a srcdoc or a blob document it left, a data: one's, which have no bytes to come back to (`recordable`) —
     // on to the next step that way.
     fn traversal(&self, mut delta: i64) -> Option<(i64, Vec<Change>)> {
-        let way = delta.signum();
+        let way = if delta > 0 { 1 } else { -1 };
         loop {
             let plan = self.plan(delta)?;
             let stuck = plan.1.iter().any(|&(nav, id, same_document)| {
@@ -435,9 +435,7 @@ impl SessionHistory {
         self.0.borrow_mut().take_queued(token).into_iter().map(|q| (q.token, q.delta, q.realm)).collect()
     }
     fn take_all_queued(&self) -> Vec<(u64, i64, i32)> {
-        let mut t = self.0.borrow_mut();
-        let Some(last) = t.queued.last().map(|q| q.token) else { return Vec::new() };
-        t.take_queued(last).into_iter().map(|q| (q.token, q.delta, q.realm)).collect()
+        self.0.borrow_mut().queued.drain(..).map(|q| (q.token, q.delta, q.realm)).collect()
     }
     // #queued? -> whether a traversal is queued; #queued_documents? -> whether one queued makes a document again.
     fn is_queued(&self) -> bool {
@@ -454,7 +452,8 @@ impl SessionHistory {
     fn clear_queued(&self) {
         self.0.borrow_mut().queued.clear();
     }
-    // #plan(delta) -> [step, [[navigable, entry, same_document], …]] of a traversal by `delta`, or nil for none.
+    // …the plan with no step passed over (`Traversable::plan`), which the tests read.
+    #[cfg(test)]
     fn plan(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
         self.0.borrow().plan(delta)
     }
@@ -538,7 +537,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("url", method!(SessionHistory::url, 1))?;
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
-    class.define_method("plan", method!(SessionHistory::plan, 1))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("queue", method!(SessionHistory::queue, 2))?;
     class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
