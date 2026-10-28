@@ -501,7 +501,6 @@ const ANCHORS: u32 = 7;
 const EMBEDS: u32 = 8;
 const NAME: u32 = 9;
 const SHEET_OWNERS: u32 = 10;
-const SHADOW_HOSTS: u32 = 11;
 const STATE: u32 = 12;
 const CUSTOM_CANDIDATES: u32 = 13;
 const SHADOW_INCLUDING_ELEMENTS: u32 = 14;
@@ -566,10 +565,9 @@ fn elements_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         SHEET_OWNERS => Filter::SheetOwners,
         STATE => Filter::State(a.uint32_value(scope).unwrap_or(0)),
         CUSTOM_CANDIDATES => Filter::CustomCandidates,
-        SHADOW_HOSTS | SHADOW_INCLUDING_ELEMENTS | IMAGE_ELEMENTS => {
+        SHADOW_INCLUDING_ELEMENTS | IMAGE_ELEMENTS => {
             let cid = realm_id(scope, &args);
             let pick = |n: &crate::dom::NodeData| match kind {
-                SHADOW_HOSTS => n.shadow_root.is_some(),
                 IMAGE_ELEMENTS => n.is_html_named("img") || n.is_html_named("input") || (n.ns == ns!(svg) && &*n.local_name == "image"),
                 _ => true,
             };

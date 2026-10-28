@@ -192,7 +192,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "sheetGen", sheet_gen_op, context_id);
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
     crate::dom::register(scope, ns, "ownerSheetShown", owner_sheet_shown_op, context_id);
-    crate::dom::register(scope, ns, "sheetSet", sheet_set_op, context_id);
     crate::dom::register(scope, ns, "forgetCascadeKey", forget_cascade_key_op, context_id);
 }
 
@@ -296,7 +295,6 @@ pub(crate) struct SheetSet {
     // of sheets, which a new block or an attribute change moves), their titles, media, alternate-ness, explicit
     // enabling, and the selected set — what the cascade is rebuilt on a change of.
     key: u64,
-    selected: Option<String>,
     // The owners that take part, in tree order — and those whose sheet the sets leave out.
     pub(crate) taking_part: Vec<NodeId>,
     left_out: Vec<NodeId>,
@@ -461,23 +459,8 @@ impl RealmArena {
         let (taking_part, left_out): (Vec<_>, Vec<_>) =
             sheets.into_iter().partition(|(_, title, alternate, enabled)| shadow || *enabled || if title.is_empty() { !alternate } else { title == set });
         let owners = |list: Vec<(NodeId, String, bool, bool)>| list.into_iter().map(|(owner, ..)| owner).collect();
-        SheetSet { key: hasher.finish(), selected, taking_part: owners(taking_part), left_out: owners(left_out) }
+        SheetSet { key: hasher.finish(), taking_part: owners(taking_part), left_out: owners(left_out) }
     }
-}
-
-// __dom.sheetSet(rootNid) -> [key, selectedSet, [owner, …]]: a document's style sheet sets, or a shadow root's sheets
-// (`RealmArena::sheet_set`) — a number keying what the sheets' taking part turns on, the selected set ('' where none
-// matters), and the `<style>` / `<link>` elements whose sheets take part, in tree order.
-fn sheet_set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = nid_arg(scope, &args, 0) else { return };
-    let cid = crate::dom::realm_id(scope, &args);
-    let set = crate::dom::realm(scope, cid).sheet_set(doc);
-    // (…the key cut to what a JS number holds exactly)
-    let key: v8::Local<v8::Value> = v8::Number::new(scope, (set.key >> 11) as f64).into();
-    let selected: v8::Local<v8::Value> = v8::String::new(scope, set.selected.as_deref().unwrap_or("")).map_or_else(|| v8::undefined(scope).into(), Into::into);
-    let owners = crate::dom::nodes_value(scope, cid, &set.taking_part);
-    let items = [key, selected, owners];
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 #[cfg(test)]

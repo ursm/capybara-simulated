@@ -131,9 +131,13 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
     let count = n.sheet_gen;
     let doc = document_of(arena, owner);
     let quirks = arena.document_mode(doc).0;
-    let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count && !m.failed).and_then(|m| Some((m.text.clone()?, m.base.clone())));
+    // (…its origin-clean flag the kept sheet's, which a sheet made anew of its text takes too)
+    let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count && !m.failed).and_then(|m| Some((m.text.clone()?, m.base.clone(), m.id)));
     let (text, location, clean) = match kept {
-        Some((text, location)) => (text, location, None),
+        Some((text, location, id)) => {
+            let clean = arena.sheets.stored_mut(id).is_none_or(|s| !s.origin_dirty);
+            (text, location, Some((clean, false)))
+        }
         None => {
             let url = doc.and_then(|d| arena.parse_document_url(d, &href)).map(|u| u.href().to_owned());
             let sheet = match &url {
@@ -142,8 +146,10 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
             };
             match sheet {
                 Some(crate::sheet_fetch::Sheet { text: Some(text), clean, location, .. }) => (Rc::from(text), location, Some((clean, false))),
-                // (…origin-clean as the response it failed with was, a same-origin HTTP error's: its rules, none, readable)
-                failed if empty => (Rc::from(""), url.unwrap_or(href), Some((failed.is_some_and(|s| s.clean), true))),
+                // (…origin-clean as the response it failed with was — a same-origin HTTP error's: its rules, none, readable —
+                // at that response's URL)
+                Some(crate::sheet_fetch::Sheet { clean, location, .. }) if empty => (Rc::from(""), location, Some((clean, true))),
+                _ if empty => (Rc::from(""), url.unwrap_or(href), Some((false, true))),
                 _ => return Ok(None),
             }
         }
