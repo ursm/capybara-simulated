@@ -2603,6 +2603,8 @@ pub(crate) struct Dom {
     pub(crate) next_wasm_resolution: u32,
     // The browsing context group of the isolate's window, and the window's name (realm_location.rs `agent_cluster_key`).
     pub(crate) browsing_context_group: (String, String),
+    // The number of the isolate's window's session history (session_history.rs `HISTORIES`).
+    pub(crate) session_history: u64,
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's hook a clone of a shadow host attaches the copy's shadow root through (cloning.rs
@@ -3179,6 +3181,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::multipart::install(scope, ns, context_id);
     crate::idb::install(scope, ns, context_id);
     crate::wasm::install(scope);
+    crate::session_history::install(scope, ns, context_id);
     crate::agents::install(scope, ns, context_id);
     crate::idb_databases::install(scope, ns, context_id);
     crate::web_locks::install(scope, ns, context_id);

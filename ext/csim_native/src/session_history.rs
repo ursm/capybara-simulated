@@ -13,9 +13,8 @@
 // document the page traverses back to is made again with navigables of its own, which the nested histories its document
 // state kept from before are not (they still count their steps).
 
-use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError, Weak};
 
 use magnus::{RHash, RString, Symbol, TryConvert};
 
@@ -247,6 +246,11 @@ impl State {
         lists
     }
 
+    // `history.length`: the number of steps used, at least 1.
+    fn length(&self) -> usize {
+        self.used_steps().len().max(1)
+    }
+
     // HTML "get all used history steps".
     fn used_steps(&self) -> Vec<i64> {
         self.all_lists().into_iter().flatten().map(|e| e.step).collect::<BTreeSet<_>>().into_iter().collect()
@@ -457,27 +461,55 @@ impl Traversable {
     }
 }
 
+// A window's session history: the host's handle on it, and the realms' (`__dom.historyLength`), by its number — the
+// process's, as the isolates that read it and the host thread that writes it are.
 #[magnus::wrap(class = "Capybara::Simulated::Native::SessionHistory", free_immediately)]
-pub(crate) struct SessionHistory(RefCell<Traversable>);
+pub(crate) struct SessionHistory {
+    id: u64,
+    traversable: Arc<Mutex<Traversable>>,
+}
+
+static HISTORIES: LazyLock<Mutex<(u64, HashMap<u64, Weak<Mutex<Traversable>>>)>> = LazyLock::new(Default::default);
+fn histories() -> MutexGuard<'static, (u64, HashMap<u64, Weak<Mutex<Traversable>>>)> {
+    HISTORIES.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+impl Drop for SessionHistory {
+    fn drop(&mut self) {
+        histories().1.remove(&self.id);
+    }
+}
 
 impl SessionHistory {
     fn new() -> Self {
-        SessionHistory(RefCell::new(Traversable { state: State::new(), ..Default::default() }))
+        let traversable = Arc::new(Mutex::new(Traversable { state: State::new(), ..Default::default() }));
+        let mut registry = histories();
+        registry.0 += 1;
+        let id = registry.0;
+        registry.1.insert(id, Arc::downgrade(&traversable));
+        SessionHistory { id, traversable }
+    }
+    fn lock(&self) -> MutexGuard<'_, Traversable> {
+        self.traversable.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    // #id -> its number, which its window's realms are told (`setSessionHistory`).
+    fn id(&self) -> u64 {
+        self.id
     }
 
     // #seed(navigable, parent, url) -> the id of the navigable's active entry, its session history made with `url`'s
     // entry where it has none; nil where its parent has none.
     fn seed(&self, nav: u32, parent: u32, url: String) -> Option<u64> {
-        self.0.borrow_mut().ensure(nav, parent, &url)
+        self.lock().ensure(nav, parent, &url)
     }
     // #push(navigable, parent, url, same_document, data) -> the id of the entry a navigation of the navigable adds, what
     // a replay of it sends and restores `data` (`#update`'s fields).
     fn push(&self, nav: u32, parent: u32, url: String, same_document: bool, data: Data) -> Option<u64> {
-        self.0.borrow_mut().commit(nav, parent, &url, same_document, false, data)
+        self.lock().commit(nav, parent, &url, same_document, false, data)
     }
     // #replace(navigable, parent, url, same_document, data) -> …the id of the one it makes in place of its active entry.
     fn replace(&self, nav: u32, parent: u32, url: String, same_document: bool, data: Data) -> Option<u64> {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         let replace = nav != TOP || !t.state.entries.is_empty();
         t.commit(nav, parent, &url, same_document, replace, data)
     }
@@ -489,16 +521,16 @@ impl SessionHistory {
     }
     // #active(navigable) -> the id of its active entry, or nil.
     fn active(&self, nav: u32) -> Option<u64> {
-        let t = self.0.borrow();
+        let t = self.lock();
         t.state.current_entry(nav, t.build).map(|e| e.id)
     }
     // #url(entry) -> its URL, or nil for no such entry.
     fn url(&self, id: u64) -> Option<String> {
-        self.0.borrow().state.entry(id).map(|e| e.url.clone())
+        self.lock().state.entry(id).map(|e| e.url.clone())
     }
     // #set_url(entry, url): its URL made `url` (a redirect's, a replaceState's).
     fn set_url(&self, id: u64, url: String) {
-        if let Some(e) = self.0.borrow_mut().state.entry_mut(id) {
+        if let Some(e) = self.lock().state.entry_mut(id) {
             e.url = url;
         }
     }
@@ -506,7 +538,7 @@ impl SessionHistory {
     // of those it has (`Data`; a POST's body and content type, the classic history API state and the form state binary
     // strings) — {} for no such entry, or none (nil).
     fn entry(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>) -> Result<RHash, magnus::Error> {
-        match id.and_then(|id| rb_self.0.borrow().state.entry(id).cloned()) {
+        match id.and_then(|id| rb_self.lock().state.entry(id).cloned()) {
             Some(e) => e.data.to_hash(ruby, &e.url),
             None => Ok(ruby.hash_new()),
         }
@@ -518,59 +550,59 @@ impl SessionHistory {
         if !TEXT_FIELDS.contains(&&*name) {
             return Err(magnus::Error::new(ruby.exception_arg_error(), format!("no text field {name}")));
         }
-        Ok(id.and_then(|id| rb_self.0.borrow().state.entry(id).and_then(|e| e.data.text(&name).map(str::to_owned))))
+        Ok(id.and_then(|id| rb_self.lock().state.entry(id).and_then(|e| e.data.text(&name).map(str::to_owned))))
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
     fn update(ruby: &magnus::Ruby, rb_self: &Self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
-        if let Some(e) = rb_self.0.borrow_mut().state.entry_mut(id) {
+        if let Some(e) = rb_self.lock().state.entry_mut(id) {
             Arc::make_mut(&mut e.data).merge(ruby, fields)?;
         }
         Ok(())
     }
     // #length -> `history.length`: the number of steps used, at least 1.
     fn length(&self) -> usize {
-        self.0.borrow().state.used_steps().len().max(1)
+        self.lock().state.length()
     }
     // #traversal(delta) -> [step, [[navigable, entry, same_document], …]] of a traversal by `delta` as the host applies
     // it (`Traversable::traversal`), or nil for none.
     fn traversal(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
-        self.0.borrow().traversal(delta)
+        self.lock().traversal(delta)
     }
     // #queue(delta, realm) -> [token, delay] (`Traversable::queue`).
     fn queue(&self, delta: i64, realm: i32) -> (u64, u32) {
-        self.0.borrow_mut().queue(delta, realm)
+        self.lock().queue(delta, realm)
     }
     // #take_queued(token) -> [[token, delta, realm], …] (`Traversable::take_queued`); #take_all_queued -> every one.
     fn take_queued(&self, token: u64) -> Vec<(u64, i64, i32)> {
-        self.0.borrow_mut().take_queued(token).into_iter().map(|q| (q.token, q.delta, q.realm)).collect()
+        self.lock().take_queued(token).into_iter().map(|q| (q.token, q.delta, q.realm)).collect()
     }
     fn take_all_queued(&self) -> Vec<(u64, i64, i32)> {
-        self.0.borrow_mut().queued.drain(..).map(|q| (q.token, q.delta, q.realm)).collect()
+        self.lock().queued.drain(..).map(|q| (q.token, q.delta, q.realm)).collect()
     }
     // #queued? -> whether a traversal is queued; #queued_documents? -> whether one queued makes a document again.
     fn is_queued(&self) -> bool {
-        !self.0.borrow().queued.is_empty()
+        !self.lock().queued.is_empty()
     }
     fn queued_documents(&self) -> bool {
-        self.0.borrow().queued.iter().any(|q| q.documents)
+        self.lock().queued.iter().any(|q| q.documents)
     }
     // #last_token -> the token of the traversal queued last, 0 for none ever: those up to it were asked for by now.
     fn last_token(&self) -> u64 {
-        self.0.borrow().tokens
+        self.lock().tokens
     }
     // #clear_queued: the queue emptied — the page's document gone, whose traversals go with it.
     fn clear_queued(&self) {
-        self.0.borrow_mut().queued.clear();
+        self.lock().queued.clear();
     }
     // …the plan with no step passed over (`Traversable::plan`), which the tests read.
     #[cfg(test)]
     fn plan(&self, delta: i64) -> Option<(i64, Vec<Change>)> {
-        self.0.borrow().plan(delta)
+        self.lock().plan(delta)
     }
     // #go_to(step): the traversal to `step` applied — the step a plan gave.
     fn go_to(&self, step: i64) {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         let build = t.build;
         t.state.release_moved(step, build);
         t.state.current = step;
@@ -578,12 +610,12 @@ impl SessionHistory {
     }
     // #step -> the current step.
     fn step(&self) -> i64 {
-        self.0.borrow().state.current
+        self.lock().state.current
     }
     // #hold(navigable, entry, step): the navigable left at `entry` — the one it was at at `step` — by the traversal just
     // applied, its target entry's document not made (HTML "apply the history step").
     fn hold(&self, nav: u32, id: u64, step: i64) {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         let build = t.build;
         t.state.held.insert(nav, (id, step));
         t.state.drop_stale_holds(build);
@@ -591,37 +623,37 @@ impl SessionHistory {
     // #destroyed(navigable): a frame's container removed from its document — its navigable gone, its session history
     // with it.
     fn destroyed(&self, nav: u32) {
-        self.0.borrow_mut().destroy(nav);
+        self.lock().destroy(nav);
     }
     // #rebuilt: the page's document made anew — its frames' navigables new ones.
     fn rebuilt(&self) {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         t.build += 1;
         t.state.held.clear();
     }
     // #save(slot) / #restore(slot) -> whether there was one / #forget(slot): the history as it stands, kept for a
     // navigation that may end in no document.
     fn save(&self, slot: usize) {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         let state = t.state.clone();
         if let Some(s) = t.saved.get_mut(slot) {
             *s = Some(state);
         }
     }
     fn restore(&self, slot: usize) -> bool {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         let Some(state) = t.saved.get_mut(slot).and_then(Option::take) else { return false };
         t.state = state;
         true
     }
     fn forget(&self, slot: usize) {
-        if let Some(s) = self.0.borrow_mut().saved.get_mut(slot) {
+        if let Some(s) = self.lock().saved.get_mut(slot) {
             *s = None;
         }
     }
     // #clear: no entries at all, nor traversals queued.
     fn clear(&self) {
-        let mut t = self.0.borrow_mut();
+        let mut t = self.lock();
         t.state = State::new();
         t.saved = Default::default();
         t.queued.clear();
@@ -637,6 +669,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     native.define_module_function("history_recordable_url", function!(recordable_for_ruby, 1))?;
     let class = native.define_class("SessionHistory", ruby.class_object())?;
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
+    class.define_method("id", method!(SessionHistory::id, 0))?;
     class.define_method("seed", method!(SessionHistory::seed, 3))?;
     class.define_method("push", method!(SessionHistory::push_for_ruby, 5))?;
     class.define_method("replace", method!(SessionHistory::replace_for_ruby, 5))?;
@@ -820,7 +853,7 @@ mod tests {
         let (step, _) = h.plan(2).unwrap();
         h.go_to(step);
         assert_eq!(h.active(1), Some(fa));
-        assert!(h.0.borrow().state.held.is_empty());
+        assert!(h.lock().state.held.is_empty());
     }
 
     // …and a navigation clearing the forward steps keeps it at that entry, now the current step's.
@@ -838,7 +871,7 @@ mod tests {
         h.push(2, TOP, "/mz".into(), false, Data::default());
         assert_eq!(h.active(1), Some(fa));
         assert_eq!(h.length(), 2);
-        assert!(h.0.borrow().state.held.is_empty());
+        assert!(h.lock().state.held.is_empty());
     }
 
     // …released where a later step moves it to another entry (its document made), and the frames of its document read
@@ -883,8 +916,39 @@ mod tests {
         let h = history();
         let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None], ..Default::default() }).unwrap();
         h.save(0);
-        Arc::make_mut(&mut h.0.borrow_mut().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
+        Arc::make_mut(&mut h.lock().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
         assert!(h.restore(0));
-        assert_eq!(h.0.borrow().state.entry(a).unwrap().data.text("referer"), Some("/r"));
+        assert_eq!(h.lock().state.entry(a).unwrap().data.text("referer"), Some("/r"));
     }
+}
+
+// The length of the session history numbered `id` (`SessionHistory#length`), none where it is gone.
+pub(crate) fn length_of(id: u64) -> Option<usize> {
+    let traversable = histories().1.get(&id)?.upgrade()?;
+    let t = traversable.lock().unwrap_or_else(PoisonError::into_inner);
+    Some(t.state.length())
+}
+
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
+    crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
+}
+
+// __dom.setSessionHistory(id) — the session history of the isolate's window (`SessionHistory#id`), the host's to say.
+fn set_session_history(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    crate::dom::dom(scope).session_history = id;
+}
+
+// __dom.historyLength(realm) -> `history.length` of realm `realm`'s document: its window's session history's — the
+// page's, its frames' with it — or, a realm of another traversable (a window `window.open` made in this isolate) or a
+// frame's no longer in the page, 1: the one entry of its initial document.
+fn history_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let of_page = arena.top_level_realm(realm) == 0 && (realm == 0 || arena.live_container(realm).is_some());
+    let id = crate::dom::dom(scope).session_history;
+    let length = if of_page { length_of(id).unwrap_or(1) } else { 1 };
+    rv.set_uint32(length as u32);
 }

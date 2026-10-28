@@ -206,6 +206,9 @@ module Capybara
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
         @browsing_context_group       = "g#{object_id}"
+        # The page's joint session history, its frames' with it, and what a replay of each entry sends and restores
+        # (session_history.rs) — made before the runtime, whose realms are told it.
+        @session_history              = Native::SessionHistory.new
         @runtime                      = V8Runtime.new(self)
         # The wall-sync escape hatch, cached at construction (CLAUDE.md rule 3 — the env is fixed
         # for the session).
@@ -311,9 +314,6 @@ module Capybara
         @last_polled_gen              = nil
         @idle_settle_polls            = 0
         @ticking                      = false
-        # The page's joint session history, its frames' with it, and what a replay of each entry sends and restores
-        # (session_history.rs).
-        @session_history              = Native::SessionHistory.new
         # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
         @restoring_history_state      = nil
         @cors_preflight_cache         = Native.cors_preflight_cache_new
@@ -2198,6 +2198,8 @@ module Capybara
       # an opener its opener's (`inherit_browsing_context_group`) — which keys its agent clusters (realm_location.rs
       # `agent_cluster_key`): a WebAssembly.Module crosses to another group's realm as a `messageerror`.
       attr_reader :browsing_context_group
+      # …and the number its session history goes by (session_history.rs `HISTORIES`), which its realms read.
+      def session_history_id = @session_history.id
       def inherit_browsing_context_group(opener)
         @browsing_context_group = opener.browsing_context_group
         @runtime.call('__csimSetBrowsingContextGroup', @browsing_context_group, "w#{object_id}")
@@ -11338,11 +11340,8 @@ module Capybara
         nil
       end
 
-      # `history.length`: the number of steps of the page's session history — its frames' navigations' too — or, asked
-      # by a realm of another traversable (a same-isolate window `window.open` made), 1: the one entry of its initial
-      # about:blank.
-      def history_length(realm = 0) = history_of_page?(realm) ? @session_history.length : 1
-      # …whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it.
+      # Whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it.
+      # (`history.length` the realms read themselves: session_history.rs `historyLength`)
       private def history_of_page?(realm) = realm.to_i.zero? || !frame_navigable(realm.to_i).nil?
       # The host a URL names, or nil for one with none (about:blank / data: / a relative current_url before the first
       # navigate).
