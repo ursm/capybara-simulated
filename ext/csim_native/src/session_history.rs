@@ -46,20 +46,20 @@ struct Data {
 }
 
 impl Data {
-    fn of(fields: RHash) -> Result<Self, magnus::Error> {
+    fn of(ruby: &magnus::Ruby, fields: RHash) -> Result<Self, magnus::Error> {
         let mut data = Data::default();
-        data.merge(fields)?;
+        data.merge(ruby, fields)?;
         Ok(data)
     }
 
     // The fields `fields` names made what it gives them — nil none — `:body` and `:content_type` a POST's together.
-    fn merge(&mut self, fields: RHash) -> Result<(), magnus::Error> {
+    fn merge(&mut self, ruby: &magnus::Ruby, fields: RHash) -> Result<(), magnus::Error> {
         let text = |key: &str| -> Result<Option<Option<String>>, magnus::Error> {
-            let Some(v) = fields.get(Symbol::new(key)) else { return Ok(None) };
+            let Some(v) = fields.get(ruby.to_symbol(key)) else { return Ok(None) };
             Ok(Some(Option::<String>::try_convert(v)?))
         };
         let bytes = |key: &str| -> Result<Option<Option<Arc<[u8]>>>, magnus::Error> {
-            let Some(v) = fields.get(Symbol::new(key)) else { return Ok(None) };
+            let Some(v) = fields.get(ruby.to_symbol(key)) else { return Ok(None) };
             Ok(Some(Option::<RString>::try_convert(v)?.map(|s| crate::fetch_rules::ruby_bytes(s).into())))
         };
         if let Some(body) = bytes("body")? {
@@ -88,19 +88,19 @@ impl Data {
     // …and as a hash of the ones it has.
     fn to_hash(&self, ruby: &magnus::Ruby, url: &str) -> Result<RHash, magnus::Error> {
         let hash = ruby.hash_new();
-        hash.aset(Symbol::new("url"), url)?;
+        hash.aset(ruby.to_symbol("url"), url)?;
         if let Some((body, content_type)) = &self.post {
-            hash.aset(Symbol::new("body"), ruby.str_from_slice(body))?;
-            hash.aset(Symbol::new("content_type"), content_type.as_deref())?;
+            hash.aset(ruby.to_symbol("body"), ruby.str_from_slice(body))?;
+            hash.aset(ruby.to_symbol("content_type"), content_type.as_deref())?;
         }
         for key in TEXT_FIELDS {
             if let Some(v) = self.text(key) {
-                hash.aset(Symbol::new(key), v)?;
+                hash.aset(ruby.to_symbol(key), v)?;
             }
         }
         for (key, field) in [("state", &self.state), ("form_state", &self.form_state)] {
             if let Some(v) = field {
-                hash.aset(Symbol::new(key), ruby.str_from_slice(v))?;
+                hash.aset(ruby.to_symbol(key), ruby.str_from_slice(v))?;
             }
         }
         Ok(hash)
@@ -481,11 +481,11 @@ impl SessionHistory {
         let replace = nav != TOP || !t.state.entries.is_empty();
         t.commit(nav, parent, &url, same_document, replace, data)
     }
-    fn push_for_ruby(&self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
-        Ok(self.push(nav, parent, url, same_document, Data::of(fields)?))
+    fn push_for_ruby(ruby: &magnus::Ruby, rb_self: &Self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
+        Ok(rb_self.push(nav, parent, url, same_document, Data::of(ruby, fields)?))
     }
-    fn replace_for_ruby(&self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
-        Ok(self.replace(nav, parent, url, same_document, Data::of(fields)?))
+    fn replace_for_ruby(ruby: &magnus::Ruby, rb_self: &Self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
+        Ok(rb_self.replace(nav, parent, url, same_document, Data::of(ruby, fields)?))
     }
     // #active(navigable) -> the id of its active entry, or nil.
     fn active(&self, nav: u32) -> Option<u64> {
@@ -522,9 +522,9 @@ impl SessionHistory {
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
-    fn update(&self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
-        if let Some(e) = self.0.borrow_mut().state.entry_mut(id) {
-            Arc::make_mut(&mut e.data).merge(fields)?;
+    fn update(ruby: &magnus::Ruby, rb_self: &Self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
+        if let Some(e) = rb_self.0.borrow_mut().state.entry_mut(id) {
+            Arc::make_mut(&mut e.data).merge(ruby, fields)?;
         }
         Ok(())
     }

@@ -6,7 +6,10 @@
 //
 // A message is a number here, its place in the queue: what it is — the data and the ports the bindings cloned, and
 // whether it could not be read back (a `messageerror`) — is the receiving port's to hold, in its slots, so a message
-// that reaches back to its port is a cycle the collector takes as any other. What stays with the bindings
+// that reaches back to its port is a cycle the collector takes as any other. One of the isolate's own is held unread,
+// as its serialization (clone.rs), till its delivery task reads it back in the realm holding the port then: that
+// serialization is the isolate's, not the collector's, so the port's record holds it too, and lets it go with the
+// message — the port closed, collected, gone with its realm, or the message passed over (`unread`, `let_go`). What stays with the bindings
 // (message-port.js) is that and what is a call: the realm's task a delivery is, the event, the serializer and the host
 // the ends go through.
 
@@ -41,6 +44,10 @@ pub(crate) struct Ports {
     given: HashSet<String>,
     // The size at which the next sweep lets go of the ports no object names: twice what the last one left.
     sweep_at: usize,
+    // The serialization of each message held unread, by its number; and those of messages let go of, for the Dom to
+    // drop (`Dom::let_go_of_messages`).
+    unread: HashMap<u64, u32>,
+    let_go: Vec<u32>,
 }
 
 impl Ports {
@@ -73,6 +80,9 @@ impl Ports {
     }
     fn forget(&mut self, id: u64) {
         let Some(port) = self.of.remove(&id) else { return };
+        for message in port.held.iter().chain(&port.inflight) {
+            self.release(*message);
+        }
         if let Some(peer) = port.peer.and_then(|p| self.of.get_mut(&p)) {
             peer.peer = None;
         }
@@ -82,6 +92,16 @@ impl Ports {
     }
     fn port(&mut self, id: u64) -> Option<&mut Port> {
         self.of.get_mut(&id)
+    }
+    // A message no delivery will read: its serialization, where it is held unread, let go of.
+    fn release(&mut self, message: u64) {
+        if let Some(serialized) = self.unread.remove(&message) {
+            self.let_go.push(serialized);
+        }
+    }
+    // The serializations let go of since asked last.
+    pub(crate) fn take_let_go(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.let_go)
     }
     // (…every message it has that its handler has not had, in order — a transfer's to take on)
     fn take_pending(&mut self, id: u64) -> VecDeque<u64> {
@@ -93,6 +113,10 @@ impl Ports {
     // `close()` disentangles it: detached, its peer left with nowhere to deliver (it stays open); a remote port's end
     // let go of, for the host to close.
     fn close(&mut self, id: u64) -> Option<String> {
+        let pending = self.take_pending(id);
+        for message in pending {
+            self.release(message);
+        }
         let p = self.port(id)?;
         p.detached = true;
         let peer = p.peer.take();
@@ -136,11 +160,17 @@ impl Ports {
         }
     }
     // A message arriving at the port: its number, and whether its delivery is a task to queue now — held where its
-    // queue is not enabled.
-    fn accept(&mut self, id: u64) -> (u64, bool) {
+    // queue is not enabled. `serialized` that of one held unread.
+    fn accept(&mut self, id: u64, serialized: Option<u32>) -> (u64, bool) {
         self.next_message += 1;
         let message = self.next_message;
-        let Some(p) = self.port(id) else { return (message, false) };
+        if let Some(serialized) = serialized {
+            self.unread.insert(message, serialized);
+        }
+        let Some(p) = self.port(id) else {
+            self.release(message);
+            return (message, false);
+        };
         if p.enabled {
             p.inflight.push_back(message);
         } else {
@@ -166,6 +196,10 @@ impl Ports {
         }
         let remote = p.remote_end.take();
         let pending = self.take_pending(id);
+        // (…read back here, as they go: `portToEnd`)
+        for message in &pending {
+            self.unread.remove(message);
+        }
         let went = match remote {
             Some(end) => {
                 self.ends.remove(&end);
@@ -258,7 +292,10 @@ fn messages_value<'s>(scope: &mut v8::PinScope<'s, '_>, list: &VecDeque<u64>) ->
 fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let weak = v8::Weak::new(scope, args.get(0));
     let realm = realm_id(scope, &args);
-    rv.set_double(dom(scope).message_ports.make(realm, Some(weak)) as f64);
+    let d = dom(scope);
+    let id = d.message_ports.make(realm, Some(weak));
+    d.let_go_of_messages();
+    rv.set_double(id as f64);
 }
 // __dom.portEntangle(a, b): two new ports entangled — a MessageChannel's.
 fn entangle_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -282,19 +319,32 @@ fn remote_end_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let end = dom(scope).message_ports.of.get(&id).and_then(|p| p.remote_end.clone());
     rv.set(end_value(scope, end));
 }
-// __dom.portAccept(id) -> the number of a message arriving at the port: positive where its delivery is a task to
-// queue now, negative where it is held, its queue not enabled.
+// __dom.portAccept(id, serialized) -> the number of a message arriving at the port: positive where its delivery is a
+// task to queue now, negative where it is held, its queue not enabled. `serialized` the number of the serialization of
+// one held unread (clone.rs), which the port holds with it; undefined for one read already.
 fn accept_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = id_arg(scope, args.get(0));
-    let (message, now) = dom(scope).message_ports.accept(id);
+    let serialized = (!args.get(1).is_undefined()).then(|| args.get(1).uint32_value(scope)).flatten();
+    let d = dom(scope);
+    let (message, now) = d.message_ports.accept(id, serialized);
+    d.let_go_of_messages();
     rv.set_double(if now { message as f64 } else { -(message as f64) });
 }
-// __dom.portNext(id) -> the number of the message a delivery task queued for the port runs with — or -1 where a
-// transfer took it on with the port, or the port is detached since.
+// __dom.portNext(id) -> the number of the message a delivery task queued for the port runs with, its serialization the
+// task's to read now — or -1 where a transfer took it on with the port, or the port is detached since.
 fn next_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = id_arg(scope, args.get(0));
-    let message = dom(scope).message_ports.port(id).and_then(|p| p.inflight.pop_front().filter(|_| !p.detached));
-    rv.set_double(message.map_or(-1.0, |m| m as f64));
+    let d = dom(scope);
+    let Some((message, detached)) = d.message_ports.port(id).and_then(|p| Some((p.inflight.pop_front()?, p.detached))) else {
+        return rv.set_double(-1.0);
+    };
+    if detached {
+        d.message_ports.release(message);
+        d.let_go_of_messages();
+        return rv.set_double(-1.0);
+    }
+    d.message_ports.unread.remove(&message);
+    rv.set_double(message as f64);
 }
 // __dom.portEnable(id) -> how many delivery tasks to queue: `start()` — and an `onmessage` set — enabling its queue.
 fn enable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -304,7 +354,9 @@ fn enable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 // __dom.portClose(id) -> the end a remote port let go of, for the host to close, or null.
 fn close_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = id_arg(scope, args.get(0));
-    let end = dom(scope).message_ports.close(id);
+    let d = dom(scope);
+    let end = d.message_ports.close(id);
+    d.let_go_of_messages();
     rv.set(end_value(scope, end));
 }
 // __dom.portTransfer(id, moved) -> the end `moved` takes in its place, or null: the port transferred within the isolate.
@@ -386,5 +438,25 @@ mod tests {
         assert_eq!(p.close(a).as_deref(), Some("c/1"));
         assert!(p.of[&a].detached && !p.of[&b].detached && p.of[&b].peer.is_none());
         assert!(!p.ends.contains_key("c/1"));
+    }
+
+    #[test]
+    fn lets_go_of_an_unread_message_no_delivery_will_read() {
+        let mut p = Ports::default();
+        let (a, b, moved) = (p.make(0, None), p.make(1, None), p.make(0, None));
+        // (…one carried unread by a transfer, read by its delivery: nothing let go of)
+        p.accept(a, Some(10));
+        p.transfer(a, moved);
+        p.enable(moved);
+        let read = p.of.get_mut(&moved).unwrap().inflight.pop_front().unwrap();
+        p.unread.remove(&read);
+        // (…held by a port closed, by one gone with its realm, by none at all)
+        p.accept(moved, Some(11));
+        p.close(moved);
+        p.accept(b, Some(12));
+        p.drop_realm(1);
+        p.accept(b, Some(13));
+        assert_eq!(p.take_let_go(), vec![11, 12, 13]);
+        assert!(p.unread.is_empty());
     }
 }
