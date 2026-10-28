@@ -184,6 +184,7 @@ mod nonce;
 mod popovers;
 mod activation;
 mod cookie_jar;
+mod cors;
 mod text;
 mod text_codec;
 mod text_geometry;
@@ -280,6 +281,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     session_history::define(native, ruby)?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
+    // CORS: a request's unsafe header names, the CORS check, a preflight's verdict and each session's preflight cache, the
+    // headers a CORS response exposes (cors.rs).
+    native.define_module_function("cors_unsafe_headers", magnus::function!(cors::unsafe_header_names_for_ruby, 1))?;
+    native.define_module_function("cors_check", magnus::function!(cors::check_for_ruby, 4))?;
+    native.define_module_function("cors_preflight", magnus::function!(cors::preflight_for_ruby, 8))?;
+    native.define_module_function("cors_preflight_cache_new", magnus::function!(cors::cache_new_for_ruby, 0))?;
+    native.define_module_function("cors_preflight_cache_clear", magnus::function!(cors::cache_clear_for_ruby, 1))?;
+    native.define_module_function("cors_preflight_cached", magnus::function!(cors::cache_covers_for_ruby, 7))?;
+    native.define_module_function("cors_exposed_names", magnus::function!(cors::exposed_names_for_ruby, 3))?;
     // Each session's cookie store (cookie_jar.rs).
     native.define_module_function("cookie_jar_new", magnus::function!(cookie_jar::new_for_ruby, 0))?;
     native.define_module_function("cookie_jar_clear", magnus::function!(cookie_jar::clear_for_ruby, 1))?;

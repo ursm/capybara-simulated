@@ -317,7 +317,7 @@ module Capybara
         @history_entries              = {}
         # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
         @restoring_history_state      = nil
-        @cors_preflight_cache         = {}
+        @cors_preflight_cache         = Native.cors_preflight_cache_new
         @modal_handlers               = []
         # Per-test action trace. `@trace` is the live recorder; `reset!`
         # moves it to `@pending_trace` so an after-hook running after
@@ -3685,7 +3685,7 @@ module Capybara
         reset_frame_scope
         @session_history.clear
         @history_entries.clear
-        @cors_preflight_cache = {}   # CORS-preflight cache is per browsing context
+        Native.cors_preflight_cache_clear(@cors_preflight_cache)   # CORS-preflight cache is per browsing context
         # A JS-driven history.back()/go() that scheduled a deferred traverse but
         # never drained (the page navigated away first) must not survive the reset
         # — otherwise the stale target replays against the NEXT page's fresh history.
@@ -13163,37 +13163,20 @@ module Capybara
       # that keeps it so (Content-Type only a urlencoded / multipart / text/plain one, no CORS-unsafe byte, 128 bytes at
       # most).
 
-      # The sorted, lowercased author header names that are NOT CORS-safelisted. A
-      # safelisted NAME still counts as unsafe when its VALUE fails the safelisting (an
-      # unsafe byte / over-128-byte length / non-safelisted Content-Type essence). These
-      # are echoed in Access-Control-Request-Headers for the preflight and must be covered
-      # by Access-Control-Allow-Headers.
-      def cors_unsafe_headers(headers)
-        (headers || {}).filter_map {|k, v|
-          name = k.to_s.downcase
-          next if name.start_with?('x-csim') || name == 'content-length'
-          Native.cors_safelisted_request_header(name, v.to_s) ? nil : name
-        }.uniq.sort
-      end
+      # The sorted, lowercased author header names that are NOT CORS-safelisted (a safelisted NAME whose VALUE fails the
+      # safelisting included): what Access-Control-Request-Headers echoes and a grant must cover (cors.rs).
+      def cors_unsafe_headers(headers) = Native.cors_unsafe_headers((headers || {}).map {|k, v| [k.to_s, v.to_s] })
 
       def cors_unsafe_request?(method, headers)
         !Native.cors_safelisted_method(method.to_s.upcase) || !cors_unsafe_headers(headers).empty?
       end
 
-      # Fetch "CORS check" on a cross-origin response: it must allow the request's
-      # (effective) origin via Access-Control-Allow-Origin. A NON-credentialed request
-      # accepts `*` or the exact origin; a CREDENTIALED one (withCredentials) forbids
-      # `*` — the ACAO must be the exact origin AND Access-Control-Allow-Credentials
-      # must be `true` (access-control-and-redirects-async-same-origin credentials cases).
+      # Fetch "CORS check" on a cross-origin response (cors.rs `check`): its Access-Control-Allow-Origin `*` or the
+      # request's (effective) origin — that origin alone, and Access-Control-Allow-Credentials `true`, for a credentialed
+      # one (withCredentials).
       def cors_response_ok?(resp_headers, origin, credentialed)
-        acao = cors_header(resp_headers, 'access-control-allow-origin')
-        return false if acao.nil?
-        if credentialed
-          return false unless acao == origin
-          cors_header(resp_headers, 'access-control-allow-credentials').to_s.downcase == 'true'
-        else
-          acao == '*' || acao == origin
-        end
+        Native.cors_check(cors_value(resp_headers, 'access-control-allow-origin'), cors_value(resp_headers, 'access-control-allow-credentials'),
+                          origin.to_s, credentialed == true)
       end
 
       # Whether a URL carries userinfo (`user[:password]@`). A CORS request to such a
@@ -13211,68 +13194,31 @@ module Capybara
         headers.is_a?(Hash) && headers.any? {|k, _| CONDITIONAL_REQUEST_HEADERS.include?(k.to_s.downcase) }
       end
 
-      # Run the CORS preflight unless a cached result already covers this request (Fetch
-      # "CORS-preflight cache"): a prior preflight to the same (origin, url) within its
-      # Access-Control-Max-Age that allows this method + headers lets the actual request
-      # skip the OPTIONS (access-control-basic-allow-preflight-cache). Returns false (=
-      # network error) only when a fresh preflight is needed AND fails.
+      # Run the CORS preflight unless the session's CORS-preflight cache already covers this request (cors.rs: an entry
+      # for its method and each of its unsafe header names, by origin, URL and credentials, within its max-age), its grant
+      # stored for the requests after it. Returns false (= network error) only when a fresh preflight is needed AND fails.
+      # (…on the REAL monotonic clock, not the virtual one)
       def cors_preflight_ok?(target, method, headers, req_origin, credentialed, referer)
-        return true if cors_preflight_cached?(target, req_origin, method, headers, credentialed)
-        result = cors_run_preflight(target, method, headers, req_origin, credentialed, referer)
-        return false unless result
-        # Cache the grant for Max-Age seconds so a covered follow-up skips the preflight.
-        # The key is (origin, url, credentialed): a credentialed grant (ACAO echoing the
-        # origin, no `*` matching) can't cover an uncredentialed follow-up or vice versa,
-        # so the two are cached apart. Expiry uses the REAL monotonic clock (not the
-        # virtual one), so a test that virtual-sleeps past Max-Age to force a re-preflight
-        # isn't caught yet.
-        @cors_preflight_cache[[req_origin, target, credentialed]] = result.merge(stored_at: Process.clock_gettime(Process::CLOCK_MONOTONIC)) if result[:max_age].positive?
-        true
-      end
-
-      # Whether a cached preflight grant covers this request (not expired + method/headers
-      # allowed). A method/header the cache doesn't cover — or an expired entry — forces a
-      # fresh preflight (cache-invalidation-by-method / -header / -timeout).
-      def cors_preflight_cached?(target, req_origin, method, headers, credentialed)
-        entry = @cors_preflight_cache[[req_origin, target, credentialed]]
-        return false unless entry
-        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) - entry[:stored_at] >= entry[:max_age]
-        cors_grant_allows?(entry[:methods], entry[:headers], method, cors_unsafe_headers(headers), credentialed)
-      end
-
-      # `Authorization` is Fetch's sole "CORS non-wildcard request-header name": a preflight
-      # `Access-Control-Allow-Headers: *` never covers it — it must be listed by name — even
-      # for an uncredentialed request (cors-preflight "authorization not covered by wildcard").
-      CORS_NON_WILDCARD_REQUEST_HEADERS = %w[authorization].freeze
-
-      # Does a preflight grant (its Access-Control-Allow-Methods / -Headers) cover this
-      # request: the method is allowed / `*` / CORS-safelisted, and every unsafe header is
-      # allowed / `*`. Shared by the fresh-preflight accept check and the cache-hit check.
-      # For a CREDENTIALED request the wildcard loses its meaning — Fetch's "CORS-preflight
-      # fetch" matches `*` against no method/header when credentials mode is include, so a
-      # non-listed method or unsafe header is rejected (cors-preflight-star credentialed).
-      def cors_grant_allows?(allow_methods, allow_headers, method, unsafe_headers, credentialed = false)
-        # The method match is byte-CASE-SENSITIVE (Fetch normalizes the request method but
-        # compares it verbatim against Access-Control-Allow-Methods): `delete` in the grant
-        # does not cover a `DELETE` request. Safelisted GET/HEAD/POST pass regardless
-        # (they're always normalized to upper-case) (cors-preflight-star method-case).
-        m = method.to_s
-        method_ok = allow_methods.include?(m) || Native.cors_safelisted_method(m) || (!credentialed && allow_methods.include?('*'))
-        return false unless method_ok
-        wildcard_headers = !credentialed && allow_headers.include?('*')
-        unsafe_headers.all? {|h|
-          allow_headers.include?(h) || (wildcard_headers && !CORS_NON_WILDCARD_REQUEST_HEADERS.include?(h))
-        }
-      end
-
-      # Fetch "CORS-preflight fetch": send an OPTIONS with Access-Control-Request-Method
-      # / -Headers + Origin; on success (ok-status, ACAO match, and the grant covers the
-      # method + unsafe headers) return the grant {methods, headers, max_age} for the
-      # cache, else nil. A credentialed preflight additionally requires the response to
-      # allow credentials (ACAC:true) and forbids `*` in the origin/method/header grants.
-      def cors_run_preflight(target, method, headers, req_origin, credentialed, referer)
         unsafe = cors_unsafe_headers(headers)
-        env    = rack_env_for(target, method: 'OPTIONS')
+        now    = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        return true if Native.cors_preflight_cached(@cors_preflight_cache, req_origin.to_s, target.to_s, credentialed == true, method.to_s, unsafe, now)
+
+        status, ph = cors_run_preflight(target, method, unsafe, req_origin, referer)
+        return false unless status
+
+        response = [status.to_i, *PREFLIGHT_RESPONSE_HEADERS.map {|name| cors_value(ph, name) }]
+        Native.cors_preflight(@cors_preflight_cache, response, req_origin.to_s, target.to_s, credentialed == true, method.to_s, unsafe, now)
+      end
+      PREFLIGHT_RESPONSE_HEADERS = %w[
+        access-control-allow-origin access-control-allow-credentials access-control-allow-methods access-control-allow-headers
+        access-control-max-age
+      ].freeze
+
+      # Fetch "CORS-preflight fetch": an OPTIONS with Access-Control-Request-Method / -Headers (`unsafe`, the request's
+      # CORS-unsafe header names) + Origin, sent — its [status, headers], or nil where nothing answered (what comes of it:
+      # cors.rs `preflight`).
+      def cors_run_preflight(target, method, unsafe, req_origin, referer)
+        env = rack_env_for(target, method: 'OPTIONS')
         env['REQUEST_METHOD'] = 'OPTIONS'
         # The preflight's Referer is the request's referrer under its referrer policy —
         # the SAME value the actual request sends (computed by the caller), not the raw
@@ -13295,29 +13241,9 @@ module Capybara
         pbody.close if pbody.respond_to?(:close)
         # A slow preflight counts toward the client's timeout too (timeout-multiple-fetches).
         Thread.current[:csim_fetch_server_delay_ms] += server_delay_ms_of(ph) if Thread.current[:csim_fetch_server_delay_ms]
-        return nil unless (200..299).include?(status.to_i)
-        acao = cors_header(ph, 'access-control-allow-origin')
-        # A credentialed preflight can't be allowed by the wildcard origin and must carry
-        # Access-Control-Allow-Credentials: true (cors-preflight-star credentialed).
-        return nil unless credentialed ? acao == req_origin : (acao == '*' || acao == req_origin)
-        return nil if credentialed && cors_header(ph, 'access-control-allow-credentials') != 'true'
-        allow_methods = cors_list(cors_header(ph, 'access-control-allow-methods'))
-        allow_headers = cors_list(cors_header(ph, 'access-control-allow-headers')).map(&:downcase)
-        # Fetch "extract header list values" fails when a grant contains a malformed token
-        # (`Access-Control-Allow-Methods: Bad value` — a space isn't a tchar), and a failed
-        # extraction is a network error (cors-preflight-response-validation). Methods and
-        # header names are both HTTP tokens; `*` is a valid tchar so the wildcard passes.
-        # (…each an HTTP token — a valid method or field-name — the engine's: fetch_rules.rs)
-        return nil unless (allow_methods + allow_headers).all? {|t| Native.http_token(t) }
-        return nil unless cors_grant_allows?(allow_methods, allow_headers, method, unsafe, credentialed)
-        {methods: allow_methods, headers: allow_headers, max_age: cors_header(ph, 'access-control-max-age').to_i}
+        [status, ph]
       end
 
-      # The response headers a cross-origin "cors" response exposes to getResponseHeader /
-      # getAllResponseHeaders: the CORS-safelisted set plus any named in Access-Control
-      # -Expose-Headers. `*` exposes every header, but ONLY for a non-credentialed response;
-      # with credentials the wildcard loses its meaning and matches a header literally named
-      # `*` (cors-expose-star "only matches literally").
       # The virtual server delay a response carries (X-Csim-Server-Delay-Ms, ms), 0 if none.
       def server_delay_ms_of(headers)
         return 0 unless headers.is_a?(Hash)
@@ -13325,31 +13251,19 @@ module Capybara
         pair ? header_text(pair.last).to_i : 0
       end
 
+      # The response headers a cross-origin "cors" response exposes to getResponseHeader / getAllResponseHeaders
+      # (cors.rs `exposed_names_for_ruby`): the CORS-safelisted ones and those Access-Control-Expose-Headers names — every
+      # one for its `*`, but for a credentialed response — never a forbidden one (Set-Cookie); our internal reason-phrase
+      # sentinel (`x-csim-status-text`, which `response_hash` lifts into statusText) kept.
       def cors_exposed_headers(headers, credentialed = false)
-        # set-cookie / set-cookie2 are forbidden response-header names — NEVER exposed to
-        # script, even when explicitly named in Access-Control-Expose-Headers or covered by
-        # `*` (cors-filtering "header is forbidden"). x-csim-status-text is our internal
-        # reason-phrase sentinel (response_hash lifts it into statusText, which IS exposed
-        # cross-origin, then strips it from the script-visible map), so it must survive.
-        expose = cors_list(cors_header(headers, 'access-control-expose-headers')).map(&:downcase)
-        return headers.reject {|k, _| Native.forbidden_response_header(k.to_s) } if !credentialed && expose.include?('*')
-
-        # (…a CORS-safelisted response-header name always exposed — the engine's table — and those named)
-        allowed = expose + ['x-csim-status-text']
-        headers.select {|k, _|
-          name = k.to_s
-          (Native.cors_safelisted_response_header(name) || allowed.include?(name.downcase)) && !Native.forbidden_response_header(name)
-        }
+        kept = Native.cors_exposed_names(headers.keys.map(&:to_s), cors_value(headers, 'access-control-expose-headers'), credentialed == true)
+        headers.select {|k, _| kept.include?(k.to_s) }
       end
 
-      # Case-insensitive response-header lookup + comma-list split for the CORS checks.
-      def cors_header(headers, name)
-        pair = headers.find {|k, _| k.to_s.downcase == name }
-        pair ? header_text(pair.last) : ''
-      end
-
-      def cors_list(value)
-        value.to_s.split(',').map(&:strip).reject(&:empty?)
+      # A response header's value as text, by its name in any case — nil for none.
+      def cors_value(headers, name)
+        pair = (headers || {}).find {|k, _| k.to_s.casecmp?(name) }
+        pair && header_text(pair.last)
       end
 
       # The origin of a URL — `scheme://host[:port]` with the default port (80/443)

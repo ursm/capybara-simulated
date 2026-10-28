@@ -910,6 +910,8 @@ module WptRunner
             name, _, rest = args.partition(',')
             name = name.strip.downcase
             next if name.empty?
+            # (…a `\,` in its value a comma, as wptserve's pipe parser unescapes it)
+            rest = rest.gsub(/\\(.)/, '\\1')
             if name == 'set-cookie'
               # wptserve `header(name, value, append)`: a trailing `,True`/`,False` is the
               # APPEND flag, NOT part of the value. Set-Cookie is the only corpus header
