@@ -10156,8 +10156,12 @@ module Capybara
           # UA is about to follow (a redirect whose response lacks a valid Access-Control
           # -Allow-Origin is itself a network error: access-control-and-redirects). A
           # credentialed request additionally forbids `*` and needs Allow-Credentials.
+          # (…and a request that took the CORS-preflight path — its grant from the cache or a fresh one — lets the cache's
+          # entries for its origin and URL go: Fetch "main fetch" clears them where corsWithPreflightResponse is a network
+          # error, as Firefox does)
           if cross_origin && !cors_response_ok?(resp_headers, effective_origin, with_credentials)
             resp_body.close if resp_body.respond_to?(:close)
+            Native.cors_preflight_cache_forget(@cors_preflight_cache, effective_origin.to_s, target.to_s) if cors_unsafe_request?(method, headers)
             return nil
           end
           # A redirect-status response in a NON-follow mode is handled without following,

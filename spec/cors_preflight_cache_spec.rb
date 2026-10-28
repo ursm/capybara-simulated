@@ -4,7 +4,8 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # The CORS-preflight cache (Fetch §4.9, cors.rs): a credentialed request's grant serves an uncredentialed request after
-# it, not the other way round; a preflight that fails lets every entry of its origin and URL go ("clear cache entries");
+# it, not the other way round; a preflight that fails, or the request after it, lets every entry of its origin and URL go
+# ("clear cache entries");
 # and a response's Access-Control-Expose-Headers that names a non-token exposes none of its names.
 RSpec.describe 'the CORS-preflight cache' do
   def cors_session(options)
@@ -20,7 +21,14 @@ RSpec.describe 'the CORS-preflight cache' do
         options << env['HTTP_ACCESS_CONTROL_REQUEST_METHOD']
         next [500, {}, ['']] if env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'] == 'DELETE'
 
-        [200, grant.merge('access-control-allow-methods' => env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'], 'access-control-max-age' => '600'), ['']]
+        allowed = {
+          'access-control-allow-methods' => env['HTTP_ACCESS_CONTROL_REQUEST_METHOD'],
+          'access-control-allow-headers' => 'x-fail',
+          'access-control-max-age'       => '600'
+        }
+        [200, grant.merge(allowed), ['']]
+      in ['PATCH', '/data'] if env['HTTP_X_FAIL']
+        [200, {'content-type' => 'text/plain'}, ['refused']]
       in [_, '/data']
         [200, grant.merge('content-type' => 'text/plain', 'x-shown' => '1', 'access-control-expose-headers' => 'x-shown, a b'), ['ok']]
       else
@@ -30,18 +38,19 @@ RSpec.describe 'the CORS-preflight cache' do
     simulated_session(app).tap {|s| s.visit '/' }
   end
 
-  def send_js(method, credentialed)
+  def send_js(method, credentialed, fail: false)
     <<~JS
       (() => {
         const x = new XMLHttpRequest();
         x.open(#{method.to_json}, 'http://other.example.com/data', false);
         x.withCredentials = #{credentialed};
+        if (#{fail}) x.setRequestHeader('x-fail', '1');
         try { x.send(); return x.status + ' ' + x.getResponseHeader('x-shown'); } catch (e) { return e.name; }
       })()
     JS
   end
 
-  it "serves an uncredentialed request with a credentialed one's grant, not the other way round" do
+  it "serves an uncredentialed request with a credentialed one's grant, not the other way round, exposing no header of a non-token list" do
     options = []
     s       = cors_session(options)
     expect(s.evaluate_script(send_js('PUT', true))).to eq('200 null')
@@ -59,5 +68,14 @@ RSpec.describe 'the CORS-preflight cache' do
     expect(s.evaluate_script(send_js('DELETE', false))).to eq('NetworkError')
     expect(s.evaluate_script(send_js('PUT', false))).to eq('200 null')
     expect(options).to eq(%w[PUT DELETE PUT])
+  end
+
+  it "lets a URL's entries go when a request its grant served fails the CORS check" do
+    options = []
+    s       = cors_session(options)
+    expect(s.evaluate_script(send_js('PATCH', false))).to eq('200 null')
+    expect(s.evaluate_script(send_js('PATCH', false, fail: true))).to eq('NetworkError')
+    expect(s.evaluate_script(send_js('PATCH', false))).to eq('200 null')
+    expect(options).to eq(%w[PATCH PATCH])
   end
 end
