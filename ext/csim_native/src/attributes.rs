@@ -7,7 +7,7 @@
 // change — a script prepared, a sheet renewed, a handler compiled, a frame navigated, an image fetched — the op answers
 // as `STEP_*` bits.
 
-use crate::dom::{realm, realm_id, NodeData, NodeId, RealmArena, STATE_CUSTOM, STATE_XML_DOCUMENT};
+use crate::dom::{realm, realm_id, NodeData, NodeId, RealmArena, STATE_CUSTOM, STATE_SELECTED, STATE_SELECTED_DIRTY, STATE_SELECTED_INIT, STATE_XML_DOCUMENT};
 use crate::namespaces::{valid_attribute_local_name, validate_and_extract};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -532,6 +532,20 @@ fn change(
         if let Some(owner_realm) = arena.get(id).map(|n| n.realm) {
             let in_shadow = arena.get(arena.root_of(id)).is_some_and(|r| r.host.is_some());
             arena.stale_cascade(owner_realm, in_shadow);
+        }
+    }
+    // (…an option's `selected` added or removed — HTML's attribute change steps: added, its default applied
+    // (`STATE_SELECTED_INIT`); and where its selectedness is not dirty (no script's nor user's pick set it), its
+    // selectedness the attribute's presence, the select's selectedness algorithm the bindings' to run after)
+    if steps & STEP_SELECTED != 0 {
+        if let Some(had) = arena.get(id).map(|n| n.state) {
+            let mut bits = had | if value.is_some() { STATE_SELECTED_INIT } else { 0 };
+            if had & STATE_SELECTED_DIRTY == 0 {
+                bits = bits & !STATE_SELECTED | if value.is_some() { STATE_SELECTED } else { 0 };
+            }
+            if bits != had {
+                arena.set_state(id, bits);
+            }
         }
     }
     if plain && local == "async" && value.is_some() && arena.get(id).is_some_and(is_script) {
