@@ -527,6 +527,12 @@ fn change(
         if renews && arena.renew_sheet(id) && link && local == "disabled" && value.is_none() {
             arena.explicitly_enabled.insert(id);
         }
+        // (…and the cascade of the realm whose tree it is in stale — a shadow tree's its rule set moved — whichever
+        // realm's code wrote it: sheet_feed.rs `stale_cascade`)
+        if let Some(owner_realm) = arena.get(id).map(|n| n.realm) {
+            let in_shadow = arena.get(arena.root_of(id)).is_some_and(|r| r.host.is_some());
+            arena.stale_cascade(owner_realm, in_shadow);
+        }
     }
     if plain && local == "async" && value.is_some() && arena.get(id).is_some_and(is_script) {
         if let Some(n) = arena.get_mut_quietly(id) {

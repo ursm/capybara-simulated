@@ -3,20 +3,73 @@
 // (HTML "process the linked resource": sheet_fetch.rs) — ONE per owner (`MadeSheet`), its `@import`s fetched and handed
 // over before it is used (sheet_fetch.rs `resolve_imports`); and the list of them a document's or a shadow root's
 // style engine is handed — the owners whose sheets take part, in tree order (`sheet_set`), its adopted ones after them
-// (dom.rs `set_document_sheets`, `set_shadow_sheets`).
+// (dom.rs `set_document_sheets`, `set_shadow_sheets`) — and WHEN: where a change made its cascade stale (`stale_cascade`:
+// a `<style>` / `<link>` inserted, removed or rewritten, a CSSOM edit, a parse ended) or moved its rule set, the next
+// read of its style has it handed them first (`fresh`), the bindings asking on a mark they read with no call.
 
 use std::rc::Rc;
 
-use crate::dom::{dom, nid_arg, realm, realm_id, register, NodeId, NodeKind, RealmArena};
+use crate::dom::{dom, nid_arg, realm, realm_id, register, NodeId, NodeKind, RealmArena, GEN_CASCADE, GEN_SHADOWS_FED, GEN_SHADOWS_TREE, GEN_STYLE_FED, GEN_STYLE_STALE, GEN_TREE};
 use crate::font_files::Terminated;
 use crate::sheet_owners::MadeSheet;
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "ownerSheet", owner_sheet_op, context_id);
     register(scope, ns, "fetchedSheet", fetched_sheet_op, context_id);
-    register(scope, ns, "styleRebuild", style_rebuild_op, context_id);
-    register(scope, ns, "styleFeed", style_feed_op, context_id);
-    register(scope, ns, "styleFeedShadows", style_feed_shadows_op, context_id);
+    register(scope, ns, "styleFresh", style_fresh_op, context_id);
+    register(scope, ns, "cascadeStale", cascade_stale_op, context_id);
+}
+
+impl RealmArena {
+    // Realm `cid`'s cascade stale — a sheet of its document's added, removed or made again — or (`version`, a shadow
+    // tree's, which its document's cascade key does not see) its rule set moved: either handed its engine at its next
+    // style read (`fresh`).
+    pub(crate) fn stale_cascade(&mut self, cid: i32, version: bool) {
+        let Some(state) = self.realm_state_mut(cid) else { return };
+        if version {
+            state.generations.bump(GEN_CASCADE);
+        } else {
+            state.generations.set(GEN_STYLE_STALE, 1);
+        }
+    }
+}
+
+// Realm `cid`'s style engine handed what it is to style with, where it was not yet: its document's cascade rebuilt
+// where it is stale (`cascade_rekey`), its document's sheets handed again where the rule set moved since they were, and
+// its shadow roots' where that or the tree did (`feed_shadows`) — none for a realm whose document has no document
+// element — `host` the steps its feeds fetch a `<link>`'s sheet and an `@import` through (subresource-host.js).
+pub(crate) fn fresh(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>) -> Result<(), Terminated> {
+    let arena = realm(scope, cid);
+    let Some(shadow_hosts) = arena.realm_state(cid).map(|s| s.shadow_hosts) else { return Ok(()) };
+    let Some(doc) = arena.realm_document(cid).filter(|&d| arena.first_element_child(d).is_some()) else { return Ok(()) };
+    let g = &realm(scope, cid).generations;
+    if g.get(GEN_STYLE_STALE) != 0 {
+        g.set(GEN_STYLE_STALE, 0);
+        if let Some(owners) = rekey(scope, cid, doc) {
+            feed_document(scope, cid, host, doc, &owners)?;
+        }
+    }
+    let g = &realm(scope, cid).generations;
+    if g.get(GEN_STYLE_FED) != g.get(GEN_CASCADE) {
+        let owners = realm(scope, cid).sheet_set(doc).taking_part.clone();
+        feed_document(scope, cid, host, doc, &owners)?;
+    }
+    let g = &realm(scope, cid).generations;
+    let marks = [g.get(GEN_CASCADE), g.get(GEN_TREE)];
+    if shadow_hosts && [g.get(GEN_SHADOWS_FED), g.get(GEN_SHADOWS_TREE)] != marks {
+        g.set(GEN_SHADOWS_FED, marks[0]);
+        g.set(GEN_SHADOWS_TREE, marks[1]);
+        feed_shadows(scope, cid, host, doc)?;
+    }
+    Ok(())
+}
+// …the document's cascade made of other sheets than the engine was last handed: they, the rule-set generation moved.
+fn rekey(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId) -> Option<Vec<NodeId>> {
+    let size = crate::viewport::of(scope, cid);
+    let d = dom(scope);
+    let screen = crate::style::Screen { viewport: (size[0] as f32, size[1] as f32), touch: d.touch_input };
+    let engine = d.styles.get(&cid);
+    d.arena.enter(cid).cascade_rekey(engine, screen, doc, cid)
 }
 
 // The style engine's sheet of `owner`, made of `css` — the text its fetch gave, none for a `<style>`'s block (the data of
@@ -181,10 +234,13 @@ fn owner_sheet_ids(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'
     Ok(ids)
 }
 
-// The realm document `doc`'s sheets — those of `owners` — handed to its style engine, at its base URL.
+// The realm document `doc`'s sheets — those of `owners` — handed to its style engine, at its base URL: as of the rule-set
+// generation now (`GEN_STYLE_FED`).
 fn feed_document(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, doc: NodeId, owners: &[NodeId]) -> Result<(), Terminated> {
     let ids = owner_sheet_ids(scope, cid, host, owners)?;
-    let base = realm(scope, cid).document_base_url(doc);
+    let arena = realm(scope, cid);
+    let base = arena.document_base_url(doc);
+    arena.generations.set(GEN_STYLE_FED, arena.generations.get(GEN_CASCADE));
     crate::dom::style_op(scope, cid, |scope| crate::dom::set_document_sheets(scope, cid, doc, &base, ids));
     Ok(())
 }
@@ -240,34 +296,27 @@ fn fetched_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     }
 }
 
-// __dom.styleRebuild(docNid, host) -> whether the realm document's cascade was made of other sheets than its style
-// engine was last handed (sheet_owners.rs `cascade_rekey`), and so handed them — none of the redundant rebuilds a page
-// graft schedules (a build, then one per linked sheet's deferred load, all of the same sheet sets and viewport).
-fn style_rebuild_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(false);
-    let (Some(doc), Some(host)) = (nid_arg(scope, &args, 0), host_arg(&args, 1)) else { return };
+// __dom.styleFresh(host): the realm's style engine handed what it is to style with, where it was not yet (`fresh`) —
+// asked by the bindings before a read where a mark says so.
+fn style_fresh_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(host) = host_arg(&args, 0) else { return };
     let cid = realm_id(scope, &args);
-    let size = crate::viewport::of(scope, cid);
-    let d = dom(scope);
-    let screen = crate::style::Screen { viewport: (size[0] as f32, size[1] as f32), touch: d.touch_input };
-    let engine = d.styles.get(&cid);
-    let Some(owners) = d.arena.enter(cid).cascade_rekey(engine, screen, doc, cid) else { return };
-    rv.set_bool(true);
-    let _ = feed_document(scope, cid, host, doc, &owners);
+    let _ = fresh(scope, cid, host);
 }
 
-// __dom.styleFeed(docNid, host): the realm document's sheets that take part (`sheet_set`) handed to its style engine.
-fn style_feed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(doc), Some(host)) = (nid_arg(scope, &args, 0), host_arg(&args, 1)) else { return };
+// __dom.cascadeStale(what): the realm's cascade stale (`STALE`) and its rule set moved (`VERSION`) — either or both — where
+// a binding changed what it is made of: a CSSOM edit (both: a shadow root's sheet as much as the document's), a face
+// loaded, a parse ended (`stale_cascade`).
+const STALE: u32 = 1;
+const VERSION: u32 = 2;
+fn cascade_stale_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let what = args.get(0).uint32_value(scope).unwrap_or(STALE);
     let cid = realm_id(scope, &args);
-    let owners = realm(scope, cid).sheet_set(doc).taking_part.clone();
-    let _ = feed_document(scope, cid, host, doc, &owners);
-}
-
-// __dom.styleFeedShadows(docNid, host): the shadow roots' own sheets in the realm document handed to its style engine
-// where they moved (`feed_shadows`).
-fn style_feed_shadows_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(doc), Some(host)) = (nid_arg(scope, &args, 0), host_arg(&args, 1)) else { return };
-    let cid = realm_id(scope, &args);
-    let _ = feed_shadows(scope, cid, host, doc);
+    let arena = realm(scope, cid);
+    if what & STALE != 0 {
+        arena.stale_cascade(cid, false);
+    }
+    if what & VERSION != 0 {
+        arena.stale_cascade(cid, true);
+    }
 }

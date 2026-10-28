@@ -238,13 +238,14 @@ impl RealmArena {
     }
 }
 
-// __dom.forgetCascadeKey() — what the realm's style engine was last handed forgotten: a new page's cascade, and its
-// shadow roots' sheets, are handed it whatever they are made of.
+// __dom.forgetCascadeKey() — what the realm's style engine was last handed forgotten, its cascade stale: a new page's
+// cascade, and its shadow roots' sheets, are handed it whatever they are made of.
 fn forget_cascade_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     arena.cascade_key = None;
     arena.shadow_sheets_fed.clear();
+    arena.stale_cascade(cid, false);
 }
 
 // __dom.takeStyleLoads() -> the `<style>` elements owed a `load` since their sheets were made (`renew_sheet`), as

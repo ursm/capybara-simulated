@@ -552,9 +552,9 @@ pub(crate) fn record_child_list(
     }
     let dom = crate::dom::dom(scope);
     if renewals.is_some_and(|r| r != dom.arena.sheet_renewals) {
-        dom.arena.observers.note_cascade(cid, in_shadow);
+        dom.arena.stale_cascade(cid, in_shadow);
         if shadow_hosts {
-            dom.arena.observers.note_cascade(cid, true);
+            dom.arena.stale_cascade(cid, true);
         }
     }
     // (…the record's arrays made only where an observer is to have it)

@@ -270,7 +270,7 @@ pub(crate) fn replace_data(
     let arena = realm(scope, cid);
     // (…an `<?xml-stylesheet?>`'s data its pseudo-attributes: a new sheet, or none, which its document's cascade takes)
     if arena.renew_sheet(id) && (associated || crate::sheet_owners::associates_sheet(arena, id)) {
-        crate::dom::dom(scope).arena.observers.note_cascade(cid, false);
+        realm(scope, cid).stale_cascade(cid, false);
     }
     let arena = realm(scope, cid);
     // (…a `<style>` parent's block updated — the style elements that own a sheet, sheet_owners.rs)
@@ -282,7 +282,7 @@ pub(crate) fn replace_data(
             generations.bump(GEN_TREE);
             generations.bump(GEN_NODES);
         }
-        crate::dom::dom(scope).arena.observers.note_cascade(cid, in_shadow);
+        realm(scope, cid).stale_cascade(cid, in_shadow);
     }
     Ok(())
 }

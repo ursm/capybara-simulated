@@ -797,7 +797,10 @@ pub(crate) struct Generations {
 // bindings' `cascadeVersion`, cascade.js); the scroll's (a scroll offset moved, or a scroll into view asked for, which
 // moves every rendered box and no other generation). And beside them a word of flags rather than a count: the
 // observations the realm owes at its next rendering update (`OBSERVATIONS_*`, observers.js), which keep its event loop
-// stepping (timers.rs `realmPending`).
+// stepping (timers.rs `realmPending`); and the marks of what its style engine was handed (sheet_feed.rs `fresh`) —
+// whether its document's cascade is stale (1 until it is first handed one), the rule-set generation its document's
+// sheets were handed at, and the rule-set and tree generations its shadow roots' were — which the bindings compare with
+// no call before they ask the engine anything (cascade.js `feedStyleEngineSheets`).
 pub(crate) const GEN_DIRTY: usize = 0;
 pub(crate) const GEN_SUBTREE_MARKS: usize = 1;
 pub(crate) const GEN_SETTLE: usize = 2;
@@ -807,7 +810,11 @@ pub(crate) const GEN_STYLE_STATE: usize = 5;
 pub(crate) const GEN_CASCADE: usize = 6;
 pub(crate) const GEN_SCROLL: usize = 7;
 pub(crate) const GEN_OBSERVATIONS: usize = 8;
-const GENERATIONS: usize = 9;
+pub(crate) const GEN_STYLE_STALE: usize = 9;
+pub(crate) const GEN_STYLE_FED: usize = 10;
+pub(crate) const GEN_SHADOWS_FED: usize = 11;
+pub(crate) const GEN_SHADOWS_TREE: usize = 12;
+const GENERATIONS: usize = 13;
 
 impl Generations {
     pub(crate) fn get(&self, which: usize) -> u32 {
@@ -821,6 +828,12 @@ impl Generations {
     pub(crate) fn bump(&self, which: usize) {
         self.bump_by(which, 1);
     }
+    pub(crate) fn set(&self, which: usize, value: u32) {
+        let Some(buffer) = &self.buffer else { return };
+        for (cell, byte) in buffer[which * 4..which * 4 + 4].iter().zip(value.to_ne_bytes()) {
+            cell.set(byte);
+        }
+    }
     pub(crate) fn bump_by(&self, which: usize, by: u32) {
         let Some(buffer) = &self.buffer else { return };
         let cells = &buffer[which * 4..which * 4 + 4];
@@ -832,11 +845,12 @@ impl Generations {
             cell.set(byte);
         }
     }
-    // …the buffer, made as the realm's bindings first view it: every generation 0.
+    // …the buffer, made as the realm's bindings first view it: every generation 0, its cascade stale.
     fn store(&mut self) -> v8::SharedRef<v8::BackingStore> {
         self.buffer
             .get_or_insert_with(|| {
-                let words = [0u32; GENERATIONS];
+                let mut words = [0u32; GENERATIONS];
+                words[GEN_STYLE_STALE] = 1;
                 let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_ne_bytes()).collect();
                 v8::ArrayBuffer::new_backing_store_from_vec(bytes).make_shared()
             })

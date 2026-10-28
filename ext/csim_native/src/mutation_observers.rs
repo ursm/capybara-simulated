@@ -59,15 +59,11 @@ pub(crate) struct Observers {
     // the agent's mutation observer microtask is queued, [2] whether observers are being notified, [3] whether anything
     // is pending — set as a realm becomes pending, cleared as the notification takes them all — which a change the
     // engine signaled a slot for asks the microtask to be queued by — and what of the bindings' a change the engine made
-    // asks for: [4] the document's cascade refreshed, [5] the cascade version moved (a shadow tree's sheet), [6] a
-    // `<style>` owed its `load` (sheet_owners.rs `takeStyleLoads`) — a rendering update's observations asked of the word
-    // of the realms asked (`observations_asked`).
+    // asks for: [4] a `<style>` owed its `load` (sheet_owners.rs `takeStyleLoads`) — a rendering update's observations
+    // asked of the word of the realms asked (`observations_asked`).
     flags: Option<v8::SharedRef<v8::BackingStore>>,
     // The realm whose microtask queue holds the agent's mutation observer microtask, while one does (`moQueue`).
     queued_in: Option<i32>,
-    // The realms whose cascade a change asks for — refreshed (a document's sheet owner), or its version moved (a shadow
-    // tree's) — the realm whose tree it is, whichever realm's code made it (`takeCascadeChanges`).
-    cascade: Vec<(i32, bool)>,
     // …and the realms a change asked a rendering update's observations of — the one whose tree or element changed,
     // whichever realm's code changed it: its own observers to hear of it — in a word the bindings read with no call
     // (`observationsAsked`: 0 none, a realm's id + 1 for that one alone, `ASKED_SEVERAL` for several), the several kept
@@ -79,10 +75,8 @@ pub(crate) struct Observers {
 const ANY_REGISTERED: usize = 0;
 const MICROTASK_QUEUED: usize = 1;
 const PENDING: usize = 3;
-pub(crate) const CASCADE_REFRESH: usize = 4;
-pub(crate) const CASCADE_VERSION: usize = 5;
-pub(crate) const STYLE_LOADS: usize = 6;
-const FLAGS: usize = 7;
+pub(crate) const STYLE_LOADS: usize = 4;
+const FLAGS: usize = 5;
 // (…the word of the realms asked their observations, where there are several of them)
 const ASKED_SEVERAL: u32 = u32::MAX;
 
@@ -91,7 +85,7 @@ impl Observers {
     pub(crate) fn observing(&self) -> bool {
         !self.lists.is_empty()
     }
-    // A change asks for one of the bindings' steps (`CASCADE_REFRESH`, `CASCADE_VERSION`, `STYLE_LOADS`).
+    // A change asks for one of the bindings' steps (`STYLE_LOADS`).
     pub(crate) fn note(&self, flag: usize) {
         if let Some(flags) = &self.flags {
             flags[flag].set(1);
@@ -114,13 +108,6 @@ impl Observers {
                 self.observations_asked.set(ASKED_SEVERAL);
             },
         }
-    }
-    // …the cascade of realm `cid` — the one whose tree changed — refreshed, or (`version`) its version moved.
-    pub(crate) fn note_cascade(&mut self, cid: i32, version: bool) {
-        if !self.cascade.contains(&(cid, version)) {
-            self.cascade.push((cid, version));
-        }
-        self.note(if version { CASCADE_VERSION } else { CASCADE_REFRESH });
     }
     // `observer` is pending, and so is its realm.
     fn pend_observer(&mut self, observer: u32) {
@@ -344,7 +331,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moRecord", record, context_id);
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
     crate::dom::register(scope, ns, "moTakeBatch", take_batch, context_id);
-    crate::dom::register(scope, ns, "moTakeCascade", take_cascade, context_id);
     crate::dom::register(scope, ns, "moTakeObservations", take_observations, context_id);
     let asked = crate::dom::dom(scope).arena.observers.observations_asked.store();
     crate::dom::view_word(scope, ns, "observationsAsked", asked);
@@ -591,14 +577,6 @@ fn take_observations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallba
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.moTakeCascade() -> [realm, version, …]: the realms whose cascade the changes since asked for (`note_cascade`) —
-// refreshed, or (`version` 1) its version moved — none any more.
-fn take_cascade(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let asked = std::mem::take(&mut crate::dom::dom(scope).arena.observers.cascade);
-    let items: Vec<v8::Local<v8::Value>> =
-        asked.iter().flat_map(|&(cid, version)| [f64::from(cid), f64::from(u8::from(version))]).map(|n| v8::Number::new(scope, n).into()).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
 // __dom.moTakeBatch() -> `[observers, slots]`: the calling realm's pending observers, in the order they were made — no
 // longer pending — and its signal slots, in the order signaled, taken: a notification's part in this realm. Each
 // observer's records are taken as its turn comes (`moTakeRecords`): one an earlier callback queued for it is its, and
