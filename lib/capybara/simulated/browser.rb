@@ -486,13 +486,13 @@ module Capybara
         # The lock covers main-thread resets racing the worker-thread writes.
         @sw_raced_fetches = {}
         @sw_race_lock     = Mutex.new
-        # keepalive_start machinery: detached request results + the 64 KiB
-        # in-flight payload quota. Survives per-visit rebuilds by design.
-        @keepalive_results  = {}
-        @keepalive_inflight_sizes = {}
-        @keepalive_inflight = 0
-        @keepalive_seq      = 0
-        @keepalive_lock     = Mutex.new
+        # keepalive_start machinery: detached request results, and each request's reservation of its fetch group's 64 KiB
+        # in-flight payload quota (keepalive.rs, this window's session of it). Survives per-visit rebuilds by design.
+        @keepalive_results = {}
+        @keepalive_tickets = {}
+        @keepalive_seq     = 0
+        @keepalive_lock    = Mutex.new
+        @keepalive_session = Native.keepalive_session_new
         # Async <img> loads: fetch + decode on a thread (a real browser never blocks the parser
         # on an image), delivered into the realm by `deliver_image_loads` from the same drain
         # funnel the other background channels use. Threads are fire-and-forget WITHIN a page's
@@ -5565,10 +5565,8 @@ module Capybara
       # polling keepalive_take on its normal deferred tick. Threads are NOT killed on
       # per-visit rebuild — surviving navigation is the contract — only at session
       # reset (reset_workers), when the Rack app itself goes away. The Fetch keepalive
-      # quota (64 KiB of in-flight request payload) is enforced at start: -1 = over
-      # quota, the caller rejects with TypeError synchronously, like a browser.
-      KEEPALIVE_QUOTA = 65_536
-
+      # quota — 64 KiB of in-flight request payload, each fetch group's: its client's document's (keepalive.rs) — is
+      # enforced at start: -1 = over quota, the caller rejects with TypeError synchronously, like a browser.
       def keepalive_start(request, body)
         # The quota reserves the PAYLOAD size: a text body arrives as its UTF-8 String and
         # any other as its BINARY bytes, so either way that is the String's byte count.
@@ -5577,12 +5575,11 @@ module Capybara
         # ONE critical section for reserve + spawn: a reset between them would
         # leave the spawned thread unregistered for the boundary drain.
         @keepalive_lock.synchronize do
-          return -1 if @keepalive_inflight + size > KEEPALIVE_QUOTA
+          ticket = Native.keepalive_reserve(@keepalive_session, request.to_h['clientRealm'].to_i, size) or return -1
 
-          @keepalive_inflight += size
           id = (@keepalive_seq += 1)
-          @keepalive_results[id]        = :pending
-          @keepalive_inflight_sizes[id] = size
+          @keepalive_results[id] = :pending
+          @keepalive_tickets[id] = ticket
           spawn_app_request_thread do
             r = nil
             begin
@@ -5596,14 +5593,12 @@ module Capybara
             ensure
               # Release + finalize under `ensure`: an escaping non-StandardError (or a
               # kill) must not strand the reservation for the session, nor leave a
-              # live page's poll parked on :pending forever. The per-id size map makes
+              # live page's poll parked on :pending forever. The per-id ticket makes
               # the release GENERATION-SAFE: a thread completing after reset_workers
-              # cleared the maps finds no entry and subtracts nothing from the next
-              # session's tally.
+              # cleared them finds none and lets nothing of the next session's go.
               @keepalive_lock.synchronize do
-                if (sz = @keepalive_inflight_sizes.delete(id))
-                  @keepalive_inflight = [0, @keepalive_inflight - sz].max
-                end
+                ticket = @keepalive_tickets.delete(id)
+                Native.keepalive_release(ticket) if ticket
                 @keepalive_results[id] = r if @keepalive_results[id] == :pending
               end
             end
@@ -8643,12 +8638,12 @@ module Capybara
         # Keepalive threads are never KILLED — delivering the beacon is their
         # contract — but they no longer outlive the session boundary either:
         # dispose/reset! drain them (join, so the beacon still lands) via
-        # drain_app_request_threads before this runs. The per-id size map makes a
+        # drain_app_request_threads before this runs. The per-id ticket makes a
         # late release/finalize generation-safe against these clears regardless.
         @keepalive_lock.synchronize do
           @keepalive_results.clear
-          @keepalive_inflight_sizes.clear
-          @keepalive_inflight = 0
+          @keepalive_tickets.clear
+          Native.keepalive_clear(@keepalive_session)
         end
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}

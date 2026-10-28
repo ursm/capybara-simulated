@@ -188,6 +188,7 @@ mod activation;
 mod cookie_jar;
 mod http_auth;
 mod http_cache;
+mod keepalive;
 mod civil;
 mod cors;
 mod text;
@@ -294,6 +295,11 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("cors_exposed_names", magnus::function!(cors::exposed_names_for_ruby, 3))?;
     // Each session's cookie store (cookie_jar.rs).
     native.define_module_function("cookie_jar_new", magnus::function!(cookie_jar::new_for_ruby, 0))?;
+    // …its keepalive requests' bytes in flight, each fetch group's (keepalive.rs)…
+    native.define_module_function("keepalive_session_new", magnus::function!(keepalive::session_new_for_ruby, 0))?;
+    native.define_module_function("keepalive_reserve", magnus::function!(keepalive::reserve, 3))?;
+    native.define_module_function("keepalive_release", magnus::function!(keepalive::release, 1))?;
+    native.define_module_function("keepalive_clear", magnus::function!(keepalive::clear, 1))?;
     // …and its HTTP authentication entries (http_auth.rs).
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
     native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;
