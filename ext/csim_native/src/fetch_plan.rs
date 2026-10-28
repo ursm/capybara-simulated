@@ -8,9 +8,9 @@
 
 use std::cell::RefCell;
 
-use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RModule, Ruby, TryConvert, Value};
+use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RModule, Ruby, TryConvert, Value};
 
-use crate::fetch_hop::FetchHops;
+use crate::fetch_hop::{ClientFacts, FetchHops};
 use crate::fetch_rules::{bad_port, follow_redirect, redirect_status, request_body_header, Redirected, Redirecting};
 
 // Fetch caps a chain at 20 redirects: the 21st is a network error (one dispatch more than the redirects followed).
@@ -125,29 +125,75 @@ fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
 }
 
 impl FetchPlan {
-    // FetchPlan.new(hops, request, sessions) -> the plan, or nil for a URL no fetch here goes to (no HTTP(S) one, a
-    // blocked port: a network error before any connection — Fetch "port blocking"). `hops` are `FetchHops.new`'s
-    // arguments; `request` [method, url, header pairs, body empty, redirect mode, cache mode, referrer policy, referrer
-    // source, origin tainted already, a document's navigation]; `sessions` [preflight cache, authentication entries].
-    fn new(hops: RArray, request: RArray, sessions: (u64, u64)) -> Result<Option<Self>, Error> {
-        let (mode, dest, nav_dest, flags, credentials, origins, documents, ancestors, worker_site): (Option<String>, Option<String>, Option<String>, u32, String, RArray, RArray, RArray, Option<String>) =
-            TryConvert::try_convert(hops.as_value())?;
-        let (origin, doc_origin, client_origin): (Option<String>, Option<String>, Option<String>) = (origins.entry(0)?, origins.entry(1)?, origins.entry(2)?);
-        let target: String = request.entry(1)?;
+    // FetchPlan.new(request, sessions) -> the plan of the fetch `request` describes, or nil for a URL no fetch here goes
+    // to (no HTTP(S) one; a blocked port — Fetch "port blocking": a network error before any connection). `request` is
+    // the host's description, by name: `method`, `url` (resolved), `headers` (pairs), `body_empty`, `redirect`, `mode`
+    // (nil a mode-less internal load's), `credentials`, `referrer_policy`, `referrer` (nil its client's URL, '' none),
+    // `cache`, `initiator` (a worker re-issuing a navigation: the request's origin whatever its mode), `site_seed`,
+    // `origin_null`, `client_url`, `client_origin`, `ancestors`, `cookie_cross_site`, `nav_dest`, `navigation`, `dest`,
+    // `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil for none);
+    // `sessions` [preflight cache, authentication entries].
+    fn new(ruby: &Ruby, request: RHash, sessions: (u64, u64)) -> Result<Option<Self>, Error> {
+        let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
+        let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
+        let flag = |key: &str| -> Result<bool, Error> { Ok(get(key)?.to_bool()) };
+        let target = text("url")?.unwrap_or_default();
         if !ada_url::Url::parse(&target, None).is_ok_and(|u| matches!(u.protocol(), "http:" | "https:") && !port_blocked(&u)) {
             return Ok(None);
         }
-        let mut headers = header_pairs(request.entry(2)?)?;
+        let mode = text("mode")?;
+        let credentials = text("credentials")?.unwrap_or_else(|| "same-origin".to_owned());
+        // The CLIENT: the realm that called fetch/XHR — its own document's URL, a service worker's script URL — and, where
+        // that is no HTTP(S) URL (an about:blank / javascript: / data: realm's), the page's; its origin the realm's where
+        // it says (a sandboxed document's opaque `null` its URL does not carry), else its URL's.
+        let client_url = text("client_url")?;
+        let client = client_url.clone().filter(|u| http_origin(u).is_some()).or(text("top_url")?);
+        let client_origin = text("client_origin")?.filter(|o| !o.is_empty()).or_else(|| client.as_deref().and_then(http_origin));
+        // The request's origin for every mode — Fetch appends an Origin to every non-GET/HEAD request whatever its mode —
+        // and the document origin a mode's response type is judged by; a mode-less internal load has none. A worker's
+        // re-issued navigation (`initiator`) is of its initiator's whatever its mode, a document's own navigation request
+        // of its document's.
+        let moded = matches!(mode.as_deref(), Some("cors" | "no-cors" | "same-origin"));
+        let initiator = text("initiator")?;
+        let navigation = flag("navigation")?;
+        let origin = initiator.clone().or_else(|| (navigation || moded).then(|| client_origin.clone()).flatten());
+        let doc_origin = moded.then(|| client_origin.clone()).flatten();
+        // Its referrer: an explicit one, else its client's URL; '' none.
+        let ref_source = if get("referrer")?.is_nil() { client.clone() } else { text("referrer")? };
+        // The origin Sec-Fetch-Site measures from, whatever the referrer policy makes of the Referer: an explicit
+        // initiator's, else the referrer's, else the client's (an about:blank document's: its creator's).
+        let sec_initiator = initiator.or_else(|| ref_source.as_deref().and_then(http_origin)).or_else(|| client_origin.clone());
+        let worker: Option<RArray> = Option::try_convert(get("worker")?)?;
+        let worker_site = worker.map(|w| w.entry::<Option<String>>(0)).transpose()?;
+        let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
+        let ancestors = ancestors.map_or(Ok(Vec::new()), |a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>())?;
+        let mut headers = header_pairs(RArray::try_convert(get("headers")?)?)?;
         // (…the XHR's challenge credentials, which its marker header carries: never sent until a challenge asks for them)
         let challenge = headers
             .iter()
             .position(|(k, _)| k.eq_ignore_ascii_case(b"x-csim-auth-challenge"))
             .map(|i| format!("Basic {}", String::from_utf8_lossy(&headers.remove(i).1)));
         let skip_cache = headers.iter().any(|(k, _)| CONDITIONAL.contains(&lower(k).as_str()));
-        let origin_null: bool = request.entry(8)?;
         let of_mode = |m: &str| mode.as_deref() == Some(m);
         let (cors, no_cors, same_origin) = (of_mode("cors"), of_mode("no-cors"), of_mode("same-origin"));
-        let hops = FetchHops::new(mode, dest, nav_dest, flags, credentials.clone(), origins, documents, ancestors, worker_site)?;
+        let hops = FetchHops::new(ClientFacts {
+            mode: mode.clone(),
+            dest: text("dest")?,
+            nav_dest: text("nav_dest")?,
+            navigation,
+            user_activated: flag("user_activated")?,
+            credentials: credentials.clone(),
+            origin: origin.clone(),
+            doc_origin: doc_origin.clone(),
+            client_origin: client_origin.clone(),
+            sec_initiator,
+            client_url,
+            top_document: text("top_url")?,
+            ancestors,
+            worker_site,
+            cross_site_frame: flag("cookie_cross_site")?,
+        });
+        hops.seed(text("site_seed")?);
         Ok(Some(FetchPlan {
             hops,
             no_cors,
@@ -157,21 +203,21 @@ impl FetchPlan {
             doc_origin,
             client_origin,
             credentials,
-            redirect_mode: request.entry(4)?,
-            cache_mode: request.entry(5)?,
+            redirect_mode: text("redirect")?.unwrap_or_else(|| "follow".to_owned()),
+            cache_mode: text("cache")?.unwrap_or_else(|| "default".to_owned()),
             skip_cache,
-            navigation: request.entry(9)?,
+            navigation,
             challenge,
             preflight_cache: sessions.0,
             auth_entries: sessions.1,
             st: RefCell::new(State {
-                method: request.entry(0)?,
+                method: text("method")?.unwrap_or_else(|| "GET".to_owned()),
                 target,
                 headers,
-                body_empty: request.entry(3)?,
-                effective_origin: if origin_null { Some("null".to_owned()) } else { origin },
-                ref_policy: request.entry(6)?,
-                ref_source: request.entry(7)?,
+                body_empty: flag("body_empty")?,
+                effective_origin: if flag("origin_null")? { Some("null".to_owned()) } else { origin },
+                ref_policy: text("referrer_policy")?,
+                ref_source,
                 crossed: false,
                 tainted: false,
                 redirected: false,
@@ -186,10 +232,6 @@ impl FetchPlan {
         }))
     }
 
-    // #seed(site): the chain's Sec-Fetch-Site so far (`FetchHops#seed`).
-    fn seed(&self, site: Option<String>) {
-        self.hops.seed(site);
-    }
     // #target / #request_method / #redirected?: the request as it stands.
     fn target(&self) -> String {
         self.st.borrow().target.clone()
@@ -492,8 +534,7 @@ enum Followed {
 
 pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     let class = native.define_class("FetchPlan", ruby.class_object())?;
-    class.define_singleton_method("new", function!(FetchPlan::new, 3))?;
-    class.define_method("seed", method!(FetchPlan::seed, 1))?;
+    class.define_singleton_method("new", function!(FetchPlan::new, 2))?;
     class.define_method("target", method!(FetchPlan::target, 0))?;
     class.define_method("request_method", method!(FetchPlan::request_method, 0))?;
     class.define_method("redirected?", method!(FetchPlan::redirected, 0))?;

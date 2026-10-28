@@ -9771,14 +9771,6 @@ module Capybara
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
-      # `FetchHops`' flags: a document's own navigation request, one whose document had transient activation, a navigation
-      # into a frame with a cross-site ancestor, and a worker's request.
-      FETCH_HOP_NAVIGATION       = 1
-      FETCH_HOP_USER_ACTIVATED   = 2
-      FETCH_HOP_CROSS_SITE_FRAME = 4
-      FETCH_HOP_WORKER           = 8
-      # The request modes whose fetch is of its client's origin (a mode-less internal load is of none).
-      FETCH_MODES_WITH_ORIGIN = %w[cors no-cors same-origin].freeze
 
       # URLs we won't even try to route through Rack: anything that
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
@@ -9798,80 +9790,45 @@ module Capybara
         # every caller resolves it first, JS-side or through parse_url / resolve_against.)
         target = http_url?(url) ? url.to_s : resolve_against_current(url.to_s)
         return nil unless target.is_a?(String) && http_url?(target)
-        # The CLIENT is the realm that called fetch/XHR — its own location (a Service
-        # Worker's script URL, a frame document's URL), threaded from JS; the top-level
-        # @current_url is only the fallback. It is the request's SINGLE origin identity:
-        # URL resolution (JS-side, vs the realm's baseURI), the response-taint verdict
-        # (doc_origin), CORS enforcement and the Origin header (req_origin) must all
-        # agree, or a frame's request to its OWN origin is judged cross-origin vs the
-        # top document (the cross-origin login iframe's Basic-auth XHR pre-flighted
-        # and died — fetch-canvas-tainting &Auth; an SW's own fetch() likewise judges
-        # vs its OWN script origin, not the page it controls).
-        # Only a REAL http(s) client URL carries origin identity; an opaque-origin
-        # context (about:blank / javascript: / data: realm reporting its own location)
-        # falls back to the top document, keeping the creator-inherited behavior those
-        # contexts had before client threading.
-        client = http_url?(client_url) ? client_url : @current_url
-        # …and its ORIGIN, where the realm says it (`client_origin`, its document's): a sandboxed document at a real URL
-        # is of an opaque origin ("null") its URL does not carry — every request it makes cross-origin, as Fetch has it.
-        client_origin = client_origin.to_s.empty? ? url_origin(client) : client_origin.to_s
-        # The request's origin for EVERY fetch mode — Fetch appends an Origin header to every non-GET/HEAD request
-        # regardless of mode — and the document origin its response's type is judged by, for a mode's request; a nil-mode
-        # internal caller (navigation / asset GET) has no origin semantics. An explicit `initiator` (a SW re-issuing a
-        # navigation via `fetch(event.request)`) is the request's origin for ALL modes — so a passthrough 'navigate'-mode
-        # POST still carries its Origin — and a document's own navigation request (`navigation`: a form submission's of a
-        # frame) is of its document's origin.
-        moded      = FETCH_MODES_WITH_ORIGIN.include?(cors_mode)
-        req_origin = initiator || (navigation || moded ? client_origin : nil)
-        doc_origin = moded ? client_origin : nil
-        # The request's referrer: an explicit `init.referrer` URL when given, else the document URL ("client"); an empty
-        # one is no-referrer (referrer.rs `request_referrer` maps a blank source to none).
-        ref_source = referrer.nil? ? client : referrer
-        # The request's INITIATOR origin for Sec-Fetch-Site — independent of Referrer-Policy: the referrer's origin (a
-        # SW's `fetch(event.request)` carries the navigating frame's origin here, so a cross-origin passthrough is same-/
-        # cross-site correctly), falling back to the client's origin when the referrer was policy-emptied or has none (an
-        # about:blank document's: its creator's). An explicit `initiator` is authoritative: it survives the referrer
-        # reset a `new Request(event.request, init)` performs (referrer → about:client), so a SW's change-request
-        # re-fetch is same-origin to the SW's own script.
-        sec_initiator = initiator || url_origin(ref_source) || client_origin
-        # The fetch, step by step (fetch_plan.rs `FetchPlan`) — its hops' headers and cookie site of the request's client
-        # (fetch_hop.rs `FetchHops`: its cookies by its document (or origin), a mode-less load's by the top-level document
-        # too, a frame document's by its ancestors' — `client_realm`, which the bindings name — a dedicated worker's by
-        # the site for cookies it was made with); none for a URL no fetch goes to (no HTTP(S) one; a blocked port, Fetch
-        # "port blocking": a network error before any connection — request-bad-port). A SW re-fetch seeds Sec-Fetch-Site
-        # with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts tainted where
-        # they had (`origin_null`). Use the method's case AS GIVEN: the JS callers already normalized it
+        # The fetch, step by step (fetch_plan.rs `FetchPlan`), of the request this describes: its client the realm that
+        # called fetch/XHR (`client_url`, `client_origin`: its document's, a service worker's script's — the page's where
+        # that is no HTTP(S) URL), its origin and referrer and the origin Sec-Fetch-Site measures from worked out there;
+        # its hops' headers and cookie site of that client (fetch_hop.rs: a frame document's by its ancestors' — `client_realm`,
+        # which the bindings name — a dedicated worker's by the site for cookies it was made with). None for a URL no fetch
+        # goes to (no HTTP(S) one; a blocked port, Fetch "port blocking" — request-bad-port). A SW re-fetch seeds
+        # Sec-Fetch-Site with the site the network hops accumulated BEFORE the SW intercepted the final hop, and starts
+        # tainted where they had (`origin_null`). The method's case AS GIVEN: the JS callers normalized it already
         # (open-method-case-sensitive).
         worker = Thread.current[:csim_worker_record]
         plan   = Native::FetchPlan.new(
-          [
-            cors_mode,
-            dest,
-            nav_dest,
-            (navigation ? FETCH_HOP_NAVIGATION : 0) | (user_activated ? FETCH_HOP_USER_ACTIVATED : 0) |
-              (cookie_cross_site ? FETCH_HOP_CROSS_SITE_FRAME : 0) | (worker&.key?(:site_for_cookies) ? FETCH_HOP_WORKER : 0),
-            credentials.to_s,
-            [req_origin, doc_origin, client_origin, sec_initiator],
-            [client_url, @current_url],
+          {
+            method:            (method || 'GET').to_s,
+            url:               target,
+            headers:           request_header_pairs(headers),
+            body_empty:        body.to_s.empty?,
+            redirect:          redirect_mode.to_s,
+            mode:              cors_mode,
+            credentials:       credentials.to_s,
+            referrer_policy:   referrer_policy,
+            referrer:          referrer,
+            cache:             cache_mode.to_s,
+            initiator:         initiator,
+            site_seed:         site_seed,
+            origin_null:       origin_null == true,
+            client_url:        client_url,
+            client_origin:     client_origin,
             # (…none where the page's realm cannot answer: a context being torn down)
-            (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
-            worker&.dig(:site_for_cookies)
-          ],
-          [
-            (method || 'GET').to_s,
-            target,
-            request_header_pairs(headers),
-            body.to_s.empty?,
-            redirect_mode.to_s,
-            cache_mode.to_s,
-            referrer_policy,
-            ref_source,
-            origin_null == true,
-            navigation == true
-          ],
+            ancestors:         (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
+            cookie_cross_site: cookie_cross_site == true,
+            nav_dest:          nav_dest,
+            navigation:        navigation == true,
+            dest:              dest,
+            user_activated:    user_activated == true,
+            top_url:           @current_url,
+            worker:            worker&.key?(:site_for_cookies) ? [worker[:site_for_cookies]] : nil
+          },
           [@cors_preflight_cache, @auth_cache]
         ) or return nil
-        plan.seed(site_seed) if site_seed
         loop do
           t0          = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           method      = plan.request_method

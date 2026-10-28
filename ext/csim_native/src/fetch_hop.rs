@@ -6,8 +6,6 @@
 
 use std::cell::RefCell;
 
-use magnus::{prelude::*, Error, RArray};
-
 use crate::referrer::{cross_site_for_cookies, fetch_site, http_origin, origin_header, wider_site};
 
 // The request's client and mode, as one fetch is made with them, and the documents its cookies are judged against.
@@ -96,49 +94,58 @@ impl Client {
     }
 }
 
+// What a fetch's client is (`FetchHops::new`): its request's mode, destination and a navigation's, whether it is a
+// document's own navigation request and whether that document had transient activation, its credentials mode; its
+// origin, the document origin a mode's response is judged by, its client's origin and the origin Sec-Fetch-Site measures
+// from; its client's URL, the top-level document a mode-less load is under, its frame's ancestors' document URLs, a
+// dedicated worker's site for cookies (Some(None): of none); and whether it navigates a frame with a cross-site ancestor.
+pub(crate) struct ClientFacts {
+    pub(crate) mode: Option<String>,
+    pub(crate) dest: Option<String>,
+    pub(crate) nav_dest: Option<String>,
+    pub(crate) navigation: bool,
+    pub(crate) user_activated: bool,
+    pub(crate) credentials: String,
+    pub(crate) origin: Option<String>,
+    pub(crate) doc_origin: Option<String>,
+    pub(crate) client_origin: Option<String>,
+    pub(crate) sec_initiator: Option<String>,
+    pub(crate) client_url: Option<String>,
+    pub(crate) top_document: Option<String>,
+    pub(crate) ancestors: Vec<Option<String>>,
+    pub(crate) worker_site: Option<Option<String>>,
+    pub(crate) cross_site_frame: bool,
+}
+
 impl FetchHops {
     // (…the client's cookie judge its origin's where it is a mode's request — its document's or its initiator's — else
     // its document's URL, an opaque one's `null`)
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        mode: Option<String>,
-        dest: Option<String>,
-        nav_dest: Option<String>,
-        flags: u32,
-        credentials: String,
-        origins: RArray,
-        cookie_documents: RArray,
-        ancestors: RArray,
-        worker_site: Option<String>,
-    ) -> Result<Self, Error> {
-        let origin_at = |i: isize| -> Result<Option<String>, Error> { origins.entry::<Option<String>>(i) };
-        let (origin, doc_origin, client_origin, sec_initiator) = (origin_at(0)?, origin_at(1)?, origin_at(2)?, origin_at(3)?);
-        let (client_url, top_document): (Option<String>, Option<String>) = (cookie_documents.entry(0)?, cookie_documents.entry(1)?);
-        let cookie_client = match mode {
-            Some(_) => doc_origin.clone().or_else(|| sec_initiator.clone()),
-            None if client_origin.as_deref() == Some("null") => Some("null".to_owned()),
-            None => client_url.or_else(|| sec_initiator.clone()),
+    pub(crate) fn new(f: ClientFacts) -> Self {
+        let cookie_client = match f.mode {
+            Some(_) => f.doc_origin.clone().or_else(|| f.sec_initiator.clone()),
+            None if f.client_origin.as_deref() == Some("null") => Some("null".to_owned()),
+            None => f.client_url.or_else(|| f.sec_initiator.clone()),
         };
-        let reissued = mode.as_deref() == Some("navigate") && nav_dest.as_deref().is_some_and(|d| !d.is_empty());
+        let reissued = f.mode.as_deref() == Some("navigate") && f.nav_dest.as_deref().is_some_and(|d| !d.is_empty());
         let client = Client {
-            mode,
-            dest,
-            nav_dest,
-            navigation: flags & NAVIGATION != 0,
-            user_activated: flags & USER_ACTIVATED != 0,
-            credentials,
-            origin,
-            doc_origin,
-            client_origin,
-            sec_initiator,
+            mode: f.mode,
+            dest: f.dest,
+            nav_dest: f.nav_dest,
+            navigation: f.navigation,
+            user_activated: f.user_activated,
+            credentials: f.credentials,
+            origin: f.origin,
+            doc_origin: f.doc_origin,
+            client_origin: f.client_origin,
+            sec_initiator: f.sec_initiator,
             cookie_client,
-            top_document,
-            ancestors: ancestors.into_iter().map(Option::<String>::try_convert).collect::<Result<_, _>>()?,
-            worker_site: (flags & WORKER != 0).then_some(worker_site),
+            top_document: f.top_document,
+            ancestors: f.ancestors,
+            worker_site: f.worker_site,
             reissued,
-            cross_site_frame: flags & CROSS_SITE_FRAME != 0,
+            cross_site_frame: f.cross_site_frame,
         };
-        Ok(FetchHops { client, latches: RefCell::default() })
+        FetchHops { client, latches: RefCell::default() }
     }
 
     // #seed(site): the chain's Sec-Fetch-Site so far — a worker's re-fetch of a navigation its network hops widened.
@@ -200,10 +207,6 @@ fn static_site(site: &str) -> &'static str {
     }
 }
 
-const NAVIGATION: u32 = 1;
-const USER_ACTIVATED: u32 = 2;
-const CROSS_SITE_FRAME: u32 = 4;
-const WORKER: u32 = 8;
 
 
 #[cfg(test)]
