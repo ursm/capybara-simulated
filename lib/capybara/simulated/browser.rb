@@ -10640,18 +10640,12 @@ module Capybara
           end
         end
       end
-      # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (the container's `sandbox` as it
-      # began: frame_navigation.rs `planFrameLocation`), none for another realm's — one the navigation's own made, nested
-      # in it.
-      def navigation_sandbox(realm)
-        sandbox_realm, sandbox = @navigation_sandbox
-        sandbox if realm && sandbox_realm == realm.to_i
-      end
       # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken as the
       # task ends, in the order they were planned (frame_navigation.rs `takeFrameNavigations`): each its URL, whether it
       # replaces the frame's entry, the document that began it and the Referer it sends, the container's `sandbox` as it
-      # began, its source's activation. (Applying one re-navigates the owning iframe, which disposes the frame's realm —
-      # illegal while its location setter is still on the V8 stack.)
+      # began — begun with it, what its document's seed and a download its response is take: frame_navigation.rs
+      # `frame_sandbox` — its source's activation. (Applying one re-navigates the owning iframe, which disposes the frame's
+      # realm — illegal while its location setter is still on the V8 stack.)
       FRAME_NAVIGATE = 1
       FRAME_RELOAD   = 2
       def consume_pending_frame_nav
@@ -10660,9 +10654,6 @@ module Capybara
         @runtime.call('__csimTakeFrameNavigations', FRAME_NAVIGATE).each do |_, realm_id, url, replace, initiator, source, policy, sandbox, activated|
           referrer = [source, policy]
           invalidate_find_cache
-          # (…sandboxed as the container said when the navigation began: what its document's seed and a download its
-          # response is take, a document it does not make — a refused unload — leaving nothing behind)
-          saved_sandbox, @navigation_sandbox = @navigation_sandbox, [realm_id, sandbox]
           # If this frame is on the entered `within_frame` stack, navigate it
           # through `navigate_frame` — it does the full fetch (redirects /
           # downloads / cookies) AND updates `@frame_stack` / `@current_realm_id`
@@ -10690,8 +10681,6 @@ module Capybara
           end
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")
-        ensure
-          @navigation_sandbox = saved_sandbox
         end
       end
       # The navigations the windows `window.open` made in this isolate planned of their own — each in its realm's plan,
@@ -10808,11 +10797,10 @@ module Capybara
       # each its realm, its request, the navigable its target chose (`frame_submission_route`'s) and its Referer.
       # (Never while the form's `submit()` is still on the V8 stack.)
       def consume_pending_frame_submit
-        while (realm_id, spec, kind, chosen_realm, _container, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
-          chosen = kind == ROUTE_FRAME ? chosen_realm : SUBMISSION_ROUTES[kind]
+        while (realm_id, spec, kind, chosen_realm, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
           invalidate_find_cache
           begin
-            submit_frame_route(realm_id, spec, [chosen, [source, policy]])
+            submit_frame_route(realm_id, spec, [route_chosen(kind, chosen_realm), [source, policy]])
           rescue StandardError => e
             log_console('warn', "nested-context form submission failed: #{e.message}")
           end
@@ -11111,17 +11099,19 @@ module Capybara
       def submit_form_in_realm(realm_id, spec)
         submit_frame_route(realm_id, spec, frame_submission_route(realm_id, spec))
       end
-      # …where it goes, asked of the frame's document while it is there (navigation_plan.rs `submissionRoute`): [chosen,
-      # initiator] — `:self` its own frame (a self-targeted link's navigation: within_frame's `navigate_frame`, else its
-      # iframe re-navigated by realm id), `:top` the page (`_top`, a `_parent` that is the page, or a name the page has), a
-      # frame's realm (a name's, `_parent`'s: made now, where its navigable has no document yet), `:window` a same-isolate
-      # window's (its navigation not modeled), nil a new window (not modeled), `:blocked` none its sandbox lets it
-      # navigate — and its Referer: the frame's document's, under its policy or `noreferrer`'s.
+      # The navigable a route the engine answers (navigation_plan.rs `ROUTE_*`) chooses: `:self` its own frame (a
+      # self-targeted link's navigation: within_frame's `navigate_frame`, else its iframe re-navigated by realm id), `:top`
+      # the page (`_top`, a `_parent` that is the page, or a name the page has), a frame's realm (a name's, `_parent`'s:
+      # made now, where its navigable has no document yet), `:window` a same-isolate window's (its navigation not
+      # modeled), nil a new window (not modeled), `:blocked` none its sandbox lets it navigate.
       SUBMISSION_ROUTES = {1 => :self, 2 => :top, 5 => :window, 6 => nil, 7 => :blocked}.freeze
       ROUTE_FRAME = 3
+      def route_chosen(kind, realm) = kind == ROUTE_FRAME ? realm : SUBMISSION_ROUTES[kind]
+      # …where a form of frame realm `realm_id` goes, as the engine routes it (`submissionRoute`): [chosen, initiator] —
+      # and its Referer: the frame's document's, under its policy or `noreferrer`'s.
       def frame_submission_route(realm_id, spec)
         kind, chosen, source, policy = @runtime.call('__csimSubmissionRoute', realm_id.to_i, spec['target'].to_s, spec['rel'].to_s)
-        [kind == ROUTE_FRAME ? chosen : SUBMISSION_ROUTES[kind], [source, policy]]
+        [route_chosen(kind, chosen), [source, policy]]
       end
       def submit_frame_route(realm_id, spec, route)
         chosen, initiator = route
@@ -11155,7 +11145,7 @@ module Capybara
         end
       end
       # The navigable a target name chooses from realm `realm_id`'s browsing context (`frame_submission_route`): a frame's
-      # realm, `:top`, `:blocked`, or nil (none has the name).
+      # realm, `:top`, `:window`, `:blocked`, or nil (none has the name).
       def choose_named_navigable(realm_id, target) = frame_submission_route(realm_id, {'target' => target})[0]
       # Whether a link's or a form's target opens a new browsing context — `_blank`, or a name no navigable has (the page
       # chose the one that has it first: `choose_named_navigable`).
@@ -11435,7 +11425,7 @@ module Capybara
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         # (…none where its container is gone: no document of it made unsandboxed, as an empty seed would)
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp, navigation_sandbox(realm_id)) or return
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp) or return
         return unless unload_frame_document(parent, realm_id)
 
         new_id = @runtime.reload_frame_realm(
@@ -11972,7 +11962,7 @@ module Capybara
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp, navigation_sandbox(old_id)) or return
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp) or return
         return unless unload_frame_document(parent, old_id)
 
         # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
@@ -12585,7 +12575,7 @@ module Capybara
         frame_navigation_made_no_document(realm) if realm
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         source = @download_source || realm
-        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox || navigation_sandbox(realm))
+        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox)
 
         filename = Native.download_filename(content_disposition_header(headers), url.to_s, hint)
         dir = downloads_directory

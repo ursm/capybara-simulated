@@ -161,17 +161,21 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &str) -> Route {
         other => other,
     }
 }
-// …and its request's target and Referer: the frame's document's, `no-referrer` for its `rel=noreferrer`.
+// …a form's of realm `realm`'s document with target `target` and link types `rel`, and the Referer it sends: that
+// document's, `no-referrer` for its `rel=noreferrer`.
+fn target_route(arena: &mut crate::dom::RealmArena, realm: i32, target: &str, rel: &str) -> (Route, (String, String)) {
+    let policy = if crate::token_list::link_types(rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
+    let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
+    (route(arena, realm, target), referrer)
+}
+// …its request's (the bindings' record of it: its `target`, its `rel`).
 fn request_route(scope: &mut v8::PinScope<'_, '_>, realm: i32, request: &v8::Global<v8::Value>) -> (Route, (String, String)) {
     let local = v8::Local::new(scope, request);
     let member = |scope: &mut v8::PinScope<'_, '_>, name: &str| {
         v8::Local::<v8::Object>::try_from(local).ok().and_then(|o| crate::dom::member(scope, o, name)).map_or_else(String::new, |v| v.to_rust_string_lossy(scope))
     };
     let (target, rel) = (member(scope, "target"), member(scope, "rel"));
-    let policy = if crate::token_list::link_types(&rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
-    let arena = &mut crate::dom::dom(scope).arena;
-    let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
-    (route(arena, realm, &target), referrer)
+    target_route(&mut crate::dom::dom(scope).arena, realm, &target, &rel)
 }
 // Frame realm `realm`'s navigable navigated otherwise (its own `location`, a reload, a form of its parent's document, a
 // traversal): the submission it made that the host routes taken out of its plan with its route — let go where it targets
@@ -472,6 +476,10 @@ fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
             *host = None;
         }
     }
+    match (route, container) {
+        (Route::SelfTarget, Some(c)) | (Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
+        _ => {}
+    }
     if matches!(route, Route::Top) {
         realm(scope, cid).navigation_plan.submission = None;
         let top = &mut realm(scope, 0).navigation_plan;
@@ -522,21 +530,23 @@ fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let target = args.get(1).to_rust_string_lossy(scope);
     let rel = args.get(2).to_rust_string_lossy(scope);
-    let policy = if crate::token_list::link_types(&rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
     let arena = &mut crate::dom::dom(scope).arena;
-    let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
-    let route = route(arena, realm, &target);
+    let (route, referrer) = target_route(arena, realm, &target, &rel);
+    // (…the navigation it begins sandboxed as the chosen frame's container says now)
+    match (route, arena.live_container(realm)) {
+        (Route::SelfTarget, Some(c)) | (Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
+        _ => {}
+    }
     let [kind, at, container] = route_items(scope, route);
     let items = [kind, at, container, v8::String::new(scope, &referrer.0).unwrap().into(), v8::String::new(scope, &referrer.1).unwrap().into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.takeRoutedSubmission() -> the first of the submissions frames' documents made that the host routes, in the order
 // they were made, which none plans any more: `[realm, request, ROUTE_*, realm, container, referrerSource,
-// referrerPolicy]` — for another frame's (ROUTE_FRAME) the realm of the document its container's navigable has now, or
-// (ROUTE_UNBUILT) the realm of the container's own document and the container, its navigable with none made yet; else
-// null. None whose frame is gone (no container: its navigable discarded with its document, HTML "plan to navigate"
-// queueing on a document no longer fully active), nor whose request no realm holds any more (a click that took it); null
-// where none is left. One at a time: the one before may have given the frame chosen a new document.
+// referrerPolicy]` (`route_items`). None whose frame is gone (no container: its navigable discarded with its document,
+// HTML "plan to navigate" queueing on a document no longer fully active), nor whose request no realm holds any more (a
+// click that took it); null where none is left. One at a time: the one before may have given the frame chosen a new
+// document.
 fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     loop {

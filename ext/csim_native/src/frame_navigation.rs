@@ -139,6 +139,13 @@ impl FrameNavigations {
             nav.planned = 0;
         }
     }
+    // A form's submission into container `c`'s navigable begun: the container's `sandbox` attribute now what the document
+    // it makes is sandboxed by (`frame_sandbox`) — as it was when the form was submitted, not as an earlier navigation
+    // that made no document (a download) began.
+    pub(crate) fn begin_submission(arena: &mut crate::dom::RealmArena, c: NodeId) {
+        let sandbox = arena.get(c).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
+        arena.frame_navigation(c).sandbox = Some(sandbox);
+    }
     // Whether the host plans a navigation of any frame.
     pub(crate) fn hosted(&self) -> bool {
         self.0.values().any(|n| n.host.is_some())
@@ -660,12 +667,16 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| kind(h) & kinds != 0)).map(|(&c, _)| c).collect();
     for c in containers {
         let realm = arena.frame_realm(c);
-        if let Some((at, host)) = arena.frame_navigations.0.get_mut(&c).and_then(|n| n.host.take()) {
-            // (…none of a container whose navigable has no document now, nothing to navigate)
-            if let Some(realm) = realm {
-                taken.push((at, realm, host));
-            }
+        let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
+        let Some((at, host)) = nav.host.take() else { continue };
+        // (…none of a container whose navigable has no document now, nothing to navigate)
+        let Some(realm) = realm else { continue };
+        // (…its navigation begun now, the container's `sandbox` as it was planned what the document it makes — or a
+        // download its response is — is sandboxed by: `frame_sandbox`, `take_frame_sandbox`)
+        if let HostNavigation::Navigate { sandbox, .. } = &host {
+            nav.sandbox = Some(sandbox.clone());
         }
+        taken.push((at, realm, host));
     }
     taken.sort_by_key(|&(at, ..)| at);
     // (…each frame's navigable navigated now: the submission of its document the host routes taken out with its route
