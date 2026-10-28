@@ -1244,7 +1244,8 @@ module Capybara
         retarget_from: nil,
         csp: nil,
         client_id: nil,
-        refresh: nil
+        refresh: nil,
+        sandbox: nil
       )
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm: its location's navigations planned in its own realm's plan, which the host
@@ -1274,6 +1275,8 @@ module Capybara
           # Document object"; its sandboxing a CSP `sandbox`'s)
           realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
           realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
+          # (…an about:blank one a navigation of its own made, the navigable's sandboxing: `navigationOrigins`)
+          realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") if sandbox.to_i.positive?
         end
         adopt_client_id(realm, client_id)
         realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?

@@ -70,6 +70,15 @@ RSpec.describe 'a window open() made, navigated' do
     expect(poll_until { session.evaluate_script('w.document.title') == 'B' }).to be(true)
   end
 
+  # …an about:blank one's a new about:blank document, its writes gone (Chrome, measured), of its origin still — the
+  # opener reaches into it as before.
+  it 'reloads an about:blank one as a new empty document of its origin' do
+    session.visit '/'
+    session.execute_script('window.first = w.document; w.document.body.innerHTML = "written"; w.location.reload()')
+    expect(poll_until { session.evaluate_script('w.document !== first') }).to be(true)
+    expect(session.evaluate_script('[w.document.body.innerHTML, w.location.href, w.origin === origin]')).to eq(['', 'about:blank', true])
+  end
+
   it 'stays at its document for a download, and navigates no more once closed' do
     session.visit '/'
     session.execute_script('w.location.href = "/dl"')

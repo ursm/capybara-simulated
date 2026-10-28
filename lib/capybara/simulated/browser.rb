@@ -10655,7 +10655,14 @@ module Capybara
               refresh:         refresh_header(headers)
             }
           end
-          # (…any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
+          # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
+          # Chrome measured makes a new one, its writes gone — of the initiator's origin and its navigable's sandboxing;
+          # any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
+          if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
+            body, ctype = '', 'text/html'
+            doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator)
+            made = {doc_origin: doc_origin, location_origin: location_origin, sandbox: sandbox}
+          end
           if body.nil?
             log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
             next

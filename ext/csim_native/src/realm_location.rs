@@ -149,6 +149,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "frameOrigins", frame_origins_op, context_id);
     register(scope, ns, "cspSandboxing", csp_sandboxing, context_id);
     register(scope, ns, "popupOrigins", popup_origins_op, context_id);
+    register(scope, ns, "navigationOrigins", navigation_origins_op, context_id);
     register(scope, ns, "setSandbox", set_sandbox, context_id);
     register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
     register(scope, ns, "sandboxed", sandboxed_op, context_id);
@@ -265,6 +266,18 @@ fn frame_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 fn popup_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let created = popup_origins(realm(scope, cid), cid);
+    let value = creation_value(scope, created);
+    rv.set(value);
+}
+// __dom.navigationOrigins(initiator) -> `[document, location, sandbox]` of the about:blank document a navigation the
+// document of realm `initiator` began makes in its own navigable (a reload of an about:blank popup, its `location` set
+// to about:blank): its origin the initiator's (HTML "navigate": a URL matching about:blank takes the initiator origin),
+// its sandboxing its navigable's, which the initiator's document has.
+fn navigation_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let initiator = args.get(0).int32_value(scope).unwrap_or(0);
+    let arena = realm(scope, initiator);
+    let flags = arena.location.sandbox;
+    let created = creation(arena, initiator, "", flags);
     let value = creation_value(scope, created);
     rv.set(value);
 }
