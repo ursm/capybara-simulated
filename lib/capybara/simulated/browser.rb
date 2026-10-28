@@ -8916,8 +8916,9 @@ module Capybara
         # Tag this thread so blob URLs created by the worker's script are owned by
         # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
-        # …and with its record, which its fetches are judged by (worker_cross_site?): a navigation removes the registry's
-        # entry without waiting for the thread, and a fetch still in flight is the worker's all the same.
+        # …and with its record, whose site for cookies its fetches are judged by (rack_fetch's `FetchHops`): a navigation
+        # removes the registry's entry without waiting for the thread, and a fetch still in flight is the worker's all the
+        # same.
         Thread.current[:csim_worker_record] = record
         rt = nil
         # The worker's clock follows the window's (one agent cluster's time): a tick with a timer pending advances it a
@@ -9794,6 +9795,13 @@ module Capybara
       # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
       # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
       # no-cors request but where it asks for CORS)
+      # `FetchHops`' flags: a document's own navigation request, one whose document had transient activation, a navigation
+      # into a frame with a cross-site ancestor, and a worker's request.
+      FETCH_HOP_NAVIGATION       = 1
+      FETCH_HOP_USER_ACTIVATED   = 2
+      FETCH_HOP_CROSS_SITE_FRAME = 4
+      FETCH_HOP_WORKER           = 8
+
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
                      user_activated: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
@@ -9859,11 +9867,6 @@ module Capybara
         # origin-clean flag unset, sheet_fetch.rs `fetch`)
         tainted          = false
         marked           = ->(out) { out['tainted'] = true if out && tainted && !crossed; out }
-        # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
-        # (like the navigation path), computed vs the request's referrer-source origin below. A SW
-        # re-fetch seeds it with the widened site the network hops accumulated BEFORE the SW
-        # intercepted the final hop (a same-site redirect the passthrough must keep reporting).
-        sec_site         = site_seed
         # A request is "credentialed" (cookies + the credentialed CORS check) only in
         # `include` mode; `same-origin` (default) and `omit` are uncredentialed for the
         # CORS check, while the cookie decision below distinguishes all three.
@@ -9920,30 +9923,27 @@ module Capybara
         # it survives the referrer reset a `new Request(event.request, init)` performs (referrer →
         # about:client), so a SW's change-request re-fetch is same-origin to the SW's own script.
         sec_initiator = initiator || url_origin(ref_source) || client_origin
-        # (…the site for cookies and the client it is judged by, kept across the hops: a redirect back to the client's own
-        # site is still a cross-site chain's)
-        cookie_site = cookie_client = nil
-        # …which a hop to `hop` widens (RFC 6265bis "site for cookies"): a script fetch's by its client document's site
-        # against the hop's; a mode-less load's — an image's, a font's, a style sheet's, the host's for a document — by its
-        # client's and its top-level document's; a client of an opaque origin (`null`, `data:`) cross-site
-        # (cookie_cross_site_document?); one a frame's document made (`client_realm`, which the bindings name) by that
-        # frame's ancestors too, the top-level document included (its own document is the client); a dedicated worker's
-        # by the site for cookies it was made with (worker_cross_site?). None for a load with no client at all.
-        widen_cookie_site = lambda {|hop|
-          # (…a client of an opaque origin judged by it: `null`, cross-site to every site — a sandboxed frame's)
-          cookie_client ||= cors_mode ? (doc_origin || sec_initiator) : (client_origin == 'null' ? 'null' : (client_url || sec_initiator))
-          next if cookie_client.nil?
-
-          cross = cookie_cross_site_document?(cookie_client, hop) ||
-                  (!cors_mode && !@current_url.nil? && cookie_cross_site_document?(@current_url, hop)) ||
-                  (client_realm.to_i.positive? && frame_ancestor_cross_site?(client_realm, hop)) ||
-                  worker_cross_site?(hop)
-          cookie_site = cross ? 'cross-site' : Native.fetch_site(cookie_site, cookie_client, hop)
-        }
-        # (…a `navigate`-mode request of a navigation's destination is a SW re-issuing the navigation it intercepted,
-        # whose cookies the chain's verdict judges: any other — a plugin's resource, of mode "navigate" too — its
-        # client)
-        reissued = cors_mode == 'navigate' && !nav_dest.to_s.empty?
+        # What each hop carries — whether it is a CORS hop to another origin, whether it sends cookies, its Origin, its
+        # Sec-Fetch-* and the site its cookies are judged by (fetch_hop.rs `FetchHops`) — of the request's client: its
+        # cookies by its document (or origin), a mode-less load's by the top-level document too, a frame document's by its
+        # ancestors' (`client_realm`, which the bindings name), a dedicated worker's by the site for cookies it was made with.
+        # Sec-Fetch-Site and the cookie site latch the widest relation across the chain; a SW re-fetch seeds the former with
+        # the site the network hops accumulated BEFORE the SW intercepted the final hop (a same-site redirect the
+        # passthrough must keep reporting).
+        worker = Thread.current[:csim_worker_record]
+        hops   = Native::FetchHops.new(
+          cors_mode,
+          dest,
+          nav_dest,
+          (navigation ? FETCH_HOP_NAVIGATION : 0) | (user_activated ? FETCH_HOP_USER_ACTIVATED : 0) |
+            (cookie_cross_site ? FETCH_HOP_CROSS_SITE_FRAME : 0) | (worker&.key?(:site_for_cookies) ? FETCH_HOP_WORKER : 0),
+          credentials.to_s,
+          [req_origin, doc_origin, client_origin, sec_initiator],
+          [client_url, @current_url],
+          client_realm.to_i.positive? ? @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i) : [],
+          worker&.dig(:site_for_cookies)
+        )
+        hops.seed(site_seed) if site_seed
         (MAX_FETCH_REDIRECTS + 1).times do
           t0 = @trace && Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Cross-origin-ness for the request mode/type, latched across hops. Computed
@@ -9980,7 +9980,7 @@ module Capybara
               when String then return nil
               when Array
                 trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
-                widen_cookie_site.(target) unless reissued   # (…a hop the cache answered a hop all the same)
+                hops.cached(target)   # (…a hop the cache answered a hop all the same)
                 redirected = true
                 target     = followed.first
                 next
@@ -10017,18 +10017,13 @@ module Capybara
           # a frame navigation's has its own already: fetch_rules.rs `defaultRequestHeaders`.)
           env['HTTP_ACCEPT'] ||= Native.default_accept(dest.to_s)
           apply_default_request_env(env, referer: hop_referer, force: false)
-          # Whether this hop is cross-origin (cors only): a tainted (opaque) origin is
-          # cross-origin to every real target; otherwise compare the target to the
-          # document origin. Drives the Origin header, preflight, and the CORS check.
-          cross_origin = cors && (effective_origin == 'null' || url_origin(target) != req_origin)
-          # Fetch credentials mode decides cookie attachment, independent of the CORS
-          # mode: `omit` never sends them; `include` always does; `same-origin` (default)
-          # sends them only to a same-origin target — so an uncredentialed cross-origin
-          # hop (cors OR no-cors) must not leak the document's cookies
-          # (cors-redirect-credentials / cors-cookies). A navigation / internal caller has
-          # no doc_origin, so it counts as same-origin and keeps them.
-          hop_cross_origin = !!(doc_origin && (effective_origin == 'null' || url_origin(target) != doc_origin))
-          send_cookies     = credentials == 'include' || (credentials != 'omit' && !hop_cross_origin)
+          # What this hop carries (fetch_hop.rs `FetchHops#hop`): whether it is a CORS hop to another origin — a tainted
+          # (opaque) origin is cross-origin to every target — which drives the preflight and the CORS check; whether it
+          # sends cookies (the credentials mode: `omit` never, `include` always, `same-origin` only to the document's
+          # origin, so an uncredentialed cross-origin hop of any mode leaks none — cors-redirect-credentials / cors-cookies);
+          # its Origin; its Sec-Fetch-* (`[site, mode, dest, user, top-level]`, for a mode's request and every load that
+          # names its destination); the site its cookies are judged by; and whether a cross-site one keeps its Lax cookies.
+          cross_origin, send_cookies, origin_value, sec_fetch, cookie_site, lax_ok = hops.hop(target, method.to_s, effective_origin, ref_policy)
           env.delete('HTTP_COOKIE') unless send_cookies
           # HTTP auth caching (RFC 7617 §2.2): once credentials succeed for an origin (cached below),
           # the UA sends them pre-emptively for later credentialed requests to it — so a Basic-auth
@@ -10053,57 +10048,20 @@ module Capybara
           if cross_origin && cors_unsafe_request?(method, headers)
             return nil unless cors_preflight_ok?(target, method, headers, effective_origin, with_credentials, hop_referer)
           end
-          # Send the (effective) Origin — the UA owns this header — on a cors request when
-          # the hop is cross-origin OR the method is not GET/HEAD (Fetch appends Origin to
-          # every non-GET/HEAD request, so a same-origin POST carries it too). After a
-          # cross-origin redirect the origin is the opaque "null".
-          if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
-            env['HTTP_ORIGIN'] = Native.origin_header(effective_origin, ref_policy, target, cors)
-          end
-          # Fetch-Metadata request headers — emitted for every fetch/XHR/SW request (a mode is set) and every element load
-          # that names its destination (`dest`, a no-cors one but where it asks for CORS); the internal callers of neither —
-          # a beacon, a worker's script — are left alone. Sec-Fetch-Site
-          # widens across the redirect chain vs the loop-invariant `sec_initiator` (see above). -Mode
-          # is the request mode (a SW's `fetch(event.request)` re-issues a 'navigate'-mode request,
-          # `new Request(…,{mode})` a 'same-origin' one); -Dest is 'empty' for a script-initiated
-          # fetch — INCLUDING a SW's navigate-mode passthrough: navigation-headers.https pins
-          # that a `fetch(event.request)` re-fetch reports `sec-fetch-dest: empty`, not the
-          # navigation's destination. The navigation's dest ('document'/'iframe', threaded as
-          # `nav_dest`) still drives the SameSite Lax gate below, which is top-level-only.
-          if cors_mode || dest
-            # (…an opaque-origin client's request is of no site at all: cross-site, wherever it goes)
-            sec_site = client_origin == 'null' ? 'cross-site' : Native.fetch_site(sec_site, sec_initiator, target)
-            env['HTTP_SEC_FETCH_SITE'] = sec_site
-            env['HTTP_SEC_FETCH_MODE'] = cors_mode || 'no-cors'
-            # (…a document's own navigation request its destination: a SW's passthrough re-fetch alone reports 'empty')
-            env['HTTP_SEC_FETCH_DEST'] = navigation ? nav_dest.to_s : (dest.to_s.empty? ? 'empty' : dest)
-            # (…a navigation's whose source document had transient activation as it began, its user-activation)
-            env['HTTP_SEC_FETCH_USER'] = '?1' if navigation && user_activated
+          env['HTTP_ORIGIN'] = origin_value if origin_value
+          if sec_fetch
+            env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'], user, top_level = sec_fetch
+            env['HTTP_SEC_FETCH_USER'] = '?1' if user
             # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
             # merge_set_cookie)
-            env['csim.cookie_top_level'] = true if cors_mode == 'navigate' && nav_dest.to_s == 'document'
-          end
-          # SameSite re-filter: cookies attached above (apply_default_request_env ran before this hop's site was known) —
-          # a cross-site hop sheds Strict/Lax cookies. The COOKIE site is not always the Sec-Fetch latch: a SW re-issuing
-          # the navigation it intercepted (`reissued`) keeps the CHAIN's verdict (and the top-level Lax exception for a
-          # GET) — any other is judged by its client (`widen_cookie_site`: an SW that builds a `new Request` fetches as
-          # ITSELF — same-site-cookies expects Strict cookies on the rewritten same-origin request even though the
-          # intercepted navigation was cross-site).
-          if reissued
-            cookie_site = sec_site
-          else
-            widen_cookie_site.(target)
+            env['csim.cookie_top_level'] = true if top_level
           end
           if cookie_site
-            # The ancestor-chain verdict (a SW re-fetch of a navigation into a frame with a cross-site ancestor — see
-            # frame_ancestor_cross_site?) overrides: it's a property of the target frame, cross-site whoever issues it.
-            cookie_site = 'cross-site' if cookie_cross_site
             # (…the one verdict the response's Set-Cookie is stored by too: merge_set_cookie)
             env['csim.cookie_site'] = cookie_site
+            # SameSite re-filter: cookies attached above (apply_default_request_env ran before this hop's site was known) —
+            # a cross-site hop sheds Strict cookies, and Lax ones but on a top-level navigation's GET.
             if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
-              # The Lax navigation exception is TOP-LEVEL only (dest 'document'): an iframe navigation or an
-              # ancestor-cross frame navigation (cookie_cross_site) sheds Lax like any cross-site subresource.
-              lax_ok = cors_mode == 'navigate' && method.to_s.upcase == 'GET' && nav_dest.to_s == 'document' && !cookie_cross_site
               ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env), cross_site: true, lax_ok: lax_ok)
               ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
             end
@@ -12693,15 +12651,6 @@ module Capybara
       # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's: the engine's
       # (referrer.rs `site_for_cookies`).
       private def site_for_cookies(realm_id) = @runtime.realm_direct_call(0, '__csimSiteForCookies', realm_id.to_i)
-      # …and whether a request to `hop` a dedicated worker makes — on its own thread — is cross-site for cookies by the one
-      # it was made with: false for none (not a worker's thread, a service worker).
-      private def worker_cross_site?(hop)
-        record = Thread.current[:csim_worker_record]
-        return false unless record&.key?(:site_for_cookies)
-
-        site = record[:site_for_cookies]
-        site.nil? || registrable_site(hop) != site
-      end
       # Whether a request of realm `realm_id`'s document to `target_url` is cross-site for cookies by its document or an
       # ancestor's, up to its top-level one — a window's opener none of them (referrer.rs `frame_cross_site`).
       private def container_cross_site?(realm_id, target_url)
@@ -12711,9 +12660,6 @@ module Capybara
       private def frame_ancestor_cross_site?(realm_id, target_url)
         realm_id.to_i.positive? && @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, false) == true
       end
-      # Whether a document of `url` (or an origin) makes a request to `target_url` under it cross-site for cookies
-      # (referrer.rs `cross_site_for_cookies`).
-      private def cookie_cross_site_document?(url, target_url) = Native.cross_site_for_cookies(url, target_url.to_s)
 
       def dispatch_navigation_request(
         url,

@@ -101,6 +101,7 @@ mod response_state;
 mod search_params;
 mod select_options;
 mod session_history;
+mod fetch_hop;
 mod sw_router;
 mod system_clipboard;
 mod text_setters;
@@ -279,6 +280,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
+    fetch_hop::define(native, ruby)?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     // CORS: a request's unsafe header names, the CORS check, a preflight's verdict and each session's preflight cache, the
@@ -310,7 +312,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("fetch_site", magnus::function!(referrer::fetch_site_for_ruby, 3))?;
     native.define_module_function("redirect_taints_origin", magnus::function!(referrer::redirect_taints_for_ruby, 4))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
-    native.define_module_function("cross_site_for_cookies", magnus::function!(referrer::cross_site_for_cookies_for_ruby, 2))?;
     // Whether a response downloads, and the name it is saved under (downloads.rs).
     native.define_module_function("download_response", magnus::function!(downloads::is_download_for_ruby, 1))?;
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;

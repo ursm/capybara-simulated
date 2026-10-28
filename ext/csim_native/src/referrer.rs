@@ -19,7 +19,7 @@ fn policy_or_default(policy: &str) -> &str {
 }
 
 // The origin of `url` where it is an http(s) one — the origins these rules compare — None for any other.
-fn http_origin(url: &str) -> Option<String> {
+pub(crate) fn http_origin(url: &str) -> Option<String> {
     let url = ada_url::Url::parse(url, None).ok()?;
     matches!(url.protocol(), "http:" | "https:").then(|| url.origin())
 }
@@ -151,6 +151,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "requestClient", request_client_op, context_id);
     register(scope, ns, "siteForCookies", site_for_cookies_op, context_id);
     register(scope, ns, "crossSiteForCookies", cross_site_for_cookies_op, context_id);
+    register(scope, ns, "ancestorDocuments", ancestor_documents_op, context_id);
 }
 
 // What a request's client knows of the document of realm `r` (0 the page's) — where the engine has the realm, the page's
@@ -266,9 +267,6 @@ fn known_document(arena: &mut RealmArena, r: i32) -> Option<(String, bool)> {
 pub(crate) fn cross_site_for_cookies(url: Option<&str>, target: &str) -> bool {
     url.is_none_or(|url| url == "null" || url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) || fetch_site(url, target) == "cross-site")
 }
-pub(crate) fn cross_site_for_cookies_for_ruby(url: Option<String>, target: Option<String>) -> bool {
-    cross_site_for_cookies(url.as_deref(), target.as_deref().unwrap_or(""))
-}
 // …a request of realm `r`'s document: where an ancestor's document is of another site than `target`'s — its own too,
 // `own` — up to its top-level one (a window's: its opener is no ancestor).
 fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str, own: bool) -> bool {
@@ -309,6 +307,21 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     if let Some(site) = site_for_cookies(&mut dom(scope).arena, r) {
         rv.set(v8::String::new(scope, &site).unwrap().into());
     }
+}
+// __dom.ancestorDocuments(realm) -> the URLs of the documents of realm `realm`'s ancestors, up to its top-level one (null
+// for one not known): what a request its document makes is cross-site for cookies by, besides its own (`frame_cross_site`).
+fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mut r = args.get(0).int32_value(scope).unwrap_or(0);
+    let mut urls = Vec::new();
+    while let Some(p) = dom(scope).arena.parent_realm(r) {
+        urls.push(known_document(&mut dom(scope).arena, p).map(|d| d.0));
+        r = p;
+    }
+    let items: Vec<v8::Local<'_, v8::Value>> = urls
+        .iter()
+        .map(|u| u.as_deref().and_then(|u| v8::String::new(scope, u)).map_or_else(|| v8::null(scope).into(), Into::into))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.crossSiteForCookies(realm, target, own) -> `frame_cross_site`.
 fn cross_site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
