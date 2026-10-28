@@ -137,6 +137,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "elementById", element_by_id, context_id);
     crate::dom::register(scope, ns, "documentNamed", document_named, context_id);
     crate::dom::register(scope, ns, "documentNames", document_names, context_id);
+    crate::dom::register(scope, ns, "allNamed", all_named, context_id);
+    crate::dom::register(scope, ns, "allNames", all_names, context_id);
     crate::dom::register(scope, ns, "windowNamed", window_named, context_id);
     crate::dom::register(scope, ns, "namedIn", named_in, context_id);
     crate::dom::register(scope, ns, "namesIn", names_in, context_id);
@@ -210,6 +212,28 @@ fn document_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     let names = crate::dom::realm(scope, cid).document_names(doc);
+    let strings: Vec<v8::Local<'_, v8::Value>> = names
+        .iter()
+        .filter_map(|units| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal).map(Into::into))
+        .collect();
+    rv.set(v8::Array::new_with_elements(scope, &strings).into());
+}
+
+// __dom.allNamed(docNid, name) -> the document's all-named elements of the name (`RealmArena::all_named`), as
+// `nodes_value` answers.
+fn all_named(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let name = utf16_arg(scope, args.get(1));
+    let cid = realm_id(scope, &args);
+    let found = crate::dom::realm(scope, cid).all_named(doc, &name);
+    rv.set(crate::dom::nodes_value(scope, cid, &found));
+}
+
+// __dom.allNames(docNid) -> [name] — `document.all`'s supported property names (`RealmArena::all_names`).
+fn all_names(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    let names = crate::dom::realm(scope, cid).all_names(doc);
     let strings: Vec<v8::Local<'_, v8::Value>> = names
         .iter()
         .filter_map(|units| v8::String::new_from_two_byte(scope, units, v8::NewStringType::Normal).map(Into::into))
@@ -456,6 +480,43 @@ impl RealmArena {
         let (mut out, mut seen) = (Vec::new(), std::collections::HashSet::new());
         each_element(self, doc, |id, n| {
             for name in self.document_names_of(id, n).into_iter().flatten() {
+                if seen.insert(name.clone()) {
+                    out.push(name);
+                }
+            }
+        });
+        out
+    }
+    // HTML's "all-named elements" of `document.all` (§2.6.2.1): an element is one by its `id`, and an `a`, `button`,
+    // `embed`, `form`, `frame`, `frameset`, `iframe`, `img`, `input`, `map`, `meta`, `object`, `select` or `textarea`
+    // by its `name` too — none empty.
+    fn all_names_of(n: &NodeData) -> [Option<Vec<u16>>; 2] {
+        const ALL_NAMED: &[&str] = &[
+            "a", "button", "embed", "form", "frame", "frameset", "iframe", "img", "input", "map", "meta", "object", "select", "textarea"
+        ];
+        let nonempty = |v: Option<Vec<u16>>| v.filter(|v| !v.is_empty());
+        let by_name = n.ns == ns!(html) && ALL_NAMED.contains(&&*n.local_name);
+        [nonempty(n.plain_attr_units("id")), nonempty(n.plain_attr_units("name")).filter(|_| by_name)]
+    }
+    // The document's all-named elements of the name `name`, in tree order — none of no name.
+    pub(crate) fn all_named(&self, doc: NodeId, name: &[u16]) -> Vec<NodeId> {
+        let mut out = Vec::new();
+        if name.is_empty() {
+            return out;
+        }
+        each_element(self, doc, |id, n| {
+            if Self::all_names_of(n).iter().flatten().any(|v| v == name) {
+                out.push(id);
+            }
+        });
+        out
+    }
+    // `document.all`'s supported property names: each element's id and all-named name in tree order, a later duplicate
+    // ignored.
+    pub(crate) fn all_names(&self, doc: NodeId) -> Vec<Vec<u16>> {
+        let (mut out, mut seen) = (Vec::new(), std::collections::HashSet::new());
+        each_element(self, doc, |_, n| {
+            for name in Self::all_names_of(n).into_iter().flatten() {
                 if seen.insert(name.clone()) {
                     out.push(name);
                 }
