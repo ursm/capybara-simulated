@@ -13116,19 +13116,15 @@ module Capybara
       # is a network error (Fetch "extract header list values": a single header's list of more than one is failure); its
       # bytes no UTF-8 are percent-encoded, as Chrome sends them (`url_text`).
       def follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
-        location = header_field(resp_headers, 'location')
-        if location.is_a?(Array)
-          values = location.uniq
-          return 'more than one Location' if values.size > 1
+        locations = location_fields(resp_headers)
+        return 'more than one Location' if locations.size > 1
 
-          location = values.first
-        end
         Native.follow_redirect(
           status.to_i,
           method.to_s,
           target,
           target,
-          url_text(location),
+          url_text(locations.first),
           cors == true,
           req_origin,
           cors == true && crossed,
@@ -13148,14 +13144,17 @@ module Capybara
         loc unless loc.to_s.empty?
       end
 
-      # A response's Location, as Fetch's "location URL" extracts it: its field — Rack 3 permits an Array of them — or ''
-      # for more than one, which the one value Location takes cannot be ("extract header list values": failure; Chrome's
-      # ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION) and so has no followable target; nil for none (an empty Array too).
-      def location_field(headers)
+      # A response's distinct Location fields — Rack 3 permits an Array of them — none for no header (an empty Array too).
+      # More than one is failure, the one value Location takes ("extract header list values"; Chrome's
+      # ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION).
+      def location_fields(headers)
         loc = header_field(headers, 'location')
-        return loc unless loc.is_a?(Array)
-        return nil if loc.empty?
-        loc.uniq.one? ? loc.first : ''
+        loc.is_a?(Array) ? loc.uniq : [loc].compact
+      end
+      # …as a navigation reads it: its one field, '' for more than one — no followable target — and nil for none.
+      def location_field(headers)
+        locations = location_fields(headers)
+        locations.size > 1 ? '' : locations.first
       end
 
       # …parsed as the page parses a URL (url_ops.rs): Ruby's URI refused what the URL Standard keeps, and the URL came

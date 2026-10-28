@@ -14,7 +14,7 @@ jobs:
   # versions.
   test:
     runs-on: ubuntu-latest
-    # Runs in 5-8 min; the cap is there for the runner-side hangs (an apt mirror
+    # Runs in 10-15 min, the native extension's cold build included; the cap is there for the runner-side hangs (an apt mirror
     # that never answers has stalled this step for 20+ min more than once), which
     # GitHub would otherwise let sit for its 6-hour default before anyone can
     # `gh run rerun --failed`.
@@ -34,7 +34,11 @@ jobs:
           bundler-cache: true
 
       # The native extension (csim_native: V8, the native DOM, layout) is built from source — `bundle install` builds
-      # none for the gem's own checkout — with the runner's Rust toolchain; the v8 crate downloads its prebuilt V8.
+      # none for the gem's own checkout — with the runner's Rust toolchain; the v8 crate downloads its prebuilt V8. The
+      # build's target directory is cached across runs, so a warm one recompiles only what changed.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ruby-${{ matrix.ruby }}
       - run: bundle exec rake compile
 
       # Multi-process run (worker count = vCPUs). The WPT and capybara-shared
@@ -80,6 +84,7 @@ jobs:
 
       # The run loads the csim_native extension (V8 + the native DOM), which `bundle install` does not build for the
       # gem's own checkout — `rake compile` does.
+      - uses: Swatinem/rust-cache@v2
       - run: bundle exec rake compile
 
       # A bare `rspec` (no ci-rspec retry): the counts are deterministic, so a red is a real
