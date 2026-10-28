@@ -36,6 +36,9 @@ pub(crate) struct Navigables {
     // Each nested realm's top-level realm, as it was when the realm became its container's navigable's: its document's
     // environment's top-level origin is that one's, whatever becomes of its container after (HTML "top-level origin").
     tops: HashMap<i32, i32>,
+    // …and the realm its container's document was in then: its parent's, whatever is made of the container or of the
+    // navigable after — a navigation the frame begins unlinks it while its document still unloads.
+    parents: HashMap<i32, i32>,
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
@@ -231,6 +234,9 @@ impl RealmArena {
             let parent = self.get(container).map(|n| n.realm).filter(|&p| p != realm);
             let top = parent.map(|p| self.top_level_realm(p));
             self.navigables.tops.insert(realm, top.unwrap_or(realm));
+            if let Some(parent) = parent {
+                self.navigables.parents.insert(realm, parent);
+            }
             if let (Some((at, count)), Some(parent)) = (activation, parent) {
                 self.inherit_activation(realm, parent, at, count);
             }
@@ -419,6 +425,11 @@ impl RealmArena {
     pub(crate) fn document_fully_active(&self, doc: NodeId) -> bool {
         self.get(doc).is_some_and(|d| self.navigables.documents.get(&d.realm) == Some(&doc) && self.navigables.fully_active(d.realm))
     }
+    // The realm whose document nested realm `realm`'s container was in as the realm became its navigable's (`parents`) —
+    // None for a top-level one's.
+    pub(crate) fn parent_realm(&self, realm: i32) -> Option<i32> {
+        self.navigables.parents.get(&realm).copied()
+    }
     // …realm `cid`'s document, where it has one (a worker's none).
     pub(crate) fn realm_document(&self, cid: i32) -> Option<NodeId> {
         self.navigables.documents.get(&cid).copied()
@@ -450,6 +461,7 @@ impl RealmArena {
             }
             nav.top_names.remove(&cid);
             nav.tops.remove(&cid);
+            nav.parents.remove(&cid);
             self.note_discarded();
             let dead: Vec<NodeId> = self.navigables.children.keys().copied().filter(|&c| self.get(c).is_none()).collect();
             for container in dead {

@@ -2,8 +2,11 @@
 // referrer"), its `Origin` (Fetch "append a request `Origin` header") and its `Sec-Fetch-Site` (Fetch Metadata §2.4),
 // each from its referrer source or initiator, its referrer policy and the URL it is at — and, over a redirect chain,
 // the widest `Sec-Fetch-Site` any hop has had and whether its origin has become opaque (Fetch "HTTP-redirect fetch"
-// step 13). The host sends what these answer.
+// step 13). The host sends what these answer. And the client a document's request is made as (Fetch "client"): the URL
+// its site and origin are judged by, the source and policy it refers by, and its site for cookies (RFC 6265bis) — read
+// off the realms' documents and the tree of navigables they are in.
 
+use crate::dom::{dom, register, RealmArena};
 use crate::url_ops::{potentially_trustworthy_url, DEFAULT_POLICY, POLICIES};
 
 // A referrer URL longer than this goes as its origin (Referrer Policy §8.3 step 6).
@@ -141,6 +144,167 @@ pub(crate) fn redirect_taints(tainted: bool, initiator: &str, current: &str, loc
 }
 pub(crate) fn redirect_taints_for_ruby(tainted: bool, initiator: Option<String>, current: Option<String>, location: Option<String>) -> bool {
     redirect_taints(tainted, initiator.as_deref().unwrap_or(""), current.as_deref().unwrap_or(""), location.as_deref().unwrap_or(""))
+}
+
+pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    register(scope, ns, "requestClient", request_client_op, context_id);
+    register(scope, ns, "siteForCookies", site_for_cookies_op, context_id);
+    register(scope, ns, "crossSiteForCookies", cross_site_for_cookies_op, context_id);
+}
+
+// What a request's client knows of the document of realm `r` (0 the page's) — where the engine has the realm, the page's
+// for one gone: its URL, whether its origin is opaque (a sandboxed document's), and the referrer policy its `<meta
+// name="referrer">` elements and its response set (url_ops.rs `document_referrer_policy`), '' for none.
+struct Document {
+    realm: i32,
+    url: String,
+    opaque: bool,
+    policy: &'static str,
+}
+fn document(arena: &mut RealmArena, r: i32) -> Document {
+    let realm = if arena.enter_known(r).is_some() { r } else { 0 };
+    let arena = arena.enter(realm);
+    let policy = arena.realm_document(realm).map_or("", |doc| arena.document_referrer_policy(doc));
+    Document { realm, url: arena.location.href().to_owned(), opaque: arena.location.origin() == "null", policy }
+}
+// The realm of the document a frame realm `r`'s container was in (navigables.rs `parent_realm`) — the page's for none: a
+// window's, whose opener is no parent of it.
+fn parent(arena: &RealmArena, r: i32) -> i32 {
+    arena.parent_realm(r).unwrap_or(0)
+}
+
+// The referrer source and policy of a request the document of realm `r` makes (Referrer Policy "determine request's
+// referrer" steps 2-3): its URL under its policy — an iframe srcdoc document's its container document's, under that
+// one's unless its own sets one — and one of an opaque origin's `no-referrer`, a step before.
+fn referrer_source(arena: &mut RealmArena, r: i32) -> (String, &'static str) {
+    let doc = document(arena, r);
+    if doc.opaque {
+        return (doc.url, "no-referrer");
+    }
+    if doc.realm != 0 && doc.url.eq_ignore_ascii_case("about:srcdoc") {
+        let (url, policy) = referrer_source(arena, parent(arena, doc.realm));
+        return (url, if doc.policy.is_empty() { policy } else { doc.policy });
+    }
+    (doc.url, doc.policy)
+}
+// The URL whose site a request of realm `r`'s document is judged by (Sec-Fetch-Site, cookies) and whose origin its Origin
+// carries — `url` the document's own: one of an http(s) URL its own, a `blob:` one's its blob URL's origin's, a local
+// one's (about:blank, srcdoc) its container document's, up to the page's. (KNOWN LIMIT: a popup's about:blank the
+// page's, not its opener's; a frame another document navigated to about:blank its parent's, not that document's.)
+fn creator_url(arena: &mut RealmArena, mut r: i32, mut url: String) -> String {
+    loop {
+        if url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("blob:")) {
+            if let Some(origin) = http_origin(&url[5..]) {
+                return origin + "/";
+            }
+        }
+        if r == 0 || http_origin(&url).is_some() {
+            return url;
+        }
+        r = parent(arena, r);
+        url = document(arena, r).url;
+    }
+}
+
+// __dom.requestClient(realm, elementPolicy, opaque) -> [url, policy, opaque, realm, source]: the client a subresource
+// request of realm `realm`'s document — the calling realm's for undefined — is made as (Fetch "client"), the page's
+// where that realm is gone: the URL its
+// site and origin are judged by (`creator_url`), the policy it refers by — the element's (`elementPolicy`), else its
+// document's; `no-referrer` for one of an opaque origin, which no element lifts — whether that origin is opaque, the
+// realm it is, and the URL it refers by (`referrer_source`). `opaque` a boolean where the bindings tell it (an image's
+// load, which names the policy its document had as the element was inserted): the URL alone is the realm's then, and
+// the document's policy only a srcdoc one's container's.
+fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let r = if args.get(0).is_undefined() { crate::dom::realm_id(scope, &args) } else { args.get(0).int32_value(scope).unwrap_or(0) };
+    let element_policy = args.get(1).to_rust_string_lossy(scope);
+    let told = args.get(2).is_boolean().then(|| args.get(2).is_true());
+    let arena = &mut dom(scope).arena;
+    let doc = document(arena, r);
+    let (opaque, source, policy) = match told {
+        None => {
+            let (source, policy) = referrer_source(arena, doc.realm);
+            (doc.opaque, source, policy)
+        }
+        Some(opaque) if doc.realm != 0 && doc.url.eq_ignore_ascii_case("about:srcdoc") => {
+            let (source, policy) = referrer_source(arena, parent(arena, doc.realm));
+            (opaque, source, policy)
+        }
+        Some(opaque) => (opaque, doc.url.clone(), ""),
+    };
+    let url = creator_url(arena, doc.realm, if told.is_none() { source.clone() } else { doc.url });
+    let policy = if opaque { "no-referrer" } else if element_policy.is_empty() { policy } else { element_policy.as_str() };
+    let items = [
+        v8::String::new(scope, &url).unwrap().into(),
+        v8::String::new(scope, policy).unwrap().into(),
+        v8::Boolean::new(scope, opaque).into(),
+        v8::Integer::new(scope, doc.realm).into(),
+        v8::String::new(scope, &source).unwrap().into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// The URL of realm `r`'s document and whether its origin is opaque — None for a realm gone, which no request is judged
+// by: closed rather than open.
+fn known_document(arena: &mut RealmArena, r: i32) -> Option<(String, bool)> {
+    let arena = arena.enter_known(r)?;
+    Some((arena.location.href().to_owned(), arena.location.origin() == "null"))
+}
+// Whether a request a document at `url` makes to `target` is cross-site for cookies (RFC 6265bis "site for cookies"): one
+// of no URL known, one of an opaque origin (a `data:` document's, a sandboxed one's `null`: of no site at all), one of
+// another site.
+pub(crate) fn cross_site_for_cookies(url: Option<&str>, target: &str) -> bool {
+    url.is_none_or(|url| url == "null" || url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) || fetch_site(url, target) == "cross-site")
+}
+pub(crate) fn cross_site_for_cookies_for_ruby(url: Option<String>, target: Option<String>) -> bool {
+    cross_site_for_cookies(url.as_deref(), target.as_deref().unwrap_or(""))
+}
+// …a request of realm `r`'s document: where an ancestor's document is of another site than `target`'s — its own too,
+// `own` — up to its top-level one (a window's: its opener is no ancestor).
+fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str, own: bool) -> bool {
+    if own && cross_site_for_cookies(known_document(arena, r).map(|d| d.0).as_deref(), target) {
+        return true;
+    }
+    while let Some(p) = arena.parent_realm(r) {
+        if cross_site_for_cookies(known_document(arena, p).map(|d| d.0).as_deref(), target) {
+            return true;
+        }
+        r = p;
+    }
+    false
+}
+// The site for cookies of realm `r`'s document (RFC 6265bis): its top-level document's site where every document between
+// is of that site — one of a local URL (about:blank, srcdoc) its creator's — None where one is not, or is of an opaque
+// origin, or is gone.
+fn site_for_cookies(arena: &mut RealmArena, mut r: i32) -> Option<String> {
+    let mut urls = Vec::new();
+    while let Some(p) = arena.parent_realm(r) {
+        let (url, opaque) = known_document(arena, r)?;
+        if opaque {
+            return None;
+        }
+        urls.push(url);
+        r = p;
+    }
+    let site = crate::realm_location::site(&known_document(arena, r)?.0)?;
+    let same = urls.iter().all(|u| {
+        !u.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:"))
+            && (http_origin(u).is_none() || crate::realm_location::site(u).as_deref() == Some(&site))
+    });
+    same.then_some(site)
+}
+// __dom.siteForCookies(realm) -> `site_for_cookies`, undefined for none.
+fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let r = args.get(0).int32_value(scope).unwrap_or(0);
+    if let Some(site) = site_for_cookies(&mut dom(scope).arena, r) {
+        rv.set(v8::String::new(scope, &site).unwrap().into());
+    }
+}
+// __dom.crossSiteForCookies(realm, target, own) -> `frame_cross_site`.
+fn cross_site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let r = args.get(0).int32_value(scope).unwrap_or(0);
+    let target = args.get(1).to_rust_string_lossy(scope);
+    let own = args.get(2).is_true();
+    rv.set_bool(frame_cross_site(&mut dom(scope).arena, r, &target, own));
 }
 
 #[cfg(test)]

@@ -297,6 +297,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("wider_fetch_site", magnus::function!(referrer::wider_site_for_ruby, 2))?;
     native.define_module_function("redirect_taints_origin", magnus::function!(referrer::redirect_taints_for_ruby, 4))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
+    native.define_module_function("cross_site_for_cookies", magnus::function!(referrer::cross_site_for_cookies_for_ruby, 2))?;
     native.define_module_function("target_keyword", magnus::function!(navigables::target_keyword_for_ruby, 1))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;

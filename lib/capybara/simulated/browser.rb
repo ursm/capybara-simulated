@@ -4725,7 +4725,7 @@ module Capybara
       # the pipe). The JS-side XHR checks the return shape to pick
       # between inline processing and waiting for `__csim_
       # deliverHijackedFetches`.
-      def rack_fetch_async(method, url, body, headers_json, credentials: 'same-origin', client_url: nil, client_origin: nil, client_realm: nil, referrer_policy: nil)
+      def rack_fetch_async(method, url, body, headers_json, credentials: 'same-origin', client_url: nil, client_origin: nil, client_realm: nil, referrer_policy: nil, referrer: nil)
         headers = begin
           JSON.parse(headers_json.to_s)
         rescue JSON::ParserError
@@ -4753,7 +4753,7 @@ module Capybara
         Thread.current[:csim_fetch_env] = nil
         # (…a CORS request as an XHR's is, by its client)
         resp = rack_fetch(method, url, body, headers, 'follow', 'cors', credentials: credentials, env_extras: env_extras, client_url: client_url,
-                          client_origin: client_origin, client_realm: client_realm, referrer_policy: referrer_policy)
+                          client_origin: client_origin, client_realm: client_realm, referrer_policy: referrer_policy, referrer: referrer)
         # (…nil, a network error, as `rack_fetch` answers one)
         return resp unless hijacked
         # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is)
@@ -10647,11 +10647,7 @@ module Capybara
       # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
       # any policy.
-      def navigation_referrer(realm, policy = '')
-        source, document_policy = realm_referrer_initiator(realm)
-        policy = '' if frame_document_origin_opaque?(realm)
-        [source, policy.to_s.empty? ? document_policy : policy.to_s]
-      end
+      def navigation_referrer(realm, policy = '') = request_client(realm, policy).values_at(4, 1)
       # …and none — nor a reload: a navigation the page planned since (a location's, a link's, a form's, a reload) replaces
       # it (HTML "plan to navigate": the later is the one taken).
       def cancel_planned_navigation
@@ -11145,18 +11141,17 @@ module Capybara
       # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
       # object"), none for none — one given more than once combined as Fetch's "get a header" does.
       def refresh_header(headers) = (value = header_field(headers || {}, 'refresh')) && Array(value).join(', ')
-      # The client a subresource request of realm `realm`'s document is made as (Fetch "client"), read on the main thread,
-      # which a realm's URL is asked on — a frame gone, the page's:
+      # The client a subresource request of realm `realm`'s document is made as (Fetch "client"), the engine's (referrer.rs
+      # `requestClient`) — a frame gone, the page's:
       # - its URL, whose origin it is of and whose site its cookies and Sec-Fetch-Site are judged by: a local document's
-      #   (about:blank, srcdoc, blob:) its creator's, the nearest ancestor's of a fetchable URL (`realm_request_initiator`);
-      # - its origin where that is opaque ('null': a sandboxed document's) — `opaque` where the bindings tell it, as the
-      #   host cannot ask a frame still parsing (a load the host makes for an image), else the realm's;
+      #   (about:blank, srcdoc, blob:) its creator's;
+      # - its origin where that is opaque ('null': a sandboxed document's) — `opaque` where the bindings tell it (a load
+      #   the host makes for an image, its document still parsing perhaps), else the realm's;
       # - the realm itself, whose ancestors make it cross-site for cookies;
       # - the referrer and policy it refers by: its document's URL (a srcdoc one's container's) — or `referrer` where the
       #   request names one of its own: a font's sheet's location, an imported module's referring script's base URL, its
       #   initiator (Sec-Fetch-Site, Origin) the client's origin all the same — under the policy the request's element
-      #   sets (`element_policy`), else its document's; an opaque one none (Referrer Policy "determine request's
-      #   referrer").
+      #   sets (`element_policy`), else its document's; an opaque one none.
       # Or, a negative `realm`, worker -`realm`'s: its script's URL under the default policy (a worker no document's realm
       # the host may ask from its thread).
       def client_for(realm, element_policy = nil, referrer: nil, opaque: nil)
@@ -11166,23 +11161,14 @@ module Capybara
           url = nil unless http_url?(url)
           return {url: url, policy: element_policy.to_s, origin: nil, realm: nil, referrer: referrer || url, initiator: referrer && url_origin(url)}
         end
-        if opaque.nil?
-          # (…the creator walk from the URL it refers by: its own, a srcdoc one's container's — the frame asked once)
-          source, policy = realm_referrer_initiator(realm)
-          url, opaque = realm_creator_url(realm, source), document_origin_opaque?(realm)
-        else
-          own = realm.zero? ? @current_url : frame_realm_url(realm)
-          # (…told by the bindings, its document is not asked — every image of a page asks this: its URLs alone, and a
-          # srcdoc one's policy its container's where the element and its document name none; a frame gone, the page's)
-          realm, own = 0, @current_url if own.nil?
-          srcdoc = realm.positive? && own.match?(/\Aabout:srcdoc\z/i)
-          source, policy = srcdoc ? realm_referrer_initiator(@runtime.frame_realm_parent(realm).to_i) : [own, '']
-          url = realm_creator_url(realm, own)
-        end
-        # (…which no element lifts for an opaque origin's document: it refers as none, as its navigations do)
-        policy = opaque ? 'no-referrer' : (element_policy.to_s.empty? ? policy : element_policy)
+        url, policy, opaque, realm, source = request_client(realm, element_policy, opaque)
         origin = opaque ? 'null' : nil
         {url: url, policy: policy, origin: origin, realm: realm.zero? ? nil : realm, referrer: referrer || source, initiator: referrer && (origin || url_origin(url))}
+      end
+      # …as the engine answers it: [url, policy, opaque, realm, source] — the page's URL alone before the page has a realm
+      # to ask. Asked on the page's context directly, as a frame's parser-time requests ask it from inside a V8 callback.
+      private def request_client(realm, element_policy = nil, opaque = nil)
+        @runtime.realm_direct_call(0, '__csimRequestClient', realm.to_i, element_policy.to_s, opaque) || [@current_url, '', false, 0, @current_url]
       end
       # The origin a request of client `client` is made as — its own where it is opaque, else its URL's, the page's for a
       # client of no http(s) URL — as `rack_fetch` judges its request.
@@ -11195,34 +11181,13 @@ module Capybara
         client.merge(cookie_cross_site: cross, realm: nil)
       end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
-      # and whose origin an Origin header carries (`realm_creator_url`) and whether that document's own origin is opaque
-      # (a sandbox's)].
-      def realm_request_initiator(realm) = [realm_creator_url(realm), document_origin_opaque?(realm)]
-      # …that URL alone — `url` the realm's own where the caller has it: a document of a fetchable URL's own, a blob: one's
-      # its blob URL's origin's, a local one's (about:blank, srcdoc) its parent's, the nearest ancestor's of a fetchable
-      # URL. (KNOWN LIMIT: a popup's about:blank the page's, not its opener's; a frame another document navigated to
-      # about:blank its parent's, not that document's.)
-      def realm_creator_url(realm, url = realm.zero? ? @current_url : frame_realm_url(realm))
-        loop do
-          if url.to_s.match?(/\Ablob:/i)
-            inner = url_origin(url.to_s.sub(/\Ablob:/i, ''))
-            return "#{inner}/" if inner && inner != 'null'
-          end
-          break if realm.zero? || http_url?(url)
-
-          realm = @runtime.frame_realm_parent(realm).to_i
-          url   = realm.zero? ? @current_url : frame_realm_url(realm)
-        end
-        url
-      end
-      # …the page's own document as one of an opaque origin too: a `Content-Security-Policy: sandbox` response's.
-      def document_origin_opaque?(realm)
-        return frame_document_origin_opaque?(realm) unless realm.zero?
-
-        @runtime.call('__csimDocumentOriginOpaque') == true
-      rescue StandardError
-        false
-      end
+      # and whose origin an Origin header carries, and whether that document's own origin is opaque (a sandbox's)].
+      def realm_request_initiator(realm) = request_client(realm).values_at(0, 2)
+      # …that URL alone.
+      def realm_creator_url(realm) = request_client(realm)[0]
+      # …whether its origin is opaque alone: a sandboxed document's, the page's a `Content-Security-Policy: sandbox`
+      # response's.
+      def document_origin_opaque?(realm) = request_client(realm)[2]
       def frame_realm_url(realm_id)
         return @runtime.loading_frame_realm_url(realm_id) unless @runtime.frame_realm_alive?(realm_id)
 
@@ -11237,13 +11202,6 @@ module Capybara
         @runtime.call('__csimDocumentReferrerPolicy').to_s
       rescue StandardError
         ''
-      end
-      # (…a realm still loading its document asked too, as its parser-time subresources are requested meanwhile)
-      def frame_document_referrer_policy(realm_id)
-        @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy').to_s
-      end
-      def frame_document_origin_opaque?(realm_id)
-        @runtime.realm_direct_call(realm_id, '__csimDocumentOriginOpaque') == true
       end
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
@@ -12039,16 +11997,7 @@ module Capybara
       # One whose origin is opaque — a sandboxed document's — refers as none, a step before (`no-referrer`): its URL stays
       # the initiator its Origin and Sec-Fetch-Site are made of.
       def current_referrer_initiator = realm_referrer_initiator(@current_realm_id.to_i)
-      def realm_referrer_initiator(realm_id)
-        # (…a document of an opaque origin, a sandboxed one's — the page's a CSP `sandbox` makes one — refers as none)
-        return [@current_url, document_origin_opaque?(0) ? 'no-referrer' : main_document_referrer_policy] if realm_id.zero?
-        url = frame_realm_url(realm_id)
-        return [url, 'no-referrer'] if frame_document_origin_opaque?(realm_id)
-        policy = frame_document_referrer_policy(realm_id)
-        return [url, policy] unless url.to_s.match?(/\Aabout:srcdoc\z/i)
-        container_url, container_policy = realm_referrer_initiator(@runtime.frame_realm_parent(realm_id).to_i)
-        [container_url, policy.empty? ? container_policy : policy]
-      end
+      def realm_referrer_initiator(realm_id) = request_client(realm_id).values_at(4, 1)
       # The top-level browsing context navigated by the page — a link followed in it or `target=_top` from a frame
       # within it — its Referer the browsing context it was followed in, under the policy the link sets (`policy`: its
       # `referrerpolicy`, `no-referrer` for `rel=noreferrer`), else that document's.
@@ -13039,20 +12988,9 @@ module Capybara
         [mode == 'cors', credentials, pinned_client(client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, opaque: opaque), target_url)]
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
-      # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's.
-      private def site_for_cookies(realm_id)
-        urls = []
-        rid  = realm_id.to_i
-        while rid.positive? && !@runtime.top_level_realm?(rid)
-          return nil if frame_document_origin_opaque?(rid)   # (…a document of an opaque origin is of no site at all)
-
-          urls << frame_realm_url(rid)
-          rid = @runtime.frame_realm_parent(rid).to_i
-        end
-        site = registrable_site(rid.positive? ? frame_realm_url(rid) : @current_url) or return nil
-        same = urls.all? {|u| u && !u.match?(/\Adata:/i) && (!http_url?(u) || registrable_site(u) == site) }
-        same ? site : nil
-      end
+      # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's: the engine's
+      # (referrer.rs `site_for_cookies`).
+      private def site_for_cookies(realm_id) = @runtime.realm_direct_call(0, '__csimSiteForCookies', realm_id.to_i)
       # …and whether a request to `hop` a dedicated worker makes — on its own thread — is cross-site for cookies by the one
       # it was made with: false for none (not a worker's thread, a service worker).
       private def worker_cross_site?(hop)
@@ -13062,31 +13000,18 @@ module Capybara
         site = record[:site_for_cookies]
         site.nil? || registrable_site(hop) != site
       end
+      # Whether a request of realm `realm_id`'s document to `target_url` is cross-site for cookies by its document or an
+      # ancestor's, up to its top-level one — a window's opener none of them (referrer.rs `frame_cross_site`).
       private def container_cross_site?(realm_id, target_url)
-        rid = realm_id.to_i
-        cookie_cross_site_document?(rid.positive? ? frame_realm_url(rid) : @current_url, target_url) || frame_ancestor_cross_site?(rid, target_url)
+        @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, true) == true
       end
-      # Whether a document of `url` (or an origin) makes a request to `target_url` under it cross-site for cookies: one
-      # whose URL is not known (closed rather than open), one of an opaque origin (a `data:` document's, a sandboxed
-      # one's `null`: of no site at all), one of another site.
-      private def cookie_cross_site_document?(url, target_url)
-        url.nil? || url == 'null' || url.to_s.match?(/\Adata:/i) || Native.fetch_site(nil, url, target_url.to_s) == 'cross-site'
-      end
+      # …by an ancestor's alone.
       private def frame_ancestor_cross_site?(realm_id, target_url)
-        rid = realm_id.to_i
-        # A WINDOW realm (same-isolate popup) is itself a top-level navigable: it has
-        # no ancestors of its own, and its OPENER must never fold in — the loop guard
-        # stops both a popup's self-navigation (no iterations) and an iframe chain
-        # inside a popup (the popup's document is compared as the chain's top, then
-        # the walk ends there instead of crossing into the opener via parent 0).
-        while rid.positive? && !@runtime.top_level_realm?(rid)
-          parent       = @runtime.frame_realm_parent(rid).to_i
-          return true if cookie_cross_site_document?(parent.positive? ? frame_realm_url(parent) : @current_url, target_url)
-
-          rid = parent
-        end
-        false
+        realm_id.to_i.positive? && @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, false) == true
       end
+      # Whether a document of `url` (or an origin) makes a request to `target_url` under it cross-site for cookies
+      # (referrer.rs `cross_site_for_cookies`).
+      private def cookie_cross_site_document?(url, target_url) = Native.cross_site_for_cookies(url, target_url.to_s)
 
       def dispatch_navigation_request(
         url,

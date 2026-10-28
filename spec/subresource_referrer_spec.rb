@@ -33,6 +33,11 @@ RSpec.describe 'a subresource request' do
                              '<link rel=stylesheet href=/a3b.css><script>1</script>'
              when '/mf' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/mf.css><script src=/mf.js></script>'
              when '/long' then '<link rel=stylesheet href=/long.css>'
+             when '/nest' then '<iframe src=/outer></iframe>'
+             when '/sbtop' then '<iframe sandbox=allow-scripts src=/sb></iframe>'
+             when '/sb' then "<script>fetch('/sb.js'); const x = new XMLHttpRequest; x.open('GET', '/sbx.js'); x.send()</script>"
+             when '/outer' then %(<iframe srcdoc="<script>const x = new XMLHttpRequest; x.open('GET', '/sdx.js', false); x.send(); ) +
+                               %(onpagehide = () => fetch('/gone.js', {keepalive: true})</script>"></iframe>)
              when '/e' then '<link rel=stylesheet referrerpolicy=no-referrer href=/e.css><script referrerpolicy=origin src=/e.js></script>'
              end
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
@@ -51,6 +56,23 @@ RSpec.describe 'a subresource request' do
   it 'is referred by its origin alone from a URL too long to send' do
     session.visit "/long?#{'x' * 4100}"
     expect(referers['/long.css']).to eq('http://www.example.com/')
+  end
+
+  # …a srcdoc document's by its container's document — an XHR's as a fetch()'s — as its navigation away unloads it too
+  # (navigables.rs `parents`).
+  it 'is referred by the container of a srcdoc document it navigates away from' do
+    session.visit '/nest'
+    session.execute_script("frames[0].frames[0].location = '/x.css'")
+    session.evaluate_script('1')
+    expect(referers.slice('/sdx.js', '/gone.js').values).to eq(['http://www.example.com/outer'] * 2)
+  end
+
+  # …and not at all by a document of an opaque origin, a sandboxed one's (Referrer Policy §8.3 step 2): a fetch() or an
+  # XHR of it as its subresources are.
+  it 'is referred by no document of an opaque origin' do
+    session.visit '/sbtop'
+    session.evaluate_script('1')
+    expect(referers).to include('/sb' => 'http://www.example.com/sbtop', '/sb.js' => nil, '/sbx.js' => nil)
   end
 
   it "is referred under its document's policy" do

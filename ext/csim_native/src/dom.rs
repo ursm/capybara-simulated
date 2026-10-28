@@ -2918,6 +2918,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::selected_coordinates::install(scope, ns, context_id);
     crate::realm_location::install(scope, ns, context_id);
+    crate::referrer::install(scope, ns, context_id);
     crate::font_resolve::install(scope, ns, context_id);
     crate::subresource_obtain::install(scope, ns, context_id);
     crate::sheet_fetch::install(scope, ns, context_id);
