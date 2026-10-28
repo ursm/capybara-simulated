@@ -571,6 +571,17 @@ const INTERFACES = [
   ['css-anchor-position', 'CSSPositionTryRule', { install: true }],
   ['dom', 'MutationObserver', { install: true }],
   ['cssom-view', 'MediaQueryList', { install: true }],
+  ['geolocation', 'Geolocation'],
+  ['geolocation', 'GeolocationPosition'],
+  ['geolocation', 'GeolocationCoordinates'],
+  ['geolocation', 'GeolocationPositionError'],
+  ['permissions', 'Permissions', {
+    omit: {
+      'permissions-request': 'request: Requesting Permissions is a WICG proposal (headless Chrome exposes none)',
+      'permissions-revoke': 'revoke: Relinquishing Permissions is a WICG proposal (headless Chrome exposes none)'
+    }
+  }],
+  ['permissions', 'PermissionStatus', { install: true }],
   ['cssom-view', 'CaretPosition', { install: true }],
   ['dom', 'MutationRecord', { install: true }],
   ['dom', 'AbortController', { install: true }],

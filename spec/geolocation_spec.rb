@@ -1,10 +1,10 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# navigator.geolocation: spec-compliant Geolocation API whose position is
-# injectable from tests via `page.driver.set_geolocation(...)`. Callbacks are
-# delivered asynchronously on the virtual clock, so each assertion reads back a
-# global the callback set, after a follow-up `evaluate_script` drains settle.
+# navigator.geolocation and navigator.permissions (W3C Geolocation, W3C Permissions), generated from their IDL, the
+# position injectable from tests via `page.driver.set_geolocation(...)`: what a request answers and the permissions'
+# states are the engine's (geolocation.rs), each callback called in a task of its own — so each assertion reads back a
+# global the callback set, after a follow-up `evaluate_script` drains settle. Chrome's figures measured headless.
 RSpec.describe 'navigator.geolocation' do
   let(:app) {
     lambda do |_env|
@@ -143,5 +143,88 @@ RSpec.describe 'navigator.geolocation' do
 
     session.driver.set_geolocation(denied: true)
     expect(session.evaluate_async_script(query)).to eq('denied')
+  end
+
+  it 'answers with interface objects, a callback in a task after the script that asked' do
+    session.driver.set_geolocation(latitude: 1, longitude: 2, accuracy: 3)
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      let sync = true;
+      navigator.geolocation.getCurrentPosition(function (p) {
+        window.__seen.push(sync, p instanceof GeolocationPosition, p.coords instanceof GeolocationCoordinates, p.coords === p.coords,
+                           JSON.stringify(p.toJSON().coords), typeof p.timestamp);
+      });
+      sync = false;
+      window.__shape = [navigator.geolocation instanceof Geolocation, navigator.geolocation === navigator.geolocation,
+                        String(navigator.geolocation), typeof GeolocationPositionError.TIMEOUT];
+      try { new Geolocation(); } catch (e) { window.__shape.push(e.name); }
+    JS
+    expect(session.evaluate_script('window.__shape')).to eq([true, true, '[object Geolocation]', 'number', 'TypeError'])
+    expect(session.evaluate_script('window.__seen')).to eq(
+      [false, true, true, true, '{"accuracy":3,"latitude":1,"longitude":2,"altitude":null,"altitudeAccuracy":null,"heading":null,"speed":null}', 'number']
+    )
+  end
+
+  it 'times out at a timeout of 0, and answers from the cache a position no older than maximumAge' do
+    session.driver.set_geolocation(latitude: 1, longitude: 2)
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      const g = navigator.geolocation, err = (e) => window.__seen.push([e.code, e.message, String(e)]);
+      g.getCurrentPosition(() => window.__seen.push('ok'), err, {timeout: 0});
+      g.getCurrentPosition((p) => window.__seen.push(p.coords.latitude), err);
+    JS
+    expect(session.evaluate_script('window.__seen')).to eq([[3, 'Timeout expired', '[object GeolocationPositionError]'], 1])
+    session.driver.set_geolocation
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      const err = (e) => window.__seen.push(e.code);
+      navigator.geolocation.getCurrentPosition((p) => window.__seen.push(p.coords.latitude), err, {maximumAge: 60000, timeout: 0});
+      navigator.geolocation.getCurrentPosition(() => window.__seen.push('ok'), err);
+    JS
+    expect(session.evaluate_script('window.__seen')).to eq([1, 2])
+  end
+
+  it 'hands out watch ids from 1, calls back no watch cleared before its task, and reports what a callback throws' do
+    session.driver.set_geolocation(latitude: 1, longitude: 2)
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      addEventListener('error', (e) => { window.__seen.push(e.error.message); e.preventDefault(); });
+      const g = navigator.geolocation;
+      const a = g.watchPosition(() => { throw new Error('boom'); });
+      const b = g.watchPosition(() => window.__seen.push('b'));
+      const c = g.watchPosition(() => window.__seen.push('c'));
+      g.clearWatch(c);
+      window.__seen.push(a, b, c);
+    JS
+    expect(session.evaluate_script('window.__seen')).to eq([1, 2, 3, 'boom', 'b'])
+  end
+
+  it 'rejects a descriptor that names no powerful feature, and tells a PermissionStatus its state moved' do
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      const p = navigator.permissions;
+      const fail = (e) => window.__seen.push(e.name + ': ' + e.message);
+      p.query({}).catch(fail);
+      p.query({name: 'foo'}).catch(fail);
+      p.query().catch(fail);
+      p.query({name: 'geolocation'}).then((s) => {
+        window.__status = s;
+        window.__seen.push([s instanceof PermissionStatus, s instanceof EventTarget, s.name, s.state]);
+        s.onchange = () => window.__seen.push('change ' + s.state);
+      });
+      window.__seen.push([typeof p.request, typeof p.revoke, String(p)]);
+    JS
+    expect(session.evaluate_script('window.__seen')).to eq(
+      [
+        ['undefined', 'undefined', '[object Permissions]'],
+        "TypeError: Failed to execute 'query' on 'Permissions': Failed to read the 'name' property from 'PermissionDescriptor': Required member is undefined.",
+        "TypeError: Failed to execute 'query' on 'Permissions': Failed to read the 'name' property from 'PermissionDescriptor': The provided value 'foo' is not a valid enum value of type PermissionName.",
+        "TypeError: Failed to execute 'query' on 'Permissions': 1 argument required, but only 0 present.",
+        [true, true, 'geolocation', 'prompt']
+      ]
+    )
+    session.driver.set_geolocation(denied: true)
+    session.driver.set_geolocation(denied: true)
+    expect(session.evaluate_script('[window.__seen.slice(5), window.__status.state]')).to eq([['change denied'], 'denied'])
   end
 end

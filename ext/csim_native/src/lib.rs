@@ -69,6 +69,7 @@ mod font_faces;
 mod form_entries;
 mod form_state;
 mod fontconfig;
+mod geolocation;
 mod geometry;
 // HTML's presentational hints: the declarations an element's attributes add to the cascade.
 mod hints;

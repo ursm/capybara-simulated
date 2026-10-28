@@ -1085,6 +1085,8 @@ pub(crate) struct RealmState {
     pub(crate) window_viewport: crate::viewport::Viewport,
     // What its navigator says of the user agent (navigator.rs).
     pub(crate) navigator: crate::navigator::Navigator,
+    // Its Geolocation's watch ids and cached position (geolocation.rs).
+    pub(crate) geolocation: crate::geolocation::Geolocation,
     // What its document planned for its navigable, for the host to take (navigation_plan.rs).
     pub(crate) navigation_plan: crate::navigation_plan::NavigationPlan,
     // Its parse's list of scripts to execute after parsing (script.rs `list_parser_script`), until "the end" takes it,
@@ -2905,6 +2907,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::subresource_obtain::install(scope, ns, context_id);
     crate::sheet_fetch::install(scope, ns, context_id);
     crate::sheet_feed::install(scope, ns, context_id);
+    crate::geolocation::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);

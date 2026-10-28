@@ -126,6 +126,10 @@ Navigator:
   - webdriver
   - windowControlsOverlay
   - xr
+# (…Requesting and Relinquishing Permissions: WICG proposals — headless Chrome exposes neither, measured)
+Permissions:
+  - request
+  - revoke
 Performance:
   - eventCounts
   - interactionCount

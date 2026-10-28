@@ -2839,10 +2839,9 @@ module Capybara
             {'coords' => {'latitude' => latitude, 'longitude' => longitude, 'accuracy' => accuracy}.merge(rest.transform_keys(&:to_s))}
           end
 
-        # Re-deliver to any active watchPosition watchers, mirroring a real
-        # browser firing the watch again when the location updates. The JS
-        # side reads the fresh @geolocation via the host fn.
-        execute_script('if (typeof globalThis.__csimGeoRefireWatches === "function") globalThis.__csimGeoRefireWatches();')
+        # Each watch called back again, and each PermissionStatus whose state moved told, as a browser does when its
+        # location changes (geolocation.js `__csimGeolocationChanged`, which reads the fresh @geolocation).
+        execute_script('if (typeof globalThis.__csimGeolocationChanged === "function") globalThis.__csimGeolocationChanged();')
         nil
       end
 
