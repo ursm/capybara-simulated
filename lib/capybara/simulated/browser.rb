@@ -3687,7 +3687,7 @@ module Capybara
         reset_frame_scope
         @session_history.clear
         @history_entries.clear
-        Native.cors_preflight_cache_clear(@cors_preflight_cache)   # CORS-preflight cache is per browsing context
+        Native.cors_preflight_cache_clear(@cors_preflight_cache)   # the window's CORS-preflight cache: a test's grants none of the next's
         # A JS-driven history.back()/go() that scheduled a deferred traverse but
         # never drained (the page navigated away first) must not survive the reset
         # — otherwise the stale target replays against the NEXT page's fresh history.
@@ -3770,6 +3770,7 @@ module Capybara
         Native.sw_clear(@sw_partition)
         Native.storage_clear(@session_storage)
         Native.storage_clear(@local_storage) if @local_storage_owned
+        Native.cors_preflight_cache_drop(@cors_preflight_cache)
         @runtime.dispose
         # …and the IndexedDB databases, caches and clipboard of a partition this window alone had (one a driver gave it is
         # the driver's).
@@ -13187,8 +13188,12 @@ module Capybara
       # request's (effective) origin — that origin alone, and Access-Control-Allow-Credentials `true`, for a credentialed
       # one (withCredentials).
       def cors_response_ok?(resp_headers, origin, credentialed)
-        Native.cors_check(cors_value(resp_headers, 'access-control-allow-origin'), cors_value(resp_headers, 'access-control-allow-credentials'),
-                          origin.to_s, credentialed == true)
+        Native.cors_check(
+          cors_value(resp_headers, 'access-control-allow-origin'),
+          cors_value(resp_headers, 'access-control-allow-credentials'),
+          origin,
+          credentialed == true
+        )
       end
 
       # Whether a URL carries userinfo (`user[:password]@`). A CORS request to such a
@@ -13206,9 +13211,10 @@ module Capybara
         headers.is_a?(Hash) && headers.any? {|k, _| CONDITIONAL_REQUEST_HEADERS.include?(k.to_s.downcase) }
       end
 
-      # Run the CORS preflight unless the session's CORS-preflight cache already covers this request (cors.rs: an entry
+      # Run the CORS preflight unless the window's CORS-preflight cache already covers this request (cors.rs: an entry
       # for its method and each of its unsafe header names, by origin, URL and credentials, within its max-age), its grant
-      # stored for the requests after it. Returns false (= network error) only when a fresh preflight is needed AND fails.
+      # stored for the requests after it. Returns false (= network error) only when a fresh preflight is needed AND fails —
+      # and then the cache's entries for the request's origin and URL go (Fetch "clear cache entries").
       # (…on the REAL monotonic clock, not the virtual one)
       def cors_preflight_ok?(target, method, headers, req_origin, credentialed, referer)
         unsafe = cors_unsafe_headers(headers)
@@ -13216,10 +13222,18 @@ module Capybara
         return true if Native.cors_preflight_cached(@cors_preflight_cache, req_origin.to_s, target.to_s, credentialed == true, method.to_s, unsafe, now)
 
         status, ph = cors_run_preflight(target, method, unsafe, req_origin, referer)
-        return false unless status
-
-        response = [status.to_i, *PREFLIGHT_RESPONSE_HEADERS.map {|name| cors_value(ph, name) }]
-        Native.cors_preflight(@cors_preflight_cache, response, req_origin.to_s, target.to_s, credentialed == true, method.to_s, unsafe, now)
+        granted    = status && Native.cors_preflight(
+          @cors_preflight_cache,
+          [status.to_i, *PREFLIGHT_RESPONSE_HEADERS.map {|name| cors_value(ph, name) }],
+          req_origin.to_s,
+          target.to_s,
+          credentialed == true,
+          method.to_s,
+          unsafe,
+          now
+        )
+        Native.cors_preflight_cache_forget(@cors_preflight_cache, req_origin.to_s, target.to_s) unless granted
+        granted
       end
       PREFLIGHT_RESPONSE_HEADERS = %w[
         access-control-allow-origin access-control-allow-credentials access-control-allow-methods access-control-allow-headers
@@ -13268,8 +13282,9 @@ module Capybara
       # one for its `*`, but for a credentialed response — never a forbidden one (Set-Cookie); our internal reason-phrase
       # sentinel (`x-csim-status-text`, which `response_hash` lifts into statusText) kept.
       def cors_exposed_headers(headers, credentialed = false)
-        kept = Native.cors_exposed_names(headers.keys.map(&:to_s), cors_value(headers, 'access-control-expose-headers'), credentialed == true)
-        headers.select {|k, _| kept.include?(k.to_s) }
+        names = headers.keys
+        kept  = Native.cors_exposed_names(names.map(&:to_s), cors_value(headers, 'access-control-expose-headers'), credentialed == true)
+        kept.to_h {|i| [names[i], headers[names[i]]] }
       end
 
       # A response header's value as text, by its name in any case — nil for none.

@@ -288,6 +288,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("cors_preflight", magnus::function!(cors::preflight_for_ruby, 8))?;
     native.define_module_function("cors_preflight_cache_new", magnus::function!(cors::cache_new_for_ruby, 0))?;
     native.define_module_function("cors_preflight_cache_clear", magnus::function!(cors::cache_clear_for_ruby, 1))?;
+    native.define_module_function("cors_preflight_cache_forget", magnus::function!(cors::cache_forget_for_ruby, 3))?;
+    native.define_module_function("cors_preflight_cache_drop", magnus::function!(cors::cache_drop_for_ruby, 1))?;
     native.define_module_function("cors_preflight_cached", magnus::function!(cors::cache_covers_for_ruby, 7))?;
     native.define_module_function("cors_exposed_names", magnus::function!(cors::exposed_names_for_ruby, 3))?;
     // Each session's cookie store (cookie_jar.rs).

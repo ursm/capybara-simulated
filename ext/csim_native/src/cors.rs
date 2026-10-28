@@ -7,12 +7,16 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-use crate::fetch_rules::{cors_safelisted_method, cors_safelisted_request_header, cors_safelisted_response_header, forbidden_response_header, is_token};
+use magnus::TryConvert;
+
+use crate::fetch_rules::{cors_safelisted_method, cors_safelisted_request_header, cors_safelisted_response_header, forbidden_response_header, is_token, ruby_bytes};
 
 // Fetch's "CORS non-wildcard request-header name": `*` in a grant never covers it.
 const NON_WILDCARD: &str = "authorization";
-// The max-age of a grant whose response names none, or none valid (Fetch "CORS-preflight fetch" step 7.8).
+// The max-age of a grant whose response names none, or none valid (Fetch "CORS-preflight fetch" step 7.8) — and the
+// most one may have, the limit Fetch lets a user agent impose (Chrome's: two hours).
 const DEFAULT_MAX_AGE: f64 = 5.0;
+const MAX_MAX_AGE: f64 = 7200.0;
 
 // The names of a request's headers that are no CORS-safelisted request-header — its value too taken into account —
 // lowercased, sorted and unique: what `Access-Control-Request-Headers` lists (Fetch "CORS-unsafe request-header names").
@@ -33,11 +37,13 @@ pub(crate) fn unsafe_header_names(headers: &[(Vec<u8>, Vec<u8>)]) -> Vec<String>
 
 // Fetch "CORS check": the response allows the request's origin `origin` — `Access-Control-Allow-Origin` `*` or that
 // origin, and, `credentialed`, that origin alone and `Access-Control-Allow-Credentials` `true`, byte for byte.
-pub(crate) fn check(acao: Option<&str>, acac: Option<&str>, origin: &str, credentialed: bool) -> bool {
-    match acao {
-        None => false,
-        Some(acao) if credentialed => acao == origin && acac == Some("true"),
-        Some(acao) => acao == "*" || acao == origin,
+pub(crate) fn check(acao: Option<&str>, acac: Option<&str>, origin: Option<&str>, credentialed: bool) -> bool {
+    match (acao, origin) {
+        (None, _) => false,
+        (Some(acao), _) if !credentialed && acao == "*" => true,
+        (_, None) => false,
+        (Some(acao), Some(origin)) if credentialed => acao == origin && acac == Some("true"),
+        (Some(acao), Some(origin)) => acao == origin,
     }
 }
 
@@ -80,7 +86,7 @@ pub(crate) fn preflight(
     origin: &str,
     credentialed: bool,
 ) -> Option<Grant> {
-    if !(200..300).contains(&status) || !check(acao, acac, origin, credentialed) {
+    if !(200..300).contains(&status) || !check(acao, acac, Some(origin), credentialed) {
         return None;
     }
     let methods = token_list(allow_methods)?;
@@ -88,9 +94,13 @@ pub(crate) fn preflight(
     if !covers(&methods, &headers, method, unsafe_names, credentialed) {
         return None;
     }
-    let max_age = max_age.and_then(|v| v.trim_matches([' ', '\t']).parse::<u64>().ok()).map_or(DEFAULT_MAX_AGE, |s| s as f64);
-    // (…a grant of no method its request's own, as Fetch's step 7.4 has it)
-    let methods = if methods.is_empty() { vec![method.to_owned()] } else { methods };
+    // (…a missing `Access-Control-Allow-Methods` no grant of the request's method: Fetch's step 7.4 makes it one only for a
+    // request whose use-CORS-preflight flag is set, which no request here has. Its max-age `delta-seconds`, digits alone,
+    // and one past the limit the limit.)
+    let max_age = max_age
+        .map(|v| v.trim_matches([' ', '\t']))
+        .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
+        .map_or(DEFAULT_MAX_AGE, |v| v.parse::<f64>().map_or(MAX_MAX_AGE, |s| s.min(MAX_MAX_AGE)));
     Some(Grant { methods, headers, max_age })
 }
 
@@ -112,9 +122,20 @@ fn caches() -> MutexGuard<'static, (u64, HashMap<u64, PreflightCache>)> {
     CACHES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+// Fetch "cache entry match": an entry of `origin` and `url` serves a request of credentials `credentials` where it is a
+// credentialed one's, or the request is not credentialed either.
+fn matches(e: &CacheEntry, origin: &str, url: &str, credentials: bool) -> bool {
+    e.origin == origin && e.url == url && (e.credentials || !credentials)
+}
+
 impl PreflightCache {
     fn of<'a>(&'a self, origin: &'a str, url: &'a str, credentials: bool, now: f64) -> impl Iterator<Item = &'a CacheEntry> {
-        self.entries.iter().filter(move |e| e.origin == origin && e.url == url && e.credentials == credentials && e.expires > now)
+        self.entries.iter().filter(move |e| matches(e, origin, url, credentials) && e.expires > now)
+    }
+    // Fetch "clear cache entries": a request of `origin` to `url` whose CORS-preflight — or the request after it — failed
+    // lets every entry of theirs go.
+    fn clear_for(&mut self, origin: &str, url: &str) {
+        self.entries.retain(|e| !(e.origin == origin && e.url == url));
     }
     // Whether a request needs no preflight: a method cache entry match for its method (a safelisted one needs none) and
     // a header-name cache entry match for each of its CORS-unsafe header names (Fetch "main fetch" step 12, §4.9).
@@ -128,9 +149,7 @@ impl PreflightCache {
         let expires = now + grant.max_age;
         let made = grant.methods.iter().map(|m| (Some(m.clone()), None)).chain(grant.headers.iter().map(|h| (None, Some(h.clone()))));
         for (method, header) in made {
-            let existing = self.entries.iter_mut().find(|e| {
-                e.origin == origin && e.url == url && e.credentials == credentials && e.method == method && e.header == header
-            });
+            let existing = self.entries.iter_mut().find(|e| matches(e, origin, url, credentials) && e.method == method && e.header == header);
             match existing {
                 Some(e) => e.expires = expires,
                 None => self.entries.push(CacheEntry { origin: origin.to_owned(), url: url.to_owned(), credentials, method, header, expires }),
@@ -142,18 +161,15 @@ impl PreflightCache {
 
 // (…`pairs` [[name, value], …] of byte strings)
 pub(crate) fn unsafe_header_names_for_ruby(pairs: magnus::RArray) -> Result<Vec<String>, magnus::Error> {
-    use magnus::TryConvert;
     let mut headers = Vec::with_capacity(pairs.len());
     for pair in pairs.into_iter() {
         let pair = magnus::RArray::try_convert(pair)?;
-        let (name, value): (magnus::RString, magnus::RString) = (pair.entry(0)?, pair.entry(1)?);
-        // SAFETY: the bytes are copied out before anything can run Ruby code.
-        headers.push(unsafe { (name.as_slice().to_vec(), value.as_slice().to_vec()) });
+        headers.push((ruby_bytes(pair.entry(0)?), ruby_bytes(pair.entry(1)?)));
     }
     Ok(unsafe_header_names(&headers))
 }
-pub(crate) fn check_for_ruby(acao: Option<String>, acac: Option<String>, origin: String, credentialed: bool) -> bool {
-    check(acao.as_deref(), acac.as_deref(), &origin, credentialed)
+pub(crate) fn check_for_ruby(acao: Option<String>, acac: Option<String>, origin: Option<String>, credentialed: bool) -> bool {
+    check(acao.as_deref(), acac.as_deref(), origin.as_deref(), credentialed)
 }
 // …a session's cache: made, emptied (the session reset), asked whether it covers a request, given a preflight's grant —
 // `now` the host's monotonic seconds. Its grant (`preflight`) made and stored at once; whether one was.
@@ -167,6 +183,16 @@ pub(crate) fn cache_new_for_ruby() -> u64 {
 pub(crate) fn cache_clear_for_ruby(id: u64) {
     if let Some(cache) = caches().1.get_mut(&id) {
         cache.entries.clear();
+    }
+}
+// …let go of with the window it was made for…
+pub(crate) fn cache_drop_for_ruby(id: u64) {
+    caches().1.remove(&id);
+}
+// …its entries of a request of `origin` to `url` whose preflight or response failed let go (`clear_for`)…
+pub(crate) fn cache_forget_for_ruby(id: u64, origin: String, url: String) {
+    if let Some(cache) = caches().1.get_mut(&id) {
+        cache.clear_for(&origin, &url);
     }
 }
 pub(crate) fn cache_covers_for_ruby(id: u64, origin: String, url: String, credentials: bool, method: String, unsafe_names: Vec<String>, now: f64) -> bool {
@@ -209,17 +235,24 @@ pub(crate) fn preflight_for_ruby(
 // names and those `Access-Control-Expose-Headers` names (`expose`) — every one for its `*` where not `credentialed` —
 // never a forbidden response-header name; and the host's marker of the reason phrase (`x-csim-status-text`), which the
 // response's `statusText` is.
-pub(crate) fn exposed_names_for_ruby(names: Vec<String>, expose: Option<String>, credentialed: bool) -> Vec<String> {
-    let expose: Vec<String> = token_list(expose.as_deref()).unwrap_or_default().into_iter().map(|h| h.to_ascii_lowercase()).collect();
-    let all = !credentialed && expose.iter().any(|e| e == "*");
+pub(crate) fn exposed<'a>(names: impl IntoIterator<Item = &'a [u8]>, expose: Option<&str>, credentialed: bool) -> Vec<usize> {
+    let expose: Vec<Vec<u8>> = token_list(expose).unwrap_or_default().into_iter().map(|h| h.to_ascii_lowercase().into_bytes()).collect();
+    let all = !credentialed && expose.iter().any(|e| e == b"*");
     names
         .into_iter()
-        .filter(|name| {
+        .enumerate()
+        .filter(|(_, name)| {
             let lower = name.to_ascii_lowercase();
-            let shown = all || cors_safelisted_response_header(lower.as_bytes()) || expose.contains(&lower) || lower == "x-csim-status-text";
-            shown && !forbidden_response_header(lower.as_bytes())
+            let shown = all || cors_safelisted_response_header(&lower) || expose.contains(&lower) || lower == b"x-csim-status-text";
+            shown && !forbidden_response_header(&lower)
         })
+        .map(|(i, _)| i)
         .collect()
+}
+// (…`names` byte strings: the indices of those it exposes)
+pub(crate) fn exposed_names_for_ruby(names: magnus::RArray, expose: Option<String>, credentialed: bool) -> Result<Vec<usize>, magnus::Error> {
+    let names: Vec<Vec<u8>> = names.into_iter().map(|n| magnus::RString::try_convert(n).map(ruby_bytes)).collect::<Result<_, _>>()?;
+    Ok(exposed(names.iter().map(Vec::as_slice), expose.as_deref(), credentialed))
 }
 
 #[cfg(test)]
@@ -245,11 +278,15 @@ mod tests {
 
     #[test]
     fn a_cors_check_takes_credentials_byte_for_byte() {
-        assert!(check(Some("*"), None, "https://a.test", false));
-        assert!(!check(Some("*"), Some("true"), "https://a.test", true));
-        assert!(check(Some("https://a.test"), Some("true"), "https://a.test", true));
-        assert!(!check(Some("https://a.test"), Some("TRUE"), "https://a.test", true));
-        assert!(!check(None, None, "https://a.test", false));
+        let o = Some("https://a.test");
+        assert!(check(Some("*"), None, o, false));
+        assert!(!check(Some("*"), Some("true"), o, true));
+        assert!(check(Some("https://a.test"), Some("true"), o, true));
+        assert!(!check(Some("https://a.test"), Some("TRUE"), o, true));
+        assert!(!check(None, None, o, false));
+        // (…a request of no origin allowed by `*` alone)
+        assert!(check(Some("*"), None, None, false));
+        assert!(!check(Some(""), None, None, false));
     }
 
     #[test]
@@ -272,13 +309,34 @@ mod tests {
         cache.store("o", "u", false, &d, 1.0);
         assert!(cache.covers("o", "u", false, "PUT", &unsafe_names, 2.0));
         assert!(cache.covers("o", "u", false, "DELETE", &[], 30.0));
+        // (…a credentialed request's entries serve an uncredentialed one, not the other way round)
+        let c = preflight(200, Some("o"), Some("true"), Some("PATCH"), None, None, "PATCH", &[], "o", true).unwrap();
+        cache.store("o", "u", true, &c, 1.0);
+        assert!(cache.covers("o", "u", false, "PATCH", &[], 2.0));
+        assert!(!cache.covers("o", "u", true, "PUT", &unsafe_names, 2.0));
+        cache.clear_for("o", "u");
+        assert!(!cache.covers("o", "u", false, "DELETE", &[], 2.0));
+    }
+
+    #[test]
+    fn a_max_age_is_delta_seconds_up_to_two_hours() {
+        let age = |v: &str| preflight(200, Some("*"), None, None, None, Some(v), "GET", &[], "o", false).unwrap().max_age;
+        assert_eq!(age(" 60 "), 60.0);
+        assert_eq!(age("+60"), DEFAULT_MAX_AGE);
+        assert_eq!(age("6e1"), DEFAULT_MAX_AGE);
+        assert_eq!(age("86400"), MAX_MAX_AGE);
+        assert_eq!(age("99999999999999999999999999"), MAX_MAX_AGE);
+        // (…no grant of an unsafe method the response does not name)
+        assert!(preflight(200, Some("*"), None, None, None, None, "PUT", &[], "o", false).is_none());
     }
 
     #[test]
     fn a_cors_response_exposes_its_safelisted_and_named_headers() {
-        let names = s(&["Content-Type", "X-Secret", "Set-Cookie", "X-Shown", "x-csim-status-text"]);
-        assert_eq!(exposed_names_for_ruby(names.clone(), Some("x-shown".into()), false), s(&["Content-Type", "X-Shown", "x-csim-status-text"]));
-        assert_eq!(exposed_names_for_ruby(names.clone(), Some("*".into()), false), s(&["Content-Type", "X-Secret", "X-Shown", "x-csim-status-text"]));
-        assert_eq!(exposed_names_for_ruby(names, Some("*".into()), true), s(&["Content-Type", "x-csim-status-text"]));
+        let names: [&[u8]; 5] = [b"Content-Type", b"X-Secret", b"Set-Cookie", b"X-Shown", b"x-csim-status-text"];
+        assert_eq!(exposed(names, Some("x-shown"), false), [0, 3, 4]);
+        assert_eq!(exposed(names, Some("*"), false), [0, 1, 3, 4]);
+        assert_eq!(exposed(names, Some("*"), true), [0, 4]);
+        // (…a list naming a non-token none of them)
+        assert_eq!(exposed(names, Some("x-shown, a b"), false), [0, 4]);
     }
 }

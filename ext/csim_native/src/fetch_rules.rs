@@ -602,7 +602,7 @@ fn normalized_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 }
 // ── For the host ──
 // (…a Ruby string's bytes, whatever its encoding)
-fn ruby_bytes(s: magnus::RString) -> Vec<u8> {
+pub(crate) fn ruby_bytes(s: magnus::RString) -> Vec<u8> {
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
     unsafe { s.as_slice() }.to_vec()
 }
