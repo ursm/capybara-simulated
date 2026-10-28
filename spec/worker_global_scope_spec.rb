@@ -39,15 +39,16 @@ RSpec.describe 'Worker global scope' do
           postMessage(out);
         JS
       when '/plain.txt' then [200, {'content-type' => 'text/plain'}, ['self.v = "plain";']]
-      when '/shadow.js'
+      when '/sub/shadow.js'
         [200, {'content-type' => 'text/javascript'}, [<<~JS]]
           var location;
           const out = [];
-          try { importScripts('/plain.js'); out.push(self.v); } catch (e) { out.push(e.name); }
-          try { const x = new XMLHttpRequest(); x.open('GET', '/plain.txt', false); x.send(); out.push(x.status); } catch (e) { out.push(e.name); }
-          fetch('/plain.txt').then((r) => r.status, (e) => e.name).then((s) => { out.push(s); postMessage(out); });
+          try { importScripts('plain.js'); out.push(self.v); } catch (e) { out.push(e.name); }
+          try { const x = new XMLHttpRequest(); x.open('GET', 'echo', false); x.send(); out.push(x.responseText); } catch (e) { out.push(e.name); }
+          fetch('echo').then((r) => r.text(), (e) => e.name).then((t) => { out.push(t); postMessage(out); });
         JS
-      when '/plain.js' then [200, {'content-type' => 'text/javascript'}, ['self.v = "imported";']]
+      when '/sub/plain.js' then [200, {'content-type' => 'text/javascript'}, ["self.v = #{env['HTTP_REFERER'].to_s.inspect};"]]
+      when '/sub/echo' then [200, {'content-type' => 'text/plain'}, [env['HTTP_REFERER'].to_s]]
       when '/sw.js'
         [200, {'content-type' => 'text/javascript'}, [<<~JS]]
           const me = self.serviceWorker, seen = [[me && me.state, me && new URL(me.scriptURL).pathname]];
@@ -145,14 +146,14 @@ RSpec.describe 'Worker global scope' do
   # load — a 404 — a NetworkError; a `data:` one is Fetch's data: URL processor's, its body UTF-8; a response of no
   # JavaScript MIME type a NetworkError too ("fetch a classic worker-imported script"), whatever server sent it.
   # A worker's script that shadows `location` with a global of its own — an own property over its scope's accessor —
-  # still fetches as its realm: its requests' client URL, referrer and base URL are the engine's, not `self.location`'s.
+  # still fetches as its realm: its requests' URLs resolved against its script's, which refers them, not the page.
   it 'fetches as its realm whatever its script names `location`' do
     session.visit '/'
     got = session.evaluate_async_script(<<~JS)
       const done = arguments[0];
-      new Worker('/shadow.js').onmessage = (e) => done(e.data);
+      new Worker('/sub/shadow.js').onmessage = (e) => done(e.data);
     JS
-    expect(got).to eq(['imported', 200, 200])
+    expect(got).to eq(['http://www.example.com/sub/shadow.js'] * 3)
   end
 
   it 'throws what importScripts owes for a URL that does not parse or load' do
