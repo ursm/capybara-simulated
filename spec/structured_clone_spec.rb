@@ -307,6 +307,48 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(s.evaluate_script('got').sort).to eq(['message true', 'message true', 'messageerror null', 'messageerror null'])
   end
 
+  # …and over a MessagePort whose other end a frame of another site holds, read back in THAT frame's realm (Chrome:
+  # "port messageerror").
+  it 'posts a WebAssembly.Module over a port to the agent cluster of the realm holding its other end' do
+    port_app = lambda do |env|
+      case env['PATH_INFO']
+      when '/child'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><script>
+            onmessage = (e) => {
+              const port = e.ports[0];
+              port.onmessage = (m) => parent.postMessage('port message ' + (m.data instanceof WebAssembly.Module), '*');
+              port.onmessageerror = (m) => parent.postMessage('port messageerror ' + m.data, '*');
+              parent.postMessage('port ready', '*');
+            };
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><script>window.got = []; addEventListener('message', (e) => got.push(e.data));</script>
+          <iframe id="same" src="/child"></iframe><iframe id="other" src="http://www.other.test/child"></iframe>
+        HTML
+      end
+    end
+    s = simulated_session(port_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.channels = {};
+      for (const id of ['same', 'other']) {
+        channels[id] = new MessageChannel();
+        document.getElementById(id).contentWindow.postMessage('take', '*', [channels[id].port2]);
+      }
+    JS
+    poll_until { s.evaluate_script('got.length') == 2 }
+    s.execute_script(<<~JS)
+      const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      for (const id of ['same', 'other']) channels[id].port1.postMessage(m);
+    JS
+    poll_until { s.evaluate_script('got.length') == 4 }
+
+    expect(s.evaluate_script('got').sort).to eq(['port message true', 'port messageerror null', 'port ready', 'port ready'])
+  end
+
   # (…a gap: to another isolate — a worker — it is a DataCloneError, but refused as it is serialized, before the transfer
   # list is moved)
   it 'refuses a WebAssembly.Module to a worker before it moves the transfer list' do
