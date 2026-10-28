@@ -213,4 +213,82 @@ RSpec.describe 'same-document navigation' do
       expect(s.evaluate_script("document.getElementById('f').contentWindow.location.href")).to end_with('/frame.html?step=2')
     end
   end
+
+  # HTML "shared history push/replace state steps": the state is StructuredSerializeForStorage'd, and what a traversal
+  # gives back — a `popstate`'s, a document made again's `history.state` — is StructuredDeserialize of THOSE bytes, so
+  # whatever a structured clone keeps comes back: a RegExp, an Error, a BigInt, an array's hole, a cycle. (The host kept
+  # the state as a Ruby value, which turned the first three into plain objects and a number and filled the hole.)
+  describe 'classic history API state' do
+    def cloned_state
+      <<~JS
+        (() => {
+          const cycle = {}; cycle.self = cycle;
+          const shared = {k: 1};
+          return {cycle, a: shared, b: shared, zero: -0, re: /x/g, err: new RangeError('e'), holes: [1, , 3], big: 10n, map: new Map([[1, 2]])};
+        })()
+      JS
+    end
+
+    def kept_state
+      <<~JS
+        (st => [
+          st.cycle.self === st.cycle, st.a === st.b, Object.is(st.zero, -0), st.re instanceof RegExp && st.re.flags,
+          st.err instanceof RangeError && st.err.message, 1 in st.holes, typeof st.big, st.map.get(1)
+        ])
+      JS
+    end
+
+    def state_session
+      app = lambda do |env|
+        [200, {'content-type' => 'text/html'}, ["<p>#{env['PATH_INFO']}</p><script>window.popped = []; addEventListener('popstate', e => popped.push(e.state))</script>"]]
+      end
+      simulated_session(app).tap {|s| s.visit '/a' }
+    end
+
+    it 'gives a traversal back what a structured clone keeps' do
+      s = state_session
+      s.execute_script("history.pushState(#{cloned_state}, '', '/b'); history.pushState(null, '', '/c')")
+      s.go_back
+      poll(s, 'popped.length > 0')
+
+      kept = [true, true, true, 'g', 'e', false, 'bigint', 2]
+      expect(s.evaluate_script("#{kept_state}(popped[0])")).to eq(kept)
+      # (…a copy, the one `history.state` holds the same)
+      expect(s.evaluate_script('popped[0] === history.state')).to be(true)
+      s.visit '/z'
+      s.go_back
+
+      expect(s.evaluate_script('location.pathname')).to eq('/b')
+      expect(s.evaluate_script("#{kept_state}(history.state)")).to eq(kept)
+    end
+
+    it 'gives pushState its own copy, not the object it was given' do
+      s = state_session
+      s.execute_script("window.given = #{cloned_state}; history.pushState(given, '', '/b')")
+
+      expect(s.evaluate_script('history.state === given')).to be(false)
+      expect(s.evaluate_script("#{kept_state}(history.state)")).to eq([true, true, true, 'g', 'e', false, 'bigint', 2])
+    end
+
+    # (…for storage: no SharedArrayBuffer, even in a cross-origin isolated document, which may post one)
+    it 'refuses to keep a SharedArrayBuffer' do
+      app = lambda do |_env|
+        headers = {
+          'content-type'                 => 'text/html',
+          'cross-origin-opener-policy'   => 'same-origin',
+          'cross-origin-embedder-policy' => 'require-corp'
+        }
+        [200, headers, ['<p>isolated</p>']]
+      end
+      s = simulated_session(app)
+      s.visit '/'
+
+      expect(s.evaluate_script('crossOriginIsolated')).to be(true)
+      expect(s.evaluate_script(<<~JS)).to eq(['DataCloneError', nil])
+        (() => {
+          try { history.pushState(new SharedArrayBuffer(1), '', '/b') } catch (e) { return [e.name, history.state] }
+        })()
+      JS
+    end
+  end
 end

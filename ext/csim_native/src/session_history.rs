@@ -7,14 +7,16 @@
 // traversable by one step, which moves whichever navigable's entry the step is (Chrome: a frame navigated, the page's
 // `history.length` is one more and its `history.back()` takes the FRAME back).
 //
-// The entries here are what the joint history is made of — their steps, their document states, their URLs; what a
-// replay of one sends and restores (a POST's body, the classic history API state, form state) is the host's, by the
-// entry's id (browser.rb). A frame's navigable is the id navigables.rs gives it, and that of the page document build it
+// The entries here are what the joint history is made of — their steps, their document states, their URLs — and what a
+// replay of one sends and restores (`Data`), which the host gives and reads by the entry's id (browser.rb). A frame's navigable is the id navigables.rs gives it, and that of the page document build it
 // was made under (`rebuilt`): a document the page traverses back to is made again with navigables of its own, which
 // the nested histories its document state kept from before are not (they still count their steps).
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
+
+use magnus::{RHash, RString, Symbol, TryConvert};
 
 #[derive(Clone)]
 struct Entry {
@@ -22,6 +24,89 @@ struct Entry {
     step: i64,
     url: String,
     doc: u64,
+    // (…shared with the copies a saved history keeps, a change to it made on its own: `Arc::make_mut`)
+    data: Arc<Data>,
+}
+
+// What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
+// and referrer policy its request was sent with (HTML's document state) — its document's referrer, a frame's, and its
+// classic history API state and its document's persisted form state, serialized (StructuredSerializeForStorage).
+#[derive(Clone, Default)]
+struct Data {
+    post: Option<(Arc<[u8]>, Option<String>)>,
+    origin: Option<String>,
+    referer: Option<String>,
+    referrer_policy: Option<String>,
+    referrer: Option<String>,
+    state: Option<Arc<[u8]>>,
+    form_state: Option<Arc<[u8]>>,
+}
+
+impl Data {
+    fn of(fields: RHash) -> Result<Self, magnus::Error> {
+        let mut data = Data::default();
+        data.merge(fields)?;
+        Ok(data)
+    }
+
+    // The fields `fields` names made what it gives them — nil none — `:body` and `:content_type` a POST's together.
+    fn merge(&mut self, fields: RHash) -> Result<(), magnus::Error> {
+        let text = |key: &str| -> Result<Option<Option<String>>, magnus::Error> {
+            let Some(v) = fields.get(Symbol::new(key)) else { return Ok(None) };
+            Ok(Some(Option::<String>::try_convert(v)?))
+        };
+        let bytes = |key: &str| -> Result<Option<Option<Arc<[u8]>>>, magnus::Error> {
+            let Some(v) = fields.get(Symbol::new(key)) else { return Ok(None) };
+            Ok(Some(Option::<RString>::try_convert(v)?.map(|s| crate::fetch_rules::ruby_bytes(s).into())))
+        };
+        if let Some(body) = bytes("body")? {
+            let content_type = text("content_type")?.flatten();
+            self.post = body.map(|body| (body, content_type));
+        }
+        for (key, field) in [
+            ("origin", &mut self.origin),
+            ("referer", &mut self.referer),
+            ("referrer_policy", &mut self.referrer_policy),
+            ("referrer", &mut self.referrer),
+        ] {
+            if let Some(v) = text(key)? {
+                *field = v;
+            }
+        }
+        if let Some(v) = bytes("state")? {
+            self.state = v;
+        }
+        if let Some(v) = bytes("form_state")? {
+            self.form_state = v;
+        }
+        Ok(())
+    }
+
+    // …and as a hash of the ones it has.
+    fn to_hash(&self, ruby: &magnus::Ruby, url: &str) -> Result<RHash, magnus::Error> {
+        let hash = ruby.hash_new();
+        hash.aset(Symbol::new("url"), url)?;
+        if let Some((body, content_type)) = &self.post {
+            hash.aset(Symbol::new("body"), ruby.str_from_slice(body))?;
+            hash.aset(Symbol::new("content_type"), content_type.as_deref())?;
+        }
+        for (key, field) in [
+            ("origin", &self.origin),
+            ("referer", &self.referer),
+            ("referrer_policy", &self.referrer_policy),
+            ("referrer", &self.referrer),
+        ] {
+            if let Some(v) = field {
+                hash.aset(Symbol::new(key), v.as_str())?;
+            }
+        }
+        for (key, field) in [("state", &self.state), ("form_state", &self.form_state)] {
+            if let Some(v) = field {
+                hash.aset(Symbol::new(key), ruby.str_from_slice(v))?;
+            }
+        }
+        Ok(hash)
+    }
 }
 
 #[derive(Clone)]
@@ -153,6 +238,11 @@ impl State {
         self.all_lists().into_iter().flatten().find(|e| e.id == id)
     }
 
+    fn entry_mut(&mut self, id: u64) -> Option<&mut Entry> {
+        let State { entries, docs, .. } = self;
+        std::iter::once(entries).chain(docs.values_mut().flatten().map(|n| &mut n.entries)).flatten().find(|e| e.id == id)
+    }
+
     fn all_lists(&self) -> Vec<&Vec<Entry>> {
         let mut lists = vec![&self.entries];
         lists.extend(self.docs.values().flatten().map(|n| &n.entries));
@@ -252,16 +342,16 @@ impl Traversable {
         let parent_list = self.state.list(parent, build)?;
         let step = parent_list.iter().filter(|e| e.doc == doc).map(|e| e.step).min()?;
         let (id, entry_doc) = (self.mint(), self.mint());
-        let entry = Entry { id, step, url: url.to_owned(), doc: entry_doc };
+        let entry = Entry { id, step, url: url.to_owned(), doc: entry_doc, data: Default::default() };
         self.state.docs.entry(doc).or_default().push(Nested { navigable: nav, build, entries: vec![entry] });
         Some(id)
     }
 
     // A navigation of `nav` to `url` committed: an entry of the step after the current one (its forward entries, and
     // every other navigable's, cleared first: HTML "finalize a cross-document navigation") — or, `replace`, in place of
-    // its active entry, of that one's step. `same_document` keeps the entry's document state (a pushState / a fragment's
-    // / a replaceState).
-    fn commit(&mut self, nav: u32, parent: u32, url: &str, same_document: bool, replace: bool) -> Option<u64> {
+    // its active entry, of that one's step — what a replay of it sends and restores `data`. `same_document` keeps the
+    // entry's document state (a pushState / a fragment's / a replaceState).
+    fn commit(&mut self, nav: u32, parent: u32, url: &str, same_document: bool, replace: bool, data: Data) -> Option<u64> {
         if nav != TOP && self.state.list(nav, self.build).is_none() {
             self.ensure(nav, parent, "about:blank")?;
         }
@@ -282,13 +372,13 @@ impl Traversable {
         if replace {
             if let Some(old) = leaving {
                 let at = list.iter().position(|e| e.id == old.id)?;
-                list[at] = Entry { id, step: old.step, url: url.to_owned(), doc };
+                list[at] = Entry { id, step: old.step, url: url.to_owned(), doc, data: Arc::new(data) };
                 self.state.collect_docs();
                 return Some(id);
             }
         }
         let step = current + 1;
-        list.push(Entry { id, step, url: url.to_owned(), doc });
+        list.push(Entry { id, step, url: url.to_owned(), doc, data: Arc::new(data) });
         self.state.current = step;
         self.state.drop_stale_holds(build);
         Some(id)
@@ -367,11 +457,6 @@ impl Traversable {
         self.state.collect_docs();
         self.state.drop_stale_holds(build);
     }
-
-    fn ids(&self) -> Vec<u64> {
-        let states = std::iter::once(&self.state).chain(self.saved.iter().flatten());
-        states.flat_map(|s| s.all_lists().into_iter().flatten().map(|e| e.id).collect::<Vec<_>>()).collect()
-    }
 }
 
 #[magnus::wrap(class = "Capybara::Simulated::Native::SessionHistory", free_immediately)]
@@ -387,17 +472,22 @@ impl SessionHistory {
     fn seed(&self, nav: u32, parent: u32, url: String) -> Option<u64> {
         self.0.borrow_mut().ensure(nav, parent, &url)
     }
-    // #push(navigable, parent, url, same_document) -> the id of the entry a navigation of the navigable adds.
-    fn push(&self, nav: u32, parent: u32, url: String, same_document: bool) -> Option<u64> {
-        self.0.borrow_mut().commit(nav, parent, &url, same_document, false)
+    // #push(navigable, parent, url, same_document, data) -> the id of the entry a navigation of the navigable adds, what
+    // a replay of it sends and restores `data` (`#update`'s fields).
+    fn push(&self, nav: u32, parent: u32, url: String, same_document: bool, data: Data) -> Option<u64> {
+        self.0.borrow_mut().commit(nav, parent, &url, same_document, false, data)
     }
-    // #replace(navigable, parent, url, same_document) -> …the id of the one it makes in place of its active entry.
-    fn replace(&self, nav: u32, parent: u32, url: String, same_document: bool) -> Option<u64> {
+    // #replace(navigable, parent, url, same_document, data) -> …the id of the one it makes in place of its active entry.
+    fn replace(&self, nav: u32, parent: u32, url: String, same_document: bool, data: Data) -> Option<u64> {
         let mut t = self.0.borrow_mut();
-        if nav == TOP && t.state.entries.is_empty() {
-            return t.commit(nav, parent, &url, same_document, false);
-        }
-        t.commit(nav, parent, &url, same_document, true)
+        let replace = nav != TOP || !t.state.entries.is_empty();
+        t.commit(nav, parent, &url, same_document, replace, data)
+    }
+    fn push_for_ruby(&self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
+        Ok(self.push(nav, parent, url, same_document, Data::of(fields)?))
+    }
+    fn replace_for_ruby(&self, nav: u32, parent: u32, url: String, same_document: bool, fields: RHash) -> Result<Option<u64>, magnus::Error> {
+        Ok(self.replace(nav, parent, url, same_document, Data::of(fields)?))
     }
     // #active(navigable) -> the id of its active entry, or nil.
     fn active(&self, nav: u32) -> Option<u64> {
@@ -410,12 +500,26 @@ impl SessionHistory {
     }
     // #set_url(entry, url): its URL made `url` (a redirect's, a replaceState's).
     fn set_url(&self, id: u64, url: String) {
-        let mut t = self.0.borrow_mut();
-        let State { entries, docs, .. } = &mut t.state;
-        let lists = std::iter::once(entries).chain(docs.values_mut().flatten().map(|n| &mut n.entries));
-        if let Some(e) = lists.flatten().find(|e| e.id == id) {
+        if let Some(e) = self.0.borrow_mut().state.entry_mut(id) {
             e.url = url;
         }
+    }
+    // #entry(entry) -> {url:, body:, content_type:, origin:, referer:, referrer_policy:, referrer:, state:, form_state:}
+    // of those it has (`Data`; a POST's body and content type, the classic history API state and the form state binary
+    // strings) — {} for no such entry, or none (nil).
+    fn entry(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>) -> Result<RHash, magnus::Error> {
+        match id.and_then(|id| rb_self.0.borrow().state.entry(id).cloned()) {
+            Some(e) => e.data.to_hash(ruby, &e.url),
+            None => Ok(ruby.hash_new()),
+        }
+    }
+    // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
+    // them (`Data::merge`) — a history saved before keeping the ones it had.
+    fn update(&self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
+        if let Some(e) = self.0.borrow_mut().state.entry_mut(id) {
+            Arc::make_mut(&mut e.data).merge(fields)?;
+        }
+        Ok(())
     }
     // #length -> `history.length`: the number of steps used, at least 1.
     fn length(&self) -> usize {
@@ -515,10 +619,6 @@ impl SessionHistory {
         t.saved = Default::default();
         t.queued.clear();
     }
-    // #ids -> the ids of every entry there is, a saved history's included: the ones whose host data is still wanted.
-    fn ids(&self) -> Vec<u64> {
-        self.0.borrow().ids()
-    }
 }
 
 pub(crate) fn recordable_for_ruby(url: Option<String>) -> bool {
@@ -531,11 +631,13 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     let class = native.define_class("SessionHistory", ruby.class_object())?;
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
     class.define_method("seed", method!(SessionHistory::seed, 3))?;
-    class.define_method("push", method!(SessionHistory::push, 4))?;
-    class.define_method("replace", method!(SessionHistory::replace, 4))?;
+    class.define_method("push", method!(SessionHistory::push_for_ruby, 5))?;
+    class.define_method("replace", method!(SessionHistory::replace_for_ruby, 5))?;
     class.define_method("active", method!(SessionHistory::active, 1))?;
     class.define_method("url", method!(SessionHistory::url, 1))?;
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
+    class.define_method("entry", method!(SessionHistory::entry, 1))?;
+    class.define_method("update", method!(SessionHistory::update, 2))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("queue", method!(SessionHistory::queue, 2))?;
@@ -554,7 +656,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("restore", method!(SessionHistory::restore, 1))?;
     class.define_method("forget", method!(SessionHistory::forget, 1))?;
     class.define_method("clear", method!(SessionHistory::clear, 0))?;
-    class.define_method("ids", method!(SessionHistory::ids, 0))?;
     Ok(())
 }
 
@@ -572,10 +673,10 @@ mod tests {
     #[test]
     fn a_frame_navigation_is_a_step_of_the_page() {
         let h = history();
-        let a = h.push(TOP, TOP, "/top".into(), false).unwrap();
+        let a = h.push(TOP, TOP, "/top".into(), false, Data::default()).unwrap();
         h.seed(1, TOP, "/f1".into()).unwrap();
         assert_eq!(h.length(), 1);
-        let f2 = h.push(1, TOP, "/f2".into(), false).unwrap();
+        let f2 = h.push(1, TOP, "/f2".into(), false, Data::default()).unwrap();
         assert_eq!(h.length(), 2);
         let (step, changes) = h.plan(-1).unwrap();
         assert_eq!(changes.len(), 1);
@@ -584,10 +685,10 @@ mod tests {
         assert_eq!(h.url(h.active(1).unwrap()).as_deref(), Some("/f1"));
         assert_eq!(h.active(TOP), Some(a));
         assert_eq!(h.plan(1).unwrap().1, vec![(1, f2, false)]);
-        h.push(1, TOP, "/f1x".into(), true).unwrap();
+        h.push(1, TOP, "/f1x".into(), true, Data::default()).unwrap();
         assert_eq!(h.length(), 2);
         assert_eq!(h.url(f2), None);
-        h.push(TOP, TOP, "/topx".into(), true).unwrap();
+        h.push(TOP, TOP, "/topx".into(), true, Data::default()).unwrap();
         assert_eq!(h.length(), 3);
         let (step, changes) = h.plan(-1).unwrap();
         assert_eq!(changes, vec![(TOP, a, true)]);
@@ -603,10 +704,10 @@ mod tests {
     #[test]
     fn a_traversal_skips_an_entry_it_cannot_make_and_queues_in_order() {
         let h = history();
-        h.push(TOP, TOP, "http://a.test/".into(), false).unwrap();
+        h.push(TOP, TOP, "http://a.test/".into(), false, Data::default()).unwrap();
         h.seed(1, TOP, "http://a.test/f".into()).unwrap();
-        h.push(1, TOP, "about:srcdoc".into(), false).unwrap();
-        h.push(1, TOP, "http://a.test/g".into(), false).unwrap();
+        h.push(1, TOP, "about:srcdoc".into(), false, Data::default()).unwrap();
+        h.push(1, TOP, "http://a.test/g".into(), false, Data::default()).unwrap();
         assert_eq!(h.length(), 3);
         // (…back from /g: past the srcdoc entry, to /f)
         let (_, changes) = h.traversal(-1).unwrap();
@@ -630,11 +731,11 @@ mod tests {
     #[test]
     fn a_page_navigation_keeps_the_frames_steps() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false).unwrap();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data::default()).unwrap();
         h.seed(1, TOP, "/f1".into());
-        h.push(1, TOP, "/f2".into(), false);
+        h.push(1, TOP, "/f2".into(), false, Data::default());
         h.rebuilt();
-        h.push(TOP, TOP, "/b".into(), false);
+        h.push(TOP, TOP, "/b".into(), false, Data::default());
         assert_eq!(h.length(), 3);
         let (step, changes) = h.plan(-1).unwrap();
         assert_eq!(changes, vec![(TOP, a, false)]);
@@ -648,13 +749,13 @@ mod tests {
     #[test]
     fn a_replacement_adds_no_step() {
         let h = history();
-        h.replace(TOP, TOP, "/a".into(), false);
-        h.replace(TOP, TOP, "/b".into(), false);
+        h.replace(TOP, TOP, "/a".into(), false, Data::default());
+        h.replace(TOP, TOP, "/b".into(), false, Data::default());
         assert_eq!(h.length(), 1);
-        h.replace(2, TOP, "/f".into(), false).unwrap();
+        h.replace(2, TOP, "/f".into(), false, Data::default()).unwrap();
         assert_eq!(h.length(), 1);
         assert_eq!(h.url(h.active(2).unwrap()).as_deref(), Some("/f"));
-        h.push(TOP, TOP, "/c".into(), false);
+        h.push(TOP, TOP, "/c".into(), false, Data::default());
         assert_eq!(h.length(), 2);
     }
 
@@ -663,12 +764,12 @@ mod tests {
     #[test]
     fn a_nested_frame_is_its_parents() {
         let h = history();
-        h.push(TOP, TOP, "/a".into(), false);
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
         h.seed(1, TOP, "/mid".into());
         h.seed(2, 1, "/in1".into()).unwrap();
-        h.push(2, 1, "/in2".into(), false).unwrap();
+        h.push(2, 1, "/in2".into(), false, Data::default()).unwrap();
         assert_eq!(h.length(), 2);
-        h.push(1, TOP, "/mid2".into(), false);
+        h.push(1, TOP, "/mid2".into(), false, Data::default());
         assert_eq!(h.length(), 3);
         assert_eq!(h.active(2), None);
         let (step, changes) = h.plan(-1).unwrap();
@@ -681,9 +782,9 @@ mod tests {
     #[test]
     fn a_destroyed_navigable_takes_its_steps() {
         let h = history();
-        h.push(TOP, TOP, "/a".into(), false);
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
         h.seed(1, TOP, "/f1".into());
-        h.push(1, TOP, "/f2".into(), false);
+        h.push(1, TOP, "/f2".into(), false, Data::default());
         h.seed(2, 1, "/in".into());
         assert_eq!(h.length(), 2);
         h.destroyed(1);
@@ -697,11 +798,11 @@ mod tests {
     #[test]
     fn a_held_navigable_stays_at_its_entry() {
         let h = history();
-        h.push(TOP, TOP, "/top".into(), false);
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
         h.seed(1, TOP, "/blank".into());
-        let fa = h.push(1, TOP, "/fa".into(), false).unwrap();
+        let fa = h.push(1, TOP, "/fa".into(), false, Data::default()).unwrap();
         h.seed(2, TOP, "/blank2".into());
-        h.push(2, TOP, "/fb".into(), false);
+        h.push(2, TOP, "/fb".into(), false, Data::default());
         let (step, _) = h.plan(-2).unwrap();
         h.go_to(step);
         h.hold(1, fa, 2);
@@ -718,15 +819,15 @@ mod tests {
     #[test]
     fn a_held_navigable_keeps_its_entry_past_a_navigation() {
         let h = history();
-        h.push(TOP, TOP, "/top".into(), false);
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
         h.seed(1, TOP, "/blank".into());
-        let fa = h.push(1, TOP, "/fa".into(), false).unwrap();
+        let fa = h.push(1, TOP, "/fa".into(), false, Data::default()).unwrap();
         h.seed(2, TOP, "/blank2".into());
-        h.push(2, TOP, "/fb".into(), false);
+        h.push(2, TOP, "/fb".into(), false, Data::default());
         let (step, _) = h.plan(-2).unwrap();
         h.go_to(step);
         h.hold(1, fa, 2);
-        h.push(2, TOP, "/mz".into(), false);
+        h.push(2, TOP, "/mz".into(), false, Data::default());
         assert_eq!(h.active(1), Some(fa));
         assert_eq!(h.length(), 2);
         assert!(h.0.borrow().state.held.is_empty());
@@ -737,14 +838,14 @@ mod tests {
     #[test]
     fn a_hold_goes_where_a_step_moves_the_navigable() {
         let h = history();
-        h.push(TOP, TOP, "/top".into(), false);
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
         h.seed(1, TOP, "/blank".into());
-        let fa = h.push(1, TOP, "/fa".into(), false).unwrap();
+        let fa = h.push(1, TOP, "/fa".into(), false, Data::default()).unwrap();
         h.seed(3, 1, "/c0".into());
-        let cz = h.push(3, 1, "/cz".into(), false).unwrap();
-        let fc = h.push(1, TOP, "/fc".into(), false).unwrap();
+        let cz = h.push(3, 1, "/cz".into(), false, Data::default()).unwrap();
+        let fc = h.push(1, TOP, "/fc".into(), false, Data::default()).unwrap();
         h.seed(2, TOP, "/blank2".into());
-        h.push(2, TOP, "/fb".into(), false);
+        h.push(2, TOP, "/fb".into(), false, Data::default());
         let before = h.step();
         let (step, _) = h.plan(-4).unwrap();
         h.go_to(step);
@@ -760,12 +861,22 @@ mod tests {
     #[test]
     fn a_saved_history_is_restored() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false).unwrap();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data::default()).unwrap();
         h.save(0);
-        h.push(TOP, TOP, "/dl".into(), false);
+        h.push(TOP, TOP, "/dl".into(), false, Data::default());
         assert!(h.restore(0));
         assert_eq!(h.active(TOP), Some(a));
         assert_eq!(h.length(), 1);
         assert!(!h.restore(0));
+    }
+
+    #[test]
+    fn a_saved_history_keeps_the_data_it_had() {
+        let h = history();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data { referer: Some("/r".into()), ..Default::default() }).unwrap();
+        h.save(0);
+        Arc::make_mut(&mut h.0.borrow_mut().state.entry_mut(a).unwrap().data).referer = Some("/changed".into());
+        assert!(h.restore(0));
+        assert_eq!(h.0.borrow().state.entry(a).unwrap().data.referer.as_deref(), Some("/r"));
     }
 }
