@@ -9811,7 +9811,7 @@ module Capybara
       # The redirects a navigation follows before it fails (Fetch "HTTP-redirect fetch": a redirect count of 20).
       NAVIGATION_REDIRECT_LIMIT = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
-      DEFAULT_REFERRER_POLICY = Native.default_referrer_policy
+      DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
       # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
       # pre-gate: only URLs whose authority carries an explicit `:<digit>` are parsed

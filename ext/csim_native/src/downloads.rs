@@ -74,7 +74,7 @@ fn ext_value_text(ext: &[u8]) -> Option<String> {
     let mut rest = &ext[second + 1..];
     while let Some((&b, tail)) = rest.split_first() {
         if b == b'%' {
-            let hex = tail.get(..2).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok())?;
+            let hex = tail.get(..2).filter(|h| h.iter().all(u8::is_ascii_hexdigit)).and_then(|h| u8::from_str_radix(std::str::from_utf8(h).ok()?, 16).ok())?;
             bytes.push(hex);
             rest = &tail[2..];
         } else {
@@ -152,6 +152,7 @@ mod tests {
         assert_eq!(disposition_filename(b"attachment; filename*=UTF-8''a%00b.txt; filename=\"plain.txt\"").as_deref(), Some("plain.txt"));
         assert_eq!(disposition_filename(b"attachment; filename*=iso-8859-1'en'%E9.txt").as_deref(), Some("é.txt"));
         assert_eq!(disposition_filename(b"attachment; filename*=bogus''x.txt; filename=y.txt").as_deref(), Some("y.txt"));
+        assert_eq!(disposition_filename(b"attachment; filename*=UTF-8''a%+1b.txt; filename=y.txt").as_deref(), Some("y.txt"));
         assert_eq!(disposition_filename("attachment; filename=\"café.txt\"".as_bytes()).as_deref(), Some("café.txt"));
         assert_eq!(disposition_filename(b"attachment; filename=\"bad\xE9.txt\"").as_deref(), Some("badé.txt"));
         assert_eq!(disposition_filename(b"attachment; filename=\"a\\\"b;c.txt\"").as_deref(), Some("a\"b;c.txt"));
