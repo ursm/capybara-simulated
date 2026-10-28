@@ -287,8 +287,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
     // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).
     fetch_plan::define(native, ruby)?;
-    // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
-    native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
     // Each session's CORS-preflight cache, and the headers a CORS response exposes (cors.rs).
     native.define_module_function("cors_preflight_cache_new", magnus::function!(cors::cache_new_for_ruby, 0))?;
     native.define_module_function("cors_preflight_cache_clear", magnus::function!(cors::cache_clear_for_ruby, 1))?;

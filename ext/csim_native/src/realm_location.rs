@@ -269,15 +269,16 @@ fn popup_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let value = creation_value(scope, created);
     rv.set(value);
 }
-// __dom.navigationOrigins(initiator) -> `[document, location, sandbox]` of the about:blank document a navigation the
-// document of realm `initiator` began makes in its own navigable (a reload of an about:blank popup, its `location` set
-// to about:blank): its origin the initiator's (HTML "navigate": a URL matching about:blank takes the initiator origin),
-// its sandboxing its navigable's, which the initiator's document has.
+// __dom.navigationOrigins(initiator, navigable) -> `[document, location, sandbox]` of the about:blank document a
+// navigation the document of realm `initiator` began makes in the navigable whose document is realm `navigable`'s (a
+// reload of an about:blank popup, its `location` set to about:blank — by itself or by its opener): its origin the
+// initiator's (HTML "navigate": a URL matching about:blank takes the initiator origin), its sandboxing the navigable's,
+// which its document has, whoever navigates it.
 fn navigation_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let initiator = args.get(0).int32_value(scope).unwrap_or(0);
-    let arena = realm(scope, initiator);
-    let flags = arena.location.sandbox;
-    let created = creation(arena, initiator, "", flags);
+    let navigable = args.get(1).int32_value(scope).unwrap_or(initiator);
+    let flags = realm(scope, navigable).location.sandbox;
+    let created = creation(realm(scope, initiator), initiator, "", flags);
     let value = creation_value(scope, created);
     rv.set(value);
 }

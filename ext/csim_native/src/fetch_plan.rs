@@ -190,15 +190,12 @@ impl FetchPlan {
     fn seed(&self, site: Option<String>) {
         self.hops.seed(site);
     }
-    // #target / #request_method / #headers / #redirected?: the request as it stands.
+    // #target / #request_method / #redirected?: the request as it stands.
     fn target(&self) -> String {
         self.st.borrow().target.clone()
     }
     fn request_method(&self) -> String {
         self.st.borrow().method.clone()
-    }
-    fn headers(ruby: &Ruby, rb_self: &Self) -> RArray {
-        pairs(ruby, &rb_self.st.borrow().headers)
     }
     fn redirected(&self) -> bool {
         self.st.borrow().redirected
@@ -499,7 +496,6 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("seed", method!(FetchPlan::seed, 1))?;
     class.define_method("target", method!(FetchPlan::target, 0))?;
     class.define_method("request_method", method!(FetchPlan::request_method, 0))?;
-    class.define_method("headers", method!(FetchPlan::headers, 0))?;
     class.define_method("redirected?", method!(FetchPlan::redirected, 0))?;
     class.define_method("begin_hop", method!(FetchPlan::begin_hop, 2))?;
     class.define_method("preflight_answer", method!(FetchPlan::preflight_answer, 2))?;

@@ -71,12 +71,20 @@ RSpec.describe 'a window open() made, navigated' do
   end
 
   # …an about:blank one's a new about:blank document, its writes gone (Chrome, measured), of its origin still — the
-  # opener reaches into it as before.
+  # opener reaches into it as before — its base URL the initiator's, its referrer the document's it replaces; and so where
+  # the opener navigates it to about:blank, referred by the opener (Chrome: its origin).
   it 'reloads an about:blank one as a new empty document of its origin' do
     session.visit '/'
+    probe = '[w.document.body.innerHTML, w.location.href, w.origin === origin, w.document.baseURI, w.document.referrer]'
+    referrer = session.evaluate_script('w.document.referrer')
     session.execute_script('window.first = w.document; w.document.body.innerHTML = "written"; w.location.reload()')
     expect(poll_until { session.evaluate_script('w.document !== first') }).to be(true)
-    expect(session.evaluate_script('[w.document.body.innerHTML, w.location.href, w.origin === origin]')).to eq(['', 'about:blank', true])
+    expect(session.evaluate_script(probe)).to eq(['', 'about:blank', true, 'http://www.example.com/', referrer])
+    # (…through its WindowProxy, whose setter knows this realm the incumbent: a Location member another realm's script
+    # calls directly runs as the window's own — the open gap platform-globals.js `navigateLocationFrom` names)
+    session.execute_script('window.second = w.document; w.document.body.innerHTML = "written"; w.location = "about:blank"')
+    expect(poll_until { session.evaluate_script('w.document !== second') }).to be(true)
+    expect(session.evaluate_script(probe)).to eq(['', 'about:blank', true, 'http://www.example.com/', 'http://www.example.com/'])
   end
 
   it 'stays at its document for a download, and navigates no more once closed' do

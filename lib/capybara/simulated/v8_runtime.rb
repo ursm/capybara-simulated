@@ -503,8 +503,8 @@ module Capybara
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_name: meta[:window_name], about_base: meta[:about_base], window_key: meta[:window_key], retarget_from: old_id,
-          **made
+          opener_id: meta[:opener_id], window_name: meta[:window_name], window_key: meta[:window_key], retarget_from: old_id,
+          **{about_base: meta[:about_base]}.merge(made)
         )
       end
       # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
@@ -1271,11 +1271,13 @@ module Capybara
           realm.eval_void("__dom.takeOpenerOrigins(#{opener_id.to_i});") unless opener_id.nil?
         else
           realm.call('__csimUpdateLocation', url.to_s)
+          # (…a navigation's to about:blank its base URL the initiator's: HTML "navigate", the about base URL)
+          realm.call('__csimSetAboutBaseURL', about_base.to_s) if !about_base.to_s.empty? && url.to_s.match?(/\Aabout:blank(?:[?#]|\z)/i)
           # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a
           # Document object"; its sandboxing a CSP `sandbox`'s)
           realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
           realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
-          # (…an about:blank one a navigation of its own made, the navigable's sandboxing: `navigationOrigins`)
+          # (…an about:blank one a navigation made, its navigable's sandboxing: `navigationOrigins`)
           realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") if sandbox.to_i.positive?
         end
         adopt_client_id(realm, client_id)

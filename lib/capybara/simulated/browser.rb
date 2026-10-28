@@ -9763,29 +9763,13 @@ module Capybara
         cache[[eff, url]] ||= parse_url(url.to_s, eff)&.fetch(:href) || url
       end
 
-      # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count).
-      # The loop below runs one iteration PER dispatch, so it needs 20 redirect hops plus
-      # the final response — MAX_FETCH_REDIRECTS + 1 iterations — to let exactly 20 succeed.
+      # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count) — a navigation's and a service
+      # worker's chain counted here (a fetch's by its plan, fetch_plan.rs), each dispatching 20 hops and the response.
       MAX_FETCH_REDIRECTS = 20
-      # Request cache modes that never READ the store (always hit the network), and modes that
-      # serve a STORED response even when stale. Frozen so the hot rack_fetch path allocates no
-      # throwaway arrays per hop (perf).
-      CACHE_MODES_SKIP_READ  = %w[no-store reload].freeze
-      CACHE_MODES_SERVE_STALE = %w[force-cache only-if-cached].freeze
       # The redirects a navigation follows before it fails (Fetch "HTTP-redirect fetch": a redirect count of 20).
       NAVIGATION_REDIRECT_LIMIT = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
-
-      # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
-      # pre-gate: only URLs whose authority carries an explicit `:<digit>` are parsed
-      # (the vast majority don't), so the rack_fetch hot path — every asset / xhr /
-      # fetch, cache hits included — skips URI.parse entirely.
-      def bad_port?(url_str)
-        return false unless url_str =~ %r{\A[a-z]+://[^/]*:\d}i
-        port = parse_url(url_str)&.fetch(:port).to_s
-        !port.empty? && Native.bad_port(port.to_i)
-      end
 
       # `FetchHops`' flags: a document's own navigation request, one whose document had transient activation, a navigation
       # into a frame with a cross-site ancestor, and a worker's request.
@@ -10481,12 +10465,28 @@ module Capybara
             }
           end
           # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
-          # Chrome measured makes a new one, its writes gone — of the initiator's origin and its navigable's sandboxing;
-          # any other scheme no document it loads here: one of a blob: URL's resolved as it began, above)
+          # Chrome measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the
+          # window's navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the
+          # document it replaces was, HTML's reload reusing its document state's referrer; any other scheme no document it
+          # loads here: one of a blob: URL's resolved as it began, above)
           if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
             body, ctype = '', 'text/html'
-            doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator)
-            made = {doc_origin: doc_origin, location_origin: location_origin, sandbox: sandbox}
+            doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
+            if kind == WINDOW_RELOAD
+              referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
+              policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
+            else
+              source, policy = realm_referrer_initiator(initiator)
+              referrer       = source && Native.request_referrer(policy, source, url)
+            end
+            made = {
+              doc_origin:      doc_origin,
+              location_origin: location_origin,
+              sandbox:         sandbox,
+              about_base:      @runtime.realm_direct_call(initiator, '__csimBaseURL'),
+              referrer:        referrer,
+              referrer_policy: policy
+            }
           end
           if body.nil?
             log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")

@@ -647,9 +647,6 @@ pub(crate) fn ruby_bytes(s: magnus::RString) -> Vec<u8> {
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
     unsafe { s.as_slice() }.to_vec()
 }
-pub(crate) fn bad_port_for_ruby(port: u32) -> bool {
-    bad_port(port)
-}
 pub(crate) fn redirect_to_get_for_ruby(status: u32, method: magnus::RString) -> bool {
     redirect_to_get(status, &ruby_bytes(method))
 }
