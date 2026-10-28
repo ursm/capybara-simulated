@@ -9788,13 +9788,6 @@ module Capybara
         !port.empty? && Native.bad_port(port.to_i)
       end
 
-      # URLs we won't even try to route through Rack: anything that
-      # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
-      # like V8's `<snapshot>` that sourcemap libraries pull out of
-      # error stacks and feed straight to `fetch()` / `xhr.open()`.
-      # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
-      # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
-      # no-cors request but where it asks for CORS)
       # `FetchHops`' flags: a document's own navigation request, one whose document had transient activation, a navigation
       # into a frame with a cross-site ancestor, and a worker's request.
       FETCH_HOP_NAVIGATION       = 1
@@ -9802,6 +9795,13 @@ module Capybara
       FETCH_HOP_CROSS_SITE_FRAME = 4
       FETCH_HOP_WORKER           = 8
 
+      # URLs we won't even try to route through Rack: anything that
+      # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
+      # like V8's `<snapshot>` that sourcemap libraries pull out of
+      # error stacks and feed straight to `fetch()` / `xhr.open()`.
+      # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
+      # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
+      # no-cors request but where it asks for CORS)
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
                      user_activated: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
@@ -9940,7 +9940,8 @@ module Capybara
           credentials.to_s,
           [req_origin, doc_origin, client_origin, sec_initiator],
           [client_url, @current_url],
-          client_realm.to_i.positive? ? @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i) : [],
+          # (…none where the page's realm cannot answer: a context being torn down)
+          (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
           worker&.dig(:site_for_cookies)
         )
         hops.seed(site_seed) if site_seed

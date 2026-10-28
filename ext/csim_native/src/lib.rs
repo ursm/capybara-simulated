@@ -280,6 +280,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
+    // What each hop of a fetch carries (fetch_hop.rs).
     fetch_hop::define(native, ruby)?;
     // Fetch's fixed header, method and port rules, the page's too (fetch_rules.rs).
     native.define_module_function("bad_port", magnus::function!(fetch_rules::bad_port_for_ruby, 1))?;
