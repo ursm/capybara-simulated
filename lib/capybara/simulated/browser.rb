@@ -2839,16 +2839,16 @@ module Capybara
             {'coords' => {'latitude' => latitude, 'longitude' => longitude, 'accuracy' => accuracy}.merge(rest.transform_keys(&:to_s))}
           end
 
-        # Each watch called back again, and each PermissionStatus whose state moved told, as a browser does when its
-        # location changes (geolocation.js `__csimGeolocationChanged`, which reads the fresh @geolocation).
-        execute_script('if (typeof globalThis.__csimGeolocationChanged === "function") globalThis.__csimGeolocationChanged();')
+        # A significant change of position (Geolocation §12 "set emulated position data"), the page's top-level
+        # traversable's — every window of it hears: its watches called back again, and each PermissionStatus whose state
+        # moved told (geolocation.js `__csimGeolocationChanged`, which reads the fresh @geolocation).
+        invalidate_find_cache
+        [0, *@runtime.frame_realm_ids].each {|rid| @runtime.realm_call(rid, '__csimGeolocationChanged') }
         nil
       end
 
-      # Backs the `__csimGeolocationState` host fn. Returns the configured
-      # geolocation override as a JSON string (or 'null' when none is set),
-      # which the JS geolocation object reads on every getCurrentPosition /
-      # watchPosition call.
+      # Backs the `__csimGeolocationState` host fn: the emulated position as JSON ('null' for none), which every request
+      # and permission query reads (geolocation.rs `source`).
       def geolocation_state_json
         JSON.generate(@geolocation)
       end
