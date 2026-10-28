@@ -8032,13 +8032,12 @@ module Capybara
       def broadcast_to_windows(name, data, source_realm_id = 0, origin = nil, from_worker: nil)
         broadcast_external(name, data, origin, from_worker: from_worker)
         # Same-isolate main + frame realms (LEGACY single-realm / worker-inbound path — the multi-realm
-        # main-thread post goes through the isolate's ordered queue instead: `broadcast_queued`). The poster already delivered
-        # to itself in-VM, so this only reaches the OTHER realms — queue whenever one exists. A WORKER
-        # post reaches realm 0 and every frame (a separate isolate delivered to none in-VM). A FRAME post
-        # always reaches main realm 0 — even when the posting frame's own realm isn't yet recorded in
-        # `frame_realms` (a BroadcastChannel posted SYNCHRONOUSLY during the frame's initial script runs
-        # before the realm is registered, so `has_frames` can be false though a valid target — main —
-        # exists). A MAIN post reaches the frames only when some are registered.
+        # main-thread post goes through the isolate's ordered queue instead: `broadcast_queued`). The poster already
+        # delivered to itself in-VM, so this only reaches the OTHER realms — queue whenever one exists. A WORKER post
+        # reaches realm 0 and every frame (a separate isolate delivered to none in-VM). A FRAME post always reaches main
+        # realm 0 — even when the posting frame's own realm isn't yet recorded in `frame_realms` (a BroadcastChannel
+        # posted SYNCHRONOUSLY during the frame's initial script runs before the realm is registered, so `has_frames` can
+        # be false though a valid target — main — exists). A MAIN post reaches the frames only when some are registered.
         has_frames = @runtime.frame_realm_ids.any?
         from_frame = !from_worker && !source_realm_id.nil? && source_realm_id != 0
         enqueue_broadcast(name, data, source_realm_id, origin) if has_frames || from_worker || from_frame
@@ -8047,8 +8046,9 @@ module Capybara
       # Fan a BroadcastChannel post out beyond this isolate's main-thread realms: OTHER top-level windows
       # (separate isolates, via the Driver) and every live WORKER (separate isolate, via its thread-safe
       # inbox, except the posting worker). Shared by the legacy `broadcast_to_windows` and the multi-realm
-      # post (`broadcast_queued`) — a same-isolate ordered post still reaches workers and other windows. `origin` here is
-      # the SCOPING origin KEY (opaque token / tuple origin), which the worker + cross-window sides match on.
+      # post (`broadcast_queued`) — a same-isolate ordered post still reaches workers and other windows.
+      # `origin` here is the SCOPING origin KEY (opaque token / tuple origin), which the worker + cross-window
+      # sides match on.
       def broadcast_external(name, data, origin, from_worker: nil)
         @driver.broadcast_channel(self, name.to_s, data, origin) if @driver.respond_to?(:broadcast_channel)
         # Skip a worker whose thread has already exited (self-close / termination in flight): it will
