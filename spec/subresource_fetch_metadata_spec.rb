@@ -172,7 +172,7 @@ RSpec.describe 'a subresource request', :https do
   # A worker's its own as well, and the page's next document's anew, whatever the last one left in flight.
   it "counts a beacon against its own document's quota" do
     s = simulated_session(lambda {|env|
-      sleep(env['PATH_INFO'].start_with?('/long') ? 1.5 : 0.3) if env['PATH_INFO'].start_with?('/held', '/long')   # (…in flight while the next is sent)
+      sleep(env['PATH_INFO'].start_with?('/long') ? 3 : 0.3) if env['PATH_INFO'].start_with?('/held', '/long')   # (…in flight while the next is sent)
       if env['PATH_INFO'] == '/w.js'
         [200, {'content-type' => 'text/javascript'}, ["fetch('/held-w', {method: 'POST', keepalive: true, body: 'x'.repeat(40000)}).then(() => postMessage('sent'), (e) => postMessage(e.name));"]]
       else
@@ -186,9 +186,11 @@ RSpec.describe 'a subresource request', :https do
         return [navigator.sendBeacon('/held1', big), navigator.sendBeacon('/held2', big), framed.navigator.sendBeacon('/held3', big)];
       })()
     JS
-    worker = "const done = arguments[0]; navigator.sendBeacon('/long1', 'x'.repeat(40000)); new Worker('/w.js').onmessage = (e) => done(e.data);"
-    expect(s.evaluate_async_script(worker)).to eq('sent')
-    s.execute_script("navigator.sendBeacon('/long2', 'x'.repeat(40000))")
+    # (…the first beacons let go — a whole quota's beacon going through says so — then one held long while a worker's
+    # keepalive goes out and the page navigates)
+    poll_until { s.evaluate_script("navigator.sendBeacon('/drained', 'x'.repeat(65536))") }
+    expect(s.evaluate_script("navigator.sendBeacon('/long1', 'x'.repeat(40000))")).to be(true)
+    expect(s.evaluate_async_script("const done = arguments[0]; new Worker('/w.js').onmessage = (e) => done(e.data);")).to eq('sent')
     s.visit '/next'
     expect(s.evaluate_script("navigator.sendBeacon('/held4', 'x'.repeat(40000))")).to be(true)
   end
