@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # The structured clone (HTML §2.7), V8's own serializer (clone.rs) with the bindings saying what each platform object
 # serializes to: the JavaScript values with their cycles and shared references; a DOMException — any realm's — made
@@ -249,5 +250,78 @@ RSpec.describe 'Structured clone of platform objects' do
       };
     JS
     expect(stored).to eq('DataCloneError')
+  end
+
+  # …and in Chrome's words, as each operation reports it.
+  it 'refuses a WebAssembly.Module for storage in the words of the operation' do
+    session.visit '/'
+    got = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      const words = [];
+      try { history.pushState(m, '') } catch (e) { words.push(e.message) }
+      const open = indexedDB.open('wasm-words');
+      open.onupgradeneeded = () => open.result.createObjectStore('s');
+      open.onsuccess = () => {
+        const store = open.result.transaction('s', 'readwrite').objectStore('s');
+        try { store.put(m, 1) } catch (e) { words.push(e.message) }
+        done(words);
+      };
+    JS
+    expect(got).to eq([
+      "Failed to execute 'pushState' on 'History': A WebAssembly.Module can not be serialized for storage.",
+      "Failed to execute 'put' on 'IDBObjectStore': A WebAssembly.Module can not be serialized for storage."
+    ])
+  end
+
+  # The WebAssembly JS API's deserialization steps: a module is read back in the agent cluster it was serialized in
+  # alone — a frame of another site's, or of an opaque origin, gets a `messageerror` (Chrome: 127.0.0.1 → localhost, and
+  # a sandboxed frame), one of the same site the module, its origin another or not.
+  it "posts a WebAssembly.Module to a frame of the agent cluster alone" do
+    frames_app = lambda do |env|
+      case env['PATH_INFO']
+      when '/child'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><script>
+            addEventListener('message', (e) => parent.postMessage('message ' + (e.data instanceof WebAssembly.Module), '*'));
+            addEventListener('messageerror', (e) => parent.postMessage('messageerror ' + e.data, '*'));
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!doctype html><script>window.got = []; addEventListener('message', (e) => got.push(e.data));</script>
+          <iframe id="same" src="/child"></iframe><iframe id="sibling" src="http://other.example.com/child"></iframe>
+          <iframe id="other" src="http://www.other.test/child"></iframe>
+          <iframe id="opaque" sandbox="allow-scripts" src="/child"></iframe>
+        HTML
+      end
+    end
+    s = simulated_session(frames_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      for (const id of ['same', 'sibling', 'other', 'opaque']) document.getElementById(id).contentWindow.postMessage(m, '*');
+    JS
+    poll_until { s.evaluate_script('got.length') == 4 }
+
+    expect(s.evaluate_script('got').sort).to eq(['message true', 'message true', 'messageerror null', 'messageerror null'])
+  end
+
+  # (…a gap: to another isolate — a worker — it is a DataCloneError, but refused as it is serialized, before the transfer
+  # list is moved)
+  it 'refuses a WebAssembly.Module to a worker before it moves the transfer list' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const w = new Worker('/echo.js');
+        const buffer = new ArrayBuffer(8);
+        const { port1 } = new MessageChannel();
+        const m = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+        let name;
+        try { w.postMessage({m, buffer}, [buffer, port1]) } catch (e) { name = e.name }
+        return [name, buffer.byteLength];
+      })()
+    JS
+    expect(got).to eq(['DataCloneError', 8])
   end
 end

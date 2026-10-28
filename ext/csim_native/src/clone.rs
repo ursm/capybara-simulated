@@ -17,7 +17,7 @@ use std::rc::Rc;
 
 use v8::{ValueDeserializerHelper, ValueSerializerHelper};
 
-use crate::dom::{dom, register};
+use crate::dom::{dom, realm, realm_id, register};
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "structuredSerialize", structured_serialize, context_id);
@@ -40,6 +40,9 @@ pub(crate) struct Serialized {
     buffers: Vec<v8::Global<v8::ArrayBuffer>>,
     transferred: Vec<v8::SharedRef<v8::BackingStore>>,
     modules: Vec<v8::CompiledWasmModule>,
+    // (…and, where it shares any, the key of the agent cluster it was serialized in: realm_location.rs
+    // `agent_cluster_key`)
+    cluster: Option<String>,
 }
 
 type Descriptions = Rc<RefCell<Vec<v8::Global<v8::Value>>>>;
@@ -49,15 +52,36 @@ type Modules = Rc<RefCell<Vec<v8::CompiledWasmModule>>>;
 // The serializer's delegate: the bindings' hook (none for plain data), what it said of the object V8 last asked about —
 // V8 asks whether an object is a host object, then has it written, one after the other — every description written,
 // the SharedArrayBuffers kept where they may be shared (an agent cluster that is cross-origin isolated), the
-// WebAssembly.Modules' compiled modules kept where the value is not serialized for storage, and this realm's
+// WebAssembly.Modules' compiled modules kept where they may be shared (`ModuleRule`), and this realm's
 // %Object.prototype%, which an ordinary object of it has.
 struct Serializer<'h> {
     hook: Option<v8::Local<'h, v8::Function>>,
     asked: RefCell<Option<v8::Global<v8::Value>>>,
     described: Descriptions,
     shared: Option<Shared>,
-    modules: Option<Modules>,
+    modules: ModuleRule,
     object_prototype: Option<v8::Local<'h, v8::Value>>,
+}
+
+// What a WebAssembly.Module serialized becomes (the WebAssembly JS API's serialization steps): its compiled module,
+// shared — or a DataCloneError serialized for storage (a session history entry's state, an IndexedDB record) and, a
+// gap, serialized for another isolate (a worker's, a BroadcastChannel's), whose agent cluster may share it but where no
+// compiled module goes across yet.
+#[derive(Clone)]
+enum ModuleRule {
+    Share(Modules),
+    Refuse(&'static str),
+}
+
+impl ModuleRule {
+    // …as `__dom.structuredSerialize` names it: 'storage', 'agent', or anything else (shared).
+    fn named(name: &str) -> Self {
+        match name {
+            "storage" => ModuleRule::Refuse("A WebAssembly.Module can not be serialized for storage."),
+            "agent" => ModuleRule::Refuse("A WebAssembly.Module could not be sent to another agent."),
+            _ => ModuleRule::Share(Modules::default()),
+        }
+    }
 }
 
 impl v8::ValueSerializerImpl for Serializer<'_> {
@@ -85,13 +109,15 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
         Some(shared.len() as u32 - 1)
     }
 
-    // (…a WebAssembly.Module its compiled module, kept by its place — the WebAssembly JS API's serialization steps, which
-    // share it — but a DataCloneError serialized for storage: a session history entry's state, an IndexedDB record)
+    // (…a WebAssembly.Module its compiled module, kept by its place, where it is shared: `ModuleRule`)
     fn get_wasm_module_transfer_id(&self, scope: &mut v8::PinScope<'_, '_>, module: v8::Local<v8::WasmModuleObject>) -> Option<u32> {
-        let Some(modules) = &self.modules else {
-            let message = v8::String::new(scope, "A WebAssembly.Module could not be cloned.")?;
-            throw_dom_exception(scope, message, "DataCloneError");
-            return None;
+        let modules = match &self.modules {
+            ModuleRule::Share(modules) => modules,
+            ModuleRule::Refuse(words) => {
+                let message = v8::String::new(scope, words)?;
+                throw_dom_exception(scope, message, "DataCloneError");
+                return None;
+            }
         };
         let mut modules = modules.borrow_mut();
         modules.push(module.get_compiled_module());
@@ -198,7 +224,7 @@ fn write(
     value: v8::Local<'_, v8::Value>,
     hook: Option<v8::Local<'_, v8::Function>>,
     shared: Option<Shared>,
-    modules: Option<Modules>,
+    modules: ModuleRule,
     transfer: &[v8::Local<'_, v8::ArrayBuffer>],
 ) -> Option<(Vec<u8>, Vec<v8::Global<v8::Value>>)> {
     let described = Descriptions::default();
@@ -217,13 +243,13 @@ fn write(
 
 // StructuredSerialize `value`, `hook` answering for each object no ordinary one — None where it threw (V8's
 // DataCloneError for a function or a symbol, the hook's for a platform object; a SharedArrayBuffer's but where `shared`
-// keeps them, a WebAssembly.Module's but where `modules` does).
+// keeps them, a WebAssembly.Module's where `modules` refuses it).
 fn serialize(
     scope: &mut v8::PinScope<'_, '_>,
     value: v8::Local<'_, v8::Value>,
     hook: v8::Local<'_, v8::Function>,
     shared: Option<Shared>,
-    modules: Option<Modules>,
+    modules: ModuleRule,
     transfer: &[v8::Local<'_, v8::ArrayBuffer>],
 ) -> Option<Vec<u8>> {
     let (bytes, described) = write(scope, value, Some(hook), shared, modules, transfer)?;
@@ -232,7 +258,7 @@ fn serialize(
     } else {
         let descriptions: Vec<v8::Local<v8::Value>> = described.into_iter().map(|d| v8::Local::new(scope, d)).collect();
         let descriptions = v8::Array::new_with_elements(scope, &descriptions);
-        write(scope, descriptions.into(), None, None, None, &[])?.0
+        write(scope, descriptions.into(), None, None, ModuleRule::named("storage"), &[])?.0
     };
     let mut out = Vec::with_capacity(4 + head.len() + bytes.len());
     out.extend_from_slice(&(head.len() as u32).to_le_bytes());
@@ -290,23 +316,31 @@ fn buffers<'s>(scope: &mut v8::PinScope<'s, '_>, list: v8::Local<'_, v8::Value>)
     (0..list.length()).map(|i| list.get_index(scope, i).and_then(|b| v8::Local::<v8::ArrayBuffer>::try_from(b).ok())).collect()
 }
 
-// __dom.structuredSerialize(value, hook, mayShare, transfer, forStorage) -> the serialization's number: its
-// SharedArrayBuffers shared where `mayShare`, its WebAssembly.Modules' compiled modules but `forStorage`, and the
-// ArrayBuffers `transfer` lists — none of them detached yet — written by their places. The number is the isolate's: any
-// realm of it may read the value back.
+// __dom.structuredSerialize(value, hook, mayShare, transfer, modules) -> the serialization's number: its
+// SharedArrayBuffers shared where `mayShare`, its WebAssembly.Modules as `modules` names their rule (`ModuleRule`:
+// 'storage', 'agent', else shared), and the ArrayBuffers `transfer` lists — none of them detached yet — written by their
+// places. The number is the isolate's: any realm of it may read the value back, but one sharing modules a realm of the
+// agent cluster it was serialized in alone (`structured_deserialize`).
 fn structured_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
     let shared = args.get(2).boolean_value(scope).then(Shared::default);
     let Some(transfer) = buffers(scope, args.get(3)) else { return };
-    let modules = (!args.get(4).boolean_value(scope)).then(Modules::default);
-    let Some(bytes) = serialize(scope, args.get(0), hook, shared.clone(), modules.clone(), &transfer) else { return };
+    let rule = ModuleRule::named(&args.get(4).to_rust_string_lossy(scope));
+    let Some(bytes) = serialize(scope, args.get(0), hook, shared.clone(), rule.clone(), &transfer) else { return };
     let shared = shared.map(|s| s.take()).unwrap_or_default();
-    let modules = modules.map(|m| m.take()).unwrap_or_default();
+    let modules = match rule {
+        ModuleRule::Share(modules) => modules.take(),
+        ModuleRule::Refuse(_) => Vec::new(),
+    };
+    let cluster = (!modules.is_empty()).then(|| {
+        let cid = realm_id(scope, &args);
+        realm(scope, cid).location.agent_cluster_key(cid)
+    });
     let buffers = transfer.into_iter().map(|b| v8::Global::new(scope, b)).collect();
     let d = dom(scope);
     let number = d.next_serialized;
     d.next_serialized = number.wrapping_add(1);
-    d.serialized.insert(number, Serialized { bytes, shared, buffers, modules, ..Default::default() });
+    d.serialized.insert(number, Serialized { bytes, shared, buffers, modules, cluster, ..Default::default() });
     rv.set(v8::Integer::new_from_unsigned(scope, number).into());
 }
 
@@ -333,6 +367,15 @@ fn structured_deserialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let Some(number) = args.get(0).uint32_value(scope) else { return };
     let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
     let Some(serialized) = dom(scope).serialized.remove(&number) else { return };
+    // (…a WebAssembly.Module's compiled module read back in the agent cluster it was serialized in alone: another's is
+    // a DataCloneError — the WebAssembly JS API's deserialization steps — a message's `messageerror`)
+    if let Some(cluster) = &serialized.cluster {
+        let cid = realm_id(scope, &args);
+        if realm(scope, cid).location.agent_cluster_key(cid) != *cluster {
+            let Some(message) = v8::String::new(scope, "A WebAssembly.Module could not be read back in another agent cluster.") else { return };
+            return throw_dom_exception(scope, message, "DataCloneError");
+        }
+    }
     if let Some(value) = deserialize(scope, serialized, hook) {
         rv.set(value);
     }

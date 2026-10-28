@@ -108,6 +108,15 @@ impl RealmLocation {
         }
         self.origin_key.insert(format!("{OPAQUE_KEY}realm{cid}")).clone()
     }
+    // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"): its origin's site — an
+    // opaque origin its own key — what a WebAssembly.Module serialized in one is read back by in another of it alone.
+    pub(crate) fn agent_cluster_key(&mut self, cid: i32) -> String {
+        let key = self.origin_key(cid);
+        if key.starts_with(OPAQUE_KEY) {
+            return key;
+        }
+        site(&key).unwrap_or(key)
+    }
     // The fragments to look for the target element by: the target fragment as it stands, then percent-decoded and UTF-8
     // decoded (the one when they say the same) — none for an empty fragment.
     fn target_fragments(&self) -> Vec<String> {
