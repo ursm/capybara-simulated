@@ -1,5 +1,5 @@
 // The AGENTS of the process's shared registries — IndexedDB's databases (idb_databases.rs) and the lock managers of Web
-// Locks (web_locks.rs): who asks, and what a registry owes each. An agent is a realm of an isolate (a window's, a
+// Locks (web_locks.rs), and the position Geolocation emulates (geolocation.rs): who asks, and what a registry owes each. An agent is a realm of an isolate (a window's, a
 // frame's, a worker's) of a driver session's partition, made as the realm first uses one of them and gone with its realm
 // (`drop_realm`) or its isolate, every registry told (`agent_gone`) so that what it held — a connection, a lock — goes
 // with it — or, a worker's, as the host reaps the worker (`drop_owner`): a terminated worker's isolate may outlive it.
@@ -54,6 +54,13 @@ pub(crate) fn live(agent: u64) -> bool {
 // Agent `agent` told a notice, where it lives.
 pub(crate) fn tell(agent: u64, kind: u32, args: [f64; 4], later: bool) {
     if let Some(a) = agents().get_mut(&agent) {
+        a.notices.push(Notice { kind, args, later });
+    }
+}
+// Every agent of session `partition` told a notice — what a registry the session's agents share owes them all (the
+// position geolocation.rs emulates having moved).
+pub(crate) fn tell_session(partition: u64, kind: u32, args: [f64; 4], later: bool) {
+    for a in agents().values_mut().filter(|a| a.partition == partition) {
         a.notices.push(Notice { kind, args, later });
     }
 }

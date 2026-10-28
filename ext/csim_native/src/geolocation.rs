@@ -153,6 +153,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "geolocationWatch", watch_op, context_id);
     register(scope, ns, "geolocationClearWatch", clear_watch_op, context_id);
     register(scope, ns, "geolocationWatches", watches_op, context_id);
+    register(scope, ns, "geolocationMoved", moved_op, context_id);
     register(scope, ns, "permissionMember", permission_member_op, context_id);
     register(scope, ns, "permissionState", permission_state_op, context_id);
 }
@@ -216,6 +217,17 @@ fn watches_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     }
     let items: Vec<v8::Local<v8::Value>> = ids.into_iter().map(|id| v8::Integer::new(scope, id).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// The notice a realm that watches a position or holds a PermissionStatus — an agent of the session's (agents.rs) — is
+// told as the emulated position moves: a task of its own (geolocation.js).
+const MOVED: u32 = 32;
+// __dom.geolocationMoved(partition): every agent of the session told the emulated position moved — a "significant
+// change" (Geolocation §12): each window's watches, and each window's and each worker's PermissionStatus, its own to
+// act on.
+fn moved_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let partition = args.get(0).integer_value(scope).unwrap_or(0) as u64;
+    crate::agents::tell_session(partition, MOVED, [0.0; 4], true);
 }
 
 // __dom.permissionMember(name) -> [member, boolean] of the member a descriptor naming `name` must say (`Needs`) and

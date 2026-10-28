@@ -946,7 +946,7 @@ module Capybara
         handle ? Node.new(self, handle) : nil
       end
 
-      # CDP-ish geolocation override (Capybara driver-level API).
+      # The session's emulated position (Capybara driver-level API; WebDriver BiDi "set emulated position data").
       #
       #   page.driver.set_geolocation(latitude: 35.6, longitude: 139.7)
       #   page.driver.set_geolocation(denied: true)  # PERMISSION_DENIED

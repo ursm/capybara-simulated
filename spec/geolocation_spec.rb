@@ -1,14 +1,25 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # navigator.geolocation and navigator.permissions (W3C Geolocation, W3C Permissions), generated from their IDL, the
 # position injectable from tests via `page.driver.set_geolocation(...)`: what a request answers and the permissions'
 # states are the engine's (geolocation.rs), each callback called in a task of its own — so each assertion reads back a
 # global the callback set, after a follow-up `evaluate_script` drains settle. Chrome's figures measured headless.
 RSpec.describe 'navigator.geolocation' do
+  include PollUntil
+
   let(:app) {
-    lambda do |_env|
-      [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']]
+    lambda do |env|
+      next [200, {'content-type' => 'text/html'}, ['<!doctype html><html><body></body></html>']] unless env['PATH_INFO'] == '/w.js'
+
+      worker = <<~JS
+        navigator.permissions.query({name: 'geolocation'}).then((s) => {
+          postMessage('init ' + s.state);
+          s.onchange = () => postMessage('change ' + s.state);
+        });
+      JS
+      [200, {'content-type' => 'text/javascript'}, [worker]]
     end
   }
   let(:session) { simulated_session(app) }
@@ -274,5 +285,28 @@ RSpec.describe 'navigator.geolocation' do
     session.driver.set_geolocation(denied: true)
     session.driver.set_geolocation(denied: true)
     expect(session.evaluate_script('[window.__seen.slice(5), window.__status.state]')).to eq([['change denied'], 'denied'])
+  end
+
+  it "runs a member as the realm of the object it is called on, a frame's on the page's Geolocation the page's" do
+    session.driver.set_geolocation(latitude: 1, longitude: 2)
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      const frame = document.body.appendChild(document.createElement('iframe')).contentWindow;
+      const id = navigator.geolocation.watchPosition((p) => window.__seen.push('top ' + p.coords.latitude));
+      frame.Geolocation.prototype.clearWatch.call(navigator.geolocation, id);
+      window.__other = frame.Geolocation.prototype.watchPosition.call(navigator.geolocation, () => {});
+    JS
+    session.driver.set_geolocation(latitude: 3, longitude: 4)
+    expect(session.evaluate_script('[window.__seen, window.__other]')).to eq([[], 2])
+  end
+
+  it "tells a worker's PermissionStatus its state moved" do
+    session.execute_script(<<~JS)
+      window.__seen = [];
+      new Worker('/w.js').onmessage = (e) => window.__seen.push(e.data);
+    JS
+    expect(poll_until { session.evaluate_script('window.__seen.length') == 1 && session.evaluate_script('window.__seen') }).to eq(['init prompt'])
+    session.driver.set_geolocation(denied: true)
+    expect(poll_until { session.evaluate_script('window.__seen.length') == 2 && session.evaluate_script('window.__seen') }).to eq(['init prompt', 'change denied'])
   end
 end

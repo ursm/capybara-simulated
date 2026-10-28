@@ -2819,11 +2819,9 @@ module Capybara
         @runtime.call('__csimSettleIdleStyle')
       end
 
-      # CDP-ish shim: override navigator.geolocation (like CDP's
-      # `Emulation.setGeolocationOverride`). State is Ruby-backed on
-      # `@geolocation`; the JS geolocation object reads it on every call via
-      # the `__csimGeolocationState` host fn, so it survives the per-call VM
-      # rebuilds (the same model web storage uses).
+      # The session's emulated position (WebDriver BiDi "set emulated position data", Geolocation §12): kept on
+      # `@geolocation`, which every request and permission query reads through the `__csimGeolocationState` host fn —
+      # a denial the geolocation permission's state.
       #
       #   set_geolocation(latitude: 35.6, longitude: 139.7)
       #   set_geolocation(latitude: 1, longitude: 2, accuracy: 5, altitude: 10)
@@ -2839,11 +2837,13 @@ module Capybara
             {'coords' => {'latitude' => latitude, 'longitude' => longitude, 'accuracy' => accuracy}.merge(rest.transform_keys(&:to_s))}
           end
 
-        # A significant change of position (Geolocation §12 "set emulated position data"), the page's top-level
-        # traversable's — every window of it hears: its watches called back again, and each PermissionStatus whose state
-        # moved told (geolocation.js `__csimGeolocationChanged`, which reads the fresh @geolocation).
+        # A significant change of position (Geolocation §12 "set emulated position data"), the session's — every window
+        # and worker of it told (geolocation.js `__csimGeolocationChanged`): its watches called back again, and each
+        # PermissionStatus whose state moved told, each reading the fresh @geolocation — the windows' notices taken at once
+        # (a worker takes its own as its loop steps).
         invalidate_find_cache
-        [0, *@runtime.frame_realm_ids].each {|rid| @runtime.realm_call(rid, '__csimGeolocationChanged') }
+        @runtime.call('__csimGeolocationChanged')
+        deliver_agent_notices
         nil
       end
 
