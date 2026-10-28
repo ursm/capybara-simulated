@@ -11,7 +11,7 @@ RSpec.describe 'the gemspec' do
   let(:spec) { Dir.chdir(root) { Gem::Specification.load('capybara-simulated.gemspec') } }
 
   it 'ships every file it declares' do
-    absent = Dir.chdir(root) { spec.files.reject { File.exist?(it) } }
+    absent = Dir.chdir(root) { spec.files.reject {|f| File.exist?(f) } }
     expect(absent).to be_empty
   end
 
@@ -20,9 +20,9 @@ RSpec.describe 'the gemspec' do
     # One pattern per line, read as the first quoted string on it — a trailing comment may hold quotes of its
     # own, so `scan` over the whole block picks up prose.
     patterns = File.read(File.join(root, 'capybara-simulated.gemspec'))[/spec\.files\s*=\s*Dir\[\n(.*?)^\s*\]/m, 1]
-                   .to_s.lines.filter_map { it[/\A\s*'([^']+)'/, 1] }
+                   .to_s.lines.filter_map {|line| line[/\A\s*'([^']+)'/, 1] }
     expect(patterns).not_to be_empty, 'the file list is no longer a Dir[] of literals — update this spec'
-    empty = Dir.chdir(root) { patterns.reject { Dir[it].any? } }
+    empty = Dir.chdir(root) { patterns.reject {|pattern| Dir[pattern].any? } }
     expect(empty).to be_empty
   end
 
@@ -34,5 +34,17 @@ RSpec.describe 'the gemspec' do
       expect(spec.files).to include("#{dir}/Cargo.toml"), "#{dir}/Cargo.toml is not in spec.files"
       expect(spec.files.grep(%r{^#{Regexp.escape(dir)}/src/.*\.rs$})).not_to be_empty, "#{dir}/src/*.rs is not in spec.files"
     end
+  end
+
+  # …and every file that crate compiles in: an `include_str!` / `include_bytes!` target missing from the gem fails the
+  # source install's build, as `ua.css` did.
+  it 'ships every file the crate includes' do
+    included = Dir.chdir(root) do
+      spec.files.grep(/\.rs\z/).flat_map {|source|
+        File.read(source).scan(/include_(?:str|bytes)!\(\s*"([^"]+)"\s*\)/).map {|(path)| File.join(File.dirname(source), path) }
+      }
+    end
+    expect(included).not_to be_empty
+    expect(included - spec.files).to be_empty
   end
 end

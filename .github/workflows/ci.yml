@@ -33,6 +33,10 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
+      # The native extension (csim_native: V8, the native DOM, layout) is built from source — `bundle install` builds
+      # none for the gem's own checkout — with the runner's Rust toolchain; the v8 crate downloads its prebuilt V8.
+      - run: bundle exec rake compile
+
       # Multi-process run (worker count = vCPUs). The WPT and capybara-shared
       # gates — the dominant cost centres — are sharded across spec/wpt_gate/
       # and spec/capybara_shared/ files precisely so they distribute here; a
@@ -74,9 +78,12 @@ jobs:
           ruby-version: '4.0'
           bundler-cache: true
 
+      # The run loads the csim_native extension (V8 + the native DOM), which `bundle install` does not build for the
+      # gem's own checkout — `rake compile` does.
+      - run: bundle exec rake compile
+
       # A bare `rspec` (no ci-rspec retry): the counts are deterministic, so a red is a real
-      # change to lock in. The run loads the csim_native extension (V8 + the native DOM),
-      # which `bundle install` does not build for the gem's own checkout — `rake compile` does.
+      # change to lock in.
       - run: bundle exec rspec spec/perf_gate
 
   # The gem SHIPS the pre-built bundles and never runs npm, so nothing in the spec

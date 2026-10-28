@@ -18,7 +18,7 @@ RSpec.describe 'a redirected request' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 
-  it "sends the opaque Origin once a redirect leaves another origin, in no-cors mode too" do
+  it 'sends the opaque Origin once a redirect leaves another origin, in no-cors mode too' do
     seen = []
     app  = lambda {|env|
       host, path = env['SERVER_NAME'], env['PATH_INFO']
@@ -44,5 +44,20 @@ RSpec.describe 'a redirected request' do
         ['c.example.com', 'null']
       ]
     )
+  end
+
+  # …and its Location's bytes that are no UTF-8 percent-encoded, as Chrome sends them (redirect-location-escape).
+  it 'follows a Location of bytes no UTF-8 percent-encoded' do
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/r' then [302, {'location' => "/x\xFF".b}, ['']]
+      when '/x%FF' then [200, {'content-type' => 'text/plain'}, ['landed']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>']]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script("window.got = null; fetch('/r').then((r) => r.text().then((t) => { window.got = [new URL(r.url).pathname, t]; }), (e) => { window.got = e.name; });")
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(['/x%FF', 'landed'])
   end
 end

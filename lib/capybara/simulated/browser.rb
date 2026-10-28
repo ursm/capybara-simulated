@@ -10189,19 +10189,21 @@ module Capybara
           # Fetch "HTTP-redirect fetch" (fetch_rules.rs `follow_redirect`): the next request — its URL, its method and body,
           # its `Authorization`, its origin — or a network error; a redirect with no `Location` answers as it is.
           followed = REDIRECT_STATUSES.include?(status.to_i) && follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
+          if followed
+            # Log this hop (3xx) before method/body are rewritten for the next.
+            trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
+            # Cache the redirect itself (a cacheable 3xx with freshness) BEFORE following it — HTTP-network-or-cache
+            # fetch stores it before the redirect is handled, one that fails included — so a later only-if-cached /
+            # force-cache request can follow the redirect chain from the cache (request-cache "uses cached …
+            # redirects"). Same store gate as the terminal hop.
+            @@asset_cache.store(target, status, resp_headers, '') if method == 'GET' && cache_mode != 'no-store' && !skip_cache
+          end
           case followed
           when String
             resp_body.close if resp_body.respond_to?(:close)
             return nil
           when Array
             next_url, bits = followed
-            # Log this hop (3xx) before method/body are rewritten for the next.
-            trace_network(method, target, status, headers, body, resp_headers, nil, t0, true)
-            # Cache the redirect itself (a cacheable 3xx with freshness) BEFORE following it —
-            # the follow does `next`, which would otherwise skip the store below — so a later
-            # only-if-cached / force-cache request can follow the redirect chain from the cache
-            # (request-cache "uses cached … redirects"). Same store gate as the terminal hop.
-            @@asset_cache.store(target, status, resp_headers, '') if method == 'GET' && cache_mode != 'no-store' && !skip_cache
             redirected = true
             ref_source = hop_referer   # the next hop strips from what THIS hop sent
             # A redirect response's Referrer-Policy overrides the policy for the next hop
@@ -13110,14 +13112,23 @@ module Capybara
       # Fetch "HTTP-redirect fetch" over a redirect response of `status` with `resp_headers` to the request at `target`
       # (fetch_rules.rs `follow_redirect`): nil to answer with it, a network error's reason, or [next URL, bits]. Its
       # response tainting is "cors" for a CORS request whose chain has been at another origin (`crossed`); its origin is
-      # `req_origin`, tainted where `effective_origin` is already 'null'.
+      # `req_origin`, tainted where `effective_origin` is already 'null'. A `Location` given more than once, differently,
+      # is a network error (Fetch "extract header list values": a single header's list of more than one is failure); its
+      # bytes no UTF-8 are percent-encoded, as Chrome sends them (`url_text`).
       def follow_redirect(status, method, target, resp_headers, cors, crossed, req_origin, effective_origin)
+        location = header_field(resp_headers, 'location')
+        if location.is_a?(Array)
+          values = location.uniq
+          return 'more than one Location' if values.size > 1
+
+          location = values.first
+        end
         Native.follow_redirect(
           status.to_i,
           method.to_s,
           target,
           target,
-          location_field(resp_headers),
+          url_text(location),
           cors == true,
           req_origin,
           cors == true && crossed,

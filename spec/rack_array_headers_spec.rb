@@ -53,5 +53,7 @@ RSpec.describe 'a response header given as an Array' do
       })()
     JS
     expect(got).to eq(['200 n=1', '200 n=2', '200 in', 'NetworkError', '302 three', '200 mixed'])
+    # (…a Location of two fields a network error at once, never followed: Fetch "extract header list values")
+    expect(hits['/two']).to eq(1)
   end
 end

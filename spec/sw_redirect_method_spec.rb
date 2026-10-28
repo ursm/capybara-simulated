@@ -18,11 +18,16 @@ RSpec.describe 'Service Worker redirect method' do
         const u = new URL(e.request.url);
         if (u.pathname === '/scope/r') e.respondWith(Response.redirect(new URL('/scope/t', u).href, 303));
         else if (u.pathname === '/scope/t') e.respondWith(new Response(null, {headers: {'x-method': e.request.method}}));
+        else if (u.pathname === '/away') e.respondWith(new Response(null, {status: 307, headers: {location: 'http://b.example.com/on'}}));
+        else if (u.pathname === '/on') e.respondWith(new Response(null, {status: 307, headers: {location: 'http://c.example.com/last'}}));
       });
     JS
+    origins = self.origins
     Rack::Builder.new {
       run lambda {|env|
+        origins << env['HTTP_ORIGIN'] if env['PATH_INFO'] == '/last'
         case Rack::Request.new(env).path_info
+        when '/last'            then [200, {'content-type' => 'text/plain'}, ['last']]
         when '/'                then [200, {'content-type' => 'text/html'}, ['<html><body>main</body></html>']]
         when '/sw.js'           then [200, {'content-type' => 'text/javascript'}, [worker]]
         when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<html><body>in-scope</body></html>']]
@@ -31,6 +36,8 @@ RSpec.describe 'Service Worker redirect method' do
       }
     }.to_app
   }
+
+  let(:origins) { [] }
 
   around do |example|
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']
@@ -90,5 +97,27 @@ RSpec.describe 'Service Worker redirect method' do
       });
     JS
     expect(poll_until { session.evaluate_script('globalThis.__xhr') }).to eq(['GET', '/scope/t', ['/scope/r']])
+  end
+
+  # A chain the worker leads off another origin than the request's and on to yet another taints the request's origin, and
+  # the network hop it falls through on sends it so — "null" — whatever the request's mode.
+  it 'carries the origin its redirects tainted to the network hop it falls through on' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__done = false;
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async reg => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise(res => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        f.onload = () => {
+          f.contentWindow.fetch('/away', {method: 'POST', mode: 'no-cors', body: 'x'}).finally(() => { globalThis.__done = true; });
+        };
+        document.body.appendChild(f);
+      });
+    JS
+    poll_until { session.evaluate_script('globalThis.__done') }
+    expect(origins).to eq(['null'])
   end
 end
