@@ -273,6 +273,9 @@ impl crate::dom::RealmArena {
 pub(crate) fn policy_of_header(header: &str) -> Option<&'static str> {
     header.split(',').rev().find_map(|token| POLICIES.iter().find(|&&p| !p.is_empty() && p == token.trim_matches([' ', '\t'])).copied())
 }
+pub(crate) fn policy_of_header_for_ruby(header: String) -> Option<&'static str> {
+    policy_of_header(&header)
+}
 // __dom.metaReferrerPolicy(docNid) -> the policy its `<meta name="referrer">` elements have set
 // (`document_referrer_policy`), '' for none.
 fn meta_referrer_policy_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

@@ -191,6 +191,7 @@ mod timers;
 mod toggle_tasks;
 mod selected_coordinates;
 mod realm_location;
+mod referrer;
 mod font_files;
 mod token_list;
 mod traversal;
@@ -287,6 +288,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("message_length", magnus::function!(headers::message_length_for_ruby, 1))?;
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;
     native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
+    // What a request says of where it came from — its Referer, Origin and Sec-Fetch-Site, over its redirects too
+    // (referrer.rs).
+    native.define_module_function("request_referrer", magnus::function!(referrer::request_referrer_for_ruby, 3))?;
+    native.define_module_function("referrer_url", magnus::function!(referrer::referrer_url_for_ruby, 1))?;
+    native.define_module_function("origin_header", magnus::function!(referrer::origin_header_for_ruby, 4))?;
+    native.define_module_function("fetch_site", magnus::function!(referrer::fetch_site_for_ruby, 3))?;
+    native.define_module_function("wider_fetch_site", magnus::function!(referrer::wider_site_for_ruby, 2))?;
+    native.define_module_function("redirect_taints_origin", magnus::function!(referrer::redirect_taints_for_ruby, 4))?;
+    native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
     native.define_module_function("target_keyword", magnus::function!(navigables::target_keyword_for_ruby, 1))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("cors_safelisted_method", magnus::function!(fetch_rules::cors_safelisted_method_for_ruby, 1))?;

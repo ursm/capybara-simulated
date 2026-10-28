@@ -32,6 +32,7 @@ RSpec.describe 'a subresource request' do
              when '/a3' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/a3.css><meta name=referrer content=unsafe-url>' \
                              '<link rel=stylesheet href=/a3b.css><script>1</script>'
              when '/mf' then '<meta name=referrer content=no-referrer><link rel=stylesheet href=/mf.css><script src=/mf.js></script>'
+             when '/long' then '<link rel=stylesheet href=/long.css>'
              when '/e' then '<link rel=stylesheet referrerpolicy=no-referrer href=/e.css><script referrerpolicy=origin src=/e.js></script>'
              end
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
@@ -44,6 +45,12 @@ RSpec.describe 'a subresource request' do
     session.evaluate_script('1')
     expect(referers['/top.css']).to eq('http://www.example.com/top')
     expect(referers.slice('/f.css', '/f.js', '/fm.js', '/fi.js', '/ff.woff').values.uniq).to eq(['http://www.example.com/f'])
+  end
+
+  # …as its document's origin where its URL is longer than 4096 (Referrer Policy §8.3 step 6), whatever the policy.
+  it 'is referred by its origin alone from a URL too long to send' do
+    session.visit "/long?#{'x' * 4100}"
+    expect(referers['/long.css']).to eq('http://www.example.com/')
   end
 
   it "is referred under its document's policy" do

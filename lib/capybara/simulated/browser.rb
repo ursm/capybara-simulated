@@ -1445,7 +1445,7 @@ module Capybara
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
         ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env))
         env['HTTP_COOKIE']     = ck              unless ck.empty?
-        referrer               = referrer_header(@current_url)
+        referrer               = Native.referrer_url(@current_url)
         env['HTTP_REFERER']    = referrer if referrer
         response = dispatch_rack_or_http(url, env) or return
         status, headers, body = response
@@ -3525,7 +3525,7 @@ module Capybara
         # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
         referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
-        hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
+        hop_referer = referer && Native.request_referrer(referrer_policy.to_s, referer, url)
         # The document's referrer is the request's, the last hop's, as a GET navigation's is (`navigate`).
         @current_referer = hop_referer.to_s
         # (…its origin the initiating document's — 'null' where that is opaque or a redirect has tainted it, none where the
@@ -3546,7 +3546,7 @@ module Capybara
         # `event.request.text()`); respondWith serves the document, nil falls through to
         # the network POST below. The wire Content-Type carries the same urlencoded
         # default the network path applies, so `event.request.headers` matches Chrome.
-        nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+        nav_site = Native.fetch_site(site_seed, initiator, url)
         if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body,
                                                      content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
                                                      is_reload: is_reload, is_history: from_history && !is_reload,
@@ -3588,7 +3588,7 @@ module Capybara
         env['CONTENT_LENGTH'] = body.bytesize.to_s
         apply_default_request_env(env, referer: hop_referer)
         # (…and its origin, as every POST navigation carries it: `navigation_request_headers`)
-        env['HTTP_ORIGIN'] = request_origin_header(origin, referrer_policy, url) if origin
+        env['HTTP_ORIGIN'] = Native.origin_header(origin, referrer_policy, url, false) if origin
         response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return commit_error_document(url)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -5306,7 +5306,7 @@ module Capybara
           # is made under (its element's `referrerpolicy`, else its policy container's) —
           # the raw document URL must not leak into event.request.referrer beyond it.
           referrerPolicy: referrer_policy.to_s,
-          referrer:       compute_referrer(referrer_policy, referrer.to_s, url.to_s).to_s
+          referrer:       Native.request_referrer(referrer_policy, referrer.to_s, url.to_s).to_s
         )
         r = sw_direct_fetch(handle.to_i, req, handle.to_i) or return nil
         return nil if r['fallthrough']
@@ -5481,7 +5481,7 @@ module Capybara
         req = JSON.parse(req_json)
         return req_json unless req.is_a?(Hash)
 
-        req['referrer'] = compute_referrer(req['referrerPolicy'], req.delete('referrerSource'), req['url']).to_s if req.key?('referrerSource')
+        req['referrer'] = Native.request_referrer(req['referrerPolicy'], req.delete('referrerSource'), req['url']).to_s if req.key?('referrerSource')
         headers = req['headers'].is_a?(Hash) ? req['headers'] : (req['headers'] = {})
         headers['Accept'] = Native.default_accept(req['destination'].to_s) unless headers.keys.any? {|k| k.casecmp?('accept') }
         JSON.generate(req)
@@ -7047,7 +7047,7 @@ module Capybara
             return nil if sw['networkError']
 
             # (…the Referer its request carried, as the network's would have: the referrer of the document it makes)
-            sent_referrer = referrer_header(compute_referrer(referrer_policy.to_s, initiator, target))
+            sent_referrer = Native.request_referrer(referrer_policy.to_s, initiator, target)
 
             status  = (sw['status'] || 200).to_i
             headers = sw['headers'] || {}
@@ -7059,7 +7059,7 @@ module Capybara
               referrer_source:   initiator,
               origin_url:        origin_url,
               referrer_policy:   referrer_policy,
-              site:              widen_sec_fetch_site(site, sec_fetch_site(origin_url, target)),
+              site:              Native.fetch_site(site, origin_url, target),
               origin_null:       origin_null,
               body:              req_body.empty? ? nil : req_body,
               content_type:      req_ct,
@@ -7072,9 +7072,9 @@ module Capybara
           end
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
-            site        = widen_sec_fetch_site(site, sec_fetch_site(origin_url, target))
+            site        = Native.fetch_site(site, origin_url, target)
             next_url    = carry_fragment(target, resolve_against(loc, target))
-            origin_null = redirect_taints_origin?(origin_null, origin_url, target, next_url)
+            origin_null = Native.redirect_taints_origin(origin_null, origin_url, target, next_url)
             if Native.redirect_to_get(status.to_i, meth)
               meth     = 'GET'
               req_body = ''.b
@@ -7224,7 +7224,7 @@ module Capybara
           # (the document default absent a meta/header — strict-origin-when-cross-origin — so a
           # same-origin nav keeps the full URL). A SW that re-issues the request
           # (`fetch(event.request)`) computes Sec-Fetch-Site / Origin against this referrer's origin.
-          referrer:            compute_referrer(referrer_policy, referrer_source, url.to_s).to_s,
+          referrer:            Native.request_referrer(referrer_policy, referrer_source, url.to_s).to_s,
           # `event.request.referrerPolicy` reflects the RESOLVED policy: a navigation with no explicit
           # meta/header policy uses the document default (strict-origin-when-cross-origin), never the
           # empty string a bare Request would carry (fetch-event-referrer-policy "default referrer policy").
@@ -9818,83 +9818,8 @@ module Capybara
       CACHE_MODES_SERVE_STALE = %w[force-cache only-if-cached].freeze
       # The redirects a navigation follows before it fails (Fetch "HTTP-redirect fetch": a redirect count of 20).
       NAVIGATION_REDIRECT_LIMIT = 20
-      REFERRER_POLICIES = %w[
-        no-referrer no-referrer-when-downgrade origin origin-when-cross-origin
-        same-origin strict-origin strict-origin-when-cross-origin unsafe-url
-      ].freeze
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = 'strict-origin-when-cross-origin'
-
-      # The `Origin` header a request carries (Fetch "append a request Origin header"): its serialized origin `origin`
-      # ('null' once tainted or opaque) — which, for a request not in mode 'cors', its referrer policy `policy` withholds
-      # as 'null' where that policy would withhold the origin from `target` (an empty / unknown one the default).
-      def request_origin_header(origin, policy, target, cors: false)
-        return origin if cors || origin == 'null'
-
-        case REFERRER_POLICIES.include?(policy.to_s) ? policy.to_s : DEFAULT_REFERRER_POLICY
-        when 'no-referrer'
-          'null'
-        when 'no-referrer-when-downgrade', 'strict-origin', 'strict-origin-when-cross-origin'
-          origin.start_with?('https:') && !target.to_s.start_with?('https:') ? 'null' : origin
-        when 'same-origin'
-          url_origin(target) == origin ? origin : 'null'
-        else
-          origin
-        end
-      end
-
-      # The `Referer` value a request carries under a Referrer-Policy — nil = send none
-      # (https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer).
-      # `referrer_url` is the request's referrer (the initiating document); `target_url`
-      # its destination. "full" is the referrer stripped of fragment + credentials;
-      # "origin" is scheme://host[:port]/. An empty / unknown policy → the default
-      # (strict-origin-when-cross-origin).
-      def compute_referrer(policy, referrer_url, target_url)
-        return nil if referrer_url.nil? || referrer_url.to_s.empty?
-        policy = DEFAULT_REFERRER_POLICY unless REFERRER_POLICIES.include?(policy)
-        return nil if policy == 'no-referrer'
-        # The referrer is almost always the (constant) document URL — memoise its parse
-        # so the rack_fetch hot path doesn't re-parse it per request (rule 3).
-        ref = parse_referrer_url(referrer_url)
-        return nil unless ref && %w[http: https:].include?(ref[:protocol])
-        full        = -> { referrer_of(ref) }
-        origin_only = -> { "#{ref[:origin]}/" }
-        return full.call        if policy == 'unsafe-url'
-        return origin_only.call if policy == 'origin'
-        # The remaining policies need the target to know same-origin / downgrade.
-        tgt = parse_url(target_url.to_s)
-        return nil unless tgt
-        same_origin = ref[:origin] == tgt[:origin]
-        downgrade   = ref[:protocol] == 'https:' && tgt[:protocol] == 'http:'
-        case policy
-        when 'origin-when-cross-origin'        then same_origin ? full.call : origin_only.call
-        when 'same-origin'                     then same_origin ? full.call : nil
-        when 'strict-origin'                   then downgrade ? nil : origin_only.call
-        when 'no-referrer-when-downgrade'      then downgrade ? nil : full.call
-        when 'strict-origin-when-cross-origin' then same_origin ? full.call : (downgrade ? nil : origin_only.call)
-        end
-      end
-
-      # Parse a referrer URL, memoising the last one (the referrer is the document URL
-      # for nearly every request, so this caches across the whole page's subresources).
-      def parse_referrer_url(url)
-        return @referrer_parsed if defined?(@referrer_parsed_for) && @referrer_parsed_for == url
-        @referrer_parsed_for = url
-        @referrer_parsed     = parse_url(url.to_s)
-      end
-
-      # The `Referer` a request sends for the referrer `url`, or nil for none: stripped (a fragment had been sent), and
-      # none for a URL of a local scheme (`about:srcdoc`, `about:blank`, `blob:`, `data:`) — Referrer Policy's "strip url
-      # for use as a referrer" step 1.
-      def referrer_header(url)
-        parts = parse_url(url.to_s)
-        parts && %w[http: https:].include?(parts[:protocol]) ? referrer_of(parts) : nil
-      end
-
-      # A URL as a referrer: no fragment, no credentials (Referrer Policy "strip url").
-      def referrer_of(url)
-        "#{url[:protocol]}//#{url[:host]}#{url[:pathname]}#{url[:search]}"
-      end
 
       # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
       # pre-gate: only URLs whose authority carries an explicit `:<digit>` are parsed
@@ -10057,7 +9982,7 @@ module Capybara
                   (!cors_mode && !@current_url.nil? && cookie_cross_site_document?(@current_url, hop)) ||
                   (client_realm.to_i.positive? && frame_ancestor_cross_site?(client_realm, hop)) ||
                   worker_cross_site?(hop)
-          cookie_site = widen_sec_fetch_site(cookie_site, cross ? 'cross-site' : sec_fetch_site(cookie_client, hop))
+          cookie_site = cross ? 'cross-site' : Native.fetch_site(cookie_site, cookie_client, hop)
         }
         # (…a `navigate`-mode request of a navigation's destination is a SW re-issuing the navigation it intercepted,
         # whose cookies the chain's verdict judges: any other — a plugin's resource, of mode "navigate" too — its
@@ -10126,7 +10051,7 @@ module Capybara
           # The Referer follows the request's Referrer-Policy (a redirect response can
           # override the policy for the next hop — see below). `hop_referer` also becomes
           # the source the NEXT hop strips from.
-          hop_referer = compute_referrer(ref_policy, ref_source, target)
+          hop_referer = Native.request_referrer(ref_policy, ref_source, target)
           # The ancestor-chain cookie verdict (a SW-re-fetched navigation into a frame
           # with a cross-site ancestor): flag the env BEFORE cookies attach so the
           # SameSite gate in apply_default_request_env sees it, like a navigation would.
@@ -10178,7 +10103,7 @@ module Capybara
           # every non-GET/HEAD request, so a same-origin POST carries it too). After a
           # cross-origin redirect the origin is the opaque "null".
           if cross_origin || (req_origin && !%w[GET HEAD].include?(method.to_s.upcase))
-            env['HTTP_ORIGIN'] = request_origin_header(effective_origin, ref_policy, target, cors: cors)
+            env['HTTP_ORIGIN'] = Native.origin_header(effective_origin, ref_policy, target, cors)
           end
           # Fetch-Metadata request headers — emitted for every fetch/XHR/SW request (a mode is set) and every element load
           # that names its destination (`dest`, a no-cors one but where it asks for CORS); the internal callers of neither —
@@ -10192,7 +10117,7 @@ module Capybara
           # `nav_dest`) still drives the SameSite Lax gate below, which is top-level-only.
           if cors_mode || dest
             # (…an opaque-origin client's request is of no site at all: cross-site, wherever it goes)
-            sec_site = widen_sec_fetch_site(sec_site, client_origin == 'null' ? 'cross-site' : sec_fetch_site(sec_initiator, target))
+            sec_site = client_origin == 'null' ? 'cross-site' : Native.fetch_site(sec_site, sec_initiator, target)
             env['HTTP_SEC_FETCH_SITE'] = sec_site
             env['HTTP_SEC_FETCH_MODE'] = cors_mode || 'no-cors'
             # (…a document's own navigation request its destination: a SW's passthrough re-fetch alone reports 'empty')
@@ -10332,7 +10257,7 @@ module Capybara
             effective_origin = 'null' if cors && crossed && url_origin(next_url) != url_origin(target)
             # (…a document's navigation request tainted as every mode is — Fetch "HTTP-redirect fetch": a redirect to
             # another origin from a URL not of the request's own)
-            effective_origin = 'null' if navigation && redirect_taints_origin?(effective_origin == 'null', req_origin, target, next_url)
+            effective_origin = 'null' if navigation && Native.redirect_taints_origin(effective_origin == 'null', req_origin, target, next_url)
             # Fetch "HTTP-redirect fetch": a CROSS-ORIGIN redirect strips the request's
             # `Authorization` — credentials sent to the first origin must not be replayed to a
             # different one (nor seed that origin's auth cache below).
@@ -10415,7 +10340,7 @@ module Capybara
           # keeps: a POST's through a 307 / 308 still one, a 303's a GET)
           out['method'] = method.to_s if navigation && out
           # (…and the Referer it sent, the referrer of the document it makes)
-          out['referrer'] = referrer_header(hop_referer) if navigation && out && hop_referer
+          out['referrer'] = hop_referer if navigation && out && hop_referer
           return out
         end
         raise StandardError, "[capybara-simulated] fetch exceeded #{MAX_FETCH_REDIRECTS} redirects"
@@ -11215,7 +11140,7 @@ module Capybara
       def referrer_policy_header(headers)
         rp = header_field(headers || {}, 'referrer-policy') or return nil
         # (…its tokens matched as they are, case and all: an unknown one — `No-Referrer` — none, as the spec's parse has it)
-        Array(rp).join(',').split(',').map(&:strip).reverse.find {|t| REFERRER_POLICIES.include?(t) }
+        Native.referrer_policy_header(Array(rp).join(','))
       end
       # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
       # object"), none for none — one given more than once combined as Fetch's "get a header" does.
@@ -11376,7 +11301,7 @@ module Capybara
           # does the single utf8_text re-tag, matching the network path below.
           reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
                                    response_content_type(sw['headers'] || {}), restore_state: restore, history_state: history_state, client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                   referrer: frame_entry_referrer(entry, is_reload) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) },
+                                   referrer: frame_entry_referrer(entry, is_reload) { Native.request_referrer(referrer_policy.to_s, referrer_source, url) },
                                    referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
           return
         end
@@ -11385,7 +11310,7 @@ module Capybara
           env['CONTENT_TYPE']   = entry[:content_type].to_s.empty? ? 'application/x-www-form-urlencoded' : entry[:content_type]
           env['CONTENT_LENGTH'] = body.bytesize.to_s
         end
-        apply_default_request_env(env, referer: compute_referrer(referrer_policy, referrer_source, url))
+        apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, referrer_source, url))
         response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url, rid)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
@@ -11395,7 +11320,7 @@ module Capybara
         return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(status)
         reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers),
                                  restore_state: restore, history_state: history_state, csp: response_csp(headers),
-                                 referrer: frame_entry_referrer(entry, is_reload) { referrer_header(compute_referrer(referrer_policy.to_s, referrer_source, url)) },
+                                 referrer: frame_entry_referrer(entry, is_reload) { Native.request_referrer(referrer_policy.to_s, referrer_source, url) },
                                  referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
       # The referrer of the document a traversal (or, `is_reload`, a reload) to frame session history entry `entry` makes:
@@ -11570,15 +11495,15 @@ module Capybara
             return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, get_url, rid) }
             return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
                                                      user_activated: user_activated,
-                                                     site_seed: widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, get_url)),
-                                                     origin_null: redirect_taints_origin?(origin_null, origin_url, get_url, next_url),
+                                                     site_seed: Native.fetch_site(site_seed, origin_url, get_url),
+                                                     origin_null: Native.redirect_taints_origin(origin_null, origin_url, get_url, next_url),
                                                      resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
           end
           return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
           return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                          referrer: referrer_header(compute_referrer(referrer_policy.to_s, source, get_url)), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
+                                          referrer: Native.request_referrer(referrer_policy.to_s, source, get_url), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
         end
-        site      = widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, get_url))
+        site      = Native.fetch_site(site_seed, origin_url, get_url)
         response = dispatch_navigation_request(
           get_url,
           method:            'GET',
@@ -11596,10 +11521,10 @@ module Capybara
           resp_body.close if resp_body.respond_to?(:close)
           return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, get_url, rid) }
           # Latch the redirect chain's Fetch-Metadata: Sec-Fetch-Site widens to include this hop, and
-          # a form POST's Origin taints to 'null' per redirect_taints_origin? (moot for GET — no Origin).
+          # a form POST's Origin taints to 'null' per Native.redirect_taints_origin (moot for GET — no Origin).
           return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
                                                      user_activated: user_activated,
-                                                   site_seed: site, origin_null: redirect_taints_origin?(origin_null, origin_url, get_url, next_url),
+                                                   site_seed: site, origin_null: Native.redirect_taints_origin(origin_null, origin_url, get_url, next_url),
                                                    resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
         end
         return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
@@ -11671,8 +11596,8 @@ module Capybara
           if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
             next_url = carry_fragment(url, resolve_location(loc, url))
             return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, url, rid) }
-            site     = widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, url.to_s))
-            taint    = redirect_taints_origin?(origin_null, origin_url, url.to_s, next_url)
+            site     = Native.fetch_site(site_seed, origin_url, url.to_s)
+            taint    = Native.redirect_taints_origin(origin_null, origin_url, url.to_s, next_url)
             next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
             if [307, 308].include?(sw['status'].to_i)
               return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, user_activated: user_activated,
@@ -11685,7 +11610,7 @@ module Capybara
           return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
           tag_frame_entry_post(realm_id, body, content_type)
           reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                   referrer: referrer_header(compute_referrer(referrer_policy.to_s, source, url.to_s)), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
+                                   referrer: Native.request_referrer(referrer_policy.to_s, source, url.to_s), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
           return
         end
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
@@ -11693,7 +11618,7 @@ module Capybara
         # returns for a non-entered frame. A form POST
         # navigation carries that document's Origin + a Referer under its Referrer-Policy + the
         # Fetch-Metadata triple (Sec-Fetch-Dest 'iframe' for a subframe).
-        site      = widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, url.to_s))
+        site      = Native.fetch_site(site_seed, origin_url, url.to_s)
         response = dispatch_navigation_request(
           url,
           method:            'POST',
@@ -11714,8 +11639,8 @@ module Capybara
           return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, url, rid) }
           # 307/308 preserve method + body; 301/302/303 → GET the frame — the same split as the SW branch above, the
           # navigation going on (its document prompted to unload once, at its start). Latch the redirect chain's
-          # Sec-Fetch-Site (widened) + Origin taint (redirect_taints_origin?).
-          taint    = redirect_taints_origin?(origin_null, origin_url, url.to_s, next_url)
+          # Sec-Fetch-Site (widened) + Origin taint (Native.redirect_taints_origin).
+          taint    = Native.redirect_taints_origin(origin_null, origin_url, url.to_s, next_url)
           next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
           unless Native.redirect_to_get(status.to_i, 'POST')
             return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, user_activated: user_activated,
@@ -12228,7 +12153,7 @@ module Capybara
       # `navigate_realm_self_get`'s). [site widened by this hop, the initiating document's URL].
       private def frame_request_headers(env, method, url, referrer:, initiator:, site:, frame:, taint: false, user_activated: false)
         initiator_url, opaque = realm_request_initiator(initiator.to_i)
-        site = widen_sec_fetch_site(site, opaque ? 'cross-site' : sec_fetch_site(initiator_url, url))
+        site = opaque ? 'cross-site' : Native.fetch_site(site, initiator_url, url)
         env['csim.cookie_cross_site'] = true if frame_ancestor_cross_site?(frame, url)
         navigation_request_headers(env, method: method, initiator_url: referrer[0], origin_url: initiator_url, target: url, dest: 'iframe', referrer_policy: referrer[1],
                                         site_override: site, origin_null: opaque || taint, user_activated: user_activated)
@@ -12270,7 +12195,7 @@ module Capybara
             return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site, user_activated: user_activated)
           else
             return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site, user_activated: user_activated,
-                                                                     taint: redirect_taints_origin?(taint, initiator_url, url, next_url))
+                                                                     taint: Native.redirect_taints_origin(taint, initiator_url, url, next_url))
           end
         end
         return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
@@ -12366,7 +12291,7 @@ module Capybara
         # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
         referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
-        hop_referer = referer && compute_referrer(referrer_policy.to_s, referer, url)
+        hop_referer = referer && Native.request_referrer(referrer_policy.to_s, referer, url)
         # The document's referrer is the request's, the last hop's (a redirect determines it anew).
         @current_referer = hop_referer.to_s
         # A full-document navigate also clears the pushState transition
@@ -12420,7 +12345,7 @@ module Capybara
           # window's Browser (they're profile-wide; see Driver#sw_navigation_fetch).
           # respondWith serves the document; nil falls through to the network GET below.
           # Mirrors the frame-navigation model (navigate_realm_self_get).
-          nav_site = widen_sec_fetch_site(site_seed, sec_fetch_site(initiator, url))
+          nav_site = Native.fetch_site(site_seed, initiator, url)
           if (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: from_history && !is_reload, dest: 'document',
                                                        referrer_source: initiator, site_seed: site_seed))
             # A network-error respondWith FAILS the navigation (the history entry above stands).
@@ -13026,7 +12951,7 @@ module Capybara
         # server can negotiate — HTML-only routes still pick html,
         # both-available pick the first registered.
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
-        referrer = referrer_header(referer)
+        referrer = Native.referrer_url(referer)
         env['HTTP_REFERER'] = referrer if referrer
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
@@ -13068,18 +12993,18 @@ module Capybara
         # Fetch metadata FIRST: apply_default_request_env's SameSite cookie gate reads
         # the request's own Sec-Fetch-Site/Mode/Dest, so they must be on the env before
         # cookies attach.
-        env['HTTP_SEC_FETCH_SITE'] = site_override || sec_fetch_site(initiator_url, target)
+        env['HTTP_SEC_FETCH_SITE'] = site_override || Native.fetch_site(nil, initiator_url, target)
         env['HTTP_SEC_FETCH_MODE'] = 'navigate'
         env['HTTP_SEC_FETCH_DEST'] = dest.to_s
         env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
-        apply_default_request_env(env, referer: compute_referrer(referrer_policy, initiator_url, target))
+        apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, initiator_url, target))
         # Origin is appended to every non-GET/HEAD request (a form POST carries it; a GET navigation
         # does not). From a KNOWN initiating document it's that document's origin serialization, or
         # the literal 'null' when that origin is opaque (an about:blank / data: frame) or has been
         # tainted by a cross-origin redirect — matching the fetch path's `effective_origin`
         # convention. Omitted only when the initiator is unknown (a disposed realm → nil url).
         if origin_url && !origin_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
-          env['HTTP_ORIGIN'] = request_origin_header((!origin_null && url_origin(origin_url)) || 'null', referrer_policy, target)
+          env['HTTP_ORIGIN'] = Native.origin_header((!origin_null && url_origin(origin_url)) || 'null', referrer_policy, target, false)
         end
       end
 
@@ -13145,7 +13070,7 @@ module Capybara
       # whose URL is not known (closed rather than open), one of an opaque origin (a `data:` document's, a sandboxed
       # one's `null`: of no site at all), one of another site.
       private def cookie_cross_site_document?(url, target_url)
-        url.nil? || url == 'null' || url.to_s.match?(/\Adata:/i) || sec_fetch_site(url, target_url.to_s) == 'cross-site'
+        url.nil? || url == 'null' || url.to_s.match?(/\Adata:/i) || Native.fetch_site(nil, url, target_url.to_s) == 'cross-site'
       end
       private def frame_ancestor_cross_site?(realm_id, target_url)
         rid = realm_id.to_i
@@ -13201,7 +13126,7 @@ module Capybara
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
         # (…and the Referer the request sent: the referrer of the document its response makes)
-        [status, headers, resp_body, referrer_header(compute_referrer(referrer_policy, referrer_source, url))]
+        [status, headers, resp_body, Native.request_referrer(referrer_policy, referrer_source, url)]
       end
 
       # The Navigation Preload request: a parallel GET the browser issues for a navigation whose
@@ -13223,7 +13148,7 @@ module Capybara
         cookie_cross_site: false,
         origin_url: referrer_source
       )
-        site = widen_sec_fetch_site(site_seed, sec_fetch_site(origin_url, url))
+        site = Native.fetch_site(site_seed, origin_url, url)
         response = dispatch_navigation_request(
           url,
           method:            'GET',
@@ -13259,40 +13184,9 @@ module Capybara
       # A preload that failed: `event.preloadResponse` rejects (Service Workers "Handle Fetch").
       PRELOAD_NETWORK_ERROR = {'networkError' => true}.freeze
 
-      # Fetch-Metadata `Sec-Fetch-Site`: the relationship of a request's INITIATOR to its target.
-      # no initiator (a direct address-bar load) → 'none'; same (scheme,host,port) → 'same-origin';
-      # same registrable site (eTLD+1) → 'same-site'; else → 'cross-site'.
-      def sec_fetch_site(initiator_url, target_url)
-        io = url_origin(initiator_url)
-        return 'none' if io.nil?
-        return 'same-origin' if io == url_origin(target_url)
-        is = registrable_site(initiator_url)
-        ts = registrable_site(target_url)
-        is && ts && is == ts ? 'same-site' : 'cross-site'
-      end
-
-      SEC_FETCH_SITE_RANK = {'same-origin' => 0, 'same-site' => 1, 'cross-site' => 2, 'none' => 2}.freeze
-      private_constant :SEC_FETCH_SITE_RANK
-      # The wider (more distant) of two Sec-Fetch-Site values — used to latch the value across a
-      # redirect chain (same-origin < same-site < cross-site). `nil` seed → the other value.
-      def widen_sec_fetch_site(a, b)
-        return b if a.nil?
-        SEC_FETCH_SITE_RANK[b].to_i > SEC_FETCH_SITE_RANK[a].to_i ? b : a
-      end
-
-      # Fetch "HTTP-redirect fetch": a request's Origin opaques to 'null' once it follows a
-      # cross-origin redirect WHILE ALREADY off the initiator's origin — i.e. the current URL is
-      # cross-origin to BOTH the redirect target and the initiator. The FIRST cross-origin hop (still
-      # on the initiator's origin) keeps the real Origin; a later hop that redirects same-origin-to-
-      # current keeps it too. Monotonic: once opaque, an opaque origin is same-origin with nothing, so
-      # it stays null.
-      def redirect_taints_origin?(already_null, initiator_url, current_url, location_url)
-        already_null ||
-          (url_origin(current_url) != url_origin(location_url) && url_origin(initiator_url) != url_origin(current_url))
-      end
       # …a request's origin `origin` (serialized, nil for none) after a redirect from `current_url` to `location_url`.
       def redirected_origin(origin, current_url, location_url)
-        origin && (redirect_taints_origin?(origin == 'null', origin, current_url, location_url) ? 'null' : origin)
+        origin && (Native.redirect_taints_origin(origin == 'null', origin, current_url, location_url) ? 'null' : origin)
       end
 
       # The site of a URL — scheme and registrable domain — that a Sec-Fetch-Site / same-site comparison and a blob
