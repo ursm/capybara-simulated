@@ -17,6 +17,9 @@ RSpec.describe 'a frame\'s form submission' do
     seen = hits
     js_frame = '<iframe src="javascript:(function(){var f=document.createElement(\'form\');f.method=\'post\';' \
                'f.action=\'/jspost\';document.body.appendChild(f);f.submit();return \'<p>js</p>\'})()"></iframe>'
+    js_other = '<iframe name=y src=/y0></iframe><iframe src="javascript:(function(){var f=document.createElement(\'form\');' \
+               'f.method=\'post\';f.target=\'y\';f.action=\'/jsy\';document.body.appendChild(f);f.submit();' \
+               'return \'<p>js</p>\'})()"></iframe>'
     simulated_session(lambda {|env|
       seen << "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}"
       form = ->(name, target, method = 'get') { %(<form id=f action="/#{name}" method=#{method} target="#{target}"><input name=q value=1></form>) }
@@ -28,6 +31,7 @@ RSpec.describe 'a frame\'s form submission' do
              when '/gx'   then form.('posted', 'y', 'post')
              when '/own'  then '<iframe name=x src=/gx></iframe><iframe name=y src=/y0></iframe>'
              when '/js'   then js_frame
+             when '/jsy0' then js_other
              else "<p>#{env['PATH_INFO'].delete_prefix('/')}</p>"
              end
       [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
@@ -64,5 +68,12 @@ RSpec.describe 'a frame\'s form submission' do
     poll_until { text.(0) == 'jspost' }
     expect(text.(0)).to eq('jspost')
     expect(hits).to include('POST /jspost')
+  end
+
+  # …its result its document all the same where the form goes to another frame (Chrome).
+  it 'keeps a javascript: URL frame\'s result where the form it submitted goes to another frame' do
+    session.visit '/jsy0'
+    expect(poll_until { [text.(0), text.(1)] == %w[jsy js] && [text.(0), text.(1)] }).to eq(%w[jsy js])
+    expect(hits).to include('POST /jsy')
   end
 end

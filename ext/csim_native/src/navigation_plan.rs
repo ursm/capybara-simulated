@@ -105,6 +105,8 @@ pub(crate) struct RoutedSubmissions {
 struct RoutedSubmission {
     planned: u64,
     source: i32,
+    // …whether its target chose the frame's own navigable, as it was made.
+    own: bool,
     taken: Option<(v8::Global<v8::Value>, Route, (String, String))>,
 }
 impl RoutedSubmissions {
@@ -242,6 +244,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
     register(scope, ns, "routeFrameSubmission", route_frame_submission, context_id);
     register(scope, ns, "takeRoutedSubmission", take_routed_submission, context_id);
+    register(scope, ns, "holdRoutedSubmission", hold_routed_submission, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
     register(scope, ns, "flushBegin", flush_begin, context_id);
@@ -297,11 +300,15 @@ fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     plan(scope, &args).supersede();
 }
 
-// __dom.navigationPlanned() -> whether a navigation or a submission is planned, which the host is yet to take: one a
+// __dom.navigationPlanned() -> whether a navigation or a submission of its navigable is planned, which the host is yet
+// to take (a frame's submission routed to another navigable none): one a
 // javascript: URL's script planned outranks the document its string result would make (url-parse.js `runJavascriptURL`).
 fn navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    // (…a frame's submission the host routes to another navigable none of its own)
+    let elsewhere = crate::dom::dom(scope).arena.routed_submissions.entries.iter().any(|e| e.source == cid && !e.own);
     let plan = plan(scope, &args);
-    rv.set_bool(plan.navigation.is_some() || plan.submission.is_some());
+    rv.set_bool(plan.navigation.is_some() || (plan.submission.is_some() && !elsewhere));
 }
 
 // __dom.takeNavigation(newWindowOnly) -> [url, target, opener, referrerPolicy, blob, activated] of the navigation planned, which the
@@ -471,7 +478,14 @@ fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         top.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
         return;
     }
-    arena.routed_submissions.entries.push(RoutedSubmission { planned: next_planned(), source: cid, taken: None });
+    arena.routed_submissions.entries.push(RoutedSubmission { planned: next_planned(), source: cid, own, taken: None });
+}
+// __dom.holdRoutedSubmission(): the calling frame realm's document about to make way for another in place (a
+// javascript: URL's string result) — the submission it made that the host routes taken out of its plan with its route
+// (`supersede_routed`), as the frame's navigable navigated otherwise takes it.
+fn hold_routed_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    supersede_routed(scope, cid);
 }
 // __dom.takeRoutedSubmission() -> the first of the submissions frames' documents made that the host routes, in the order
 // they were made, which none plans any more: `[realm, request, ROUTE_*, realm, container, referrerSource,
