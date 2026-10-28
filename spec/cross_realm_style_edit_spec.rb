@@ -6,7 +6,7 @@ require_relative 'support/poll_until'
 
 # A change another realm's code makes to a document's tree is the document's: a `<style>` a frame made and put in the
 # page, its text edited through the frame's own methods, restyles the page — its cascade refreshed and its tree's memos
-# moved, as an edit from the page's own code does (mutation.rs `record_child_list`, `note_cascade`).
+# moved, as an edit from the page's own code does (mutation.rs `record_child_list`, sheet_feed.rs `stale_cascade`).
 RSpec.describe 'a cross-realm edit of a style sheet owner' do
   include PollUntil
 

@@ -23,7 +23,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 impl RealmArena {
     // Realm `cid`'s cascade stale — a sheet of its document's added, removed or made again — or (`version`, a shadow
     // tree's, which its document's cascade key does not see) its rule set moved: either handed its engine at its next
-    // style read (`fresh`).
+    // style read (`fresh`) — and a rendering update's observations asked of it, as a change of its tree asks them: what
+    // a new sheet resizes a ResizeObserver hears of, though no node changed.
     pub(crate) fn stale_cascade(&mut self, cid: i32, version: bool) {
         let Some(state) = self.realm_state_mut(cid) else { return };
         if version {
@@ -31,6 +32,7 @@ impl RealmArena {
         } else {
             state.generations.set(GEN_STYLE_STALE, 1);
         }
+        self.observers.note_observations(cid);
     }
 }
 
