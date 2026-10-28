@@ -113,8 +113,8 @@ fn style_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
 // sheet it obtains (its count, `NodeData::sheet_gen`), whose text makes it again in another mode or under another media
 // list — at the URL its response came from, origin-clean where that was CORS-same-origin, its `@import`s decoded in the
 // encoding it decoded in. Where it was not fetched — its `href` no URL, or no response to use — none, tried again the
-// next time; or with `empty`, an empty sheet at its URL, not origin-clean: what `.sheet` exposes for one (Chrome,
-// Firefox).
+// next time; or with `empty`, an empty sheet at its URL, origin-clean only where the response it failed with was
+// CORS-same-origin: what `.sheet` exposes for one (Chrome, Firefox).
 fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: NodeId, empty: bool) -> Result<Option<(u32, u32)>, Terminated> {
     let arena = realm(scope, cid);
     let Some(n) = arena.get(owner) else { return Ok(None) };
@@ -142,7 +142,8 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
             };
             match sheet {
                 Some(crate::sheet_fetch::Sheet { text: Some(text), clean, location, .. }) => (Rc::from(text), location, Some((clean, false))),
-                _ if empty => (Rc::from(""), url.unwrap_or(href), Some((false, true))),
+                // (…origin-clean as the response it failed with was, a same-origin HTTP error's: its rules, none, readable)
+                failed if empty => (Rc::from(""), url.unwrap_or(href), Some((failed.is_some_and(|s| s.clean), true))),
                 _ => return Ok(None),
             }
         }
