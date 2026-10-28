@@ -4,7 +4,8 @@
 // submission (its request as it was submitted: HTML "submit" builds it before it plans the navigation, so a page that
 // changes the form or moves it to another document after `submit()` changes nothing it sends), a download — and, the
 // top-level document's own, a navigation its `location` began (its URL, whether it replaces the current entry, the
-// document that began it and the Referer that one sends, a `blob:` one's blob) and a reload. A navigation of the
+// document that began it and the Referer that one sends, a `blob:` one's blob), a reload, and a frame's form submission
+// that navigates it. A navigation of the
 // top-level document supersedes the navigation, submission, location navigation or reload planned before it: the later
 // is taken (Chrome navigates to `/b` for `form.submit(); location.href = '/b'`, to the form's for the other order, and
 // reloads for `location.href = '/b'; location.reload()`). A frame's are its container's (frame_navigation.rs).
@@ -38,11 +39,23 @@ pub(crate) struct Location {
     blob: Option<v8::Global<v8::Value>>,
 }
 
-// The top-level document's location navigation and reload, as a flush of its tasks stashes them (`flushBegin`).
+// A form's submission a frame's document made that navigates the top-level document (its target `_top`, or a `_parent`
+// that is it): the frame's realm, the request as it was submitted, and the Referer it sends — the frame's document's
+// under its policy, `no-referrer` for its `rel=noreferrer` — taken as it was planned. The page's navigation planned last,
+// as its own are (Chrome: `location.href = …; frames[0].f.submit()` submits, the other order navigates).
+pub(crate) struct FrameSubmission {
+    realm: i32,
+    request: v8::Global<v8::Value>,
+    referrer: (String, String),
+}
+
+// The top-level document's location navigation, reload and a frame's submission to it, as a flush of its tasks stashes
+// them (`flushBegin`).
 #[derive(Default)]
 struct Own {
     location: Option<Location>,
     reload: Option<bool>,
+    submission: Option<FrameSubmission>,
 }
 
 #[derive(Default)]
@@ -80,6 +93,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "planReload", plan_reload, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
+    register(scope, ns, "submitToTop", submit_to_top, context_id);
+    register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
     register(scope, ns, "flushBegin", flush_begin, context_id);
     register(scope, ns, "flushEnd", flush_end, context_id);
@@ -127,9 +142,9 @@ fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan(scope, &args).download = Some((url, filename));
 }
 
-// __dom.supersedePlanned(): a navigation of the top-level document planned elsewhere (a frame's submission to it, a
-// traversal making its document again, a location's) — the navigation, the submission, the location navigation and the
-// reload planned before it taken by none.
+// __dom.supersedePlanned(): a navigation of the top-level document planned elsewhere (a traversal making its document
+// again, a location's) — the navigation, the submission, the location navigation, the reload and a frame's submission
+// planned before it taken by none.
 fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     plan(scope, &args).supersede();
 }
@@ -241,10 +256,41 @@ fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         rv.set_bool(activated);
     }
 }
-// __dom.ownPlanned() -> which of a location navigation (1) and a reload (2) is planned, 0 for neither.
+// __dom.submitToTop(): the calling frame realm's planned submission handed to the page's plan, as its target is the
+// top-level document (`FrameSubmission`) — superseding what that planned before — its Referer the frame's document's,
+// `no-referrer` for its `rel=noreferrer` (referrer.rs `navigation_referrer`).
+fn submit_to_top(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let Some(Submission(request)) = realm(scope, cid).navigation_plan.submission.take() else { return };
+    let local = v8::Local::new(scope, &request);
+    let rel = v8::Local::<v8::Object>::try_from(local)
+        .ok()
+        .and_then(|o| crate::dom::member(scope, o, "rel"))
+        .map_or_else(String::new, |r| r.to_rust_string_lossy(scope));
+    let policy = if crate::token_list::link_types(&rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
+    let referrer = crate::referrer::navigation_referrer(&mut crate::dom::dom(scope).arena, cid, policy);
+    let top = &mut realm(scope, 0).navigation_plan;
+    top.supersede();
+    top.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
+}
+// __dom.takeFrameSubmission() -> [realm, request, referrerSource, referrerPolicy] of that submission, which it plans no
+// more — or null.
+fn take_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(s) = plan(scope, &args).own.submission.take() else { return };
+    let items = [
+        v8::Integer::new(scope, s.realm).into(),
+        v8::Local::new(scope, s.request),
+        v8::String::new(scope, &s.referrer.0).unwrap().into(),
+        v8::String::new(scope, &s.referrer.1).unwrap().into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.ownPlanned() -> which of a location navigation (1), a reload (2) and a frame's submission (4) is planned, 0 for
+// none.
 fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let own = &plan(scope, &args).own;
-    rv.set_uint32(u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1));
+    rv.set_uint32(u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2));
 }
 // __dom.flushBegin(): the tasks due before a navigation of the document about to run — what it planned kept apart, so
 // they plan anew. __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
@@ -264,12 +310,17 @@ fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let drop = args.get(0).is_true();
     let plan = plan(scope, &args);
     let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { return rv.set_bool(false) };
-    let restored = (plan.own.location.is_none() && flushed.location.is_some()) || (plan.own.reload.is_none() && flushed.reload.is_some());
+    let restored = (plan.own.location.is_none() && flushed.location.is_some())
+        || (plan.own.reload.is_none() && flushed.reload.is_some())
+        || (plan.own.submission.is_none() && flushed.submission.is_some());
     if plan.own.location.is_none() {
         plan.own.location = flushed.location;
     }
     if plan.own.reload.is_none() {
         plan.own.reload = flushed.reload;
+    }
+    if plan.own.submission.is_none() {
+        plan.own.submission = flushed.submission;
     }
     rv.set_bool(restored);
 }

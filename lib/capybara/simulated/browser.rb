@@ -2450,7 +2450,6 @@ module Capybara
       # The navigations planned for navigable `nav` (0 the page) let go of: a traversal making its document again.
       private def cancel_navigations_for(nav)
         if nav.zero?
-          cancel_planned_navigation
           @runtime.call('__csimSupersedePlanned')
         elsif (realm = navigable_realm(nav))
           supersede_frame_navigation(realm)
@@ -3267,7 +3266,6 @@ module Capybara
       private def pending_navigation_besides_traversals?
         !(@pending_frame_nav || {}).empty? ||
           !(@pending_frame_submit || []).empty? ||
-          !@pending_page_submission.nil? ||
           !(@pending_frame_reload || []).empty? ||
           !own_planned.zero?
       end
@@ -10612,13 +10610,8 @@ module Capybara
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
       # any policy.
       def navigation_referrer(realm, policy = '') = request_client(realm, policy).values_at(4, 1)
-      # A frame's submission to the page, which was the page's navigation planned last (`frame_submit_self`), planned no
-      # more: a navigation the page planned since (a location's, a link's, a form's, a reload) replaces it (HTML "plan to
-      # navigate": the later is the one taken) — the page's own plan its own to supersede (navigation_plan.rs).
-      def cancel_planned_navigation
-        @pending_page_submission = nil
-      end
-      # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload.
+      # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload, a frame's
+      # submission to it.
       OWN_LOCATION = 1
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
@@ -10897,39 +10890,38 @@ module Capybara
       # `drain_pending_navigation` so we never serialize/navigate while the
       # form's `submit()` is still on the V8 stack.
       # (…`target` the one its request names, `request` that request: one that navigates the page is the page's navigation
-      # planned last, in a slot of the page's (`@pending_page_submission`), not the frame's — the one planned before it
-      # superseded, a location's, a reload, a link's or a form's of the page, Chrome's `location.href = …;
-      # frames[0].f.submit()` — and superseded in turn by one the page plans after it (`cancel_planned_navigation`),
-      # whatever the frame plans: its request and route taken now, whatever becomes of the frame by the time the page
-      # navigates; true where it is, the frame's plan of it the frame's to drop — handed over, not asked of the frame,
-      # whose realm a frame still being built does not answer)
-      # (…a frame still being built — its realm not yet one the host can ask — has its request taken as it is, routed as it
-      # is drained, its navigables known by then)
+      # planned last — SUBMIT_TO_TOP: the frame's plan hands it to the page's (navigation_plan.rs `submitToTop`), its
+      # request and Referer taken now, whatever becomes of the frame by the time the page navigates — not the frame's,
+      # superseding the one planned before it, a location's, a reload, a link's or a form's of the page, Chrome's
+      # `location.href = …; frames[0].f.submit()`, and superseded in turn by one the page plans after it, whatever the
+      # frame plans.)
+      # (…a frame still being built — its realm not yet one the host can ask — has its request taken as it is
+      # (SUBMIT_TAKEN: the frame's plan of it the frame's to drop), routed as it is drained, its navigables known by then)
+      SUBMIT_KEPT    = 0
+      SUBMIT_TAKEN   = 1
+      SUBMIT_TO_TOP  = 2
       def frame_submit_self(realm_id, target = '', request = nil)
-        return false if realm_id.nil? || realm_id.zero?
+        return SUBMIT_KEPT if realm_id.nil? || realm_id.zero?
         supersede_frame_navigation(realm_id, submitted: true)
         cancel_parent_form_navigation(realm_id) if frame_self_target?(target.to_s) || choose_named_navigable(realm_id, target.to_s) == realm_id
         pending = ((@pending_frame_submit ||= {})[realm_id] = {})
-        return false unless request.is_a?(Hash)
+        return SUBMIT_KEPT unless request.is_a?(Hash)
         unless @runtime.frame_realm_alive?(realm_id)
           pending[:spec] = request
-          return true
+          return SUBMIT_TAKEN
         end
-        return false unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
-        return false unless choose_named_navigable(realm_id, target) == :top
+        return SUBMIT_KEPT unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
+        return SUBMIT_KEPT unless choose_named_navigable(realm_id, target) == :top
 
         @pending_frame_submit.delete(realm_id)
-        cancel_planned_navigation
-        @runtime.call('__csimSupersedePlanned')
-        @pending_page_submission = {realm_id: realm_id, spec: request, route: frame_submission_route(realm_id, request)}
-        true
+        SUBMIT_TO_TOP
       end
       def consume_pending_page_submission
-        return unless (pending = @pending_page_submission)
+        realm_id, spec, source, policy = @runtime.call('__csimTakeFrameSubmission')
+        return unless realm_id
 
-        @pending_page_submission = nil
         invalidate_find_cache
-        submit_frame_route(pending[:realm_id], pending[:spec], pending[:route])
+        submit_frame_route(realm_id, spec, [:top, [source, policy]])
       rescue StandardError => e
         log_console('warn', "nested-context form submission failed: #{e.message}")
       end
@@ -12645,10 +12637,11 @@ module Capybara
       # (rather than saved individually) because a re-assignment does NOT restore a
       # slot mutated IN PLACE — `@pending_window_nav` / `@pending_frame_nav` / `@pending_frame_submit` are
       # Hashes keyed by realm and the frame-reload slot is an Array.
-      # (The page's own plan — its location navigation, its reload — is stashed alike, in the engine: navigation_plan.rs
+      # (The page's own plan — its location navigation, its reload, a frame's submission to it — is stashed alike, in the
+      # engine: navigation_plan.rs
       # `flushBegin`.)
       NAV_INTENT_SLOTS = %i[
-        @pending_history_traverse @pending_window_nav @pending_frame_nav @pending_frame_submit @pending_page_submission
+        @pending_history_traverse @pending_window_nav @pending_frame_nav @pending_frame_submit
         @pending_frame_reload
       ].freeze
       private_constant :NAV_INTENT_SLOTS

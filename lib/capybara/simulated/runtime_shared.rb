@@ -48,7 +48,6 @@ module Capybara
           mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
           b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
-        '__csimCancelPlannedNavigation' => ->(b, *_) { b.cancel_planned_navigation; nil },
         # A nested browsing context navigated (a[1] = the frame's realm id) — its OWN
         # location, or (a[3] = the initiating realm id) a link whose target names it,
         # under the policy (a[4]) its `rel` / `referrerpolicy` sets.
@@ -66,7 +65,7 @@ module Capybara
         # A <form> submitted from inside a nested browsing context (a[0] = the
         # initiating frame's realm id). Deferred + applied against that realm,
         # like __csimFrameNavigate — see Browser#frame_submit_self.
-        '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i, a[1].to_s, a[2]) == true },
+        '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i, a[1].to_s, a[2]) },
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
