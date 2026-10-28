@@ -10796,7 +10796,6 @@ module Capybara
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends.
       def consume_pending_frame_reload
         @runtime.call('__csimTakeFrameNavigations', FRAME_RELOAD).each do |_, realm_id|
-
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps
           # the frame stack in sync) — re-fetching its current document URL, which

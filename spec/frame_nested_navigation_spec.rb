@@ -56,7 +56,7 @@ RSpec.describe 'a nested document navigating itself' do
     s = session
     text = -> { s.evaluate_script('document.getElementById("f").contentDocument?.body?.textContent') }
     poll_until { text.() == 'o' }
-    s.execute_script("const f = document.getElementById('f'); frames[0].location = '/a'; f.remove(); document.body.append(f)")
+    s.execute_script("const f = document.getElementById('f'); frames[0].location = '/a'; f.remove(); document.body.append(f); f.contentDocument")
     expect(poll_until { text.() == 'o' && text.() }).to eq('o')
     s.evaluate_script('1')
     expect(text.()).to eq('o')
