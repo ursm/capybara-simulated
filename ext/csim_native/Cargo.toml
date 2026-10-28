@@ -23,9 +23,10 @@ serde_json = "1"
 # document's map kept as JSON between the page and the host.
 serde_json = { version = "1", features = ["preserve_order"] }
 # rusty_racer as a LIBRARY (not its gem .so): we call install_classes from our own
-# magnus init and register the DOM via set_realm_init_hook. Path dep during
-# development; a git/tagged dep at release time.
-rusty_racer = { path = "../../../rusty_racer/ext/rusty_racer" }
+# magnus init and register the DOM via set_realm_init_hook. The released tag, the
+# same version the gemspec asks for — the gem supplies the Ruby wrappers around
+# exactly this native source.
+rusty_racer = { git = "https://github.com/ursm/rusty_racer", tag = "v0.2.5" }
 magnus = { version = "0.8", features = ["rb-sys"] }
 rb-sys = "0.9"
 # MUST match rusty_racer's v8 exactly (version + features) so Cargo unifies to one

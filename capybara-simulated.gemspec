@@ -43,9 +43,8 @@ Gem::Specification.new do |spec|
   # `spec.files` above has to carry the crate this builds — extconf.rb alone (which RubyGems adds here for
   # free) would ship a build script with nothing to build. `spec/gemspec_packaging_spec.rb` asserts that, and
   # that no pattern in the list matches nothing: `ext/native_cascade/*` outlived its directory by months
-  # exactly because a dead glob is silent. NOTE that a source install still needs rusty_racer resolvable —
-  # ext/csim_native/Cargo.toml points at it by PATH during development, and that becomes a git/tagged dep at
-  # release time.
+  # exactly because a dead glob is silent. A source install fetches rusty_racer's native source by its release
+  # tag (ext/csim_native/Cargo.toml) — the version pinned below.
   spec.extensions = ['ext/csim_native/extconf.rb']
 
   spec.add_dependency 'capybara', '>= 3.37'
@@ -54,8 +53,9 @@ Gem::Specification.new do |spec|
   # only when compiling from source; a prebuilt (fat) gem carries the compiled extension already.
   spec.add_dependency 'rb_sys', '~> 0.9'
   # The JS engine: V8 via rusty_v8. Its native engine is linked into csim_native (above); the gem
-  # supplies the Ruby API around it. 0.2.4 is the first with the `install_classes` / `set_realm_init_hook`
-  # seams csim_native builds on — and the first whose `require 'rusty_racer'` skips loading its own `.so`
-  # once csim_native has defined the classes: an earlier one loads a SECOND V8 runtime into the process.
-  spec.add_dependency 'rusty_racer', '~> 0.2', '>= 0.2.4'
+  # supplies the Ruby API around it — so the two are ONE version, the tag the crate is built from: a gem's
+  # wrappers call into the native source of their own release, and another's may name a method this one
+  # lacks. (0.2.5: `eval_primitive`, `Module#evaluate(report:)`, a thrown value rethrown as itself, and a
+  # released realm's host function that no longer runs its slot's next proc.)
+  spec.add_dependency 'rusty_racer', '0.2.5'
 end

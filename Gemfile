@@ -2,13 +2,6 @@ source 'https://rubygems.org'
 
 gemspec
 
-# The gemspec depends on rusty_racer; this points it at the local checkout. The
-# native engine is linked INTO csim_native (ext/csim_native), so the gem provides
-# rusty_racer's pure-Ruby API wrappers (Isolate.new / eval / …); its native require
-# self-skips once csim_native has defined RustyRacer::*. Path (not the released
-# gem) keeps the Ruby wrappers in lockstep with the linked native source during
-# the native-DOM work.
-gem 'rusty_racer', path: '../rusty_racer'
 gem 'nokogiri'
 
 group :development, :test do
