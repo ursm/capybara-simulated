@@ -1,39 +1,19 @@
 # frozen_string_literal: true
 
 require 'rack'
-require 'time'
 
 module Capybara
   module Simulated
-    # HTTP/1.1 (RFC 9111) compliant response cache for `Browser#rack_fetch`.
-    # Process-wide, GET-only, no Vary support — enough to mirror what a
-    # real browser does for Rails-fingerprinted assets
-    # (`Cache-Control: public, max-age=31536000, immutable`) which is the
-    # request-volume difference behind Cuprite/Selenium being able to skip
-    # 80–90 % of repeat asset fetches across a suite.
+    # The HTTP cache (RFC 9111) of `Browser#rack_fetch`: process-wide, GET-only — enough to mirror what a real browser
+    # does for Rails-fingerprinted assets (`Cache-Control: public, max-age=31536000, immutable`), which is the
+    # request-volume difference behind Cuprite/Selenium being able to skip 80–90 % of repeat asset fetches across a suite.
     #
-    # Not cached:
-    #   - Non-GET methods
-    #   - Responses with `Cache-Control: no-store`
-    #   - Responses with `Cache-Control: private` — per-user responses that a
-    #     SHARED cache MUST NOT store (RFC 9111 §5.2.2.7). This cache is
-    #     process-wide and shared across test sessions, so it is a shared
-    #     cache for that purpose. (Forem's `/async_info/base_data` etc. send
-    #     `max-age=0, private`; storing them only wastes memory on data that
-    #     is always revalidated.)
-    #   - Responses with `Vary` listing anything other than `Accept-Encoding`
-    #     (which we ignore because we never send it)
-    #   - Responses with no freshness signal at all (no max-age, no Expires,
-    #     no ETag/Last-Modified to revalidate against)
-    #
-    # Cached but always revalidated:
-    #   - Responses with `Cache-Control: no-cache`
-    #   - Stale entries with ETag or Last-Modified validators
-    #
-    # The cache hands the body bytes back to bridge.js verbatim; downstream
-    # `__csim_runScript` bytecode caching is content-addressable
-    # (sha256(body)), so identical body → identical bytecode falls out
-    # naturally.
+    # Its POLICY is the engine's (http_cache.rs): which responses are stored — a status cacheable by default, no
+    # `no-store`, no `private` (this cache is shared across the test sessions of a process), no Vary but on
+    # Accept-Encoding (never sent), and a lifetime or a validator to go on — how long one stays fresh (max-age, else
+    # Expires less Date, else a heuristic tenth of the time since Last-Modified, less the age it came with), and what a 304
+    # updates. This keeps the responses, their bodies verbatim: downstream `__csim_runScript` bytecode caching is
+    # content-addressable (sha256(body)), so identical body → identical bytecode falls out naturally.
     #
     # No Mutex: MRI's Hash `[]`/`[]=` are atomic under the GVL. Concurrent access is
     # real — async image loads (and keepalive fetches) run `rack_fetch` on background
@@ -42,52 +22,15 @@ module Capybara
     # racing reader sees is a partial `stored_at`/`max_age` pair on `refresh`: freshness
     # computed against a transient mix, never a corrupted structure.
     class AssetCache
-      # `encoded`: the body's size on the wire before a Content-Encoding was undone — what a
-      # cache hit's Resource Timing entry reports as `encodedBodySize`.
+      # `max_age` the seconds it stays fresh from `stored_at` (nil for none: revalidated each use), `no_cache` whether every
+      # use revalidates it, `immutable` whether it outlives a test's reset; `encoded` the body's size on the wire before a
+      # Content-Encoding was undone — what a cache hit's Resource Timing entry reports as `encodedBodySize`.
       Entry = Struct.new(:status, :headers, :body, :stored_at, :max_age, :no_cache, :immutable, :encoded, keyword_init: true) do
-        # `must-revalidate` (RFC 9111 §5.2.2.2) only forbids reusing a
-        # response *once it has become stale* without revalidation — it
-        # does NOT force revalidation while the entry is still fresh, and
-        # this cache never serves a stale entry without revalidating
-        # anyway (lookup falls through to a conditional re-dispatch). So
-        # `must-revalidate` has no effect on freshness here. Only
-        # `no-cache` (§5.2.2.4), which requires validation before EVERY
-        # use, blocks a fresh entry. Conflating the two made Vite/Rails
-        # assets (`max-age=2419200, must-revalidate`) revalidate on every
-        # fetch instead of being served fresh like a real browser does.
-        def fresh?(now = Time.now)
-          return false if no_cache
-          # `max-age=0` (or absent) means the response is stale on arrival —
-          # a cache MUST revalidate before reuse (RFC 9111 §5.2.1.1). Ruby's
-          # `0` is truthy, so the value must be guarded explicitly; without
-          # `positive?`, a `max-age=0, must-revalidate` response (e.g. Forem's
-          # per-user `/async_info/base_data`, `/notifications/counts`) would be
-          # treated as fresh and served stale instead of revalidated.
-          return false unless max_age&.positive?
-          (now - stored_at) < max_age
-        end
+        def fresh?(now = Time.now) = Native.http_cache_fresh(stored_at.to_f, max_age, no_cache == true, now.to_f)
       end
 
-      # RFC 9111 §3: status codes cacheable by default.
-      # Statuses we store. 301/308 (permanent redirects) are cacheable by default; 302/307
-      # (temporary) are cacheable too but only ever served fresh with EXPLICIT freshness — they
-      # are excluded from HEURISTIC_STATUSES below, and a 302/307 with neither explicit freshness
-      # nor a validator is dropped by `store`. Storing them lets a cached redirect be followed
-      # from the cache (request-cache only-if-cached/force-cache).
-      CACHEABLE_STATUSES = [200, 203, 204, 206, 300, 301, 302, 307, 308, 404, 405, 410, 414, 501].freeze
-      # Statuses eligible for HEURISTIC freshness (RFC 9111 §4.2.2 — "cacheable by default").
-      # 302/307 are NOT here: a temporary redirect is served fresh only with explicit freshness,
-      # never a Last-Modified-derived heuristic (which would risk serving it stale).
-      HEURISTIC_STATUSES = [200, 203, 204, 206, 300, 301, 308, 404, 405, 410, 414, 501].freeze
-      # The fields a 304 does not update in the stored response (RFC 9111 §3.2): those that describe the content it
-      # carries none of.
-      UNREFRESHED_FIELDS = %w[content-encoding content-length content-range transfer-encoding].freeze
-
-      # `Vary` fields we can safely ignore because Simulated never sends
-      # the corresponding request header — the cached "no value" variant
-      # is always applicable. `Accept-Encoding` is the common one Rails
-      # adds to sprockets-served assets.
-      SAFE_VARY_FIELDS = %w[accept-encoding].freeze
+      # The response fields the policy reads (http_cache.rs `Fields`).
+      POLICY_FIELDS = %w[cache-control expires date last-modified etag vary age].freeze
 
       # Immutable entries live for the PROCESS now (they survive every reset), and a long app
       # suite mints fresh content-addressed URLs per example (Discourse's per-test themes and
@@ -125,33 +68,21 @@ module Capybara
       end
 
       def store(url, status, headers, body, encoded: nil)
-        return unless CACHEABLE_STATUSES.include?(status)
         h = ensure_lowercase(headers)
         # (…its cookies not kept: they were set as the response came, and a replay is no response that sets them)
         h.delete('set-cookie')
-        return unless vary_compatible?(h['vary'])
-        cc = parse_cache_control(h['cache-control'])
-        # Honour the server's explicit directives only (RFC 9111) — no
-        # URL-shape heuristic. `no-store` MUST NOT be stored (§5.2.2.5),
-        # full stop; whether a URL "looks fingerprinted" is a guess that
-        # can misfire and serve a genuinely no-store response stale.
-        return if cc[:no_store]
-        # `private` is a per-user response a shared cache MUST NOT store
-        # (§5.2.2.7); this process-wide cache is shared across sessions.
-        return if cc[:private]
-        max_age = freshness_seconds(cc, h, heuristic: HEURISTIC_STATUSES.include?(status))
-        # Nothing useful to cache without a freshness signal or a
-        # validator to revalidate against.
-        return if max_age.nil? && h['etag'].nil? && h['last-modified'].nil?
+        now = Time.now
+        stored = policy(status, h, now, refresh: false) or return
+        max_age, no_cache, immutable = stored
         @entries.clear if @entries.size >= MAX_ENTRIES && !@entries.key?(url)
         @entries[url] = Entry.new(
           status:    status,
           headers:   h,
           body:      body,
-          stored_at: Time.now,
+          stored_at: now,
           max_age:   max_age,
-          no_cache:  cc[:no_cache],
-          immutable: cc[:immutable] == true,
+          no_cache:  no_cache,
+          immutable: immutable,
           encoded:   encoded
         )
       end
@@ -163,66 +94,34 @@ module Capybara
         h
       end
 
-      # RFC 9111 §4.3.4: a 304 that revalidates the entry stored for `url`
-      # refreshes it without replacing the body: its header fields updated
-      # with the ones the 304 carries — a rotated ETag or Last-Modified what
-      # the next revalidation sends — but for those describing the content it
-      # carries none of (§3.2), its cookies (kept no more than a stored 200's)
-      # and the driver's own `x-csim-*` (a 304's status text is no 200's);
-      # and its freshness, no-cache and immutability read again off the
-      # fields as they now are (a bare 304 keeps the stored Cache-Control, a
-      # new Date shortens an Expires). Where they now forbid storing it —
-      # `no-store`, `private`, a Vary it cannot honour — it is dropped, though
-      # this request is still answered from it. The fields are written as one
-      # new header map, never mutated in place: a thread reading the entry's
-      # (an image load, a keepalive) iterates the one it took.
+      # RFC 9111 §4.3.4: a 304 that revalidates the entry stored for `url` refreshes it without replacing the body: its
+      # header fields updated with the ones the 304 carries — a rotated ETag or Last-Modified what the next revalidation
+      # sends — but for those it does not update (http_cache.rs `unrefreshed`: those describing the content it carries
+      # none of, its cookies, the driver's own `x-csim-*`); and its freshness, no-cache and immutability read again off the
+      # fields as they now are (a bare 304 keeps the stored Cache-Control, a new Date shortens an Expires). Where they now
+      # forbid storing it — `no-store`, `private`, a Vary it cannot honour — it is dropped, though this request is still
+      # answered from it. The fields are written as one new header map, never mutated in place: a thread reading the
+      # entry's (an image load, a keepalive) iterates the one it took.
       def refresh(url, entry, new_headers)
         merged = ensure_lowercase(entry.headers)
         ensure_lowercase(new_headers).each do |k, v|
-          merged[k] = v unless UNREFRESHED_FIELDS.include?(k) || k == 'set-cookie' || k.start_with?('x-csim-')
+          merged[k] = v unless Native.http_cache_unrefreshed(k.to_s)
         end
-        cc = parse_cache_control(merged['cache-control'])
+        now = Time.now
+        kept = policy(entry.status, merged, now, refresh: true)
         entry.headers   = merged
-        entry.stored_at = Time.now
-        entry.max_age   = freshness_seconds(cc, merged, heuristic: HEURISTIC_STATUSES.include?(entry.status))
-        entry.no_cache  = cc[:no_cache]
-        entry.immutable = cc[:immutable] == true
-        @entries.delete(url) if (cc[:no_store] || cc[:private] || !vary_compatible?(merged['vary'])) && @entries[url].equal?(entry)
+        entry.stored_at = now
+        entry.max_age, entry.no_cache, entry.immutable = kept || [nil, false, false]
+        @entries.delete(url) if kept.nil? && @entries[url].equal?(entry)
         entry
       end
 
       private
 
-      def freshness_seconds(cc, headers, heuristic: true)
-        explicit = cc[:max_age] || expires_to_max_age(headers['expires'], headers['date'])
-        explicit || (heuristic ? heuristic_freshness(headers) : nil)
-      end
-
-      # RFC 9111 §4.2.2: a response with no explicit freshness (no max-age, no
-      # Expires) but a `Last-Modified` MAY be assigned a heuristic lifetime; the
-      # common browser choice is 10% of (now − Last-Modified), and browsers cap
-      # it (an old `Last-Modified` shouldn't grant years of freshness) — we cap
-      # at one day. Without this, a response carrying only `Last-Modified` is
-      # revalidated on every fetch, which is what a real browser AVOIDS for e.g.
-      # Discourse's content-hashed `/assets/*.js` (shipped with `Last-Modified`
-      # and no `Cache-Control`). Here, cross-test staleness is bounded by
-      # `clear_volatile` dropping non-immutable entries at `reset!`; Browser's
-      # cross-session `@@asset_src` cache has its own argument (it only holds
-      # content-stable assets at content-hashed URLs).
-      HEURISTIC_FRESHNESS_CAP = 24 * 60 * 60
-
-      def heuristic_freshness(headers)
-        lm = headers['last-modified'] or return nil
-        t  = (Time.httpdate(lm) rescue nil) or return nil
-        age = Time.now - t
-        age.positive? ? [(age * 0.1).to_i, HEURISTIC_FRESHNESS_CAP].min : nil
-      end
-
-      def vary_compatible?(vary)
-        return true unless vary
-        fields = vary.to_s.downcase.split(',').map(&:strip)
-        return false if fields.include?('*')
-        (fields - SAFE_VARY_FIELDS).empty?
+      # The engine's policy for a response of `status` with the lowercased fields `h`, come at `now`: [max_age, no_cache,
+      # immutable], or nil where it may not be stored (`refresh`: kept, once a 304 updated it).
+      def policy(status, h, now, refresh:)
+        Native.http_cache_policy(status.to_i, *POLICY_FIELDS.map {|name| h[name] }, now.to_f, refresh)
       end
 
       # Apps may return mixed-case header hashes on Rack 2; Rack 3 ships
@@ -238,38 +137,6 @@ module Capybara
         out = defined?(::Rack::Headers) ? ::Rack::Headers.new : {}
         headers.each {|k, v| out[defined?(::Rack::Headers) ? k : k.to_s.downcase] = self.class.combined(v) }
         out
-      end
-
-      DIRECTIVE_RE = /\A(?<key>[a-zA-Z-]+)(?:=(?<val>.+))?\z/
-
-      def parse_cache_control(value)
-        out = {}
-        return out unless value
-        value.to_s.split(',').each {|part|
-          m = part.strip.match(DIRECTIVE_RE)
-          next unless m
-          case m[:key].downcase
-          when 'no-store'         then out[:no_store]         = true
-          when 'no-cache'         then out[:no_cache]         = true
-          when 'private'          then out[:private]          = true
-          when 'immutable'        then out[:immutable]        = true
-          when 'max-age'          then out[:max_age]          = m[:val].to_i if m[:val]
-          # `s-maxage` applies to SHARED caches only (RFC 9111 §5.2.2.10); a
-          # browser is a private cache and MUST ignore it — otherwise an
-          # `s-maxage=N` response with no `max-age` would be served fresh for
-          # N instead of revalidated, diverging from a real browser.
-          end
-        }
-        out
-      end
-
-      def expires_to_max_age(expires, date)
-        return nil unless expires
-        exp_t  = Time.httpdate(expires) rescue nil
-        return nil unless exp_t
-        base_t = (date && (Time.httpdate(date) rescue nil)) || Time.now
-        diff = (exp_t - base_t).to_i
-        diff.positive? ? diff : 0
       end
     end
   end

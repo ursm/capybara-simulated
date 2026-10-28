@@ -186,6 +186,7 @@ mod popovers;
 mod activation;
 mod cookie_jar;
 mod http_auth;
+mod http_cache;
 mod cors;
 mod text;
 mod text_codec;
@@ -304,6 +305,10 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("http_auth_entry", magnus::function!(http_auth::entry_for_ruby, 2))?;
     native.define_module_function("http_auth_accepted", magnus::function!(http_auth::accepted_for_ruby, 3))?;
     native.define_module_function("http_auth_answers", magnus::function!(http_auth::answers_challenge_for_ruby, 6))?;
+    // The HTTP cache's policy (http_cache.rs): what is stored, for how long, and what a 304 updates.
+    native.define_module_function("http_cache_policy", magnus::function!(http_cache::policy_for_ruby, 10))?;
+    native.define_module_function("http_cache_fresh", magnus::function!(http_cache::fresh_for_ruby, 4))?;
+    native.define_module_function("http_cache_unrefreshed", magnus::function!(http_cache::unrefreshed_for_ruby, 1))?;
     native.define_module_function("cookie_jar_clear", magnus::function!(cookie_jar::clear_for_ruby, 1))?;
     native.define_module_function("cookie_jar_set", magnus::function!(cookie_jar::set_for_ruby, 5))?;
     native.define_module_function("cookie_jar_get", magnus::function!(cookie_jar::get_for_ruby, 4))?;

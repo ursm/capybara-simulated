@@ -60,6 +60,20 @@ RSpec.describe Capybara::Simulated::AssetCache do
     cache.refresh('http://app/e', entry, {'cache-control' => 'no-store'})
     expect(cache.lookup('http://app/e')).to be_nil
   end
+
+  # (…its freshness RFC 9111's: the age it came with taken off its lifetime, the first of two max-ages read, an invalid
+  # Expires — "0" the common one — already in the past)
+  it 'counts the age a response came with, the first max-age, and an invalid Expires as stale' do
+    cache = described_class.new
+    now   = Time.now
+    cache.store('http://app/aged', 200, {'cache-control' => 'max-age=60', 'age' => '50'}, 'body')
+    cache.store('http://app/twice', 200, {'cache-control' => 'max-age=60, max-age=1'}, 'body')
+    cache.store('http://app/expired', 200, {'expires' => '0', 'etag' => '"e"'}, 'body')
+    expect(cache.lookup('http://app/aged').fresh?(now + 20)).to be(false)
+    expect(cache.lookup('http://app/aged').fresh?(now + 5)).to be(true)
+    expect(cache.lookup('http://app/twice').fresh?(now + 30)).to be(true)
+    expect(cache.lookup('http://app/expired').fresh?(now)).to be(false)
+  end
 end
 
 # …and the same contract seen from a session: a `reset!` between visits keeps an immutable
