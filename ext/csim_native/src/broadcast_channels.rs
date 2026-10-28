@@ -6,10 +6,12 @@
 //
 // A channel's object is held weakly: one nothing holds receives nothing, and is let go of as the registry grows. What
 // stays with the bindings (broadcast-channel.js) is what is a call or a value — the serialized message, the task each
-// delivery is, the event — and with the host the queue a post across realms of the isolate is delivered from, in this
-// order, and the windows and workers beyond the isolate.
+// delivery is, the event — and with the host the windows and workers beyond the isolate, and the running of each
+// delivery, as a task of its own, from the queue the isolate's posts across its realms are delivered from (`queue`):
+// one delivery to one channel at a time, in the order they were queued — a post's to its channels in creation order,
+// a handler's re-post after them — the single global task queue HTML's "postMessage" queues them on.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use crate::dom::{dom, realm_id, register};
 
@@ -28,6 +30,18 @@ pub(crate) struct BroadcastChannels {
     by_key: HashMap<(String, String), Vec<u64>>,
     // The size at which the next sweep lets go of the channels nothing holds: twice what the last one left.
     sweep_at: usize,
+    queue: VecDeque<Delivery>,
+}
+
+// A message queued for one channel: its realm, its number, the message as it was serialized, and its origin — the
+// serialized one a post of this isolate's exposes, or (`inbound`) the KEY of another window's or a worker's, which the
+// receiving realm serializes.
+struct Delivery {
+    realm: i32,
+    id: u64,
+    message: v8::Global<v8::Value>,
+    origin: String,
+    inbound: bool,
 }
 
 impl BroadcastChannels {
@@ -58,11 +72,13 @@ impl BroadcastChannels {
     // realm (the main one's) never reaches a channel of the one before.
     pub(crate) fn drop_realm(&mut self, cid: i32) {
         self.retain(|c| c.realm != cid);
+        self.queue.retain(|d| d.realm != cid);
     }
     // The isolate's slots go after V8 has disposed it, and a weak handle's drop resets its node, freed memory by then:
     // let go of whole (as the Dom's other weak handles are).
     pub(crate) fn leak_weak_handles(&mut self) {
         std::mem::forget(std::mem::take(&mut self.of));
+        std::mem::forget(std::mem::take(&mut self.queue));
         self.by_key.clear();
     }
 }
@@ -73,6 +89,43 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "bcTargets", targets_op, context_id);
     register(scope, ns, "bcChannel", channel_op, context_id);
     register(scope, ns, "bcState", state_op, context_id);
+    register(scope, ns, "bcQueue", queue_op, context_id);
+    register(scope, ns, "bcTakeQueued", take_queued_op, context_id);
+    register(scope, ns, "bcQueued", queued_op, context_id);
+}
+
+// __dom.bcQueue(targets, message, origin, inbound): a post queued for each channel of `targets` ([realm, id, …],
+// `bcTargets`'), in that order (`Delivery`).
+fn queue_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(targets) = v8::Local::<v8::Array>::try_from(args.get(0)) else { return };
+    let message = v8::Global::new(scope, args.get(1));
+    let origin = args.get(2).to_rust_string_lossy(scope);
+    let inbound = args.get(3).is_true();
+    let mut queued = Vec::new();
+    for i in (0..targets.length()).step_by(2) {
+        let realm = targets.get_index(scope, i).and_then(|v| v.int32_value(scope)).unwrap_or(0);
+        let id = targets.get_index(scope, i + 1).map_or(0, |v| id_arg(scope, v));
+        queued.push(Delivery { realm, id, message: message.clone(), origin: origin.clone(), inbound });
+    }
+    dom(scope).broadcast_channels.queue.extend(queued);
+}
+// __dom.bcTakeQueued() -> [realm, id, message, origin, inbound] of the first delivery queued, which is queued no more, or
+// null for none.
+fn take_queued_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_null();
+    let Some(d) = dom(scope).broadcast_channels.queue.pop_front() else { return };
+    let items = [
+        v8::Integer::new(scope, d.realm).into(),
+        v8::Number::new(scope, d.id as f64).into(),
+        v8::Local::new(scope, d.message),
+        v8::String::new(scope, &d.origin).unwrap().into(),
+        v8::Boolean::new(scope, d.inbound).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.bcQueued() -> whether a delivery is queued.
+fn queued_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(!dom(scope).broadcast_channels.queue.is_empty());
 }
 
 fn id_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> u64 {
