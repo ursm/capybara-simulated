@@ -8,9 +8,10 @@
 // `history.length` is one more and its `history.back()` takes the FRAME back).
 //
 // The entries here are what the joint history is made of — their steps, their document states, their URLs — and what a
-// replay of one sends and restores (`Data`), which the host gives and reads by the entry's id (browser.rb). A frame's navigable is the id navigables.rs gives it, and that of the page document build it
-// was made under (`rebuilt`): a document the page traverses back to is made again with navigables of its own, which
-// the nested histories its document state kept from before are not (they still count their steps).
+// replay of one sends and restores (`Data`), which the host gives and reads by the entry's id (browser.rb). A frame's
+// navigable is the id navigables.rs gives it, and that of the page document build it was made under (`rebuilt`): a
+// document the page traverses back to is made again with navigables of its own, which the nested histories its document
+// state kept from before are not (they still count their steps).
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -28,16 +29,18 @@ struct Entry {
     data: Arc<Data>,
 }
 
+// The text fields of an entry's `Data`: the origin, Referer and referrer policy its request was sent with, and its
+// document's referrer.
+const TEXT_FIELDS: [&str; 4] = ["origin", "referer", "referrer_policy", "referrer"];
+
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
 // and referrer policy its request was sent with (HTML's document state) — its document's referrer, a frame's, and its
 // classic history API state and its document's persisted form state, serialized (StructuredSerializeForStorage).
 #[derive(Clone, Default)]
 struct Data {
     post: Option<(Arc<[u8]>, Option<String>)>,
-    origin: Option<String>,
-    referer: Option<String>,
-    referrer_policy: Option<String>,
-    referrer: Option<String>,
+    // (…by `TEXT_FIELDS`)
+    texts: [Option<String>; 4],
     state: Option<Arc<[u8]>>,
     form_state: Option<Arc<[u8]>>,
 }
@@ -63,12 +66,7 @@ impl Data {
             let content_type = text("content_type")?.flatten();
             self.post = body.map(|body| (body, content_type));
         }
-        for (key, field) in [
-            ("origin", &mut self.origin),
-            ("referer", &mut self.referer),
-            ("referrer_policy", &mut self.referrer_policy),
-            ("referrer", &mut self.referrer),
-        ] {
+        for (key, field) in TEXT_FIELDS.iter().zip(&mut self.texts) {
             if let Some(v) = text(key)? {
                 *field = v;
             }
@@ -82,6 +80,11 @@ impl Data {
         Ok(())
     }
 
+    // The text field `key` names, where it has one.
+    fn text(&self, key: &str) -> Option<&str> {
+        self.texts[TEXT_FIELDS.iter().position(|&k| k == key)?].as_deref()
+    }
+
     // …and as a hash of the ones it has.
     fn to_hash(&self, ruby: &magnus::Ruby, url: &str) -> Result<RHash, magnus::Error> {
         let hash = ruby.hash_new();
@@ -90,14 +93,9 @@ impl Data {
             hash.aset(Symbol::new("body"), ruby.str_from_slice(body))?;
             hash.aset(Symbol::new("content_type"), content_type.as_deref())?;
         }
-        for (key, field) in [
-            ("origin", &self.origin),
-            ("referer", &self.referer),
-            ("referrer_policy", &self.referrer_policy),
-            ("referrer", &self.referrer),
-        ] {
-            if let Some(v) = field {
-                hash.aset(Symbol::new(key), v.as_str())?;
+        for key in TEXT_FIELDS {
+            if let Some(v) = self.text(key) {
+                hash.aset(Symbol::new(key), v)?;
             }
         }
         for (key, field) in [("state", &self.state), ("form_state", &self.form_state)] {
@@ -513,6 +511,12 @@ impl SessionHistory {
             None => Ok(ruby.hash_new()),
         }
     }
+    // #text(entry, name) -> its text field `name` (`TEXT_FIELDS`: :origin, :referer, :referrer_policy, :referrer), nil
+    // for none — what `#entry` gives without copying its bytes out.
+    fn text(&self, id: Option<u64>, name: Symbol) -> Result<Option<String>, magnus::Error> {
+        let name = name.name()?;
+        Ok(id.and_then(|id| self.0.borrow().state.entry(id).and_then(|e| e.data.text(&name).map(str::to_owned))))
+    }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
     fn update(&self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
@@ -637,6 +641,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("url", method!(SessionHistory::url, 1))?;
     class.define_method("set_url", method!(SessionHistory::set_url, 2))?;
     class.define_method("entry", method!(SessionHistory::entry, 1))?;
+    class.define_method("text", method!(SessionHistory::text, 2))?;
     class.define_method("update", method!(SessionHistory::update, 2))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
@@ -873,10 +878,10 @@ mod tests {
     #[test]
     fn a_saved_history_keeps_the_data_it_had() {
         let h = history();
-        let a = h.push(TOP, TOP, "/a".into(), false, Data { referer: Some("/r".into()), ..Default::default() }).unwrap();
+        let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None], ..Default::default() }).unwrap();
         h.save(0);
-        Arc::make_mut(&mut h.0.borrow_mut().state.entry_mut(a).unwrap().data).referer = Some("/changed".into());
+        Arc::make_mut(&mut h.0.borrow_mut().state.entry_mut(a).unwrap().data).texts[1] = Some("/changed".into());
         assert!(h.restore(0));
-        assert_eq!(h.0.borrow().state.entry(a).unwrap().data.referer.as_deref(), Some("/r"));
+        assert_eq!(h.0.borrow().state.entry(a).unwrap().data.text("referer"), Some("/r"));
     }
 }

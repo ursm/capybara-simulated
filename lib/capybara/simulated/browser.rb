@@ -10534,7 +10534,7 @@ module Capybara
       def frame_document_made(realm_id, referrer)
         return unless (id = frame_history_id(realm_id))
 
-        @session_history.update(id, {referrer: referrer.to_s}) unless @session_history.entry(id).key?(:referrer)
+        @session_history.update(id, {referrer: referrer.to_s}) unless @session_history.text(id, :referrer)
       end
       # …the live frame realm of navigable `nav`, or nil.
       def navigable_realm(nav)
@@ -10549,7 +10549,7 @@ module Capybara
         frame_history_id(parent, create: true) unless parent.zero?
         id = @session_history.seed(nav, parent_nav, frame_realm_url(realm_id).to_s)
         # (…an entry made of the document it is at keeping that document's referrer: `frame_document_made`)
-        frame_document_made_referrer(id, realm_id) if id && !@session_history.entry(id).key?(:referrer)
+        frame_document_made_referrer(id, realm_id) if id && !@session_history.text(id, :referrer)
         id
       end
       private def frame_document_made_referrer(id, realm_id)
@@ -11289,8 +11289,8 @@ module Capybara
         record_url_transition(resolved)
         @current_url = resolved
         # (…of the document's state, its referrer with it: a traversal that makes the document again refers as it was)
-        current = @session_history.entry(@session_history.active(0))
-        record_history({url: resolved, state: state, kind: :push_state, referer: current[:referer], referrer_policy: current[:referrer_policy]})
+        current = @session_history.active(0)
+        record_history({url: resolved, state: state, kind: :push_state, referer: @session_history.text(current, :referer), referrer_policy: @session_history.text(current, :referrer_policy)})
       end
 
       # A SAME-DOCUMENT URL change (pushState / replaceState / a fragment navigation) made by a NESTED browsing context:
@@ -11305,7 +11305,7 @@ module Capybara
 
         nav, parent, = frame_navigable(realm_id)
         if push
-          @session_history.push(nav, parent, url.to_s, true, {state: state, referrer: @session_history.entry(id)[:referrer]})
+          @session_history.push(nav, parent, url.to_s, true, {state: state, referrer: @session_history.text(id, :referrer)})
         else
           @session_history.set_url(id, url.to_s) if url
           @session_history.update(id, {state: state})

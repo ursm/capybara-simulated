@@ -79,6 +79,14 @@ impl v8::ValueSerializerImpl for Serializer<'_> {
         Some(shared.len() as u32 - 1)
     }
 
+    // (…a WebAssembly.Module a DataCloneError — as HTML has it of one serialized for storage (a session history entry's
+    // state); a message's, which may share its module within the agent cluster, is a gap: no module is shared here)
+    fn get_wasm_module_transfer_id(&self, scope: &mut v8::PinScope<'_, '_>, _module: v8::Local<v8::WasmModuleObject>) -> Option<u32> {
+        let message = v8::String::new(scope, "A WebAssembly.Module could not be cloned.")?;
+        throw_dom_exception(scope, message, "DataCloneError");
+        None
+    }
+
     // An ordinary object of this realm — one whose prototype is its %Object.prototype%, or null — is no platform
     // object, and the hook is not asked (another realm's is the hook's to tell, as any object with another prototype).
     fn is_host_object<'s>(&self, scope: &mut v8::PinScope<'s, '_>, object: v8::Local<'s, v8::Object>) -> Option<bool> {

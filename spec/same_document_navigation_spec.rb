@@ -270,6 +270,17 @@ RSpec.describe 'same-document navigation' do
       expect(s.evaluate_script("#{kept_state}(history.state)")).to eq([true, true, true, 'g', 'e', false, 'bigint', 2])
     end
 
+    # (…for storage: no WebAssembly.Module — WebAssembly JS API "serialization steps")
+    it 'refuses to keep a WebAssembly.Module' do
+      s = state_session
+      expect(s.evaluate_script(<<~JS)).to eq(['DataCloneError', '/a'])
+        (() => {
+          const module = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+          try { history.pushState({module}, '', '/b') } catch (e) { return [e.name, location.pathname] }
+        })()
+      JS
+    end
+
     # (…for storage: no SharedArrayBuffer, even in a cross-origin isolated document, which may post one)
     it 'refuses to keep a SharedArrayBuffer' do
       app = lambda do |_env|

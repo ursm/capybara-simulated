@@ -304,16 +304,20 @@ RSpec.describe "a form submission's request" do
     expect(session.current_url).to eq('http://www.example.com/loop20')
   end
 
-  # …and a re-post that ends in a download leaves the entry the POST's: the next reload re-posts it (Chrome).
+  # …and a re-post that ends in a download leaves the entry the POST's: the next reload re-posts it (Chrome) — its body
+  # and the Referer it was first sent with, though the redirect it was answered with made the entry a GET's before the
+  # download put the history back (session_history.rs `Data`, a saved history's copy its own).
   it 'keeps the entry of a re-post that ends in a download' do
     seen = []
+    posts = []
     app = lambda {|env|
       seen << [env['REQUEST_METHOD'], env['PATH_INFO']] unless env['PATH_INFO'] == '/'
+      posts << [env['HTTP_REFERER'], env['rack.input'].read] if env['REQUEST_METHOD'] == 'POST'
       next [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename=f.txt'}, ['f']] if env['PATH_INFO'] == '/dl'
       next [302, {'location' => '/dl'}, []] if env['PATH_INFO'] == '/r' && seen.count(%w[POST /r]) > 1
       next html.('<body>r') if env['PATH_INFO'] == '/r'
 
-      html.('<body><form action="/r" method="post"><button>go</button></form>')
+      html.('<body><form action="/r" method="post"><input name="q" value="v"><button>go</button></form>')
     }
     session = simulated_session(app)
     session.visit '/'
@@ -322,6 +326,7 @@ RSpec.describe "a form submission's request" do
     session.refresh
     expect(session).to have_current_path('/r')
     expect(seen).to eq([%w[POST /r], %w[POST /r], %w[GET /dl], %w[POST /r], %w[GET /dl]])
+    expect(posts).to eq([['http://www.example.com/', 'q=v']] * 3)
   end
 
   # …and a submission to a named frame is that frame's navigation request: Sec-Fetch-Dest 'iframe', and a POST its
