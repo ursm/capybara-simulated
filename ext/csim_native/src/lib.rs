@@ -26,6 +26,7 @@ mod canvas_path;
 mod canvas_state;
 mod canvas_text;
 mod caret;
+mod caret_moves;
 mod ce_reactions;
 mod change_on_blur;
 mod character_data;

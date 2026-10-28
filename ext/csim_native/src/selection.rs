@@ -192,6 +192,16 @@ fn selected(scope: &mut v8::PinScope<'_, '_>, cid: i32, sel: &SelectionHandle) -
     Some(Selected { start, end, backward: sel.direction.get() == BACKWARD, counted })
 }
 
+// The selection state `value`'s points as an engine step that moves the caret reads them (caret_moves.rs): its focus,
+// wherever its range is (`FOCUS`), and its start and end where the range is in the document, a shadow tree in it
+// included (`CONNECTED_RANGE`) — none of either for a selection with no range, or no selection state.
+pub(crate) fn caret_points(scope: &mut v8::PinScope<'_, '_>, cid: i32, value: v8::Local<'_, v8::Value>) -> (Option<(NodeId, u32)>, Option<[(NodeId, u32); 2]>) {
+    let Some(sel) = handle(scope, value) else { return (None, None) };
+    let Some(s) = selected(scope, cid, sel) else { return (None, None) };
+    let connected = in_document(realm(scope, cid), sel, s.start.0).then_some([s.start, s.end]);
+    (Some(s.focus()), connected)
+}
+
 // The object of a point the range has: its start's container (0) or its end's (1).
 fn container_of<'s>(scope: &mut v8::PinScope<'s, '_>, sel: &SelectionHandle, which: usize) -> Option<v8::Local<'s, v8::Object>> {
     let range = sel.range(scope)?;

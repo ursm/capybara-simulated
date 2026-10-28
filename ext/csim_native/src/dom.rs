@@ -3172,6 +3172,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::image_bitmaps::install(scope, ns, context_id);
     crate::offscreen_canvas::install(scope, ns, context_id);
     crate::canvas_image::install(scope, ns, context_id);
+    crate::caret_moves::install(scope, ns, context_id);
     crate::blob_data::install(scope, ns, context_id);
     crate::tables::install(scope, ns, context_id);
     crate::attributes::install(scope, ns, context_id);

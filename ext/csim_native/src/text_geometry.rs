@@ -834,8 +834,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "caretFromPoint", caret_from_point, context_id);
     crate::dom::register(scope, ns, "textCurrent", text_current, context_id);
     crate::dom::register(scope, ns, "caretRect", caret_rect, context_id);
-    crate::dom::register(scope, ns, "caretLineOver", caret_line_over, context_id);
-    crate::dom::register(scope, ns, "caretLineEdge", caret_line_edge, context_id);
     crate::dom::register(scope, ns, "caretMoveKeep", caret_move_keep, context_id);
     crate::dom::register(scope, ns, "caretMoveForget", caret_move_forget, context_id);
     crate::dom::register(scope, ns, "selectionModifyTarget", selection_modify_target, context_id);
@@ -918,27 +916,10 @@ impl RealmArena {
     }
 }
 
-// __dom.caretLineOver(root, nid, offset, up, edgeNid, edgeOffset) -> [[node], offset, x]: ArrowUp / ArrowDown — the caret
-// a line up or down in `root` (a contenteditable's editing host, or a textarea) from the caret at (`nid`, `offset`): on
-// the next line of its text above or below the caret's rect (`line_over`) at the x the moves set out from
-// (`caret_from_point`); past the first or last line the edge given. Undefined where the caret has no rect.
-fn caret_line_over(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(root), Some(node)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
-    let offset = args.get(2).uint32_value(scope).unwrap_or(0);
-    let up = args.get(3).is_true();
-    let edge = crate::dom::nid_arg(scope, &args, 4).map(|n| (n, args.get(5).uint32_value(scope).unwrap_or(0)));
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(((node, offset), x)) = line_over(scope, cid, root, node, offset, up, edge) else { return rv.set_null() };
-    let values = [
-        crate::dom::nodes_value(scope, cid, &[node]),
-        v8::Integer::new_from_unsigned(scope, offset).into(),
-        v8::Number::new(scope, x).into(),
-    ];
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
-}
-// The caret a line up or down from (`node`, `offset`) in `root`, at the x the moves set out from (the realm's kept move,
-// where it is there), past the first or last line to `edge` — and that x.
-fn line_over(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: NodeId, offset: u32, up: bool, edge: Option<(NodeId, u32)>) -> Option<((NodeId, u32), f64)> {
+// ArrowUp / ArrowDown (caret_moves.rs): the caret a line up or down from (`node`, `offset`) in `root` — a
+// contenteditable's editing host, or a textarea — on the next line of its text above or below the caret's rect, at the x
+// the moves set out from (the realm's kept move, where it is there), past the first or last line to `edge` — and that x.
+pub(crate) fn line_over(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: NodeId, offset: u32, up: bool, edge: Option<(NodeId, u32)>) -> Option<((NodeId, u32), f64)> {
     let from = move_from(scope, cid, node, offset);
     with_text(scope, cid, |arena, g| {
         let rect = arena.caret_rect(g, node, offset, from.is_some_and(|m| m.upstream)).or_else(|| arena.box_caret_rect(node, offset))?;
@@ -953,24 +934,9 @@ fn line_over(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: Nod
     .flatten()
 }
 
-// __dom.caretLineEdge(root, nid, offset, end) -> [[node], offset, upstream]: Home / End — the first or last place of the
-// line in `root` the caret at (`nid`, `offset`) is on (`line_edge`), the line a wrap ends there where the kept move was
-// End's; or null.
-fn caret_line_edge(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(root), Some(node)) = (crate::dom::nid_arg(scope, &args, 0), crate::dom::nid_arg(scope, &args, 1)) else { return };
-    let offset = args.get(2).uint32_value(scope).unwrap_or(0);
-    let end = args.get(3).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    let Some(((node, offset), wrapped)) = line_edge(scope, cid, root, node, offset, end) else { return rv.set_null() };
-    let values = [
-        crate::dom::nodes_value(scope, cid, &[node]),
-        v8::Integer::new_from_unsigned(scope, offset).into(),
-        v8::Boolean::new(scope, wrapped).into(),
-    ];
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
-}
-// The first or last (`end`) place of the line (`node`, `offset`) is on in `root`, and whether a soft wrap ends it there.
-fn line_edge(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: NodeId, offset: u32, end: bool) -> Option<((NodeId, u32), bool)> {
+// Home / End (caret_moves.rs): the first or last (`end`) place of the line (`node`, `offset`) is on in `root` — the line a
+// wrap ends there where the kept move was End's — and whether a soft wrap ends it there.
+pub(crate) fn line_edge(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, node: NodeId, offset: u32, end: bool) -> Option<((NodeId, u32), bool)> {
     let upstream = move_from(scope, cid, node, offset).is_some_and(|m| m.upstream);
     with_text(scope, cid, |arena, g| arena.line_edge(g, root, node, offset, upstream, end)).flatten()
 }

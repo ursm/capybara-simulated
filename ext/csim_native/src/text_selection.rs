@@ -99,7 +99,7 @@ impl RealmArena {
         crate::input_value::sanitize_units(n.input_type(), &attr, &crate::input_value::Attrs::of(n), colour)
     }
     // …its length, counted where that needs no copy: a dirty value's, a textarea's child text with each CR LF one.
-    fn relevant_value_len(&self, n: &NodeData) -> u32 {
+    pub(crate) fn relevant_value_len(&self, n: &NodeData) -> u32 {
         if let Some(v) = &n.value {
             return v.len() as u32;
         }
