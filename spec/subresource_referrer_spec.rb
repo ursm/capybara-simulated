@@ -75,6 +75,14 @@ RSpec.describe 'a subresource request' do
     expect(referers).to include('/sb' => 'http://www.example.com/sbtop', '/sb.js' => nil, '/sbx.js' => nil)
   end
 
+  # …and one of a document of no origin to send — about:blank's, top-level — is made all the same, its Origin none.
+  it 'is made from a document of no origin' do
+    session.visit 'about:blank'
+    session.execute_script("fetch('http://www.example.com/k.txt', {keepalive: true, method: 'POST', body: 'x'}).then(() => window.__done = true)")
+    session.evaluate_script('1')
+    expect(referers).to include('/k.txt' => nil)
+  end
+
   it "is referred under its document's policy" do
     session.visit '/m'
     expect(referers).to include('/m.css' => nil)

@@ -293,9 +293,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // (referrer.rs).
     native.define_module_function("request_referrer", magnus::function!(referrer::request_referrer_for_ruby, 3))?;
     native.define_module_function("referrer_url", magnus::function!(referrer::referrer_url_for_ruby, 1))?;
+    native.define_module_function("default_referrer_policy", magnus::function!(referrer::default_policy_for_ruby, 0))?;
     native.define_module_function("origin_header", magnus::function!(referrer::origin_header_for_ruby, 4))?;
     native.define_module_function("fetch_site", magnus::function!(referrer::fetch_site_for_ruby, 3))?;
-    native.define_module_function("wider_fetch_site", magnus::function!(referrer::wider_site_for_ruby, 2))?;
     native.define_module_function("redirect_taints_origin", magnus::function!(referrer::redirect_taints_for_ruby, 4))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
     native.define_module_function("cross_site_for_cookies", magnus::function!(referrer::cross_site_for_cookies_for_ruby, 2))?;

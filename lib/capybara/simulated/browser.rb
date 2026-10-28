@@ -5460,7 +5460,7 @@ module Capybara
         w[:inbox] << {kind: 'fetch_cancel', fetch_id: fetch_id.to_i}
       end
 
-      # Resolve a controlled fetch's referrer the way the network hop would (compute_referrer
+      # Resolve a controlled fetch's referrer the way the network hop would (referrer.rs `request_referrer`
       # applies the request's Referrer-Policy to its referrer source), so the SW's
       # `event.request.referrer` matches a real browser's. The client sends the referrer SOURCE
       # (`referrerSource`, its document URL for the `about:client` default); we replace it with the
@@ -9811,7 +9811,7 @@ module Capybara
       # The redirects a navigation follows before it fails (Fetch "HTTP-redirect fetch": a redirect count of 20).
       NAVIGATION_REDIRECT_LIMIT = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
-      DEFAULT_REFERRER_POLICY = 'strict-origin-when-cross-origin'
+      DEFAULT_REFERRER_POLICY = Native.default_referrer_policy
 
       # Whether a request to `url_str` must be blocked as a Fetch "bad port". Cheap
       # pre-gate: only URLs whose authority carries an explicit `:<digit>` are parsed
@@ -9943,7 +9943,7 @@ module Capybara
         # document — so once a hop reduces it to an origin (or drops it), a later, laxer
         # policy can't widen it back (redirect-referrer-override). The initial source is
         # the request's referrer: an explicit `init.referrer` URL when given, else the
-        # document URL ("client"); an empty referrer means no-referrer (compute_referrer
+        # document URL ("client"); an empty referrer means no-referrer (referrer.rs `request_referrer`
         # maps a blank source to nil).
         ref_source = referrer.nil? ? client : referrer
         # The request's INITIATOR origin for Sec-Fetch-Site — captured ONCE (loop-invariant), before
@@ -11187,14 +11187,9 @@ module Capybara
       rescue StandardError
         nil
       end
-      # A document's referrer policy (what its `<meta name="referrer">` elements have set: `__csimDocumentReferrerPolicy`),
-      # read from the live realm to compute a navigation's Referer under the initiating document's policy. '' when the
-      # realm is gone / no meta has set one → the platform default applies.
-      def main_document_referrer_policy
-        @runtime.call('__csimDocumentReferrerPolicy').to_s
-      rescue StandardError
-        ''
-      end
+      # The policy a navigation the page's document makes is sent under: what its `<meta name="referrer">` elements and
+      # its response set, '' for none — `no-referrer` for one of an opaque origin (`request_client`).
+      def main_document_referrer_policy = request_client(0)[1]
       def capture_frame_form_state(realm_id)
         return nil unless @runtime.frame_realm_alive?(realm_id)
         @runtime.realm_call(realm_id, '__csimCaptureFormState')
@@ -12876,7 +12871,7 @@ module Capybara
       # Referer / Origin / Fetch-Metadata for a NAVIGATION request (a document load — form
       # submit, location set, link activation). Unlike a fetch/XHR (which carries a per-request
       # policy through rack_fetch), a navigation's request headers derive from the INITIATING
-      # document: its Referrer-Policy (compute_referrer), its origin (an `Origin` header — sent
+      # document: its Referrer-Policy (referrer.rs `request_referrer`), its origin (an `Origin` header — sent
       # only on an unsafe method, i.e. a form POST, never a GET/HEAD navigation), and the
       # Fetch-Metadata triple. `dest` is 'document' for a top-level nav, 'iframe' for a subframe.
       # `site_override` / `origin_null` carry redirect-chain latched state (navigate_realm_self_*

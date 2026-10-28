@@ -30,12 +30,13 @@ fn stripped(url: &ada_url::Url, origin_only: bool) -> Option<String> {
     if matches!(url.protocol(), "about:" | "blob:" | "data:") {
         return None;
     }
+    // (…a URL that can have no credentials — `file:`, one of an opaque path — has none to drop: its setters refuse)
     let mut url = url.clone();
-    url.set_username(Some("")).ok()?;
-    url.set_password(Some("")).ok()?;
+    let _ = url.set_username(Some(""));
+    let _ = url.set_password(Some(""));
     url.set_hash(None);
     if origin_only {
-        url.set_pathname(Some("")).ok()?;
+        let _ = url.set_pathname(Some(""));
         url.set_search(None);
     }
     Some(url.href().to_owned())
@@ -79,6 +80,9 @@ pub(crate) fn request_referrer(policy: &str, source: &str, target: &str) -> Opti
 pub(crate) fn request_referrer_for_ruby(policy: Option<String>, source: Option<String>, target: Option<String>) -> Option<String> {
     request_referrer(policy.as_deref().unwrap_or(""), source.as_deref()?, target.as_deref().unwrap_or(""))
 }
+pub(crate) fn default_policy_for_ruby() -> &'static str {
+    DEFAULT_POLICY
+}
 pub(crate) fn referrer_url_for_ruby(url: Option<String>) -> Option<String> {
     referrer_url(url.as_deref()?)
 }
@@ -100,8 +104,8 @@ pub(crate) fn origin_header<'a>(origin: &'a str, policy: &str, target: &str, cor
     };
     if withheld { "null" } else { origin }
 }
-pub(crate) fn origin_header_for_ruby(origin: String, policy: Option<String>, target: Option<String>, cors: bool) -> String {
-    origin_header(&origin, policy.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""), cors).to_owned()
+pub(crate) fn origin_header_for_ruby(origin: Option<String>, policy: Option<String>, target: Option<String>, cors: bool) -> Option<String> {
+    Some(origin_header(&origin?, policy.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""), cors).to_owned())
 }
 
 // `Sec-Fetch-Site` of a request its initiator `initiator` makes to `target`: 'none' with no initiator of an http(s)
@@ -131,9 +135,6 @@ pub(crate) fn wider_site<'a>(seed: Option<&'a str>, site: &'a str) -> &'a str {
 }
 pub(crate) fn fetch_site_for_ruby(seed: Option<String>, initiator: Option<String>, target: Option<String>) -> String {
     wider_site(seed.as_deref(), fetch_site(initiator.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""))).to_owned()
-}
-pub(crate) fn wider_site_for_ruby(seed: Option<String>, site: String) -> String {
-    wider_site(seed.as_deref(), &site).to_owned()
 }
 
 // Whether a request whose origin is the one of `initiator` — 'null' already where `tainted` — has it opaque once it
@@ -207,13 +208,13 @@ fn creator_url(arena: &mut RealmArena, mut r: i32, mut url: String) -> String {
 }
 
 // __dom.requestClient(realm, elementPolicy, opaque) -> [url, policy, opaque, realm, source]: the client a subresource
-// request of realm `realm`'s document — the calling realm's for undefined — is made as (Fetch "client"), the page's
-// where that realm is gone: the URL its
+// request of realm `realm`'s document — the calling realm's for undefined — is made as (Fetch "client"): the URL its
 // site and origin are judged by (`creator_url`), the policy it refers by — the element's (`elementPolicy`), else its
 // document's; `no-referrer` for one of an opaque origin, which no element lifts — whether that origin is opaque, the
-// realm it is, and the URL it refers by (`referrer_source`). `opaque` a boolean where the bindings tell it (an image's
-// load, which names the policy its document had as the element was inserted): the URL alone is the realm's then, and
-// the document's policy only a srcdoc one's container's.
+// realm it is, and the URL it refers by (`referrer_source`). A realm gone answers the page's URLs, and is still the
+// realm the request is of: one of no document known, cross-site for cookies (`frame_cross_site`). `opaque` a boolean
+// where the bindings tell it (an image's load, which names the policy its document had as the element was inserted):
+// the URL alone is the realm's then, and the document's policy only a srcdoc one's container's.
 fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = if args.get(0).is_undefined() { crate::dom::realm_id(scope, &args) } else { args.get(0).int32_value(scope).unwrap_or(0) };
     let element_policy = args.get(1).to_rust_string_lossy(scope);
@@ -237,7 +238,7 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         v8::String::new(scope, &url).unwrap().into(),
         v8::String::new(scope, policy).unwrap().into(),
         v8::Boolean::new(scope, opaque).into(),
-        v8::Integer::new(scope, doc.realm).into(),
+        v8::Integer::new(scope, r).into(),
         v8::String::new(scope, &source).unwrap().into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
