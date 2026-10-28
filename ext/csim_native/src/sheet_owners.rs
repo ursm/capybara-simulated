@@ -40,7 +40,7 @@ pub(crate) fn associates_sheet(arena: &RealmArena, id: NodeId) -> bool {
         && (get("alternate") != Some("yes") || get("title").is_some_and(|t| !t.is_empty()))
 }
 // …its pseudo-attributes, by name.
-fn pi_attributes(n: &NodeData) -> Option<Vec<(String, String)>> {
+pub(crate) fn pi_attributes(n: &NodeData) -> Option<Vec<(String, String)>> {
     let attrs = crate::character_data::pseudo_attributes(&n.data)?;
     Some(attrs.into_iter().map(|(k, v)| (String::from_utf16_lossy(&k), String::from_utf16_lossy(&v))).collect())
 }
@@ -120,19 +120,20 @@ impl RealmArena {
     }
 }
 
-// The sheet the bindings made an owner (`ownerSheet`, dom.rs), in the store of the realm that made it (`realm`): its `id`,
+// The sheet a realm made an owner (sheet_feed.rs `make`), in the store of the realm that made it (`realm`): its `id`,
 // `rev`, which moves each time it is made again, whether a CSSStyleSheet shows it (`shown`, which makes the next one
-// anew under another id: the object a script holds keeps the rules it had), and what it was made of — the string it
-// was given (none for a `<style>`'s block, whose every change is a new count), its base URL, media list and the
-// document's mode, at the owner's count of sheets (`NodeData::sheet_gen`). One per owner, whichever realm last made it;
-// let go of with the owner, or as another realm makes its own.
+// anew under another id: the object a script holds keeps the rules it had), and what it was made of — the text its
+// fetch gave (none for a `<style>`'s block, whose every change is a new count; an empty one where the fetch `failed`),
+// its base URL, media list and the document's mode, at the owner's count of sheets (`NodeData::sheet_gen`). One per
+// owner, whichever realm last made it; let go of with the owner, or as another realm makes its own.
 #[derive(Clone)]
 pub(crate) struct MadeSheet {
     pub(crate) realm: i32,
     pub(crate) id: u32,
     pub(crate) rev: u32,
     pub(crate) shown: bool,
-    pub(crate) text: Option<v8::Global<v8::String>>,
+    pub(crate) text: Option<std::rc::Rc<str>>,
+    pub(crate) failed: bool,
     pub(crate) base: String,
     pub(crate) media: String,
     pub(crate) quirks: bool,
@@ -192,7 +193,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeStyleLoads", take_style_loads_op, context_id);
     crate::dom::register(scope, ns, "ownerSheetShown", owner_sheet_shown_op, context_id);
     crate::dom::register(scope, ns, "sheetSet", sheet_set_op, context_id);
-    crate::dom::register(scope, ns, "cascadeRekey", cascade_rekey_op, context_id);
     crate::dom::register(scope, ns, "forgetCascadeKey", forget_cascade_key_op, context_id);
 }
 
@@ -206,54 +206,46 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 pub(crate) struct CascadeKey {
     doc: NodeId,
     sets: u64,
-    viewport: [u64; 2],
+    viewport: [u32; 2],
     quirks: bool,
     base: String,
     adopted: Vec<u64>,
 }
 
-// __dom.cascadeRekey(docNid) -> where the document's cascade is made of other sheets than the realm last
-// handed its style engine (`CascadeKey`, its adopted sheets the store's — dom.rs `AdoptedSheets`): the `<style>` / `<link>`
-// elements whose sheets take part, in tree order (`sheetSet`'s), the realm's rule-set generation moved (`GEN_CASCADE`) —
-// else null, nothing to hand it.
-fn cascade_rekey_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_null();
-    let Some(doc) = nid_arg(scope, &args, 0) else { return };
-    let size = crate::viewport::here(scope, &args);
-    let viewport = size.map(f64::to_bits);
-    let cid = crate::dom::realm_id(scope, &args);
-    // (…its adopted sheets: each that applies by its id and version — a `replace` makes it another sheet to the engine —
-    // one that does not as a marker, so toggling `disabled` or a media change re-keys too)
-    let adopted = {
-        let d = crate::dom::dom(scope);
-        let screen = crate::style::Screen { viewport: (size[0] as f32, size[1] as f32), touch: d.touch_input };
-        let engine = d.styles.get(&cid);
-        let arena: &crate::dom::RealmArena = d.arena.enter(cid);
-        let mut key = Vec::new();
-        for &id in arena.adopted_of(doc, cid) {
-            match arena.sheets.get(id).filter(|_| crate::dom::sheet_applies_at(engine, arena, screen, id)) {
-                Some(stored) => key.extend([u64::from(id), u64::from(stored.version)]),
-                None => key.push(u64::MAX),
+impl RealmArena {
+    // Where the document's cascade is made of other sheets than the realm last handed its style engine (`CascadeKey`, its
+    // adopted sheets the store's — dom.rs `AdoptedSheets`, `engine` the realm's and `screen` its viewport): the `<style>` /
+    // `<link>` elements whose sheets take part, in tree order (`sheet_set`'s), the realm's rule-set generation moved
+    // (`GEN_CASCADE`) — else None, nothing to hand it.
+    pub(crate) fn cascade_rekey(&mut self, engine: Option<&crate::style::StyleEngine>, screen: crate::style::Screen, doc: NodeId, cid: i32) -> Option<Vec<NodeId>> {
+        // (…its adopted sheets: each that applies by its id and version — a `replace` makes it another sheet to the engine —
+        // one that does not as a marker, so toggling `disabled` or a media change re-keys too)
+        let mut adopted = Vec::new();
+        for &id in self.adopted_of(doc, cid) {
+            match self.sheets.get(id).filter(|_| crate::dom::sheet_applies_at(engine, self, screen, id)) {
+                Some(stored) => adopted.extend([u64::from(id), u64::from(stored.version)]),
+                None => adopted.push(u64::MAX),
             }
         }
-        key
-    };
-    let arena = crate::dom::realm(scope, cid);
-    let set = arena.sheet_set(doc);
-    let key = CascadeKey { doc, sets: set.key, viewport, quirks: arena.document_mode(Some(doc)).0, base: arena.document_base_url(doc), adopted };
-    if arena.cascade_key.as_ref() == Some(&key) {
-        return;
+        let set = self.sheet_set(doc);
+        let viewport = [screen.viewport.0.to_bits(), screen.viewport.1.to_bits()];
+        let key = CascadeKey { doc, sets: set.key, viewport, quirks: self.document_mode(Some(doc)).0, base: self.document_base_url(doc), adopted };
+        if self.cascade_key.as_ref() == Some(&key) {
+            return None;
+        }
+        self.cascade_key = Some(key);
+        self.generations.bump(crate::dom::GEN_CASCADE);
+        Some(set.taking_part.clone())
     }
-    arena.cascade_key = Some(key);
-    arena.generations.bump(crate::dom::GEN_CASCADE);
-    rv.set(crate::dom::nodes_value(scope, cid, &set.taking_part));
 }
 
-// __dom.forgetCascadeKey() — what the realm's style engine was last handed forgotten: a new page's cascade is handed it
-// whatever it is made of.
+// __dom.forgetCascadeKey() — what the realm's style engine was last handed forgotten: a new page's cascade, and its
+// shadow roots' sheets, are handed it whatever they are made of.
 fn forget_cascade_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
-    crate::dom::realm(scope, cid).cascade_key = None;
+    let arena = crate::dom::realm(scope, cid);
+    arena.cascade_key = None;
+    arena.shadow_sheets_fed.clear();
 }
 
 // __dom.takeStyleLoads() -> the `<style>` elements owed a `load` since their sheets were made (`renew_sheet`), as
@@ -306,7 +298,7 @@ pub(crate) struct SheetSet {
     key: u64,
     selected: Option<String>,
     // The owners that take part, in tree order — and those whose sheet the sets leave out.
-    taking_part: Vec<NodeId>,
+    pub(crate) taking_part: Vec<NodeId>,
     left_out: Vec<NodeId>,
 }
 
@@ -343,7 +335,7 @@ impl RealmArena {
     }
 
     // …kept until the tree or what else they turn on changes (the trees asked about bounded: a page's shadow roots).
-    fn sheet_set(&mut self, root: NodeId) -> std::rc::Rc<SheetSet> {
+    pub(crate) fn sheet_set(&mut self, root: NodeId) -> std::rc::Rc<SheetSet> {
         if let Some((mutations, epoch, set)) = self.sheet_sets.get(&root) {
             if *mutations == self.mutations && *epoch == self.sheet_epoch {
                 return set.clone();

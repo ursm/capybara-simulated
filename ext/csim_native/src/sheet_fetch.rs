@@ -55,7 +55,6 @@ pub(crate) struct RealmSheets {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    register(scope, ns, "fetchStyleSheet", fetch_style_sheet_op, context_id);
     register(scope, ns, "sheetIntegrity", sheet_integrity_op, context_id);
     register(scope, ns, "sheetEncodingOf", sheet_encoding_of_op, context_id);
     register(scope, ns, "sheetsForget", sheets_forget_op, context_id);
@@ -69,10 +68,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // error), its location (the URL its response came from — a redirect's last, a worker's answer's — `url` for a
 // scheme's), its `Referrer-Policy`, the host's facts of the response (`meta`) and the worker's answer (`answer`), and
 // whether the network answered.
-struct Sheet {
-    text: Option<String>,
-    clean: bool,
-    location: String,
+pub(crate) struct Sheet {
+    pub(crate) text: Option<String>,
+    pub(crate) clean: bool,
+    pub(crate) location: String,
     policy: Option<String>,
     meta: Option<v8::Global<v8::Value>>,
     answer: Option<v8::Global<v8::Value>>,
@@ -169,53 +168,14 @@ fn decode(scope: &mut v8::PinScope<'_, '_>, cid: i32, env: &Env, url: &str, byte
     text
 }
 
-// __dom.fetchStyleSheet(owner, ownerDoc, url, environment, referrer, host) -> `{text, clean, meta, location, policy,
-// network, answer}` (`Sheet`) of the sheet at `url`: `owner` its `<link>`, whose request it is, of document `ownerDoc` —
-// null for none (an `@import`'s, an `<?xml-stylesheet?>`'s); `environment` the encoding of the sheet importing it, `referrer` that sheet's location. Its
-// referrer policy noted at its location, which the requests it is responsible for are made under (url_ops.rs
-// `note_sheet_policy`).
-fn fetch_style_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(host) = v8::Local::<v8::Function>::try_from(args.get(5)) else { return };
-    let owner = crate::dom::nid_arg(scope, &args, 0).map(|id| Owner { id, doc: crate::dom::nid_arg(scope, &args, 1) });
-    let url = args.get(2).to_rust_string_lossy(scope);
-    let text_arg = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).is_string().then(|| args.get(i).to_rust_string_lossy(scope));
-    let (environment, referrer) = (text_arg(scope, 3), text_arg(scope, 4));
-    let cid = realm_id(scope, &args);
-    let Ok(sheet) = style_sheet(scope, cid, host, owner, &url, environment.as_deref(), referrer.as_deref()) else { return };
+// The sheet at `url`: `owner` its `<link>`, whose request it is — none for an `@import`'s, an `<?xml-stylesheet?>`'s;
+// `environment` the encoding of the sheet importing it, `referrer` that sheet's location. Its referrer policy noted at
+// its location, which the requests it is responsible for are made under (url_ops.rs `note_sheet_policy`).
+pub(crate) fn fetch(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: Option<Owner>, url: &str, environment: Option<&str>, referrer: Option<&str>) -> Result<Sheet, Terminated> {
+    let sheet = style_sheet(scope, cid, host, owner, url, environment, referrer)?;
     realm(scope, cid).note_sheet_policy(&sheet.location, sheet.policy.as_deref());
-    let obj = v8::Object::new(scope);
-    let text = match &sheet.text {
-        Some(t) => text_value(scope, t),
-        None => v8::null(scope).into(),
-    };
-    let policy = match &sheet.policy {
-        Some(p) => text_value(scope, p),
-        None => v8::null(scope).into(),
-    };
-    let meta = match &sheet.meta {
-        Some(g) => v8::Local::new(scope, g),
-        None => v8::null(scope).into(),
-    };
-    let answer = match &sheet.answer {
-        Some(g) => v8::Local::new(scope, g),
-        None => v8::null(scope).into(),
-    };
-    let fields = [
-        ("text", text),
-        ("clean", v8::Boolean::new(scope, sheet.clean).into()),
-        ("meta", meta),
-        ("location", text_value(scope, &sheet.location)),
-        ("policy", policy),
-        ("network", v8::Boolean::new(scope, sheet.network).into()),
-        ("answer", answer),
-    ];
-    for (k, v) in fields {
-        let k = text_value(scope, k);
-        obj.set(scope, k, v);
-    }
-    rv.set(obj.into());
+    Ok(sheet)
 }
-
 fn style_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: Option<Owner>, url: &str, environment: Option<&str>, referrer: Option<&str>) -> Result<Sheet, Terminated> {
     use crate::fetch_rules::{fetch_route, ROUTE_BLOB, ROUTE_DATA};
     let env = env(scope, host)?;
@@ -481,8 +441,12 @@ fn sheet_integrity_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 fn sheet_encoding_of_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let cid = realm_id(scope, &args);
-    let Some(e) = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.encodings.get(&url).copied()) else { return };
+    let Some(e) = encoding_of(realm(scope, cid), cid, &url) else { return };
     rv.set(text_value(scope, e));
+}
+// …that encoding (an `@import`'s environment: CSS Cascade 5 §2.2).
+pub(crate) fn encoding_of(arena: &mut crate::dom::RealmArena, cid: i32, url: &str) -> Option<&'static str> {
+    arena.realm_state_mut(cid).and_then(|s| s.sheet_fetches.encodings.get(url).copied())
 }
 
 // __dom.styleResolveImports([url, referrer, …], docNid, environment, host): the sheets the style engine's `@import`s
@@ -508,7 +472,7 @@ fn resolve_imports_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 // (dom.rs `style_import_in`). An import CYCLE would ask for ever, so a chain deeper than any real page nests is answered
 // with nothing.
 const IMPORT_DEPTH_LIMIT: usize = 16;
-fn resolve_imports(
+pub(crate) fn resolve_imports(
     scope: &mut v8::PinScope<'_, '_>,
     cid: i32,
     host: v8::Local<'_, v8::Function>,
@@ -537,8 +501,7 @@ fn resolve_imports(
             let request = (url.clone(), referrer.clone());
             if !fetched.contains_key(&request) {
                 let started = now(scope, host)?;
-                let sheet = style_sheet(scope, cid, host, None, &url, env.as_deref(), referrer.as_deref())?;
-                realm(scope, cid).note_sheet_policy(&sheet.location, sheet.policy.as_deref());
+                let sheet = fetch(scope, cid, host, None, &url, env.as_deref(), referrer.as_deref())?;
                 file_import(scope, host, &url, started, &sheet)?;
                 fetched.insert(request.clone(), (sheet.text, sheet.clean, sheet.location));
             }
@@ -548,7 +511,7 @@ fn resolve_imports(
             let mut children = None;
             crate::dom::style_op(scope, cid, |scope| children = Some(crate::dom::style_import_in(scope, cid, &url, referrer.as_deref(), text, quirks, *clean, location)));
             let Some(children) = children else { return Ok(()) };
-            let encoding = realm(scope, cid).realm_state_mut(cid).and_then(|s| s.sheet_fetches.encodings.get(&url).copied());
+            let encoding = encoding_of(realm(scope, cid), cid, &url);
             for child in children {
                 push(&mut next, child, encoding.map(str::to_owned).or_else(|| env.clone()));
             }

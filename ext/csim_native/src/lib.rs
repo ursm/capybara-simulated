@@ -165,6 +165,7 @@ mod slots;
 // The style engine: stylo over the arena.
 mod style;
 mod style_fonts;
+mod sheet_feed;
 mod sheet_fetch;
 mod subresource_judge;
 mod subresource_obtain;

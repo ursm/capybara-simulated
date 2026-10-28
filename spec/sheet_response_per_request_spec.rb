@@ -3,7 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# Each style sheet request's response is its own (browser.rb `external_asset_response`, css-utils.js `fetchStyleSheet`):
+# Each style sheet request's response is its own (browser.rb `external_asset_response`, sheet_fetch.rs `fetch`):
 # two `<link>`s of one URL of another origin that allows it — one `crossorigin`, one not — are a CORS response and an
 # opaque one, the CORS link's sheet origin-clean (its rules readable) and the other's not (CSSOM: a SecurityError),
 # whichever was inserted first.

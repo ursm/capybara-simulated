@@ -1091,8 +1091,10 @@ pub(crate) struct RealmState {
     // and the source text an inline one of them had at its end tag, until it runs.
     pub(crate) parser_list: Vec<NodeId>,
     pub(crate) parser_sources: std::collections::HashMap<NodeId, Vec<u16>>,
-    // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascadeRekey`).
+    // What its document's cascade was made of when last handed to its style engine (sheet_owners.rs `cascade_rekey`), and
+    // the rule-set generation each shadow root's sheets were last handed it at (sheet_feed.rs `feed_shadows`).
     pub(crate) cascade_key: Option<crate::sheet_owners::CascadeKey>,
+    pub(crate) shadow_sheets_fed: std::collections::HashMap<NodeId, u32>,
     // The parents its document's parse changed since its last layout pass began (mutation_observers.rs `noteParsed`).
     pub(crate) parsed: crate::mutation_observers::ParsedMarks,
     // What its reads of its elements' rendered-ness and text answered since its generations were last as they are now
@@ -2902,6 +2904,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::font_resolve::install(scope, ns, context_id);
     crate::subresource_obtain::install(scope, ns, context_id);
     crate::sheet_fetch::install(scope, ns, context_id);
+    crate::sheet_feed::install(scope, ns, context_id);
     crate::resize_observers::install(scope, ns, context_id);
     crate::perf_timeline::install(scope, ns, context_id);
     crate::xhr_state::install(scope, ns, context_id);
@@ -2983,15 +2986,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "xpathEvaluate", xpath_evaluate, context_id);
     register(scope, ns, "nodePath", node_path_op, context_id);
     register(scope, ns, "resetArena", reset_arena, context_id);
-    // The style engine (stylo): a document's sheets and the sheets their `@import`s ask for, and an element's computed
-    // value.
-    register(scope, ns, "styleSheets", style_sheets, context_id);
-    register(scope, ns, "styleImport", style_import, context_id);
+    // The style engine (stylo): the `@font-face` rules of a document's sheets (which sheet_feed.rs hands it).
     register(scope, ns, "styleFontFaces", style_font_faces, context_id);
-    register(scope, ns, "styleShadowSheets", style_shadow_sheets, context_id);
     // …the realm's sheets they are made of (sheets.rs).
     register(scope, ns, "sheetMake", sheet_make, context_id);
-    register(scope, ns, "ownerSheet", owner_sheet, context_id);
     register(scope, ns, "sheetReplace", sheet_replace, context_id);
     register(scope, ns, "sheetDrop", sheet_drop, context_id);
     // …and CSSOM's rules over them (cssom_rule.rs).
@@ -4551,8 +4549,11 @@ fn with_sheets<R>(
 // CSSOM is about to reach the sheet `id`'s rules: one sharing a kept parse takes a copy of its own (sheets.rs `own`),
 // which the engine cascades in its place.
 fn own_sheet(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, id: u32) {
-    let Some((old, new, version)) = with_sheets(scope, args, |store, _| store.own(id)) else { return };
     let cid = realm_id(scope, args);
+    own_sheet_in(scope, cid, id);
+}
+pub(crate) fn own_sheet_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, id: u32) {
+    let Some((old, new, version)) = realm(scope, cid).sheets.own(id) else { return };
     if let Some(engine) = dom(scope).styles.get_mut(&cid) {
         engine.swap_sheet(&old, &new, version);
     }
@@ -4570,6 +4571,9 @@ fn sheet_of(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
 // that imports it — `None`, any sheet), and is left alone for one no document has.
 fn rules_moved(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, sheet: Option<u32>) {
     let cid = realm_id(scope, args);
+    rules_moved_in(scope, cid, sheet);
+}
+pub(crate) fn rules_moved_in(scope: &mut v8::PinScope<'_, '_>, cid: i32, sheet: Option<u32>) {
     let d = dom(scope);
     let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
     let used = match sheet.and_then(|id| arena.sheets.get(id)) {
@@ -5112,13 +5116,7 @@ pub(crate) fn style_op(scope: &mut v8::PinScope<'_, '_>, cid: i32, op: impl FnOn
     }
 }
 
-// Sheets off a JS array of [css, baseUrl, media, constructed, css, …] (`StyleEngine::set_sheets` takes them).
-// The realm's sheets a `[id, …]` array names, in its order (an id the store no longer has, none).
-fn sheet_ids(scope: &mut v8::PinScope<'_, '_>, val: v8::Local<'_, v8::Value>) -> Vec<u32> {
-    let Ok(arr) = v8::Local::<v8::Array>::try_from(val) else { return Vec::new() };
-    (0..arr.length()).filter_map(|i| arr.get_index(scope, i)?.uint32_value(scope)).collect()
-}
-// …and a sheet as the page hands one over: `(css, baseUrl, media, constructed)` from argument `at` on.
+// A sheet as the page hands one over: `(css, baseUrl, media, constructed)` from argument `at` on.
 fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, at: i32) -> crate::sheets::SheetSource {
     let text = |scope: &mut v8::PinScope<'_, '_>, k: i32| {
         let v = args.get(at + k);
@@ -5128,29 +5126,12 @@ fn sheet_source(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArg
     crate::sheets::SheetSource { css, base, media, constructed: args.get(at + 3).is_true(), located: false }
 }
 
-// __dom.styleSheets(docNid, baseUrl, [sheetId, …]): the realm document's sheets (the realm's,
-// sheetMake), in document order, and after them its adopted ones that apply (`adopted_applying`), for its style engine —
-// which is made again only when the document's base URL, mode, kind (an HTML document or not: `document_mode`) or
-// viewport moved.
-fn style_sheets(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let cid = realm_id(scope, &args);
-    style_op(scope, cid, |scope| style_sheets_unguarded(scope, args, rv));
-}
-fn style_sheets_unguarded(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(doc) = nid_arg(scope, &args, 0) else { return };
-    let base = args.get(1).to_rust_string_lossy(scope);
-    let [w, h] = crate::viewport::here(scope, &args);
+// The realm document's sheets `ids` (the realm's: sheet_feed.rs), in document order, and after them its adopted ones
+// that apply (`adopted_applying`), handed to its style engine — which is made again only when the document's base URL
+// `base`, mode, kind (an HTML document or not: `document_mode`) or viewport moved.
+pub(crate) fn set_document_sheets(scope: &mut v8::PinScope<'_, '_>, cid: i32, doc: NodeId, base: &str, mut ids: Vec<u32>) {
+    let [w, h] = crate::viewport::of(scope, cid);
     let viewport = (w as f32, h as f32);
-    let mut ids = sheet_ids(scope, args.get(2));
-    let cid = realm_id(scope, &args);
     let d = dom(scope);
     if d.arena.is_dropped(cid) {
         return;
@@ -5160,32 +5141,16 @@ fn style_sheets_unguarded(
     let arena = d.arena.enter(cid);
     // (…its owned sheets, then its adopted ones that apply)
     ids.extend(adopted_applying(d.styles.get(&cid), arena, screen, doc, cid));
-    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, &base, quirks, html_document, screen);
+    let mut engine = crate::style::StyleEngine::for_document(d.styles.remove(&cid), arena, base, quirks, html_document, screen);
     let sheets: Vec<_> = ids.iter().filter_map(|&id| arena.sheets.get(id)).collect();
     engine.set_sheets(doc, &sheets);
     d.styles.insert(cid, engine);
 }
 
-// __dom.styleShadowSheets(rootNid, [sheetId, …]): a shadow root's own sheets (the realm's), in its tree order, and after
-// them its adopted ones that apply at the realm's viewport (`adopted_applying`).
-fn style_shadow_sheets(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let cid = realm_id(scope, &args);
-    style_op(scope, cid, |scope| style_shadow_sheets_unguarded(scope, args, rv));
-}
-fn style_shadow_sheets_unguarded(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    _rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let Some(root) = nid_arg(scope, &args, 0) else { return };
-    let mut ids = sheet_ids(scope, args.get(1));
-    let viewport = crate::viewport::here(scope, &args).map(|v| v as f32);
-    let cid = realm_id(scope, &args);
-    // (…its owned sheets, then its adopted ones that apply at the viewport)
+// …and a shadow root's own sheets `ids` (the realm's), in its tree order, and after them its adopted ones that apply at
+// the realm's viewport (`adopted_applying`).
+pub(crate) fn set_shadow_sheets(scope: &mut v8::PinScope<'_, '_>, cid: i32, root: NodeId, mut ids: Vec<u32>) {
+    let viewport = crate::viewport::of(scope, cid).map(|v| v as f32);
     {
         let d = dom(scope);
         let screen = crate::style::Screen { viewport: (viewport[0], viewport[1]), touch: d.touch_input };
@@ -5243,35 +5208,7 @@ fn style_font_faces_unguarded(
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.styleImport(url, referrer, css, docNid, clean, location) -> what the imported sheet's own `@import`s wait for
-// (`waiting_items`). The sheet at `url` arrived (`css` null: it could not be fetched) for the requests referred by
-// `referrer` ('' its document), for every realm sheet whose `@import` of it waits for it — its response a
-// CORS-same-origin one where `clean`, its location `location` (the URL its response came from; `url` for none).
-fn style_import(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let cid = realm_id(scope, &args);
-    style_op(scope, cid, |scope| style_import_unguarded(scope, args, rv));
-}
-fn style_import_unguarded(
-    scope: &mut v8::PinScope<'_, '_>,
-    args: v8::FunctionCallbackArguments<'_>,
-    mut rv: v8::ReturnValue<'_, v8::Value>,
-) {
-    let url = args.get(0).to_rust_string_lossy(scope);
-    let referrer = Some(args.get(1).to_rust_string_lossy(scope)).filter(|r| !r.is_empty());
-    let css = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
-    let quirks = quirks_arg(scope, &args, 3);
-    let clean = args.get(4).boolean_value(scope);
-    let location = Some(args.get(5)).filter(|v| v.is_string()).map(|v| v.to_rust_string_lossy(scope)).filter(|l| !l.is_empty()).unwrap_or_else(|| url.clone());
-    let cid = realm_id(scope, &args);
-    let pending = style_import_in(scope, cid, &url, referrer.as_deref(), css.as_deref(), quirks, clean, &location);
-    let urls = waiting_array(scope, &pending);
-    rv.set(urls);
-}
-// …the sheet of `url` an `@import` (referred by `referrer`) waits for handed to realm `cid`'s engine — `css`, none for a
+// The sheet of `url` an `@import` (referred by `referrer`) waits for handed to realm `cid`'s engine — `css`, none for a
 // fetch that failed — at `location`: what ITS `@import`s wait for now.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn style_import_in(
@@ -5305,90 +5242,6 @@ fn sheet_make(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let (id, pending) = arena.sheets.make(&lock, &source, quirks);
     let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into()];
     items.extend(waiting_items(scope, &pending));
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.ownerSheet(ownerNid, css, baseUrl, media, docNid) -> [sheetId, rev, …what its `@import`s wait for: `waiting_items`]: the
-// style engine's sheet of a `<style>` / `<link>` / `<?xml-stylesheet?>`, made of `css` — a `<style>`'s, null: its block,
-// the data of its child Text nodes — at `baseUrl` under `media` in the document. ONE per owner
-// (`RealmArena::made_sheets`): made again of other text, of the same text once the owner obtained another sheet (its
-// count of them, sheet_owners.rs — HTML's "update a style block", which any change to a block's text is), at another
-// base or in another mode — in place where no CSSStyleSheet shows it, else anew under another id (`MadeSheet::shown`),
-// `rev` moving either way — and given another media list in place, its rules kept. Its sheet while the owner's count
-// holds (`owner_sheets`).
-fn owner_sheet(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(owner) = nid_arg(scope, &args, 0) else { return };
-    let text = |scope: &mut v8::PinScope<'_, '_>, k: i32| {
-        let v = args.get(k);
-        if v.is_string() { v.to_rust_string_lossy(scope) } else { String::new() }
-    };
-    let css = v8::Local::<v8::String>::try_from(args.get(1)).ok();
-    let (base, media) = (text(scope, 2), text(scope, 3));
-    let quirks = quirks_arg(scope, &args, 4);
-    let cid = realm_id(scope, &args);
-    let Some(count) = dom(scope).arena.get(owner).map(|n| n.sheet_gen) else { return };
-    // (…another realm's record — the owner adopted from it — is its own realm's to let go of: this one makes its own)
-    let made = dom(scope).arena.made_sheets.get(&owner).cloned();
-    let made = match made {
-        Some(m) if m.realm != cid => {
-            dom(scope).arena.forget_made_sheet(owner);
-            None
-        }
-        made => made,
-    };
-    // (…its text the same string — the same object, at once — or none, a `<style>`'s block, whose every change is a new
-    // count)
-    let same_text = |scope: &mut v8::PinScope<'_, '_>, m: &crate::sheet_owners::MadeSheet| match (&m.text, css) {
-        (None, None) => true,
-        (Some(had), Some(css)) => v8::Local::new(scope, had).strict_equals(css.into()),
-        _ => false,
-    };
-    let same = made.as_ref().filter(|m| m.base == base && m.quirks == quirks && m.count == count).filter(|m| same_text(scope, m)).cloned();
-    let media_moved = same.as_ref().is_some_and(|m| m.media != media);
-    // (…a sheet handed its text a fetched one — a `<link>`'s, an `<?xml-stylesheet?>`'s — of a location of its own)
-    let located = css.is_some();
-    // (…the text read out only to make the sheet of it)
-    let (kept, css) = match (&same, css) {
-        (Some(m), _) => (m.text.clone(), None),
-        (None, Some(css)) => (Some(v8::Global::new(scope, css)), Some(css.to_rust_string_lossy(scope))),
-        (None, None) => (None, None),
-    };
-    let arena = realm(scope, cid);
-    let (id, rev, shown, waiting) = match (&same, made.as_ref()) {
-        (Some(m), _) => (m.id, m.rev, m.shown, Vec::new()),
-        (None, old) => {
-            let css = css.unwrap_or_else(|| String::from_utf16_lossy(&arena.child_text(owner)));
-            let source = crate::sheets::SheetSource { css, base: base.clone(), media: media.clone(), constructed: false, located };
-            let lock = arena.style_lock.0.clone();
-            match old {
-                Some(m) if !m.shown => (m.id, m.rev + 1, false, arena.sheets.replace(&lock, m.id, &source, quirks)),
-                _ => {
-                    let (id, waiting) = arena.sheets.make(&lock, &source, quirks);
-                    (id, old.map_or(0, |m| m.rev + 1), false, waiting)
-                }
-            }
-        }
-    };
-    let record = crate::sheet_owners::MadeSheet { realm: cid, id, rev, shown, text: kept, base, media: media.clone(), quirks, count };
-    arena.made_sheets.insert(owner, record);
-    if same.is_none() {
-        // (…a new sheet, made in place or anew, the owner's: its flags its own, as "add a CSS style sheet" begins them)
-        if let Some(stored) = arena.sheets.stored_mut(id) {
-            stored.owner = Some(owner);
-            stored.located = located;
-            stored.disabled = false;
-            stored.enabled = false;
-            stored.set_excluded = false;
-        }
-        arena.owner_sheets.insert(owner, (id, count));
-        arena.sheet_epoch += 1;
-    }
-    if media_moved {
-        own_sheet(scope, &args, id);
-        with_sheets(scope, &args, |store, lock| store.set_media(lock, id, &media, quirks));
-        rules_moved(scope, &args, Some(id));
-    }
-    let mut items: Vec<v8::Local<v8::Value>> = vec![v8::Integer::new_from_unsigned(scope, id).into(), v8::Integer::new_from_unsigned(scope, rev).into()];
-    items.extend(waiting_items(scope, &waiting));
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.sheetReplace(sheetId, css, baseUrl, media, constructed, docNid) -> what its `@import`s wait for (`waiting_items`): the sheet

@@ -9992,7 +9992,7 @@ module Capybara
         crossed          = false
         # (…and, whatever the mode, whether a hop left the client's origin: what a no-mode caller's response is tainted by —
         # an element's no-cors load through the asset cache, whose resource is not CORS-same-origin then: a sheet's
-        # origin-clean flag unset, css-utils.js `fetchStyleSheet`)
+        # origin-clean flag unset, sheet_fetch.rs `fetch`)
         tainted          = false
         marked           = ->(out) { out['tainted'] = true if out && tainted && !crossed; out }
         # Sec-Fetch-Site latches the widest initiator↔hop relationship across the redirect chain
