@@ -10,6 +10,9 @@ RSpec.describe 'a nested document navigating itself' do
   def session
     pages = {
       '/'  => '<!DOCTYPE html><meta charset="utf-8"><body><iframe id=f src="/o"></iframe>',
+      '/2' => '<!DOCTYPE html><meta charset="utf-8"><body><iframe id=f src="/o"></iframe><iframe id=g src="/o"></iframe>',
+      '/a' => '<!DOCTYPE html><meta charset="utf-8"><p>a',
+      '/b' => '<!DOCTYPE html><meta charset="utf-8"><p>b',
       '/o' => '<!DOCTYPE html><meta charset="utf-8"><p>o'
     }
     s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [pages.fetch(env['PATH_INFO'], '')]] })
@@ -31,6 +34,20 @@ RSpec.describe 'a nested document navigating itself' do
     JS
     poll_until { s.evaluate_script('document.getElementById("f").contentDocument.body?.textContent') == 'b' }
     expect(s.evaluate_script('[document.getElementById("f").getAttribute("src"), R]')).to eq(['/o', []])
+  end
+
+  # …each frame's its own navigable's: two frames navigated in one task both go, a later navigation of one replacing
+  # its earlier (HTML "plan to navigate"), its reload the document it is at.
+  it 'navigates each of two frames planned in one task, the later of one replacing its earlier' do
+    s = session
+    s.visit '/2'
+    text = ->(id) { s.evaluate_script("document.getElementById('#{id}').contentDocument?.body?.textContent") }
+    poll_until { text.('f') == 'o' && text.('g') == 'o' }
+    s.execute_script("frames[0].location = '/a'; frames[1].location = '/a'; frames[1].location = '/b'")
+    expect(poll_until { [text.('f'), text.('g')] == %w[a b] && [text.('f'), text.('g')] }).to eq(%w[a b])
+    s.execute_script("frames[0].location = '/b'; frames[0].location.reload()")
+    s.evaluate_script('1')
+    expect(text.('f')).to eq('a')
   end
 
   # …and a reload reloads the document it navigated to, not that `src`.

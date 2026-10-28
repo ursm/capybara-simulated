@@ -61,6 +61,8 @@ struct FrameNavigation {
     // The form submission the container's navigable plans to navigate to (HTML "plan to navigate": one pending
     // navigation per navigable, a later one replacing it), by the number `planFrameNavigation` gave it — 0 for none.
     planned: u32,
+    // …and the navigation the host plans to make of it, by the order it was planned in (`HostNavigation`).
+    host: Option<(u64, HostNavigation)>,
     contents: [Option<Content>; CONTENT_SLOTS],
     // While its navigable has no realm made: the user activation the window of its initial about:blank document has
     // had (user_activation.rs) — its last activation, on the container's realm's clock, and the activation notifications
@@ -87,6 +89,27 @@ const SRC_REFUSED: u32 = 1 << 7;
 // Its element's `load` for the navigation under way still to fire (frame-nav.js `FN_LOAD_OWED`).
 const LOAD_OWED: u32 = 1 << 8;
 
+// A navigation the host makes of a frame's navigable, planned by the frame's own document or a hyperlink that targets it
+// (HTML "plan to navigate": the navigable's one, a later one replacing it — a form's of its parent's document as well):
+// to a URL — whether it replaces the frame's session history entry, the realm of the document that began it and the
+// Referer that one sends, the container's `sandbox` attribute as it began (what the document it makes is sandboxed by),
+// whether that document had transient activation — or a reload of the document it is at.
+pub(crate) enum HostNavigation {
+    Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool },
+    Reload,
+}
+// The kinds `takeFrameNavigations` answers, which its mask names.
+const HOST_NAVIGATE: u32 = 1;
+const HOST_RELOAD: u32 = 2;
+
+// What `planFrameLocation` made of a navigation: none (the frame has no navigable), one planned, or one to a fragment of
+// the frame's document, which navigates within it at once (HTML "navigate to a fragment"), the bindings' to make.
+const PLANNED_NONE: u32 = 0;
+const PLANNED: u32 = 1;
+const PLANNED_FRAGMENT: u32 = 2;
+
+type Hosted = HashMap<NodeId, (u64, HostNavigation)>;
+
 #[derive(Default)]
 pub(crate) struct FrameNavigations(HashMap<NodeId, FrameNavigation>, Plans);
 
@@ -98,9 +121,46 @@ struct Plans {
     // (…and the parked builds', `FrameNavigation::deferred_at`)
     deferrals: u32,
     last: HashMap<NodeId, (u32, NodeId)>,
+    // The host's navigations as a flush of the page's due tasks began, and those the tasks planned
+    // (navigation_plan.rs `flushBegin`).
+    saved: Option<Hosted>,
+    flushed: Option<Hosted>,
 }
 
 impl FrameNavigations {
+    // Whether the host plans a navigation of any frame.
+    pub(crate) fn hosted(&self) -> bool {
+        self.0.values().any(|n| n.host.is_some())
+    }
+    fn take_hosted(&mut self) -> Hosted {
+        self.0.iter_mut().filter_map(|(&c, n)| n.host.take().map(|h| (c, h))).collect()
+    }
+    // The page's due tasks about to run before it navigates: the host's navigations kept apart, so they plan anew…
+    pub(crate) fn flush_begin(&mut self) {
+        self.1.saved = Some(self.take_hosted());
+    }
+    // …they ran: what they planned kept as flushed, what was planned before back…
+    pub(crate) fn flush_end(&mut self) {
+        self.1.flushed = Some(self.take_hosted());
+        for (c, host) in self.1.saved.take().unwrap_or_default() {
+            if let Some(nav) = self.0.get_mut(&c) {
+                nav.host = Some(host);
+            }
+        }
+    }
+    // …and the navigation committed no document: what they planned put back where nothing was planned since — or
+    // (`drop`) let go — whether any was.
+    pub(crate) fn flush_restore(&mut self, drop: bool) -> bool {
+        let Some(flushed) = self.1.flushed.take().filter(|_| !drop) else { return false };
+        let mut restored = false;
+        for (c, host) in flushed {
+            if let Some(nav) = self.0.get_mut(&c).filter(|n| n.host.is_none()) {
+                nav.host = Some(host);
+                restored = true;
+            }
+        }
+        restored
+    }
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty() && self.1.last.is_empty()
     }
@@ -174,6 +234,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
+    crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
+    crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "takeFrameNavigations", take_frame_navigations, context_id);
     crate::dom::register(scope, ns, "frameContent", frame_content, context_id);
     crate::dom::register(scope, ns, "setFrameContent", set_frame_content, context_id);
     crate::dom::register(scope, ns, "frameContentHeld", frame_content_held, context_id);
@@ -406,7 +470,10 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     navs.1.next = navs.1.next.wrapping_add(1).max(1);
     let token = navs.1.next;
-    navs.0.entry(container).or_default().planned = token;
+    // (…the host's planned navigation of it replaced too)
+    let nav = navs.0.entry(container).or_default();
+    nav.planned = token;
+    nav.host = None;
     navs.1.last.insert(form, (token, container));
     rv.set_uint32(token);
 }
@@ -511,6 +578,97 @@ fn frame_navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     let cid = realm_id(scope, &args);
     let navs = &crate::dom::realm(scope, cid).frame_navigations;
     rv.set_bool(token != 0 && navs.0.get(&container).is_some_and(|n| n.planned == token));
+}
+
+// __dom.planFrameLocation(realm, url, replace, initiatorRealm, policy, activated) -> PLANNED_*: a navigation of frame
+// realm `realm`'s navigable — the calling realm's for undefined — to `url` planned for the host (`HostNavigation`),
+// replacing the one it planned (a form's of its parent's document among them), its Referer that of the document of
+// `initiatorRealm` — the frame's own for undefined — under `policy` (a link's, '' that document's: referrer.rs
+// `navigation_referrer`), the container's `sandbox` attribute and `activated` taken now; none for a fragment of the
+// frame's document, which the bindings navigate to at once.
+fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let target = if args.get(0).is_undefined() { cid } else { args.get(0).int32_value(scope).unwrap_or(cid) };
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let replace = args.get(2).is_true();
+    let initiator = if args.get(3).is_null_or_undefined() { target } else { args.get(3).int32_value(scope).unwrap_or(target) };
+    let policy = args.get(4).to_rust_string_lossy(scope);
+    let activated = args.get(5).is_true();
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(container) = arena.container_of(target) else { return rv.set_uint32(PLANNED_NONE) };
+    let here = arena.enter_known(target).map(|a| a.location.href().to_owned());
+    if here.is_some_and(|here| crate::url_ops::is_fragment_navigation(&here, &url)) {
+        return rv.set_uint32(PLANNED_FRAGMENT);
+    }
+    let referrer = crate::referrer::navigation_referrer(arena, initiator, &policy);
+    let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
+    let nav = arena.frame_navigation(container);
+    // (…a form's of its parent's document cancelled: its response loads into nothing, its pending `load` this one's)
+    nav.planned = 0;
+    let host = HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated };
+    nav.host = Some((crate::navigation_plan::next_planned(), host));
+    rv.set_uint32(PLANNED);
+}
+// __dom.planFrameReload(): a reload of the calling frame realm's document planned for the host, replacing the navigation
+// its navigable planned.
+fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let Some(container) = arena.container_of(cid) else { return };
+    arena.frame_navigation(container).host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload));
+}
+// __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of — a
+// submission of its document's, a traversal making its document again.
+fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let arena = &mut crate::dom::dom(scope).arena;
+    if let Some(nav) = arena.container_of(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
+        nav.host = None;
+    }
+}
+// __dom.takeFrameNavigations(kinds) -> the navigations the host planned of frames, of the kinds `kinds` names
+// (HOST_NAVIGATE, HOST_RELOAD), in the order they were planned, which none plans any more: `[HOST_NAVIGATE, realm, url,
+// replace, initiatorRealm, referrerSource, referrerPolicy, [sandbox], activated]`, `[HOST_RELOAD, realm]` — realm the
+// frame's now (-1 for none made), sandbox null where the container had no attribute.
+fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let kinds = args.get(0).uint32_value(scope).unwrap_or(HOST_NAVIGATE | HOST_RELOAD);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let kind = |h: &HostNavigation| match h {
+        HostNavigation::Navigate { .. } => HOST_NAVIGATE,
+        HostNavigation::Reload => HOST_RELOAD,
+    };
+    let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
+    let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| kind(h) & kinds != 0)).map(|(&c, _)| c).collect();
+    for c in containers {
+        let realm = arena.frame_realm(c).unwrap_or(-1);
+        if let Some((at, host)) = arena.frame_navigations.0.get_mut(&c).and_then(|n| n.host.take()) {
+            taken.push((at, realm, host));
+        }
+    }
+    taken.sort_by_key(|&(at, ..)| at);
+    let mut items = Vec::with_capacity(taken.len());
+    for (_, realm, host) in taken {
+        let realm = v8::Integer::new(scope, realm).into();
+        let item: Vec<v8::Local<v8::Value>> = match host {
+            HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated } => {
+                let sandbox = sandbox.map_or_else(|| v8::null(scope).into(), |s| v8::String::new(scope, &s).unwrap().into());
+                vec![
+                    v8::Integer::new_from_unsigned(scope, HOST_NAVIGATE).into(),
+                    realm,
+                    v8::String::new(scope, &url).unwrap().into(),
+                    v8::Boolean::new(scope, replace).into(),
+                    v8::Integer::new(scope, initiator).into(),
+                    v8::String::new(scope, &referrer.0).unwrap().into(),
+                    v8::String::new(scope, &referrer.1).unwrap().into(),
+                    v8::Array::new_with_elements(scope, &[sandbox]).into(),
+                    v8::Boolean::new(scope, activated).into(),
+                ]
+            }
+            HostNavigation::Reload => vec![v8::Integer::new_from_unsigned(scope, HOST_RELOAD).into(), realm],
+        };
+        items.push(v8::Array::new_with_elements(scope, &item).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // __dom.cancelFrameNavigation(containerNid) — another navigation of the container's navigable replaces the one a form

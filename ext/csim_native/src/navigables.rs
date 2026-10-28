@@ -284,6 +284,10 @@ impl RealmArena {
         at(realm) || self.ancestor_realms(realm).into_iter().any(at)
     }
     // …in whichever realm's document: none for a top-level navigable's realm, or a discarded one's.
+    // The container whose navigable frame realm `realm`'s document is the active document of — None for one gone.
+    pub(crate) fn container_of(&self, realm: i32) -> Option<NodeId> {
+        self.live_container(realm)
+    }
     fn live_container(&self, realm: i32) -> Option<NodeId> {
         let nav = &self.navigables;
         nav.containers.get(&realm).copied().filter(|c| nav.children.contains_key(c))

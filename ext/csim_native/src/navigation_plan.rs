@@ -72,7 +72,7 @@ pub(crate) struct Reload {
 const WINDOW_LOCATION: i32 = 1;
 const WINDOW_RELOAD: i32 = 2;
 static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-fn next_planned() -> u64 {
+pub(crate) fn next_planned() -> u64 {
     PLANNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
 
@@ -366,13 +366,16 @@ fn take_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.ownPlanned() -> which of a location navigation (1), a reload (2) and a frame's submission (4) is planned, 0 for
-// none.
+// none — and (8) whether the host plans a navigation of a frame (frame_navigation.rs `HostNavigation`).
 fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let frames = crate::dom::dom(scope).arena.frame_navigations.hosted();
     let own = &plan(scope, &args).own;
-    rv.set_uint32(u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2));
+    let bits = u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2);
+    rv.set_uint32(bits | (u32::from(frames) << 3));
 }
 // __dom.flushBegin(): the tasks due before a navigation of the page about to run — what it planned kept apart, so they
-// plan anew, and what each window `window.open` made in this isolate planned (they run on the page's event loop).
+// plan anew, and what each window `window.open` made in this isolate planned, and the host of its frames (they run on
+// the page's event loop).
 // __dom.flushEnd(): …they ran — what they planned kept as flushed, what was planned before back.
 // __dom.flushRestore(drop) -> whether any was: the navigation committed no document — what the flushed tasks planned
 // put back where nothing was planned since — or (`drop`) what they planned let go. (One that commits a document drops
@@ -386,6 +389,7 @@ fn flush_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         let plan = &mut realm(scope, r).navigation_plan;
         plan.saved = Some(std::mem::take(&mut plan.own));
     }
+    crate::dom::dom(scope).arena.frame_navigations.flush_begin();
 }
 fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     for r in traversables(scope, &args) {
@@ -393,6 +397,7 @@ fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         let saved = plan.saved.take().unwrap_or_default();
         plan.flushed = Some(std::mem::replace(&mut plan.own, saved));
     }
+    crate::dom::dom(scope).arena.frame_navigations.flush_end();
 }
 fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let drop = args.get(0).is_true();
@@ -402,5 +407,6 @@ fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { continue };
         restored |= plan.own.restore(flushed);
     }
+    restored |= crate::dom::dom(scope).arena.frame_navigations.flush_restore(drop);
     rv.set_bool(restored);
 }

@@ -48,16 +48,6 @@ module Capybara
           mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
           b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
-        # A nested browsing context navigated (a[1] = the frame's realm id) — its OWN
-        # location, or (a[3] = the initiating realm id) a link whose target names it,
-        # under the policy (a[4]) its `rel` / `referrerpolicy` sets.
-        # Deferred + applied by re-navigating the owning iframe, so a frame's
-        # `location.href = …` navigates the frame, not the top page.
-        '__csimFrameNavigate'        => ->(b, *a) { b.frame_navigate_self(a[0], a[1].to_i, a[3].nil? ? a[1].to_i : a[3].to_i, a[4].to_s, replace: a[2] == true, user_activated: a[5] == true); nil },
-        # A nested browsing context reloading its OWN location (a[0] = the frame's
-        # realm id). Deferred + applied by re-navigating the owning iframe to its
-        # current document — see Browser#frame_reload_self.
-        '__csimFrameReload'          => ->(b, *a) { b.frame_reload_self(a[0].to_i); nil },
         # A <form> submitted from inside a nested browsing context (a[0] = the
         # initiating frame's realm id). Deferred + applied against that realm,
         # like __csimFrameNavigate — see Browser#frame_submit_self.

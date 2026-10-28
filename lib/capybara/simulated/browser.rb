@@ -2452,6 +2452,7 @@ module Capybara
         if nav.zero?
           @runtime.call('__csimSupersedePlanned')
         elsif (realm = navigable_realm(nav))
+          @runtime.call('__csimDropFrameNavigation', realm)
           supersede_frame_navigation(realm)
           # (…a form's of its parent's document too, planned in that realm: frame_navigation.rs `planned`)
           parent = @runtime.frame_realm_parent(realm)
@@ -3264,10 +3265,7 @@ module Capybara
         !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals?
       end
       private def pending_navigation_besides_traversals?
-        !(@pending_frame_nav || {}).empty? ||
-          !(@pending_frame_submit || []).empty? ||
-          !(@pending_frame_reload || []).empty? ||
-          !own_planned.zero?
+        !(@pending_frame_submit || []).empty? || !own_planned.zero?
       end
 
       # Pull every background async channel (Worker / EventSource / hijacked fetch
@@ -10611,8 +10609,9 @@ module Capybara
       # any policy.
       def navigation_referrer(realm, policy = '') = request_client(realm, policy).values_at(4, 1)
       # What the page's own plan holds (navigation_plan.rs `ownPlanned`): a location navigation, a reload, a frame's
-      # submission to it.
+      # submission to it — and whether the host plans a navigation of a frame.
       OWN_LOCATION = 1
+      OWN_FRAMES   = 8
       private def own_planned = @runtime.call('__csimOwnPlanned').to_i
       # The navigation of the page its `location` planned, taken: its URL, whether it replaces the current entry, the
       # document that began it where that is another's than the page's with the Referer it sends, its source's
@@ -10643,33 +10642,6 @@ module Capybara
           end
         end
       end
-      # A nested browsing context navigating its OWN `location` (the frame's
-      # `location.href`/assign/replace/`location=`, incl. cross-frame
-      # `iframe.contentWindow.location.href = …`). `realm_id` is the frame's realm.
-      # Deferred like the page's own: applying it re-navigates the owning iframe,
-      # which disposes that realm — illegal while the frame's location setter is
-      # still on the V8 stack — so we stash and drain from `tick_real_time`.
-      # …navigated by its own document, or (`initiator_realm`) by another's — a link whose target names it, under the
-      # `policy` its own `rel` / `referrerpolicy` sets ('' none) — the referrer made of the initiator as it is followed,
-      # before the drain: by then the initiator may have navigated itself.
-      # (…`replace` where it replaces the frame's session history entry rather than adds one: `location.replace`, a
-      # navigation of a document not completely loaded yet)
-      # (…`user_activated` whether its source document had transient activation as it began: location.js `dispatchNav`)
-      def frame_navigate_self(url, realm_id, initiator_realm = realm_id, policy = '', replace: false, user_activated: false)
-        return if realm_id.nil? || realm_id.zero?
-        # Keyed by realm id (last URL wins per frame) so two different frames each
-        # navigating in one turn both apply — a single slot would drop one.
-        # A fragment of the document the frame is at, which HTML "navigate to a fragment" moves to within it at once, no
-        # navigation ongoing: the one already under way — a cross-document one stashed — going on (Chrome: `location =
-        # '/other'` and then a link to its document's `#b` pushes the fragment's entry and lands at /other).
-        # (…a document still loading too, its realm the one it parses in: its script reading the new fragment at once, and a
-        # navigation its own `load` makes coming after it — Chrome)
-        return @runtime.realm_direct_call(realm_id, '__csimFragmentNavigate', url.to_s, replace == true) if frame_fragment_navigation?(realm_id, url)
-
-        supersede_frame_navigation(realm_id)
-        cancel_parent_form_navigation(realm_id)
-        (@pending_frame_nav ||= {})[realm_id] = [url.to_s, navigation_referrer(initiator_realm, policy), frame_sandbox_now(realm_id), initiator_realm, replace, user_activated]
-      end
       # …and a navigation a form of its parent's document planned for frame realm `realm_id`, its request not yet sent —
       # one of the frame's own replacing it: a link's targeting it, a form's of its own document (Chrome and Firefox
       # sending none; the frame's own `location` cancels it from its realm, location.js) — its pending `load` kept, the
@@ -10679,34 +10651,29 @@ module Capybara
         handle = frame_container_handle(realm_id, parent)
         frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle, true) unless handle.zero?
       end
-      # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (`frame_sandbox_now`), none for
-      # another realm's — one the navigation's own made, nested in it.
+      # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (the container's `sandbox` as it
+      # began: frame_navigation.rs `planFrameLocation`), none for another realm's — one the navigation's own made, nested
+      # in it.
       def navigation_sandbox(realm)
         sandbox_realm, sandbox = @navigation_sandbox
         sandbox if realm && sandbox_realm == realm.to_i
       end
-      # The `sandbox` attribute frame realm `realm_id`'s container has as a navigation of it begins — what the document it
-      # makes is sandboxed by, whatever the attribute says when the response is in — as `[attribute]` (its value, nil for
-      # none), carried with the navigation to the document it makes; nil where there is no container to ask.
-      def frame_sandbox_now(realm_id)
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        [frame_realm_host_call(parent, '__csimFrameSandboxAttribute', handle)] unless handle.zero?
-      rescue StandardError
-        nil
-      end
-      # Whether `url` is a fragment navigation of frame realm `realm_id`'s document (url_ops.rs `is_fragment_navigation`).
-      def frame_fragment_navigation?(realm_id, url)
-        (here = frame_realm_url(realm_id)) && Native.url_fragment_navigation(here.to_s, url.to_s)
-      end
+      # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken as the
+      # task ends, in the order they were planned (frame_navigation.rs `takeFrameNavigations`): each its URL, whether it
+      # replaces the frame's entry, the document that began it and the Referer it sends, the container's `sandbox` as it
+      # began, its source's activation. (Applying one re-navigates the owning iframe, which disposes the frame's realm —
+      # illegal while its location setter is still on the V8 stack.)
+      FRAME_NAVIGATE = 1
+      FRAME_RELOAD   = 2
       def consume_pending_frame_nav
-        # Window-realm self-navs are realm navs too — drain them at every frame-nav
-        # drain point (before the frame-nav early-return so a window-only nav lands).
+        # Window-realm self-navs are realm navs too — drain them at every frame-nav drain point.
         consume_pending_window_nav
-        return if @pending_frame_nav.nil? || @pending_frame_nav.empty?
-        navs = @pending_frame_nav
-        @pending_frame_nav = nil
-        navs.each do |realm_id, (url, referrer, sandbox, initiator, replace, activated)|
+        return unless own_planned.anybits?(OWN_FRAMES)
+
+        @runtime.call('__csimTakeFrameNavigations', FRAME_NAVIGATE).each do |_, realm_id, url, replace, initiator, source, policy, sandbox, activated|
+          next if realm_id.negative?
+
+          referrer = [source, policy]
           invalidate_find_cache
           # (…sandboxed as the container said when the navigation began: what its document's seed and a download its
           # response is take, a document it does not make — a refused unload — leaving nothing behind)
@@ -10804,17 +10771,9 @@ module Capybara
         activated = @runtime.call('__csimTakeReload')
         refresh(user_activated: activated) unless activated.nil?
       end
-      # `frame.contentWindow.location.reload()` from a nested browsing context.
-      # Like `frame_navigate_self`, the JS side flags the initiating realm here
-      # and we defer (so the child realm isn't disposed mid-reload()). Keyed by
-      # realm id so two frames reloading in one turn both apply.
-      def frame_reload_self(realm_id)
-        return if realm_id.nil? || realm_id.zero?
-        supersede_frame_navigation(realm_id)
-        (@pending_frame_reload ||= []) << realm_id
-      end
-      # …the host's navigation of frame realm `realm_id` planned, replaced by one its parent's document plans (a form's
-      # whose target names it: dom-nodes.js `__csimSubmitFormToNamedFrame`).
+      # The submission the host held for frame realm `realm_id` let go, as a navigation of its navigable is planned — its
+      # own `location`'s, a reload, a link's targeting it (location.js `planFrameNavigation`), a form's of its parent's
+      # document (dom-nodes.js `__csimSubmitFormToNamedFrame`) — whose own plan replaced the host's navigation of it.
       def frame_navigation_superseded(realm_id)
         supersede_frame_navigation(realm_id) unless realm_id.zero?
       end
@@ -10826,8 +10785,6 @@ module Capybara
       # navigates the frame, whose navigation that replaces; kept, routed while the frame's document is there to ask
       # (`frame_submission_route`), where it navigates another navigable — the page for `_top`, as Chrome has it.)
       private def supersede_frame_navigation(realm_id, submitted: false)
-        @pending_frame_nav&.delete(realm_id)
-        @pending_frame_reload&.delete(realm_id)
         return unless (pending = @pending_frame_submit&.[](realm_id))
         return @pending_frame_submit.delete(realm_id) if submitted
         return if pending[:spec]
@@ -10841,11 +10798,13 @@ module Capybara
       rescue StandardError
         nil
       end
+      # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends.
       def consume_pending_frame_reload
-        return if @pending_frame_reload.nil? || @pending_frame_reload.empty?
-        realm_ids = @pending_frame_reload.uniq
-        @pending_frame_reload = nil
-        realm_ids.each do |realm_id|
+        return unless own_planned.anybits?(OWN_FRAMES)
+
+        @runtime.call('__csimTakeFrameNavigations', FRAME_RELOAD).each do |_, realm_id|
+          next if realm_id.negative?
+
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps
           # the frame stack in sync) — re-fetching its current document URL, which
@@ -10884,8 +10843,7 @@ module Capybara
       # A <form> submitted from INSIDE a nested browsing context (a frame realm
       # reached via `contentWindow`, not an entered `within_frame` block). The
       # planned submission is the initiating realm's (navigation_plan.rs), which no
-      # top-page drain reads, so the JS side flags the realm here (mirrors
-      # `frame_navigate_self`). Keyed by realm id; deferred + drained from
+      # top-page drain reads, so the JS side flags the realm here. Keyed by realm id; deferred + drained from
       # `drain_pending_navigation` so we never serialize/navigate while the
       # form's `submit()` is still on the V8 stack.
       # (…`target` the one its request names, `request` that request: one that navigates the page is the page's navigation
@@ -10901,6 +10859,8 @@ module Capybara
       SUBMIT_TO_TOP = 2
       def frame_submit_self(realm_id, target = '', request = nil)
         return SUBMIT_KEPT if realm_id.nil? || realm_id.zero?
+        # (…the frame's navigable's navigation the host planned let go too: frame_navigation.rs `dropFrameNavigation`)
+        @runtime.call('__csimDropFrameNavigation', realm_id)
         supersede_frame_navigation(realm_id, submitted: true)
         cancel_parent_form_navigation(realm_id) if frame_self_target?(target.to_s) || choose_named_navigable(realm_id, target.to_s) == realm_id
         pending = ((@pending_frame_submit ||= {})[realm_id] = {})
@@ -12634,13 +12594,11 @@ module Capybara
       # duration of the flush and restored after, so the outgoing page's intents
       # neither leak into the incoming page nor clobber the live one. Listed here
       # (rather than saved individually) because a re-assignment does NOT restore a
-      # slot mutated IN PLACE — `@pending_frame_nav` / `@pending_frame_submit` are
-      # Hashes keyed by realm and the frame-reload slot is an Array.
-      # (The page's own plan — its location navigation, its reload, a frame's submission to it — and its windows' are
-      # stashed alike, in the engine: navigation_plan.rs `flushBegin`.)
+      # slot mutated IN PLACE — `@pending_frame_submit` is a Hash keyed by realm.
+      # (The page's own plan — its location navigation, its reload, a frame's submission to it — its windows' and the
+      # host's navigations of its frames are stashed alike, in the engine: navigation_plan.rs `flushBegin`.)
       NAV_INTENT_SLOTS = %i[
-        @pending_history_traverse @pending_frame_nav @pending_frame_submit
-        @pending_frame_reload
+        @pending_history_traverse @pending_frame_submit
       ].freeze
       private_constant :NAV_INTENT_SLOTS
 
