@@ -1,5 +1,6 @@
 // An OffscreenCanvas's own state (HTML §4.12.5.3): its width and height — its bitmap's, which a context draws into
-// (canvas_state.rs) — and whether a transfer detached it ([[Detached]]: of no size, and no member of it may run), on a
+// (canvas_state.rs), each an `[EnforceRange] unsigned long long`, past any u32 (a size too large for a bitmap is still
+// its size) — and whether a transfer detached it ([[Detached]]: of no size, and no member of it may run), on a
 // handle the bindings' object holds (`__dom.OffscreenCanvasStateBase`, as an ImageBitmap's state is: image_bitmaps.rs),
 // which lives as long as that object does.
 
@@ -14,7 +15,7 @@ const TAG: u16 = 21;
 static BRAND: u8 = 0;
 
 pub(crate) struct OffscreenHandle {
-    size: Cell<[u32; 2]>,
+    size: Cell<[f64; 2]>,
     detached: Cell<bool>,
 }
 
@@ -27,7 +28,7 @@ unsafe impl GarbageCollected for OffscreenHandle {
 
 impl OffscreenHandle {
     // Its size: none once detached.
-    pub(crate) fn size(&self) -> [u32; 2] {
+    pub(crate) fn size(&self) -> [f64; 2] {
         self.size.get()
     }
 }
@@ -37,7 +38,7 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     if args.new_target().is_undefined() {
         return;
     }
-    let size = [0, 1].map(|i| args.get(i).uint32_value(scope).unwrap_or(0));
+    let size = [0, 1].map(|i| args.get(i).number_value(scope).unwrap_or(0.0));
     let handle = OffscreenHandle { size: Cell::new(size), detached: Cell::new(false) };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
@@ -95,9 +96,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // __dom.offscreenCanvasSize(state, axis) -> its width (axis 0) or height (1).
 fn size_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(h) = handle(scope, args.get(0)) else { return rv.set_uint32(0) };
+    let Some(h) = handle(scope, args.get(0)) else { return rv.set_double(0.0) };
     let axis = usize::from(args.get(1).uint32_value(scope) == Some(1));
-    rv.set_uint32(h.size.get()[axis]);
+    rv.set_double(h.size.get()[axis]);
 }
 
 // __dom.offscreenCanvasResize(state, axis, value): its width (axis 0) or height (1) set — the bindings reset its bitmap.
@@ -105,7 +106,7 @@ fn resize_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let Some(h) = handle(scope, args.get(0)) else { return };
     let axis = usize::from(args.get(1).uint32_value(scope) == Some(1));
     let mut size = h.size.get();
-    size[axis] = args.get(2).uint32_value(scope).unwrap_or(0);
+    size[axis] = args.get(2).number_value(scope).unwrap_or(0.0);
     h.size.set(size);
 }
 
@@ -118,5 +119,5 @@ fn detached_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
 fn detach_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(h) = handle(scope, args.get(0)) else { return };
     h.detached.set(true);
-    h.size.set([0, 0]);
+    h.size.set([0.0, 0.0]);
 }
