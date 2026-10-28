@@ -48,21 +48,30 @@ pub(crate) struct Ports {
     // drop (`Dom::let_go_of_messages`).
     unread: HashMap<u64, u32>,
     let_go: Vec<u32>,
+    // …and the count of them at which the next sweep runs, twice what the last one left: a port collected with its
+    // messages unread (an unstarted one its peer alone named) holds the isolate's memory, not the collector's, so a
+    // sweep runs as they pile up too, not only as ports are made.
+    unread_sweep_at: usize,
 }
 
 impl Ports {
     fn make(&mut self, realm: i32, object: Option<v8::Weak<v8::Value>>) -> u64 {
         // (…the ports no object names any more let go of as the registry doubles: collected ones)
         if self.of.len() >= self.sweep_at.max(64) {
-            let gone: Vec<u64> = self.of.iter().filter(|(_, p)| p.object.as_ref().is_some_and(v8::Weak::is_empty)).map(|(id, _)| *id).collect();
-            for id in gone {
-                self.forget(id);
-            }
-            self.sweep_at = self.of.len() * 2;
+            self.sweep();
         }
         self.next += 1;
         self.of.insert(self.next, Port { realm, object, ..Port::default() });
         self.next
+    }
+    // The ports no object names any more — collected ones — let go of, and what they held unread with them.
+    fn sweep(&mut self) {
+        let gone: Vec<u64> = self.of.iter().filter(|(_, p)| p.object.as_ref().is_some_and(v8::Weak::is_empty)).map(|(id, _)| *id).collect();
+        for id in gone {
+            self.forget(id);
+        }
+        self.sweep_at = self.of.len() * 2;
+        self.unread_sweep_at = self.unread.len() * 2;
     }
     // The isolate's slots go after V8 has disposed it, and a weak handle's drop resets its node, freed memory by then:
     // let go of whole (as the Dom's other weak handles are).
@@ -165,6 +174,9 @@ impl Ports {
         self.next_message += 1;
         let message = self.next_message;
         if let Some(serialized) = serialized {
+            if self.unread.len() >= self.unread_sweep_at.max(64) {
+                self.sweep();
+            }
             self.unread.insert(message, serialized);
         }
         let Some(p) = self.port(id) else {
