@@ -1,5 +1,5 @@
 // The HTTP cache's policy (RFC 9111) for the host's fetches: whether a response may be stored and for how long it is
-// fresh, what a 304 that revalidates a stored one makes of it, and the conditional headers a revalidation sends. The host
+// fresh, and what a 304 that revalidates a stored one makes of it. The host
 // keeps the stored responses (their bodies never cross); these say what it does with them. A private cache's view — this
 // is a browser's — but for `private`, which the host's cache, shared across the test sessions of a process, does not store.
 
@@ -81,51 +81,72 @@ fn delta_seconds(v: &str) -> f64 {
 }
 
 // §5.3 / RFC 9110 §5.6.7 "HTTP-date", as seconds since the epoch: IMF-fixdate, and the obsolete RFC 850 and asctime
-// forms a recipient must accept. None for anything else.
-pub(crate) fn http_date(value: &str) -> Option<f64> {
+// forms a recipient must accept — robustly, as the section encourages: the weekday unread, the month and zone in any case,
+// the whitespace between fields any run of it. Its year four digits (RFC 850's two, read as the most recent year with
+// them not more than 50 years past `now`, as the section requires); its clock two digits each. None for anything else.
+pub(crate) fn http_date(value: &str, now: f64) -> Option<f64> {
     let parts: Vec<&str> = value.split_ascii_whitespace().collect();
-    let month = |m: &str| ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().position(|n| n.eq_ignore_ascii_case(m)).map(|i| i as u32 + 1);
-    let clock = |t: &str| -> Option<(u32, u32, u32)> {
-        let mut it = t.split(':').map(|n| (n.len() == 2).then(|| n.parse::<u32>().ok()).flatten());
+    let digits = |s: &str, n: std::ops::RangeInclusive<usize>| (n.contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<i64>().ok()).flatten();
+    let month = |m: &str| ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].iter().position(|n| n.eq_ignore_ascii_case(m)).map(|i| i as i64 + 1);
+    let clock = |t: &str| -> Option<i64> {
+        let mut it = t.split(':').map(|n| digits(n, 2..=2));
         let (h, m, s) = (it.next()??, it.next()??, it.next()??);
-        (it.next().is_none() && h < 24 && m < 60 && s < 61).then_some((h, m, s))
+        (it.next().is_none() && h < 24 && m < 60 && s < 61).then_some(h * 3600 + m * 60 + s)
     };
+    let gmt = |z: &str| z.eq_ignore_ascii_case("GMT");
     let (year, mon, day, time) = match parts.as_slice() {
         // Sun, 06 Nov 1994 08:49:37 GMT
-        [_, d, m, y, t, "GMT"] if y.len() == 4 => (y.parse::<i64>().ok()?, month(m)?, d.parse::<u32>().ok()?, clock(t)?),
-        // Sunday, 06-Nov-94 08:49:37 GMT (a two-digit year: within 50 years ahead, else the century before)
-        [_, dmy, t, "GMT"] => {
+        [_, d, m, y, t, z] if gmt(z) => (digits(y, 4..=4)?, month(m)?, digits(d, 1..=2)?, clock(t)?),
+        // Sunday, 06-Nov-94 08:49:37 GMT
+        [_, dmy, t, z] if gmt(z) => {
             let mut it = dmy.split('-');
             let (d, m, y) = (it.next()?, it.next()?, it.next()?);
-            let y = y.parse::<i64>().ok()?;
-            let y = if y < 100 { if y < 70 { 2000 + y } else { 1900 + y } } else { y };
-            (y, month(m)?, d.parse::<u32>().ok()?, clock(t)?)
+            if it.next().is_some() {
+                return None;
+            }
+            let (yy, this_year) = (digits(y, 2..=2)?, civil_year(now));
+            let mut year = this_year - this_year.rem_euclid(100) + yy;
+            if year > this_year + 50 {
+                year -= 100;
+            }
+            (year, month(m)?, digits(d, 1..=2)?, clock(t)?)
         }
         // Sun Nov  6 08:49:37 1994
-        [_, m, d, t, y] => (y.parse::<i64>().ok()?, month(m)?, d.parse::<u32>().ok()?, clock(t)?),
+        [_, m, d, t, y] => (digits(y, 4..=4)?, month(m)?, digits(d, 1..=2)?, clock(t)?),
         _ => return None,
     };
     if !(1..=31).contains(&day) {
         return None;
     }
-    // (…days from the civil date: Howard Hinnant's algorithm)
+    Some((days_from_civil(year, mon, day) * 86_400 + time) as f64)
+}
+// (…the days from the epoch to a civil date, and the year of an epoch time: Howard Hinnant's algorithms, a year of four
+// digits at most)
+fn days_from_civil(year: i64, mon: i64, day: i64) -> i64 {
     let (y, m) = if mon <= 2 { (year - 1, mon + 9) } else { (year, mon - 3) };
     let era = y.div_euclid(400);
     let yoe = y - era * 400;
-    let doy = (153 * m as i64 + 2) / 5 + day as i64 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    Some((days * 86_400 + time.0 as i64 * 3600 + time.1 as i64 * 60 + time.2 as i64) as f64)
+    let doy = (153 * m + 2) / 5 + day - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+fn civil_year(t: f64) -> i64 {
+    let z = (t / 86_400.0).floor() as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    yoe + era * 400 + i64::from(mp >= 10)
 }
 
 // §4.2.1 the freshness lifetime — max-age, else Expires less Date (an invalid Expires, "0" the common one, in the past:
 // §5.3), else, for a status heuristically cacheable, a tenth of the time since Last-Modified — less §4.2.3's age the
 // response had when it came (`now`): the greater of how long it was since its Date and its Age.
 fn lifetime(d: &Directives, f: &Fields<'_>, heuristic: bool, now: f64) -> Option<f64> {
-    let date = f.date.and_then(http_date);
-    let explicit = d.max_age.or_else(|| f.expires.map(|e| http_date(e).map_or(0.0, |exp| (exp - date.unwrap_or(now)).max(0.0))));
+    let date = f.date.and_then(|d| http_date(d, now));
+    let explicit = d.max_age.or_else(|| f.expires.map(|e| http_date(e, now).map_or(0.0, |exp| (exp - date.unwrap_or(now)).clamp(0.0, DELTA_SECONDS_MAX))));
     let lifetime = explicit.or_else(|| {
-        let modified = f.last_modified.and_then(http_date)?;
+        let modified = f.last_modified.and_then(|m| http_date(m, now))?;
         let age = date.unwrap_or(now) - modified;
         (heuristic && age > 0.0).then(|| (age * 0.1).floor().min(HEURISTIC_CAP))
     })?;
@@ -176,24 +197,11 @@ pub(crate) fn unrefreshed(name: &str) -> bool {
 fn text(v: Option<magnus::RString>) -> Option<String> {
     v.map(|s| String::from_utf8_lossy(&crate::fetch_rules::ruby_bytes(s)).into_owned())
 }
-fn policy_value(p: Option<Policy>) -> Option<(Option<f64>, bool, bool)> {
-    p.map(|p| (p.max_age, p.no_cache, p.immutable))
-}
-// `storable` (`refresh` false) or `refreshed` (true) over a response's Cache-Control, Expires, Date, Last-Modified, ETag,
-// Vary and Age: nil, or [max_age (nil none), no_cache, immutable].
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn policy_for_ruby(
-    status: u32,
-    cache_control: Option<magnus::RString>,
-    expires: Option<magnus::RString>,
-    date: Option<magnus::RString>,
-    last_modified: Option<magnus::RString>,
-    etag: Option<magnus::RString>,
-    vary: Option<magnus::RString>,
-    age: Option<magnus::RString>,
-    now: f64,
-    refresh: bool,
-) -> Option<(Option<f64>, bool, bool)> {
+// `storable` and `refreshed` over a response's Cache-Control, Expires, Date, Last-Modified, ETag, Vary and Age (each a
+// byte string, or nil): nil, or [max_age (nil none), no_cache, immutable].
+type FieldValues = (Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>);
+fn with_fields(values: FieldValues, rule: impl FnOnce(&Fields<'_>) -> Option<Policy>) -> Option<(Option<f64>, bool, bool)> {
+    let (cache_control, expires, date, last_modified, etag, vary, age) = values;
     let [cache_control, expires, date, last_modified, etag, vary, age] = [cache_control, expires, date, last_modified, etag, vary, age].map(text);
     let f = Fields {
         cache_control: cache_control.as_deref(),
@@ -204,10 +212,13 @@ pub(crate) fn policy_for_ruby(
         vary: vary.as_deref(),
         age: age.as_deref(),
     };
-    policy_value(if refresh { refreshed(status, &f, now) } else { storable(status, &f, now) })
+    rule(&f).map(|p| (p.max_age, p.no_cache, p.immutable))
 }
-pub(crate) fn fresh_for_ruby(stored_at: f64, max_age: Option<f64>, no_cache: bool, now: f64) -> bool {
-    fresh(stored_at, max_age, no_cache, now)
+pub(crate) fn storable_for_ruby(status: u32, fields: FieldValues, now: f64) -> Option<(Option<f64>, bool, bool)> {
+    with_fields(fields, |f| storable(status, f, now))
+}
+pub(crate) fn refreshed_for_ruby(status: u32, fields: FieldValues, now: f64) -> Option<(Option<f64>, bool, bool)> {
+    with_fields(fields, |f| refreshed(status, f, now))
 }
 pub(crate) fn unrefreshed_for_ruby(name: String) -> bool {
     unrefreshed(&name)
@@ -217,13 +228,33 @@ pub(crate) fn unrefreshed_for_ruby(name: String) -> bool {
 mod tests {
     use super::*;
 
+    // (…2026-10-29, a "now" for the dates read against it)
+    const NOW: f64 = 1_793_232_000.0;
+
     #[test]
     fn an_http_date_is_any_of_its_three_forms() {
-        assert_eq!(http_date("Sun, 06 Nov 1994 08:49:37 GMT"), Some(784_111_777.0));
-        assert_eq!(http_date("Sunday, 06-Nov-94 08:49:37 GMT"), Some(784_111_777.0));
-        assert_eq!(http_date("Sun Nov  6 08:49:37 1994"), Some(784_111_777.0));
-        assert_eq!(http_date("0"), None);
-        assert_eq!(http_date("Sun, 06 Nov 1994 25:49:37 GMT"), None);
+        assert_eq!(http_date("Sun, 06 Nov 1994 08:49:37 GMT", NOW), Some(784_111_777.0));
+        assert_eq!(http_date("Sunday, 06-Nov-94 08:49:37 GMT", NOW), Some(784_111_777.0));
+        assert_eq!(http_date("Sun Nov  6 08:49:37 1994", NOW), Some(784_111_777.0));
+        // (…read robustly: the zone and month in any case, a one-digit day, the weekday unread)
+        assert_eq!(http_date("sun, 6 nov 1994 08:49:37 gmt", NOW), Some(784_111_777.0));
+        assert_eq!(http_date("0", NOW), None);
+        assert_eq!(http_date("Sun, 06 Nov 1994 25:49:37 GMT", NOW), None);
+        assert_eq!(http_date("Sun, 06 Nov 1994 +8:49:37 GMT", NOW), None);
+        // (…a year of four digits alone: one too great to hold no date, not a wrapped one)
+        assert_eq!(http_date("Sun Nov  6 08:49:37 -99999999999999999", NOW), None);
+        assert_eq!(http_date("Sun, 06 Nov 99999 08:49:37 GMT", NOW), None);
+    }
+
+    #[test]
+    fn a_two_digit_year_is_the_latest_not_more_than_fifty_years_ahead() {
+        let year = |y: &str| http_date(&format!("Thursday, 01-Jan-{y} 00:00:00 GMT"), NOW).map(|t| civil_year(t + 1.0));
+        assert_eq!(year("26"), Some(2026));
+        assert_eq!(year("76"), Some(2076));
+        assert_eq!(year("77"), Some(1977));
+        assert_eq!(year("70"), Some(2070));
+        assert_eq!(civil_year(NOW), 2026);
+        assert_eq!(civil_year(0.0), 1970);
     }
 
     #[test]
@@ -247,7 +278,7 @@ mod tests {
 
     #[test]
     fn its_lifetime_is_less_its_age() {
-        let now = http_date("Sun, 06 Nov 1994 08:49:37 GMT").unwrap();
+        let now = http_date("Sun, 06 Nov 1994 08:49:37 GMT", NOW).unwrap();
         let lifetime = |f: Fields<'_>| storable(200, &f, now).and_then(|p| p.max_age);
         assert_eq!(lifetime(Fields { cache_control: Some("max-age=60"), age: Some("10"), ..Default::default() }), Some(50.0));
         assert_eq!(lifetime(Fields { cache_control: Some("max-age=60"), date: Some("Sun, 06 Nov 1994 08:49:07 GMT"), ..Default::default() }), Some(30.0));
@@ -262,6 +293,26 @@ mod tests {
         assert_eq!(lifetime(old), Some(HEURISTIC_CAP));
         let redirect = Fields { last_modified: Some("Sun, 06 Nov 1994 07:49:37 GMT"), ..Default::default() };
         assert_eq!(storable(307, &redirect, now).map(|p| p.max_age), Some(None));
+    }
+
+    #[test]
+    fn a_refreshed_response_keeps_what_its_fields_now_allow() {
+        let now = 1_000_000.0;
+        // (…no cacheable status or validator asked of it; no-cache kept; forbidden now, dropped)
+        let no_cache = Fields { cache_control: Some("no-cache"), ..Default::default() };
+        assert_eq!(refreshed(201, &no_cache, now), Some(Policy { max_age: None, no_cache: true, immutable: false }));
+        assert_eq!(refreshed(200, &Fields { cache_control: Some("no-store"), ..Default::default() }, now), None);
+        // (…an empty Vary varies on nothing; an Expires with no Date against the clock, at most 2^31 seconds)
+        assert!(storable(200, &Fields { vary: Some(""), cache_control: Some("max-age=1"), ..Default::default() }, now).is_some());
+        let until = |e, now| storable(200, &Fields { expires: Some(e), ..Default::default() }, now).and_then(|p| p.max_age);
+        assert_eq!(until("Thu, 01 Jan 1970 00:16:50 GMT", 1000.0), Some(10.0));
+        assert_eq!(until("Thu, 01 Jan 1970 00:16:50 GMT", 2000.0), Some(0.0));
+        assert_eq!(until("Fri, 31 Dec 9999 23:59:59 GMT", 1000.0), Some(DELTA_SECONDS_MAX));
+        // (…a heuristic lifetime from Date where there is one, else from the clock)
+        let dated = Fields { last_modified: Some("Thu, 01 Jan 1970 00:00:00 GMT"), date: Some("Thu, 01 Jan 1970 00:16:40 GMT"), ..Default::default() };
+        assert_eq!(storable(200, &dated, 1000.0).and_then(|p| p.max_age), Some(100.0));
+        let undated = Fields { last_modified: Some("Thu, 01 Jan 1970 00:00:00 GMT"), ..Default::default() };
+        assert_eq!(storable(200, &undated, 2000.0).and_then(|p| p.max_age), Some(200.0));
     }
 
     #[test]

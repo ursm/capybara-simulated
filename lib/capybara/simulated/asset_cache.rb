@@ -72,7 +72,7 @@ module Capybara
         # (…its cookies not kept: they were set as the response came, and a replay is no response that sets them)
         h.delete('set-cookie')
         now = Time.now
-        stored = policy(status, h, now, refresh: false) or return
+        stored = Native.http_cache_storable(status.to_i, policy_fields(h), now.to_f) or return
         max_age, no_cache, immutable = stored
         @entries.clear if @entries.size >= MAX_ENTRIES && !@entries.key?(url)
         @entries[url] = Entry.new(
@@ -108,7 +108,7 @@ module Capybara
           merged[k] = v unless Native.http_cache_unrefreshed(k.to_s)
         end
         now = Time.now
-        kept = policy(entry.status, merged, now, refresh: true)
+        kept = Native.http_cache_refreshed(entry.status.to_i, policy_fields(merged), now.to_f)
         entry.headers   = merged
         entry.stored_at = now
         entry.max_age, entry.no_cache, entry.immutable = kept || [nil, false, false]
@@ -118,11 +118,9 @@ module Capybara
 
       private
 
-      # The engine's policy for a response of `status` with the lowercased fields `h`, come at `now`: [max_age, no_cache,
-      # immutable], or nil where it may not be stored (`refresh`: kept, once a 304 updated it).
-      def policy(status, h, now, refresh:)
-        Native.http_cache_policy(status.to_i, *POLICY_FIELDS.map {|name| h[name] }, now.to_f, refresh)
-      end
+      # The fields of the lowercased `h` the engine's policy reads (http_cache.rs `storable`, `refreshed`, which answer
+      # [max_age, no_cache, immutable], or nil where it may not be stored, or kept).
+      def policy_fields(h) = POLICY_FIELDS.map {|name| h[name] }
 
       # Apps may return mixed-case header hashes on Rack 2; Rack 3 ships
       # lowercase. Normalise once per store/refresh so subsequent O(1)
