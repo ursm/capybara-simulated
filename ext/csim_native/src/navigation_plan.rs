@@ -49,9 +49,10 @@ pub(crate) struct FrameSubmission {
     referrer: (String, String),
 }
 
-// A top-level document's location navigation, reload and a frame's submission to it — the page's (a window's
-// `window.open` made in this isolate plans the first two, as its frames' submissions to it are not modeled) — as a flush of the page's tasks stashes them (`flushBegin`); and when the later of
-// them was planned (`PLANNED`), which orders the windows' as the host takes them.
+// A top-level document's location navigation, reload and a frame's submission to it — of the page, or of a window
+// `window.open` made in this isolate (whose frames' submissions to it are not modeled) — as a flush of the page's tasks
+// stashes them (`flushBegin`); and when the later of them was planned (`PLANNED`), which orders the windows' as the host
+// takes them.
 #[derive(Default)]
 struct Own {
     location: Option<Location>,
