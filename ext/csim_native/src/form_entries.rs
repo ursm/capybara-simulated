@@ -138,12 +138,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "formSubmission", form_submission, context_id);
 }
 
-// __dom.formSubmission(formNid, submitterNid, documentEncoding) -> `[action, method, enctype, target, rel, encoding]`:
+// __dom.formSubmission(formNid, submitterNid, documentEncoding) -> `[action, method, enctype, target, rel, encoding,
+// dialogResult]`:
 // how a form submits (HTML §4.10.21.3) — the submitter's `formaction`, `formmethod`, `formenctype` and `formtarget`
 // where it has them, else the form's own; the action as written (null for none: the bindings resolve it against the
 // document's base URL); the method and the enctype their states (an invalid or missing one GET, urlencoded); the target
 // the form's `target`, else the first `<base target>` of its node document's; its submission character encoding — the first of
-// its `accept-charset` labels that names an encoding, else the document's, UTF-8 for a UTF-16 one or `replacement`.
+// its `accept-charset` labels that names an encoding, else the document's, UTF-8 for a UTF-16 one or `replacement`; and
+// the result a `dialog` method closes its dialog with — the submitter's `value`, an image button's selected coordinate
+// ("x,y"), none for no submitter or one with no value.
 fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(form) = nid_arg(scope, &args, 0) else { return };
     let submitter = nid_arg(scope, &args, 1);
@@ -168,17 +171,29 @@ fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let labelled = f.plain_attr("accept-charset").and_then(|ac| ac.split(ascii_ws).filter(|l| !l.is_empty()).find_map(|l| encoding_rs::Encoding::for_label(l.as_bytes())));
     let encoding = labelled.or_else(|| encoding_rs::Encoding::for_label(document_encoding.as_bytes())).map_or("UTF-8", |e| e.name());
     let encoding = if matches!(encoding, "replacement" | "UTF-16BE" | "UTF-16LE") { "UTF-8" } else { encoding };
+    let dialog_result = s.zip(submitter).and_then(|(s, id)| {
+        if s.is_html_named("input") && s.input_type() == "image" {
+            let (x, y) = arena.selected_coordinates.get(id);
+            return Some(format!("{x},{y}").encode_utf16().collect());
+        }
+        s.plain_attr_units("value")
+    });
     let action = match action {
         Some(a) => crate::dom::utf16_value(scope, &a),
         None => v8::null(scope).into(),
     };
-    let values: [v8::Local<'_, v8::Value>; 6] = [
+    let dialog_result = match dialog_result {
+        Some(r) => crate::dom::utf16_value(scope, &r),
+        None => v8::null(scope).into(),
+    };
+    let values: [v8::Local<'_, v8::Value>; 7] = [
         action,
         v8::String::new(scope, method).map_or_else(|| v8::null(scope).into(), Into::into),
         v8::String::new(scope, enctype).map_or_else(|| v8::null(scope).into(), Into::into),
         crate::dom::utf16_value(scope, &target.unwrap_or_default()),
         crate::dom::utf16_value(scope, &rel),
         v8::String::new(scope, encoding).map_or_else(|| v8::null(scope).into(), Into::into),
+        dialog_result,
     ];
     rv.set(v8::Array::new_with_elements(scope, &values).into());
 }

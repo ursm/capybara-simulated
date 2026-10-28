@@ -14,6 +14,10 @@ impl SelectedCoordinates {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+    // The button's selected coordinate: the origin where none was selected.
+    pub(crate) fn get(&self, button: NodeId) -> (i32, i32) {
+        self.0.get(&button).copied().unwrap_or((0, 0))
+    }
     pub(crate) fn forget(&mut self, button: NodeId) {
         self.0.remove(&button);
     }
@@ -36,8 +40,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // __dom.selectedCoordinate(nid) -> the button's selected coordinate, `[x, y]` — the origin where none was selected.
 fn selected_coordinate(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let at = nid_arg(scope, &args, 0).and_then(|b| crate::dom::dom(scope).arena.selected_coordinates.0.get(&b).copied());
-    let (x, y) = at.unwrap_or((0, 0));
+    let (x, y) = nid_arg(scope, &args, 0).map_or((0, 0), |b| crate::dom::dom(scope).arena.selected_coordinates.get(b));
     let (x, y) = (v8::Integer::new(scope, x), v8::Integer::new(scope, y));
     rv.set(v8::Array::new_with_elements(scope, &[x.into(), y.into()]).into());
 }
