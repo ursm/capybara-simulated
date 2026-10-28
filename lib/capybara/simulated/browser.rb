@@ -9772,6 +9772,36 @@ module Capybara
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
 
+      # A request a realm's script makes the host fetch (`__rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
+      # worker's imported script), described by name (document-origin.js `hostRequest`) — its client the realm's own
+      # document, its frame's ancestors given — and `body` its bytes.
+      def rack_fetch_request(request, body)
+        r = request.to_h
+        rack_fetch(
+          r['method'],
+          r['url'],
+          body,
+          r['headers'],
+          r['redirect'],
+          r['mode'],
+          credentials:       r['credentials'] || 'same-origin',
+          referrer_policy:   r['referrerPolicy'],
+          referrer:          r['referrer'],
+          cache_mode:        r['cache'] || 'default',
+          initiator:         r['initiator'],
+          site_seed:         r['siteSeed'],
+          origin_null:       r['originNull'] == true,
+          client_url:        r['clientUrl'],
+          client_origin:     r['clientOrigin'],
+          ancestors:         r['ancestors'] || [],
+          cookie_cross_site: r['cookieCrossSite'] == true,
+          nav_dest:          r['navDest'],
+          navigation:        r['navigation'] == true,
+          dest:              r['dest'],
+          user_activated:    r['userActivated'] == true
+        )
+      end
+
       # URLs we won't even try to route through Rack: anything that
       # isn't http(s) (data: / mailto: / about:) plus pseudo-tokens
       # like V8's `<snapshot>` that sourcemap libraries pull out of
@@ -9780,7 +9810,7 @@ module Capybara
       # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
       # no-cors request but where it asks for CORS)
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
-                     user_activated: false)
+                     user_activated: false, ancestors: nil)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9817,8 +9847,9 @@ module Capybara
             origin_null:       origin_null == true,
             client_url:        client_url,
             client_origin:     client_origin,
-            # (…none where the page's realm cannot answer: a context being torn down)
-            ancestors:         (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
+            # (…the page's realm asked where the caller names the client's realm rather than its ancestors; none where it
+            # cannot answer: a context being torn down)
+            ancestors:         ancestors || (client_realm.to_i.positive? && @runtime.realm_direct_call(0, '__csimAncestorDocuments', client_realm.to_i)) || [],
             cookie_cross_site: cookie_cross_site == true,
             nav_dest:          nav_dest,
             navigation:        navigation == true,
