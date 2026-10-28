@@ -299,6 +299,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("keepalive_session_new", magnus::function!(keepalive::session_new_for_ruby, 0))?;
     native.define_module_function("keepalive_reserve", magnus::function!(keepalive::reserve, 3))?;
     native.define_module_function("keepalive_release", magnus::function!(keepalive::release, 1))?;
+    native.define_module_function("keepalive_retire", magnus::function!(keepalive::retire, 2))?;
     native.define_module_function("keepalive_clear", magnus::function!(keepalive::clear, 1))?;
     // …and its HTTP authentication entries (http_auth.rs).
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;

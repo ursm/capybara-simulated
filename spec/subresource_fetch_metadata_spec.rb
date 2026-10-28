@@ -169,10 +169,15 @@ RSpec.describe 'a subresource request', :https do
     expect(session.evaluate_script("['x'.repeat(70000), 'x'.repeat(40000)].map((d, i) => navigator.sendBeacon('/q' + i, d))")).to eq([false, true])
   end
   # (…its fetch group's: each document's beacons in flight are counted against its own quota, a frame's not its page's)
+  # A worker's its own as well, and the page's next document's anew, whatever the last one left in flight.
   it "counts a beacon against its own document's quota" do
     s = simulated_session(lambda {|env|
-      sleep 0.3 if env['PATH_INFO'].start_with?('/held')   # (…in flight while the next is sent)
-      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><iframe srcdoc="framed"></iframe>']]
+      sleep(env['PATH_INFO'].start_with?('/long') ? 1.5 : 0.3) if env['PATH_INFO'].start_with?('/held', '/long')   # (…in flight while the next is sent)
+      if env['PATH_INFO'] == '/w.js'
+        [200, {'content-type' => 'text/javascript'}, ["fetch('/held-w', {method: 'POST', keepalive: true, body: 'x'.repeat(40000)}).then(() => postMessage('sent'), (e) => postMessage(e.name));"]]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body><iframe srcdoc="framed"></iframe>']]
+      end
     })
     s.visit '/'
     expect(s.evaluate_script(<<~JS)).to eq([true, false, true])
@@ -181,6 +186,11 @@ RSpec.describe 'a subresource request', :https do
         return [navigator.sendBeacon('/held1', big), navigator.sendBeacon('/held2', big), framed.navigator.sendBeacon('/held3', big)];
       })()
     JS
+    worker = "const done = arguments[0]; navigator.sendBeacon('/long1', 'x'.repeat(40000)); new Worker('/w.js').onmessage = (e) => done(e.data);"
+    expect(s.evaluate_async_script(worker)).to eq('sent')
+    s.execute_script("navigator.sendBeacon('/long2', 'x'.repeat(40000))")
+    s.visit '/next'
+    expect(s.evaluate_script("navigator.sendBeacon('/held4', 'x'.repeat(40000))")).to be(true)
   end
   # (…an about:blank document's request its creator's — its origin, which Sec-Fetch-Site compares, however deep — and not
   # the top-level one's: no referrer of its own to say otherwise; an image's and a style sheet's alike)

@@ -489,7 +489,6 @@ module Capybara
         # keepalive_start machinery: detached request results, and each request's reservation of its fetch group's 64 KiB
         # in-flight payload quota (keepalive.rs, this window's session of it). Survives per-visit rebuilds by design.
         @keepalive_results = {}
-        @keepalive_tickets = {}
         @keepalive_seq     = 0
         @keepalive_lock    = Mutex.new
         @keepalive_session = Native.keepalive_session_new
@@ -5575,11 +5574,13 @@ module Capybara
         # ONE critical section for reserve + spawn: a reset between them would
         # leave the spawned thread unregistered for the boundary drain.
         @keepalive_lock.synchronize do
-          ticket = Native.keepalive_reserve(@keepalive_session, request.to_h['clientRealm'].to_i, size) or return -1
+          # (…its fetch group its client's: its document's realm, or a worker — whose realm id is its own isolate's — by its
+          # handle, negated)
+          group  = (worker = Thread.current[:csim_worker_handle]) ? -worker.to_i : request.to_h['clientRealm'].to_i
+          ticket = Native.keepalive_reserve(@keepalive_session, group, size) or return -1
 
           id = (@keepalive_seq += 1)
           @keepalive_results[id] = :pending
-          @keepalive_tickets[id] = ticket
           spawn_app_request_thread do
             r = nil
             begin
@@ -5593,12 +5594,11 @@ module Capybara
             ensure
               # Release + finalize under `ensure`: an escaping non-StandardError (or a
               # kill) must not strand the reservation for the session, nor leave a
-              # live page's poll parked on :pending forever. The per-id ticket makes
-              # the release GENERATION-SAFE: a thread completing after reset_workers
-              # cleared them finds none and lets nothing of the next session's go.
+              # live page's poll parked on :pending forever. The ticket makes the
+              # release GENERATION-SAFE: one reset_workers cleared, or of a document
+              # its realm no longer shows, lets nothing of the quota now go.
+              Native.keepalive_release(ticket)
               @keepalive_lock.synchronize do
-                ticket = @keepalive_tickets.delete(id)
-                Native.keepalive_release(ticket) if ticket
                 @keepalive_results[id] = r if @keepalive_results[id] == :pending
               end
             end
@@ -8638,13 +8638,10 @@ module Capybara
         # Keepalive threads are never KILLED — delivering the beacon is their
         # contract — but they no longer outlive the session boundary either:
         # dispose/reset! drain them (join, so the beacon still lands) via
-        # drain_app_request_threads before this runs. The per-id ticket makes a
-        # late release/finalize generation-safe against these clears regardless.
-        @keepalive_lock.synchronize do
-          @keepalive_results.clear
-          @keepalive_tickets.clear
-          Native.keepalive_clear(@keepalive_session)
-        end
+        # drain_app_request_threads before this runs. A late release is generation-safe against this clear regardless
+        # (keepalive.rs).
+        @keepalive_lock.synchronize { @keepalive_results.clear }
+        Native.keepalive_clear(@keepalive_session)
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}
         @sw_pending_claims   = []
@@ -11982,6 +11979,8 @@ module Capybara
         # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
         # its creator's policy container, the policies with it)
         @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
+        # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
+        Native.keepalive_retire(@keepalive_session, 0)
         @runtime.rebuild_ctx
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
         yield if block_given?
