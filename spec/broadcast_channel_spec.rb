@@ -140,4 +140,20 @@ RSpec.describe 'BroadcastChannel delivery' do
     poll_until { session.evaluate_script('window.got.length') >= 3 }
     expect(session.evaluate_script('window.got').sort).to eq(%w[abort bc:hi port:pm])
   end
+
+  # …a post queued while another realm of the isolate was live delivered once that realm is gone too (broadcast_channels.rs
+  # `bcQueue`: the host drains it as a post may have filled it, not as a realm lives now).
+  it 'delivers a post made just before the only frame is removed' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      const frame = document.createElement('iframe');
+      document.body.append(frame);
+      frame.contentWindow.document;
+      const a = new BroadcastChannel('s'), b = new BroadcastChannel('s');
+      b.onmessage = (e) => window.got.push(e.data);
+      a.postMessage('x');
+      frame.remove();
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length') == 1 && session.evaluate_script('window.got') }).to eq(%w[x])
+  end
 end

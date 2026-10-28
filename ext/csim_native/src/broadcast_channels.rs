@@ -91,7 +91,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "bcState", state_op, context_id);
     register(scope, ns, "bcQueue", queue_op, context_id);
     register(scope, ns, "bcTakeQueued", take_queued_op, context_id);
-    register(scope, ns, "bcQueued", queued_op, context_id);
 }
 
 // __dom.bcQueue(targets, message, origin, inbound): a post queued for each channel of `targets` ([realm, id, …],
@@ -103,7 +102,7 @@ fn queue_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let inbound = args.get(3).is_true();
     let mut queued = Vec::new();
     for i in (0..targets.length()).step_by(2) {
-        let realm = targets.get_index(scope, i).and_then(|v| v.int32_value(scope)).unwrap_or(0);
+        let Some(realm) = targets.get_index(scope, i).and_then(|v| v.int32_value(scope)) else { continue };
         let id = targets.get_index(scope, i + 1).map_or(0, |v| id_arg(scope, v));
         queued.push(Delivery { realm, id, message: message.clone(), origin: origin.clone(), inbound });
     }
@@ -122,10 +121,6 @@ fn take_queued_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
         v8::Boolean::new(scope, d.inbound).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.bcQueued() -> whether a delivery is queued.
-fn queued_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    rv.set_bool(!dom(scope).broadcast_channels.queue.is_empty());
 }
 
 fn id_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> u64 {
