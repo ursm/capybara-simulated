@@ -245,6 +245,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "routeFrameSubmission", route_frame_submission, context_id);
     register(scope, ns, "takeRoutedSubmission", take_routed_submission, context_id);
     register(scope, ns, "holdRoutedSubmission", hold_routed_submission, context_id);
+    register(scope, ns, "submissionRoute", submission_route, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
     register(scope, ns, "flushBegin", flush_begin, context_id);
@@ -487,6 +488,48 @@ fn hold_routed_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     supersede_routed(scope, cid);
 }
+// A route as the host takes it: [ROUTE_*, realm, container] — for another frame's (ROUTE_FRAME) the realm of the
+// document its container's navigable has now, or (ROUTE_UNBUILT) the realm of the container's own document and the
+// container, its navigable with none made yet; else null.
+fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local<'s, v8::Value>; 3] {
+    let arena = &crate::dom::dom(scope).arena;
+    let (kind, at, container) = match route {
+        Route::SelfTarget => (ROUTE_SELF, None, None),
+        Route::Top => (ROUTE_TOP, None, None),
+        Route::Frame(c) => match (arena.frame_realm(c), arena.get(c).map(|n| n.realm)) {
+            (Some(r), _) => (ROUTE_FRAME, Some(r), None),
+            (None, Some(parent)) => (ROUTE_UNBUILT, Some(parent), Some(c)),
+            (None, None) => (ROUTE_NEW_WINDOW, None, None),
+        },
+        Route::Window => (ROUTE_WINDOW, None, None),
+        Route::NewWindow => (ROUTE_NEW_WINDOW, None, None),
+        Route::Blocked => (ROUTE_BLOCKED, None, None),
+    };
+    let at: v8::Local<v8::Value> = match at {
+        Some(r) => v8::Integer::new(scope, r).into(),
+        None => v8::null(scope).into(),
+    };
+    let container = match (container, at.int32_value(scope)) {
+        (Some(c), Some(parent)) => crate::dom::nodes_value(scope, parent, &[c]),
+        _ => v8::null(scope).into(),
+    };
+    [v8::Integer::new(scope, kind).into(), at, container]
+}
+// __dom.submissionRoute(realm, target, rel) -> [ROUTE_*, realm, container, referrerSource, referrerPolicy]: where a form's
+// submission of realm `realm`'s document with target `target` and link types `rel` goes (`route`, `route_items`) and
+// the Referer it sends — what the host asks of a submission it makes for the user (an entered frame's form submitted).
+fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let target = args.get(1).to_rust_string_lossy(scope);
+    let rel = args.get(2).to_rust_string_lossy(scope);
+    let policy = if crate::token_list::link_types(&rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
+    let arena = &mut crate::dom::dom(scope).arena;
+    let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
+    let route = route(arena, realm, &target);
+    let [kind, at, container] = route_items(scope, route);
+    let items = [kind, at, container, v8::String::new(scope, &referrer.0).unwrap().into(), v8::String::new(scope, &referrer.1).unwrap().into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
 // __dom.takeRoutedSubmission() -> the first of the submissions frames' documents made that the host routes, in the order
 // they were made, which none plans any more: `[realm, request, ROUTE_*, realm, container, referrerSource,
 // referrerPolicy]` — for another frame's (ROUTE_FRAME) the realm of the document its container's navigable has now, or
@@ -510,31 +553,11 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
             }),
         };
         let Some((request, route, referrer)) = taken else { continue };
-        let arena = &crate::dom::dom(scope).arena;
-        let (kind, at, container) = match route {
-            Route::SelfTarget => (ROUTE_SELF, None, None),
-            Route::Top => (ROUTE_TOP, None, None),
-            Route::Frame(c) => match (arena.frame_realm(c), arena.get(c).map(|n| n.realm)) {
-                (Some(r), _) => (ROUTE_FRAME, Some(r), None),
-                (None, Some(parent)) => (ROUTE_UNBUILT, Some(parent), Some(c)),
-                (None, None) => (ROUTE_NEW_WINDOW, None, None),
-            },
-            Route::Window => (ROUTE_WINDOW, None, None),
-            Route::NewWindow => (ROUTE_NEW_WINDOW, None, None),
-            Route::Blocked => (ROUTE_BLOCKED, None, None),
-        };
-        let at: v8::Local<v8::Value> = match at {
-            Some(r) => v8::Integer::new(scope, r).into(),
-            None => v8::null(scope).into(),
-        };
-        let container = match (container, at.int32_value(scope)) {
-            (Some(c), Some(parent)) => crate::dom::nodes_value(scope, parent, &[c]),
-            _ => v8::null(scope).into(),
-        };
+        let [kind, at, container] = route_items(scope, route);
         let item = [
             v8::Integer::new(scope, e.source).into(),
             v8::Local::new(scope, request),
-            v8::Integer::new(scope, kind).into(),
+            kind,
             at,
             container,
             v8::String::new(scope, &referrer.0).unwrap().into(),

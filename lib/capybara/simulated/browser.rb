@@ -10805,14 +10805,11 @@ module Capybara
       end
       # The submissions frames' documents made that the host routes, taken as the task ends one at a time in the order
       # they were made (navigation_plan.rs `takeRoutedSubmission`: the frame one chose may have a new document by the next):
-      # each its realm, its request, the navigable its target chose — its own, the page, another frame's (made now where
-      # its navigable had no document: location.js), a window's or a new one (not modeled), none — and its Referer.
+      # each its realm, its request, the navigable its target chose (`frame_submission_route`'s) and its Referer.
       # (Never while the form's `submit()` is still on the V8 stack.)
-      FRAME_SUBMISSION_ROUTES = {1 => :self, 2 => :top, 5 => :window, 6 => nil, 7 => :blocked}.freeze
-      ROUTE_FRAME = 3
       def consume_pending_frame_submit
         while (realm_id, spec, kind, chosen_realm, _container, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
-          chosen = kind == ROUTE_FRAME ? chosen_realm : FRAME_SUBMISSION_ROUTES[kind]
+          chosen = kind == ROUTE_FRAME ? chosen_realm : SUBMISSION_ROUTES[kind]
           invalidate_find_cache
           begin
             submit_frame_route(realm_id, spec, [chosen, [source, policy]])
@@ -11114,25 +11111,17 @@ module Capybara
       def submit_form_in_realm(realm_id, spec)
         submit_frame_route(realm_id, spec, frame_submission_route(realm_id, spec))
       end
-      # …where it goes, asked of the frame's document while it is there: [chosen, initiator] — `:self` its own frame (a
-      # self-targeted link's navigation: within_frame's `navigate_frame`, else its iframe re-navigated by realm id), `:top`
-      # the page (`_top`, a `_parent` that is the page, or a name the page has), a frame's realm (a name's, `_parent`'s),
-      # `:window` a same-isolate window's (its navigation not modeled), nil a new window (not modeled), `:blocked` none
-      # its sandbox lets it navigate — and its Referer: the frame's document's, under its policy or `noreferrer`'s.
+      # …where it goes, asked of the frame's document while it is there (navigation_plan.rs `submissionRoute`): [chosen,
+      # initiator] — `:self` its own frame (a self-targeted link's navigation: within_frame's `navigate_frame`, else its
+      # iframe re-navigated by realm id), `:top` the page (`_top`, a `_parent` that is the page, or a name the page has), a
+      # frame's realm (a name's, `_parent`'s: made now, where its navigable has no document yet), `:window` a same-isolate
+      # window's (its navigation not modeled), nil a new window (not modeled), `:blocked` none its sandbox lets it
+      # navigate — and its Referer: the frame's document's, under its policy or `noreferrer`'s.
+      SUBMISSION_ROUTES = {1 => :self, 2 => :top, 5 => :window, 6 => nil, 7 => :blocked}.freeze
+      ROUTE_FRAME = 3
       def frame_submission_route(realm_id, spec)
-        initiator = realm_referrer_initiator(realm_id)
-        initiator = [initiator[0], 'no-referrer'] if Native.link_noreferrer(spec['rel'].to_s)
-        target = spec['target'].to_s
-        return [:self, initiator] if frame_self_target?(target)
-
-        chosen = target_keyword(target) == TARGET_BLANK ? nil : choose_named_navigable(realm_id, target)
-        # (…the top-level one of a frame of a same-isolate window is that window, not the page)
-        if chosen == :top
-          chosen = :window if top_level_realm_of(realm_id).positive?
-        elsif chosen.is_a?(Integer) && @runtime.top_level_realm?(chosen)
-          chosen = :window
-        end
-        [chosen, initiator]
+        kind, chosen, source, policy = @runtime.call('__csimSubmissionRoute', realm_id.to_i, spec['target'].to_s, spec['rel'].to_s)
+        [kind == ROUTE_FRAME ? chosen : SUBMISSION_ROUTES[kind], [source, policy]]
       end
       def submit_frame_route(realm_id, spec, route)
         chosen, initiator = route
@@ -11165,29 +11154,9 @@ module Capybara
           log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a new window is not modeled")
         end
       end
-      # The top-level realm realm `realm_id`'s browsing context is in: 0, the page's, or a same-isolate window's.
-      def top_level_realm_of(realm_id)
-        realm = realm_id.to_i
-        realm = @runtime.frame_realm_parent(realm) until @runtime.top_level_realm?(realm)
-        realm
-      end
-      # The navigable a target name — or `_top` / `_parent` — chooses from realm `realm_id`'s browsing context
-      # (navigables.rs `findNavigable`, `keyword_navigable`): a frame's realm — made now, where its navigable has no
-      # document yet — `:top` (its top-level traversable's), `:blocked` (one its sandbox keeps it from navigating), or nil
-      # (none has the name).
-      def choose_named_navigable(realm_id, target)
-        keyword = target_keyword(target)
-        realm = if [TARGET_TOP, TARGET_PARENT].include?(keyword)
-          @runtime.realm_call(realm_id, '__csimKeywordNavigable', keyword)
-        else
-          @runtime.realm_call(realm_id, '__csimFindNamedFrame', target.to_s)
-        end
-        case (realm = realm.to_i)
-        when -1 then :blocked
-        when -2 then :top
-        else realm.positive? ? realm : nil
-        end
-      end
+      # The navigable a target name chooses from realm `realm_id`'s browsing context (`frame_submission_route`): a frame's
+      # realm, `:top`, `:blocked`, or nil (none has the name).
+      def choose_named_navigable(realm_id, target) = frame_submission_route(realm_id, {'target' => target})[0]
       # Whether a link's or a form's target opens a new browsing context — `_blank`, or a name no navigable has (the page
       # chose the one that has it first: `choose_named_navigable`).
       def new_window_target?(target)
