@@ -11,10 +11,11 @@ use crate::text_selection::Direction;
 
 // What a move answers: the selection's focus moved to a point — kept as the move line-wise moves set out from
 // (`KEEP`), revealing the caret in a root that scrolls (`REVEAL`) — a textarea's caret moved to an offset, or a text
-// control edited.
+// control edited; or, asked before its text was laid out, that a move by its lines needs it to be (`TEXT_WANTED`).
 const TO_POINT: u32 = 1;
 const TO_VALUE: u32 = 2;
 const TO_EDIT: u32 = 3;
+const TEXT_WANTED: u32 = 4;
 const KEEP: u32 = 1;
 const REVEAL: u32 = 2;
 
@@ -36,6 +37,7 @@ enum Move {
     // (…the textarea's anchor, the caret's offset, x and upstream as a point's, and REVEAL)
     Value(u32, u32, Option<f64>, bool, u32),
     Edit(u32),
+    TextWanted,
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -43,8 +45,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 }
 
 // The move `motion` makes of the caret of `n` — an editing host's, its document's selection `selection` (its state), where
-// `host` — or None where it moves nowhere.
-fn key_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, n: NodeId, motion: u32, host: bool) -> Option<Move> {
+// `host` — or None where it moves nowhere; one that reads the lines of its text asked for its text laid out first where
+// it is not (`laid_out`).
+fn key_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, n: NodeId, motion: u32, host: bool, laid_out: bool) -> Option<Move> {
     let cid = realm_id(scope, args);
     let forward = motion & MOVE_FORWARD != 0;
     let extend = if motion & MOVE_EXTEND != 0 { EDIT_EXTEND } else { 0 };
@@ -61,11 +64,17 @@ fn key_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
                     let at = crate::rendered::with_engine(scope, args, |engine, arena, now| arena.caret_edge(engine, now, root, forward))?;
                     return Some(Move::Point(at, None, false, KEEP));
                 }
+                if !laid_out {
+                    return Some(Move::TextWanted);
+                }
                 let (at, upstream) = crate::text_geometry::line_edge(scope, cid, root, focus?.0, focus?.1, forward)?;
                 return Some(Move::Point(at, None, upstream, KEEP));
             }
             if textarea && !whole {
                 // (…to the start or end of its LINE as it wraps, not of the value's line between newlines)
+                if !laid_out {
+                    return Some(Move::TextWanted);
+                }
                 let (focus, anchor) = textarea_ends(scope, cid, n);
                 let ((node, offset), upstream) = crate::text_geometry::line_edge(scope, cid, n, n, focus, forward)?;
                 return (node == n).then_some(Move::Value(anchor, offset, None, upstream, 0));
@@ -106,6 +115,9 @@ fn key_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
             let up = !forward;
             if host {
                 // (…a line up or down in the host, past its first or last line to its text's edge — in the host still)
+                if !laid_out {
+                    return Some(Move::TextWanted);
+                }
                 let root = editing_host?;
                 let focus = focus?;
                 let edge = crate::rendered::with_engine(scope, args, |engine, arena, now| arena.caret_edge(engine, now, root, !up))?;
@@ -115,6 +127,9 @@ fn key_move(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgumen
                 return (element.and_then(|e| arena.editing_host(e)) == Some(root)).then_some(Move::Point(at, Some(x), false, KEEP | REVEAL));
             }
             if textarea {
+                if !laid_out {
+                    return Some(Move::TextWanted);
+                }
                 let (focus, anchor) = textarea_ends(scope, cid, n);
                 let arena = realm(scope, cid);
                 let len = arena.get(n).map_or(0, |e| arena.relevant_value_len(e));
@@ -132,14 +147,16 @@ fn textarea_ends(scope: &mut v8::PinScope<'_, '_>, cid: i32, n: NodeId) -> (u32,
     if sel.direction == Direction::Backward { (sel.start, sel.end) } else { (sel.end, sel.start) }
 }
 
-// __dom.keyMoveTarget(element, motion, editingHost, selectionState) -> where `motion` (`keyMotion`) takes the caret of
-// `element` (`key_move`): `[TO_POINT, [node], offset, x | undefined, upstream, flags]`, `[TO_VALUE, anchor, offset,
-// x | undefined, upstream, flags]`, `[TO_EDIT, edit]` — undefined where it moves nowhere.
+// __dom.keyMoveTarget(element, motion, editingHost, selectionState, laidOut) -> where `motion` (`keyMotion`) takes the
+// caret of `element` (`key_move`): `[TO_POINT, [node], offset, x | undefined, upstream, flags]`, `[TO_VALUE, anchor,
+// offset, x | undefined, upstream, flags]`, `[TO_EDIT, edit]`, `[TEXT_WANTED]` — asked again once its text is laid out
+// — undefined where it moves nowhere.
 fn key_move_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(n) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
     let motion = args.get(1).uint32_value(scope).unwrap_or(0);
     let host = args.get(2).is_true();
-    let Some(answer) = key_move(scope, &args, n, motion, host) else { return };
+    let laid_out = args.get(4).is_true();
+    let Some(answer) = key_move(scope, &args, n, motion, host, laid_out) else { return };
     let cid = realm_id(scope, &args);
     fn x<'s>(scope: &mut v8::PinScope<'s, '_>, x: Option<f64>) -> v8::Local<'s, v8::Value> {
         match x {
@@ -165,6 +182,7 @@ fn key_move_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
             v8::Integer::new_from_unsigned(scope, flags).into(),
         ],
         Move::Edit(edit) => vec![v8::Integer::new_from_unsigned(scope, TO_EDIT).into(), v8::Integer::new_from_unsigned(scope, edit).into()],
+        Move::TextWanted => vec![v8::Integer::new_from_unsigned(scope, TEXT_WANTED).into()],
     };
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

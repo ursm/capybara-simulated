@@ -532,8 +532,6 @@ fn word_unit(u: u16) -> bool {
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "caretStep", caret_step, context_id);
-    crate::dom::register(scope, ns, "caretWordStep", caret_word_step, context_id);
     crate::dom::register(scope, ns, "caretWord", caret_word, context_id);
     crate::dom::register(scope, ns, "caretEdge", caret_edge, context_id);
     crate::dom::register(scope, ns, "caretAtom", caret_atom, context_id);
@@ -561,26 +559,6 @@ fn points<'s>(scope: &mut v8::PinScope<'s, '_>, cid: i32, nodes: &[NodeId], offs
     let mut values = vec![crate::dom::nodes_value(scope, cid, nodes)];
     values.extend(offsets.iter().map(|&o| -> v8::Local<'_, v8::Value> { v8::Integer::new_from_unsigned(scope, o).into() }));
     v8::Array::new_with_elements(scope, &values).into()
-}
-
-// __dom.caretStep(nid, offset, forward) -> [[node], offset] (`caret_step`), or undefined where the caret stays (or
-// the realm has no style engine).
-fn caret_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    step_op(scope, args, rv, RealmArena::caret_step);
-}
-// __dom.caretWordStep(nid, offset, forward) -> …by a word (`caret_word_step`).
-fn caret_word_step(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, rv: v8::ReturnValue<'_, v8::Value>) {
-    step_op(scope, args, rv, RealmArena::caret_word_step);
-}
-type Step = fn(&RealmArena, &mut StyleEngine, f64, NodeId, u32, bool) -> Option<(NodeId, u32)>;
-fn step_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>, step: Step) {
-    let Some(node) = nid_arg(scope, &args, 0) else { return };
-    let offset = args.get(1).uint32_value(scope).unwrap_or(0);
-    let forward = args.get(2).is_true();
-    let cid = crate::dom::realm_id(scope, &args);
-    if let Some((to, at)) = crate::rendered::with_engine(scope, &args, |engine, arena, now| step(arena, engine, now, node, offset, forward)).flatten() {
-        rv.set(points(scope, cid, &[to], &[at]));
-    }
 }
 
 // __dom.caretWord(nid, offset) -> [[startNode, endNode], startOffset, endOffset] (`caret_word`), or undefined.
