@@ -2128,7 +2128,7 @@ impl StyleEngine {
         };
         // An eager one the traversal styled is read as it left it — its animations and transitions applied.
         let slot = arena.existing_style_slot(id)?;
-        let styled = unsafe { &*slot.data.get() }.as_ref().and_then(|data| data.borrow().styles.pseudos.get(&pseudo).cloned());
+        let styled = unsafe { &*slot.data.get() }.as_ref().and_then(|data| eager_style(&data.borrow(), &pseudo));
         if styled.is_some() {
             return styled;
         }
@@ -2466,6 +2466,16 @@ fn target_style(arena: &RealmArena, target: &waapi::Target) -> Option<Arc<Comput
     let slot = arena.style_slot(target.node)?;
     // SAFETY: no traversal runs while a style is read.
     let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
+    eager_style(&data, pseudo)
+}
+
+// The style an element's data holds for its pseudo-element `pseudo` — one the traversal styles with it, an EAGER one
+// (`::before`, `::after`, `::first-line`, `::first-letter`): none of a lazy one (`::marker`, `::placeholder`, …), which
+// the data has no slot for.
+fn eager_style(data: &style::data::ElementData, pseudo: &PseudoElement) -> Option<Arc<ComputedValues>> {
+    if !pseudo.is_eager() {
+        return None;
+    }
     data.styles.pseudos.get(pseudo).cloned()
 }
 
@@ -2485,7 +2495,7 @@ fn is_rendered(arena: &RealmArena, target: &waapi::Target) -> bool {
     match (&target.pseudo, data.styles.get_primary()) {
         (_, None) => false,
         (None, Some(primary)) => shown(primary),
-        (Some(pseudo), Some(primary)) => shown(primary) && data.styles.pseudos.get(pseudo).is_some_and(|s| shown(s)),
+        (Some(pseudo), Some(primary)) => shown(primary) && eager_style(&data, pseudo).is_some_and(|s| shown(&s)),
     }
 }
 
@@ -2632,7 +2642,7 @@ pub(crate) fn eager_pseudo(arena: &RealmArena, id: NodeId, pseudo: &PseudoElemen
     let slot = arena.style_slot(id)?;
     // SAFETY: as above.
     let data = unsafe { &*slot.data.get() }.as_ref()?.borrow();
-    data.styles.pseudos.get(pseudo).cloned()
+    eager_style(&data, pseudo)
 }
 
 // Is a box of `style`, under a parent of `parent`, a flex or grid item: its parent a flex or grid container, and
