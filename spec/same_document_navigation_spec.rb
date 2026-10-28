@@ -262,6 +262,16 @@ RSpec.describe 'same-document navigation' do
       expect(s.evaluate_script("#{kept_state}(history.state)")).to eq(kept)
     end
 
+    # (…`undefined` too, which serializes as itself: only a state that cannot be read back is null)
+    it 'gives a traversal back an undefined state' do
+      s = state_session
+      s.execute_script("history.pushState(undefined, '', '/b'); history.pushState(1, '', '/c')")
+      s.go_back
+      poll(s, 'popped.length > 0')
+
+      expect(s.evaluate_script("[typeof popped[0], typeof history.state]")).to eq(%w[undefined undefined])
+    end
+
     it 'gives pushState its own copy, not the object it was given' do
       s = state_session
       s.execute_script("window.given = #{cloned_state}; history.pushState(given, '', '/b')")

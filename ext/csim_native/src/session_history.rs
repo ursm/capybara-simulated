@@ -513,9 +513,12 @@ impl SessionHistory {
     }
     // #text(entry, name) -> its text field `name` (`TEXT_FIELDS`: :origin, :referer, :referrer_policy, :referrer), nil
     // for none — what `#entry` gives without copying its bytes out.
-    fn text(&self, id: Option<u64>, name: Symbol) -> Result<Option<String>, magnus::Error> {
+    fn text(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>, name: Symbol) -> Result<Option<String>, magnus::Error> {
         let name = name.name()?;
-        Ok(id.and_then(|id| self.0.borrow().state.entry(id).and_then(|e| e.data.text(&name).map(str::to_owned))))
+        if !TEXT_FIELDS.contains(&&*name) {
+            return Err(magnus::Error::new(ruby.exception_arg_error(), format!("no text field {name}")));
+        }
+        Ok(id.and_then(|id| rb_self.0.borrow().state.entry(id).and_then(|e| e.data.text(&name).map(str::to_owned))))
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
