@@ -958,6 +958,8 @@ pub(crate) struct RealmArena {
     pub(crate) foreign_observations: crate::foreign_observations::ForeignObservations,
     // Each frame container's navigation as it goes (frame_navigation.rs).
     pub(crate) frame_navigations: crate::frame_navigation::FrameNavigations,
+    // The form submissions frames' documents made that the host routes (navigation_plan.rs `RoutedSubmissions`).
+    pub(crate) routed_submissions: crate::navigation_plan::RoutedSubmissions,
     // Each document's mode, readiness and flags (document_state.rs).
     pub(crate) document_states: crate::document_state::DocumentStates,
     // The line of its document each script the parser made begins on (html_parse.rs `OP_SCRIPT_LINE`), until it runs

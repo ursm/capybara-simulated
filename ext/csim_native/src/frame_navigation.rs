@@ -128,6 +128,17 @@ struct Plans {
 }
 
 impl FrameNavigations {
+    // The host's planned navigation of container `c`'s navigable, where the container has navigation state.
+    pub(crate) fn host_mut(&mut self, c: NodeId) -> Option<&mut Option<(u64, HostNavigation)>> {
+        self.0.get_mut(&c).map(|n| &mut n.host)
+    }
+    // …and a form's of its parent's document cancelled: its response loads into nothing, its pending `load` the
+    // replacing navigation's own.
+    pub(crate) fn cancel_form(&mut self, c: NodeId) {
+        if let Some(nav) = self.0.get_mut(&c) {
+            nav.planned = 0;
+        }
+    }
     // Whether the host plans a navigation of any frame.
     pub(crate) fn hosted(&self) -> bool {
         self.0.values().any(|n| n.host.is_some())
@@ -475,6 +486,10 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     nav.planned = token;
     nav.host = None;
     navs.1.last.insert(form, (token, container));
+    // (…and the submission of the frame's document the host routes taken out with its route: navigation_plan.rs)
+    if let Some(frame) = crate::dom::dom(scope).arena.frame_realm(container) {
+        crate::navigation_plan::supersede_routed(scope, frame);
+    }
     rv.set_uint32(token);
 }
 
@@ -607,6 +622,8 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     nav.planned = 0;
     let host = HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated };
     nav.host = Some((crate::navigation_plan::next_planned(), host));
+    // (…and the submission of the frame's document the host routes, taken out with its route: navigation_plan.rs)
+    crate::navigation_plan::supersede_routed(scope, target);
     rv.set_uint32(PLANNED);
 }
 // __dom.planFrameReload(): a reload of the calling frame realm's document planned for the host, replacing the navigation
@@ -616,15 +633,17 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(container) = arena.live_container(cid) else { return };
     arena.frame_navigation(container).host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload));
+    crate::navigation_plan::supersede_routed(scope, cid);
 }
-// __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of — a
-// submission of its document's, a traversal making its document again.
+// __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of, and the
+// submission of its document's it routes taken out with its route — a traversal making its document again.
 fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let arena = &mut crate::dom::dom(scope).arena;
     if let Some(nav) = arena.live_container(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
         nav.host = None;
     }
+    crate::navigation_plan::supersede_routed(scope, realm);
 }
 // __dom.takeFrameNavigations(kinds) -> the navigations the host planned of frames, of the kinds `kinds` names
 // (HOST_NAVIGATE, HOST_RELOAD), in the order they were planned, which none plans any more: `[HOST_NAVIGATE, realm, url,

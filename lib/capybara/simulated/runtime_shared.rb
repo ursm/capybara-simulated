@@ -48,10 +48,6 @@ module Capybara
           mode, credentials, _, _, destination = Native.subresource_plan_fields(a[4].to_i)
           b.sw_script_subresource_fetch(a[0], a[1], a[2], a[3], destination, mode, credentials, binary: a[5] == true, integrity: a[6] || '', referrer_policy: a[7])
         },
-        # A <form> submitted from inside a nested browsing context (a[0] = the
-        # initiating frame's realm id). Deferred + applied against that realm —
-        # see Browser#frame_submit_self.
-        '__csimFrameSubmit'          => ->(b, *a) { b.frame_submit_self(a[0].to_i, a[1].to_s, a[2]) },
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
@@ -66,7 +62,6 @@ module Capybara
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1], a[2]); nil },
         '__historyGo'                => ->(b, *a) { b.plan_history_traverse(a[0], a[1]) },
         '__csimApplyTraversal'       => ->(b, *a) { b.apply_planned_traversal(a[0].to_i); nil },
-        '__csimSupersedeFrameNavigation' => ->(b, *a) { b.frame_navigation_superseded(a[0].to_i); nil },
         '__historyLength'            => ->(b, *a) { b.history_length(a[0].to_i) },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1]) },

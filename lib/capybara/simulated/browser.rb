@@ -2453,7 +2453,6 @@ module Capybara
           @runtime.call('__csimSupersedePlanned')
         elsif (realm = navigable_realm(nav))
           @runtime.call('__csimDropFrameNavigation', realm)
-          supersede_frame_navigation(realm)
           # (…a form's of its parent's document too, planned in that realm: frame_navigation.rs `planned`)
           parent = @runtime.frame_realm_parent(realm)
           handle = frame_container_handle(realm, parent)
@@ -3265,7 +3264,7 @@ module Capybara
         !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals?
       end
       private def pending_navigation_besides_traversals?
-        !(@pending_frame_submit || []).empty? || !own_planned.zero?
+        !own_planned.zero?
       end
 
       # Pull every background async channel (Worker / EventSource / hijacked fetch
@@ -10641,15 +10640,6 @@ module Capybara
           end
         end
       end
-      # …and a navigation a form of its parent's document planned for frame realm `realm_id`, its request not yet sent —
-      # one of the frame's own replacing it: a link's targeting it, a form's of its own document (Chrome and Firefox
-      # sending none; the frame's own `location` cancels it from its realm, location.js) — its pending `load` kept, the
-      # replacing navigation's own.
-      private def cancel_parent_form_navigation(realm_id)
-        parent = @runtime.frame_realm_parent(realm_id)
-        handle = frame_container_handle(realm_id, parent)
-        frame_realm_host_call(parent, '__csimCancelFrameNavigation', handle, true) unless handle.zero?
-      end
       # The `[attribute]` the frame-nav drain's navigation of frame realm `realm` carries (the container's `sandbox` as it
       # began: frame_navigation.rs `planFrameLocation`), none for another realm's — one the navigation's own made, nested
       # in it.
@@ -10766,33 +10756,6 @@ module Capybara
         activated = @runtime.call('__csimTakeReload')
         refresh(user_activated: activated) unless activated.nil?
       end
-      # The submission the host held for frame realm `realm_id` let go, as a navigation of its navigable is planned — its
-      # own `location`'s, a reload, a link's targeting it (location.js `planFrameNavigation`), a form's of its parent's
-      # document (dom-nodes.js `__csimSubmitFormToNamedFrame`) — whose own plan replaced the host's navigation of it.
-      def frame_navigation_superseded(realm_id)
-        supersede_frame_navigation(realm_id) unless realm_id.zero?
-      end
-      # A frame's navigation planned — to a URL, a reload, a form's submission — replaces the one it had planned before
-      # (HTML "navigate": a later navigation of a navigable aborts its ongoing one): `href = …` and then `reload()` in one
-      # task reloads the document it is at (Chrome, measured: the reload's document, not the href's).
-      # (…a form's submission its realm's plan as well — a later submission replaced the plan itself, in the realm, before
-      # its slot is asked for: `submitted` — taken there where another kind of navigation comes: dropped where it
-      # navigates the frame, whose navigation that replaces; kept, routed while the frame's document is there to ask
-      # (`frame_submission_route`), where it navigates another navigable — the page for `_top`, as Chrome has it.)
-      private def supersede_frame_navigation(realm_id, submitted: false)
-        return unless (pending = @pending_frame_submit&.[](realm_id))
-        return @pending_frame_submit.delete(realm_id) if submitted
-        return if pending[:spec]
-
-        spec = @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit') : nil
-        if spec.is_a?(Hash) && !frame_self_target?(spec['target'].to_s)
-          pending.merge!(spec: spec, route: frame_submission_route(realm_id, spec))
-        else
-          @pending_frame_submit.delete(realm_id)
-        end
-      rescue StandardError
-        nil
-      end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends.
       def consume_pending_frame_reload
         @runtime.call('__csimTakeFrameNavigations', FRAME_RELOAD).each do |_, realm_id|
@@ -10831,41 +10794,6 @@ module Capybara
           log_console('warn', "frame self-reload failed: #{e.message}")
         end
       end
-      # A <form> submitted from INSIDE a nested browsing context (a frame realm
-      # reached via `contentWindow`, not an entered `within_frame` block). The
-      # planned submission is the initiating realm's (navigation_plan.rs), which no
-      # top-page drain reads, so the JS side flags the realm here. Keyed by realm id; deferred + drained from
-      # `drain_pending_navigation` so we never serialize/navigate while the
-      # form's `submit()` is still on the V8 stack.
-      # (…`target` the one its request names, `request` that request: one that navigates the page is the page's navigation
-      # planned last — SUBMIT_TO_TOP: the frame's plan hands it to the page's (navigation_plan.rs `submitToTop`), its
-      # request and Referer taken now, whatever becomes of the frame by the time the page navigates — not the frame's,
-      # superseding the one planned before it, a location's, a reload, a link's or a form's of the page, Chrome's
-      # `location.href = …; frames[0].f.submit()`, and superseded in turn by one the page plans after it, whatever the
-      # frame plans.)
-      # (…a frame still being built — its realm not yet one the host can ask — has its request taken as it is
-      # (SUBMIT_TAKEN: the frame's plan of it the frame's to drop), routed as it is drained, its navigables known by then)
-      SUBMIT_KEPT   = 0
-      SUBMIT_TAKEN  = 1
-      SUBMIT_TO_TOP = 2
-      def frame_submit_self(realm_id, target = '', request = nil)
-        return SUBMIT_KEPT if realm_id.nil? || realm_id.zero?
-        # (…the frame's navigable's navigation the host planned let go too: frame_navigation.rs `dropFrameNavigation`)
-        @runtime.call('__csimDropFrameNavigation', realm_id)
-        supersede_frame_navigation(realm_id, submitted: true)
-        cancel_parent_form_navigation(realm_id) if frame_self_target?(target.to_s) || choose_named_navigable(realm_id, target.to_s) == realm_id
-        pending = ((@pending_frame_submit ||= {})[realm_id] = {})
-        return SUBMIT_KEPT unless request.is_a?(Hash)
-        unless @runtime.frame_realm_alive?(realm_id)
-          pending[:spec] = request
-          return SUBMIT_TAKEN
-        end
-        return SUBMIT_KEPT unless [TARGET_TOP, TARGET_PARENT].include?(target_keyword(target)) && top_level_realm_of(realm_id).zero?
-        return SUBMIT_KEPT unless choose_named_navigable(realm_id, target) == :top
-
-        @pending_frame_submit.delete(realm_id)
-        SUBMIT_TO_TOP
-      end
       def consume_pending_page_submission
         realm_id, spec, source, policy = @runtime.call('__csimTakeFrameSubmission')
         return unless realm_id
@@ -10875,20 +10803,17 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "nested-context form submission failed: #{e.message}")
       end
+      # The submissions frames' documents made that the host routes, taken as the task ends in the order they were made
+      # (navigation_plan.rs `takeFrameSubmissions`): each its realm, its request, the navigable its target chose — its
+      # own, the page, another frame's (made now where its navigable had no document: location.js), a window's or a new
+      # one (not modeled), none — and its Referer. (Never while the form's `submit()` is still on the V8 stack.)
+      FRAME_SUBMISSION_ROUTES = {1 => :self, 2 => :top, 5 => :window, 6 => nil, 7 => :blocked}.freeze
+      ROUTE_FRAME = 3
       def consume_pending_frame_submit
-        return if @pending_frame_submit.nil? || @pending_frame_submit.empty?
-        pending = @pending_frame_submit
-        @pending_frame_submit = nil
-        pending.each do |realm_id, entry|
-          spec, route = entry[:spec], entry[:route]
-          unless spec
-            next unless @runtime.frame_realm_alive?(realm_id)
-            spec = @runtime.realm_call(realm_id, '__csimTakePendingFormSubmit')
-            next unless spec.is_a?(Hash)
-          end
-          route ||= frame_submission_route(realm_id, spec)
+        @runtime.call('__csimTakeFrameSubmissions').each do |realm_id, spec, kind, chosen_realm, _container, source, policy|
+          chosen = kind == ROUTE_FRAME ? chosen_realm : FRAME_SUBMISSION_ROUTES[kind]
           invalidate_find_cache
-          submit_frame_route(realm_id, spec, route)
+          submit_frame_route(realm_id, spec, [chosen, [source, policy]])
         rescue StandardError => e
           log_console('warn', "nested-context form submission failed: #{e.message}")
         end
@@ -12585,12 +12510,11 @@ module Capybara
       # duration of the flush and restored after, so the outgoing page's intents
       # neither leak into the incoming page nor clobber the live one. Listed here
       # (rather than saved individually) because a re-assignment does NOT restore a
-      # slot mutated IN PLACE — `@pending_frame_submit` is a Hash keyed by realm.
-      # (The page's own plan — its location navigation, its reload, a frame's submission to it — its windows' and the
-      # host's navigations of its frames are stashed alike, in the engine: navigation_plan.rs `flushBegin`.)
-      NAV_INTENT_SLOTS = %i[
-        @pending_history_traverse @pending_frame_submit
-      ].freeze
+      # slot mutated IN PLACE.
+      # (The page's own plan — its location navigation, its reload, a frame's submission to it — its windows', the
+      # host's navigations of its frames and the frames' submissions it routes are stashed alike, in the engine:
+      # navigation_plan.rs `flushBegin`.)
+      NAV_INTENT_SLOTS = %i[@pending_history_traverse].freeze
       private_constant :NAV_INTENT_SLOTS
 
       def flush_outgoing_page_init

@@ -90,6 +90,114 @@ pub(crate) struct NavigationPlan {
     flushed: Option<Own>,
 }
 
+// A form's submission a frame's document made that the host routes, as the task ends, to the navigable its target
+// chooses (`Route`) — its own, the page (one the page's plan holds instead: `submitToTop`), another frame — in the order
+// they were made: by the frame's realm, its request held in that realm's plan until the frame's navigable is navigated
+// otherwise — its own `location`, a reload, a form of its parent's document — where it is taken out with its route then
+// (its document there to ask), one targeting its own navigable let go. A realm's later submission replaces its earlier
+// (the realm's plan holds one). (Its target its form's, per HTML "plan to navigate": the realm's is a coarser key.)
+#[derive(Default)]
+pub(crate) struct RoutedSubmissions {
+    entries: Vec<RoutedSubmission>,
+    saved: Option<Vec<RoutedSubmission>>,
+    flushed: Option<Vec<RoutedSubmission>>,
+}
+struct RoutedSubmission {
+    planned: u64,
+    source: i32,
+    taken: Option<(v8::Global<v8::Value>, Route, (String, String))>,
+}
+impl RoutedSubmissions {
+    pub(crate) fn any(&self) -> bool {
+        !self.entries.is_empty()
+    }
+}
+
+// Where a frame's form submission goes (`route`): its own navigable, the top-level traversable, another frame's (its realm
+// — or, its navigable with no document made yet, its container in the realm of its parent's, which the host makes it
+// for), a window's of this isolate or a new one (neither modeled), or none its sandbox lets it navigate.
+#[derive(Clone, Copy)]
+pub(crate) enum Route {
+    SelfTarget,
+    Top,
+    Frame(i32),
+    Unbuilt(i32, crate::dom::NodeId),
+    Window,
+    NewWindow,
+    Blocked,
+}
+const ROUTE_SELF: i32 = 1;
+const ROUTE_TOP: i32 = 2;
+const ROUTE_FRAME: i32 = 3;
+const ROUTE_UNBUILT: i32 = 4;
+const ROUTE_WINDOW: i32 = 5;
+const ROUTE_NEW_WINDOW: i32 = 6;
+const ROUTE_BLOCKED: i32 = 7;
+
+// The navigable target `target` chooses from frame realm `realm`'s document (HTML "the rules for choosing a navigable":
+// navigables.rs `keyword_navigable`, `find_navigable`) — the top-level traversable of a frame of a window that window's.
+fn route(arena: &crate::dom::RealmArena, realm: i32, target: &str) -> Route {
+    use crate::navigables::{target_keyword, Chosen, TARGET_BLANK, TARGET_PARENT, TARGET_SELF, TARGET_TOP};
+    let keyword = target_keyword(target);
+    let window = |r: i32| r != 0 && arena.parent_realm(r).is_none();
+    let chosen = match keyword {
+        TARGET_SELF => return Route::SelfTarget,
+        TARGET_BLANK => return Route::NewWindow,
+        TARGET_TOP | TARGET_PARENT => match arena.keyword_navigable(realm, keyword) {
+            None => Route::Blocked,
+            Some(0) => Route::Top,
+            Some(r) => Route::Frame(r),
+        },
+        _ => match arena.find_navigable(realm, &target.encode_utf16().collect::<Vec<u16>>()) {
+            Chosen::None | Chosen::Window(_) => Route::NewWindow,
+            Chosen::Blocked => Route::Blocked,
+            Chosen::Navigable(_, None) => Route::Top,
+            Chosen::Navigable(Some(r), Some(_)) => Route::Frame(r),
+            Chosen::Navigable(None, Some((parent, container))) => Route::Unbuilt(parent, container),
+        },
+    };
+    match chosen {
+        Route::Top if arena.top_level_realm(realm) != 0 => Route::Window,
+        Route::Frame(r) if window(r) => Route::Window,
+        other => other,
+    }
+}
+// …and its request's target and Referer: the frame's document's, `no-referrer` for its `rel=noreferrer`.
+fn request_route(scope: &mut v8::PinScope<'_, '_>, realm: i32, request: &v8::Global<v8::Value>) -> (Route, (String, String)) {
+    let local = v8::Local::new(scope, request);
+    let member = |scope: &mut v8::PinScope<'_, '_>, name: &str| {
+        v8::Local::<v8::Object>::try_from(local).ok().and_then(|o| crate::dom::member(scope, o, name)).map_or_else(String::new, |v| v.to_rust_string_lossy(scope))
+    };
+    let (target, rel) = (member(scope, "target"), member(scope, "rel"));
+    let policy = if crate::token_list::link_types(&rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
+    let arena = &mut crate::dom::dom(scope).arena;
+    let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
+    (route(arena, realm, &target), referrer)
+}
+// Frame realm `realm`'s navigable navigated otherwise (its own `location`, a reload, a form of its parent's document, a
+// traversal): the submission it made that the host routes taken out of its plan with its route — let go where it targets
+// that navigable itself, which the later navigation replaces.
+pub(crate) fn supersede_routed(scope: &mut v8::PinScope<'_, '_>, realm: i32) {
+    let pending = crate::dom::dom(scope).arena.routed_submissions.entries.iter().any(|e| e.source == realm && e.taken.is_none());
+    if !pending {
+        return;
+    }
+    let request = crate::dom::dom(scope).arena.enter_known(realm).and_then(|a| a.navigation_plan.submission.take());
+    let taken = request.map(|Submission(request)| {
+        let (route, referrer) = request_route(scope, realm, &request);
+        (request, route, referrer)
+    });
+    let entries = &mut crate::dom::dom(scope).arena.routed_submissions.entries;
+    match taken {
+        Some((_, Route::SelfTarget, _)) | None => entries.retain(|e| !(e.source == realm && e.taken.is_none())),
+        Some(taken) => {
+            if let Some(e) = entries.iter_mut().find(|e| e.source == realm && e.taken.is_none()) {
+                e.taken = Some(taken);
+            }
+        }
+    }
+}
+
 impl Own {
     // What a flush planned, `flushed`, put back where nothing was planned since — whether any was.
     fn restore(&mut self, flushed: Own) -> bool {
@@ -135,7 +243,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
-    register(scope, ns, "submitToTop", submit_to_top, context_id);
+    register(scope, ns, "routeFrameSubmission", route_frame_submission, context_id);
+    register(scope, ns, "takeFrameSubmissions", take_frame_submissions, context_id);
     register(scope, ns, "takeFrameSubmission", take_frame_submission, context_id);
     register(scope, ns, "ownPlanned", own_planned, context_id);
     register(scope, ns, "flushBegin", flush_begin, context_id);
@@ -335,22 +444,83 @@ fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         rv.set_bool(reload.activated);
     }
 }
-// __dom.submitToTop(): the calling frame realm's planned submission handed to the page's plan, as its target is the
-// top-level document (`FrameSubmission`) — superseding what that planned before — its Referer the frame's document's,
-// `no-referrer` for its `rel=noreferrer` (referrer.rs `navigation_referrer`).
-fn submit_to_top(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.routeFrameSubmission(): the submission the calling frame realm's document just planned routed by the host —
+// replacing the one it planned before, and the host's navigation of its navigable (frame_navigation.rs
+// `HostNavigation`), and a form's of its parent's document where it targets that navigable — or, one whose target is
+// the top-level document (`_top`, a `_parent` that is it), handed to the page's plan (`FrameSubmission`), superseding
+// what that planned before, its Referer the frame's document's taken now.
+fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let Some(Submission(request)) = realm(scope, cid).navigation_plan.submission.take() else { return };
-    let local = v8::Local::new(scope, &request);
-    let rel = v8::Local::<v8::Object>::try_from(local)
-        .ok()
-        .and_then(|o| crate::dom::member(scope, o, "rel"))
-        .map_or_else(String::new, |r| r.to_rust_string_lossy(scope));
-    let policy = if crate::token_list::link_types(&rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
-    let referrer = crate::referrer::navigation_referrer(&mut crate::dom::dom(scope).arena, cid, policy);
-    let top = &mut realm(scope, 0).navigation_plan;
-    top.supersede();
-    top.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.routed_submissions.entries.retain(|e| e.source != cid);
+    let container = arena.live_container(cid);
+    if let Some(nav) = container.and_then(|c| arena.frame_navigations.host_mut(c)) {
+        *nav = None;
+    }
+    let Some(request) = arena.enter_known(cid).and_then(|a| a.navigation_plan.submission.as_ref().map(|Submission(r)| v8::Global::clone(r))) else {
+        return;
+    };
+    let (route, referrer) = request_route(scope, cid, &request);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let own = matches!(route, Route::SelfTarget) || matches!(route, Route::Frame(r) if r == cid);
+    if let (true, Some(c)) = (own, container) {
+        arena.frame_navigations.cancel_form(c);
+    }
+    if matches!(route, Route::Top) && arena.top_level_realm(cid) == 0 {
+        realm(scope, cid).navigation_plan.submission = None;
+        let top = &mut realm(scope, 0).navigation_plan;
+        top.supersede();
+        top.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
+        return;
+    }
+    arena.routed_submissions.entries.push(RoutedSubmission { planned: next_planned(), source: cid, taken: None });
+}
+// __dom.takeFrameSubmissions() -> the submissions frames' documents made that the host routes, in the order they were
+// made, which none plans any more: `[realm, request, ROUTE_*, routeRealm, container, referrerSource, referrerPolicy]` —
+// routeRealm the chosen frame's (ROUTE_FRAME) or the realm of the document its container is in (ROUTE_UNBUILT, with the
+// container), else null. None whose request no realm holds any more (the frame's document gone, a click that took it).
+fn take_frame_submissions(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mut entries = std::mem::take(&mut crate::dom::dom(scope).arena.routed_submissions.entries);
+    entries.sort_by_key(|e| e.planned);
+    let mut items = Vec::new();
+    for e in entries {
+        let taken = match e.taken {
+            Some(taken) => Some(taken),
+            None => crate::dom::dom(scope).arena.enter_known(e.source).and_then(|a| a.navigation_plan.submission.take()).map(|Submission(request)| {
+                let (route, referrer) = request_route(scope, e.source, &request);
+                (request, route, referrer)
+            }),
+        };
+        let Some((request, route, referrer)) = taken else { continue };
+        let (kind, at, container) = match route {
+            Route::SelfTarget => (ROUTE_SELF, None, None),
+            Route::Top => (ROUTE_TOP, None, None),
+            Route::Frame(r) => (ROUTE_FRAME, Some(r), None),
+            Route::Unbuilt(parent, c) => (ROUTE_UNBUILT, Some(parent), Some(c)),
+            Route::Window => (ROUTE_WINDOW, None, None),
+            Route::NewWindow => (ROUTE_NEW_WINDOW, None, None),
+            Route::Blocked => (ROUTE_BLOCKED, None, None),
+        };
+        let at: v8::Local<v8::Value> = match at {
+            Some(r) => v8::Integer::new(scope, r).into(),
+            None => v8::null(scope).into(),
+        };
+        let container = match (container, route) {
+            (Some(c), Route::Unbuilt(parent, _)) => crate::dom::nodes_value(scope, parent, &[c]),
+            _ => v8::null(scope).into(),
+        };
+        let item = [
+            v8::Integer::new(scope, e.source).into(),
+            v8::Local::new(scope, request),
+            v8::Integer::new(scope, kind).into(),
+            at,
+            container,
+            v8::String::new(scope, &referrer.0).unwrap().into(),
+            v8::String::new(scope, &referrer.1).unwrap().into(),
+        ];
+        items.push(v8::Array::new_with_elements(scope, &item).into());
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.takeFrameSubmission() -> [realm, request, referrerSource, referrerPolicy] of that submission, which it plans no
 // more — or null.
@@ -366,12 +536,14 @@ fn take_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.ownPlanned() -> which of a location navigation (1), a reload (2) and a frame's submission (4) is planned, 0 for
-// none — and (8) whether the host plans a navigation of a frame (frame_navigation.rs `HostNavigation`).
+// none — and whether the host plans a navigation of a frame (8: frame_navigation.rs `HostNavigation`) or routes a
+// frame's submission (16: `RoutedSubmissions`).
 fn own_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let frames = crate::dom::dom(scope).arena.frame_navigations.hosted();
+    let arena = &crate::dom::dom(scope).arena;
+    let frames = (u32::from(arena.frame_navigations.hosted()) << 3) | (u32::from(arena.routed_submissions.any()) << 4);
     let own = &plan(scope, &args).own;
     let bits = u32::from(own.location.is_some()) | (u32::from(own.reload.is_some()) << 1) | (u32::from(own.submission.is_some()) << 2);
-    rv.set_uint32(bits | (u32::from(frames) << 3));
+    rv.set_uint32(bits | frames);
 }
 // __dom.flushBegin(): the tasks due before a navigation of the page about to run — what it planned kept apart, so they
 // plan anew, and what each window `window.open` made in this isolate planned, and the host of its frames (they run on
@@ -389,7 +561,9 @@ fn flush_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         let plan = &mut realm(scope, r).navigation_plan;
         plan.saved = Some(std::mem::take(&mut plan.own));
     }
-    crate::dom::dom(scope).arena.frame_navigations.flush_begin();
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.frame_navigations.flush_begin();
+    arena.routed_submissions.saved = Some(std::mem::take(&mut arena.routed_submissions.entries));
 }
 fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     for r in traversables(scope, &args) {
@@ -397,7 +571,10 @@ fn flush_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         let saved = plan.saved.take().unwrap_or_default();
         plan.flushed = Some(std::mem::replace(&mut plan.own, saved));
     }
-    crate::dom::dom(scope).arena.frame_navigations.flush_end();
+    let arena = &mut crate::dom::dom(scope).arena;
+    arena.frame_navigations.flush_end();
+    let routed = &mut arena.routed_submissions;
+    routed.flushed = Some(std::mem::replace(&mut routed.entries, routed.saved.take().unwrap_or_default()));
 }
 fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let drop = args.get(0).is_true();
@@ -407,6 +584,17 @@ fn flush_restore(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let Some(flushed) = plan.flushed.take().filter(|_| !drop) else { continue };
         restored |= plan.own.restore(flushed);
     }
-    restored |= crate::dom::dom(scope).arena.frame_navigations.flush_restore(drop);
+    let arena = &mut crate::dom::dom(scope).arena;
+    restored |= arena.frame_navigations.flush_restore(drop);
+    // (…a frame's routed submission put back where its realm routes none since)
+    if let Some(flushed) = arena.routed_submissions.flushed.take().filter(|_| !drop) {
+        let routed = &mut arena.routed_submissions;
+        for e in flushed {
+            if !routed.entries.iter().any(|c| c.source == e.source) {
+                routed.entries.push(e);
+                restored = true;
+            }
+        }
+    }
     rv.set_bool(restored);
 }
