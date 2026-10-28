@@ -328,6 +328,38 @@ RSpec.describe 'Sandboxing' do
     expect(%w[s t u].map {|id| s.evaluate_script("document.getElementById('#{id}').contentDocument.body.dataset.ran ?? 'no'") }).to eq(%w[no no no])
   end
 
+  # …each navigation its own snapshot, as it begins: one that made no document (a 204) leaves none a later reload of the
+  # frame is sandboxed by; a form a frame's document submits begins as the task that submitted it ends (HTML "plan to
+  # navigate"), an attribute changed in that task its (Chrome).
+  let(:snapshots) {
+    lambda {|env|
+      case env['PATH_INFO']
+      when '/n204' then [204, {}, []]
+      when '/sa' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><form id=s action="/self"></form>']]
+      when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script>onmessage = (e) => { window.O = e.data }</script>' \
+                                                          '<iframe id=f sandbox="allow-scripts allow-same-origin allow-downloads allow-forms" src="/sa"></iframe>']]
+      else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><script>parent.postMessage(self.origin + ' ' + location.pathname, '*')</script>"]]
+      end
+    }
+  }
+
+  it 'sandboxes each navigation of a frame by its own snapshot' do
+    s = simulated_session(snapshots)
+    s.visit '/'
+    seen = -> { s.evaluate_script('window.O') }
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/sa' }
+    s.execute_script("frames[0].location = '/b'")
+    poll_until { seen.() == 'http://www.example.com /b' }
+    s.execute_script("frames[0].location = '/n204'")
+    s.evaluate_script('1')
+    s.execute_script("window.O = null; document.getElementById('f').setAttribute('sandbox', 'allow-scripts allow-downloads allow-forms'); frames[0].location.reload()")
+    expect(poll_until { seen.() }).to eq('null /b')
+    s.visit '/'
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/sa' }
+    s.execute_script("frames[0].document.getElementById('s').submit(); document.getElementById('f').setAttribute('sandbox', 'allow-scripts allow-forms')")
+    expect(poll_until { seen.() }).to eq('null /self')
+  end
+
   # Without `allow-popups` a sandboxed document opens no new window — `open()` returns null, a `_blank` link or form
   # navigates nothing ("the rules for choosing a navigable": none chosen) — and without `allow-forms` it submits no form
   # (HTML "submit" step 4). Chrome's figures, measured.

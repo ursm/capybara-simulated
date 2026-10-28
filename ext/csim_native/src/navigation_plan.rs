@@ -476,10 +476,6 @@ fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
             *host = None;
         }
     }
-    match (route, container) {
-        (Route::SelfTarget, Some(c)) | (Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
-        _ => {}
-    }
     if matches!(route, Route::Top) {
         realm(scope, cid).navigation_plan.submission = None;
         let top = &mut realm(scope, 0).navigation_plan;
@@ -532,11 +528,6 @@ fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let rel = args.get(2).to_rust_string_lossy(scope);
     let arena = &mut crate::dom::dom(scope).arena;
     let (route, referrer) = target_route(arena, realm, &target, &rel);
-    // (…the navigation it begins sandboxed as the chosen frame's container says now)
-    match (route, arena.live_container(realm)) {
-        (Route::SelfTarget, Some(c)) | (Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
-        _ => {}
-    }
     let [kind, at, container] = route_items(scope, route);
     let items = [kind, at, container, v8::String::new(scope, &referrer.0).unwrap().into(), v8::String::new(scope, &referrer.1).unwrap().into()];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
@@ -563,6 +554,13 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
             }),
         };
         let Some((request, route, referrer)) = taken else { continue };
+        // (…its navigation begun now, as the task that planned it ended — HTML "plan to navigate" queues it — sandboxed as
+        // the chosen frame's container says then: frame_navigation.rs `begin_submission`)
+        let arena = &mut crate::dom::dom(scope).arena;
+        match (route, arena.live_container(e.source)) {
+            (Route::SelfTarget, Some(c)) | (Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
+            _ => {}
+        }
         let [kind, at, container] = route_items(scope, route);
         let item = [
             v8::Integer::new(scope, e.source).into(),

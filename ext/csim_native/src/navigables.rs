@@ -891,7 +891,8 @@ fn auxiliary_refused(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set_bool(arena.auxiliary_refused(realm, &target));
 }
 // __dom.downloadAllowed(source, target[, begun]) -> `RealmArena::download_allowed`, each realm -1 for none, `begun` the
-// `[attribute]` the navigation carries (browser.rb `frame_sandbox_now`).
+// `[attribute]` the navigation carries where it is no frame's own (else the container's snapshot: frame_navigation.rs
+// `frame_sandbox`).
 fn download_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).int32_value(scope).filter(|r| *r >= 0);
     let (source, target) = (realm(scope, 0), realm(scope, 1));

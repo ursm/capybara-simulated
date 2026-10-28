@@ -10905,6 +10905,8 @@ module Capybara
         @frame_history_saved_for = realm_id
       end
       def frame_navigation_made_no_document(realm_id)
+        # (…the container's `sandbox` the navigation began with let go: frame_navigation.rs `releaseFrameSandbox`)
+        @runtime.call('__csimReleaseFrameSandbox', realm_id)
         return @traversing_frames[:none] << realm_id if @traversing_frames
         return unless @frame_history_saved_for == realm_id
 
@@ -12567,15 +12569,17 @@ module Capybara
       # …refused where the navigation's source — the realm whose document made it (`@download_source`, none for the
       # driver's own) — or its target — a frame's (`realm`, the frame realm), none for the top-level one — is sandboxed
       # against downloads: no `allow-downloads` (HTML "allowed to download", navigables.rs `download_allowed`).
-      # (…`sandbox` the `[attribute]` a frame's navigation began with where the frame has no document of its own to ask)
+      # (…`sandbox` the `[attribute]` the navigation began with where it carries one — else the frame's container's snapshot
+      # of it: frame_navigation.rs `frame_sandbox`, asked before the navigation lets it go)
       # (…saved under the name its Content-Disposition gives, else the one a `<a download>` suggests (`hint`), else its URL's
       # last path segment: downloads.rs `filename`)
       def save_downloaded_response(url, headers, body, realm: nil, sandbox: nil, hint: nil)
+        source  = @download_source || realm
+        allowed = @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox)
         # (…a frame's session history as it stood before: a download is no navigation of it)
         frame_navigation_made_no_document(realm) if realm
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
-        source = @download_source || realm
-        return unless @runtime.call('__csimDownloadAllowed', source.nil? ? -1 : source.to_i, realm.nil? ? -1 : realm.to_i, sandbox)
+        return unless allowed
 
         filename = Native.download_filename(content_disposition_header(headers), url.to_s, hint)
         dir = downloads_directory

@@ -140,8 +140,8 @@ impl FrameNavigations {
         }
     }
     // A form's submission into container `c`'s navigable begun: the container's `sandbox` attribute now what the document
-    // it makes is sandboxed by (`frame_sandbox`) — as it was when the form was submitted, not as an earlier navigation
-    // that made no document (a download) began.
+    // it makes is sandboxed by (`frame_sandbox`) — as it is when the submission's navigation begins, not as an earlier
+    // navigation that made no document (a download) began.
     pub(crate) fn begin_submission(arena: &mut crate::dom::RealmArena, c: NodeId) {
         let sandbox = arena.get(c).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
         arena.frame_navigation(c).sandbox = Some(sandbox);
@@ -263,6 +263,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "copyFrameContent", copy_frame_content, context_id);
     crate::dom::register(scope, ns, "processFrameSrc", process_frame_src, context_id);
     crate::dom::register(scope, ns, "takeFrameSandbox", take_frame_sandbox, context_id);
+    crate::dom::register(scope, ns, "releaseFrameSandbox", release_frame_sandbox, context_id);
     crate::dom::register(scope, ns, "frameSandbox", frame_sandbox_op, context_id);
     crate::dom::register(scope, ns, "frameNavigationActivated", frame_navigation_activated, context_id);
     crate::dom::register(scope, ns, "beginFrameNavigation", begin_frame_navigation, context_id);
@@ -328,7 +329,7 @@ impl crate::dom::RealmArena {
     }
 }
 // __dom.beginFrameNavigation(containerNid[, begun]) — a navigation of the container begins (`begin`): a scripted one, or
-// the host's, which carries the attribute it began with (`begun`, `[attribute]`: browser.rb `frame_sandbox_now`).
+// the host's, which carries the attribute it began with (`begun`, `[attribute]`: `takeFrameNavigations`).
 fn begin_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let begun = v8::Local::<v8::Array>::try_from(args.get(1)).ok().map(|a| {
@@ -366,6 +367,16 @@ fn frame_sandbox_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     match crate::dom::realm(scope, cid).frame_sandbox(container).and_then(|s| v8::String::new(scope, &s)) {
         Some(s) => rv.set(s.into()),
         None => rv.set_null(),
+    }
+}
+// __dom.releaseFrameSandbox(realm): the navigation of frame realm `realm`'s navigable under way made no document (a 204,
+// a download): its snapshot of the container's `sandbox` let go, which a later navigation that takes none of its own
+// (a reload, a traversal) would otherwise be sandboxed by.
+fn release_frame_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let arena = &mut crate::dom::dom(scope).arena;
+    if let Some(nav) = arena.live_container(realm).and_then(|c| arena.frame_navigations.0.get_mut(&c)) {
+        nav.sandbox = None;
     }
 }
 // __dom.takeFrameSandbox(containerNid) -> `RealmArena::take_frame_sandbox` (null: none): the document the navigation
