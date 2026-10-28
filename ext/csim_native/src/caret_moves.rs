@@ -42,6 +42,22 @@ enum Move {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "keyMoveTarget", key_move_target_op, context_id);
+    register(scope, ns, "focusCaret", focus_caret_op, context_id);
+}
+
+// __dom.focusCaret(editingHost, selectionState) -> [[node], offset] where an editing host just focused puts the caret:
+// its first caret position (caret.rs `caret_edge`, Chrome's) where its document's selection is not in it — undefined
+// where it is, which stays (Chrome and Firefox: a press's, which set it where it pressed first).
+fn focus_caret_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(host) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let cid = realm_id(scope, &args);
+    let (_, range) = crate::selection::caret_points(scope, cid, args.get(1));
+    if range.is_some_and(|[start, _]| crate::ranges::contains(&dom(scope).arena, host, start.0)) {
+        return;
+    }
+    let Some((node, offset)) = crate::rendered::with_engine(scope, &args, |engine, arena, now| arena.caret_edge(engine, now, host, false)) else { return };
+    let items = [crate::dom::nodes_value(scope, cid, &[node]), v8::Integer::new_from_unsigned(scope, offset).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 // The move `motion` makes of the caret of `n` — an editing host's, its document's selection `selection` (its state), where
