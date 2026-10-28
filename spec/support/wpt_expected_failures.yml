@@ -30,8 +30,6 @@ IndexedDB/file_support.sub.html:
 - Sliced file can be stored and retrieved from IndexedDB
 IndexedDB/idb-partitioned-basic.sub.html:
 - Simple test for partitioned IndexedDB
-IndexedDB/serialize-sharedarraybuffer-throws.https.html:
-- 'IndexedDB: Attempting to serialize a SharedArrayBuffer should throw'
 cookies/attributes/attributes-ctl.sub.html:
 - Cookie with %x9 after Secure attribute is handled correctly.
 cookies/attributes/domain.sub.html:

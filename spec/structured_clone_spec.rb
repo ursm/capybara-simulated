@@ -223,4 +223,31 @@ RSpec.describe 'Structured clone of platform objects' do
     got = session.evaluate_script('window.got')
     expect([got, refused]).to eq([[100_000, 10], "Failed to execute 'structuredClone' on 'WorkerGlobalScope': () => 1 could not be cloned."])
   end
+
+  # The WebAssembly JS API's serialization steps: a WebAssembly.Module shares its compiled module — the same module
+  # read back, in any realm of the agent — but serialized for storage (an IndexedDB record) it is a DataCloneError.
+  it 'shares a WebAssembly.Module, and refuses one for storage' do
+    session.visit '/'
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const bytes = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
+        const m = new WebAssembly.Module(bytes);
+        const c = structuredClone({m}).m;
+        const f = new frames[0].Function('v', 'return structuredClone(v)')(m);
+        return [c instanceof WebAssembly.Module, c !== m, WebAssembly.Module.exports(c).length,
+                f instanceof frames[0].WebAssembly.Module];
+      })()
+    JS
+    expect(got).to eq([true, true, 0, true])
+    stored = session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const open = indexedDB.open('wasm');
+      open.onupgradeneeded = () => open.result.createObjectStore('s');
+      open.onsuccess = () => {
+        const store = open.result.transaction('s', 'readwrite').objectStore('s');
+        try { store.put(new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])), 1); done('stored'); } catch (e) { done(e.name); }
+      };
+    JS
+    expect(stored).to eq('DataCloneError')
+  end
 end
