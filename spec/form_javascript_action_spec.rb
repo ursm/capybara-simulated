@@ -18,7 +18,9 @@ RSpec.describe 'a form submitted to a javascript: or a data: URL' do
       body = case env['PATH_INFO']
              when '/'
                %(<form action="javascript:void(document.title='ran')"><button>go</button></form>) +
-                 '<form action="data:text/html,x" method=post><button>to</button></form>'
+                 '<form action="data:text/html,x" method=post><button>to</button></form>' +
+                 %(<form action="javascript:void(document.title='popped')" target=_blank><button>pop js</button></form>) +
+                 '<form action="data:text/html,x" target=_blank><button>pop data</button></form>'
              when '/frame'
                '<iframe name=f src=/inner></iframe>' +
                  %(<form action="javascript:void(document.title='in frame')" target=f><button>go</button></form>)
@@ -38,6 +40,13 @@ RSpec.describe 'a form submitted to a javascript: or a data: URL' do
     session.visit '/frame'
     session.click_button 'go'
     expect(poll_until { session.evaluate_script('frames[0].document.title') == 'in frame' && session.title }).to eq('start')
+  end
+
+  it 'opens no window for either, requesting nothing' do
+    session.visit '/'
+    session.click_button 'pop js'
+    session.click_button 'pop data'
+    expect([session.title, session.windows.size, hits]).to eq(['start', 1, ['GET /']])
   end
 
   it 'navigates the page to no data: URL' do

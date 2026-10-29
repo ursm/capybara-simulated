@@ -116,10 +116,10 @@ impl RoutedSubmissions {
     }
 }
 
-// Where a form's submission goes (`route`) — the page's, a frame's: its own navigable, the top-level traversable, another frame's — by its
-// container, whatever document it has by the time the host navigates it (none made yet: the host makes it one) — a
-// window's of this isolate (not modeled) or a new one — named by its target, '' for `_blank` — or none its sandbox lets
-// it navigate.
+// Where a form's submission goes (`route`) — the page's, a frame's: its own navigable, the top-level traversable,
+// another frame's — by its container, whatever document it has by the time the host navigates it (none made yet: the
+// host makes it one) — a window's of this isolate (not modeled) or a new one — named by its target, '' for `_blank` —
+// or none its sandbox lets it navigate.
 pub(crate) enum Route {
     SelfTarget,
     Top,

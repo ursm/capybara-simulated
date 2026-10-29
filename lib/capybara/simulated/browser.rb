@@ -840,8 +840,8 @@ module Capybara
       # from the fetched document, leaving the top page untouched (see
       # `navigate_frame`; the engine chooses the navigable a target names). A
       # `_parent`-targeted link or form from a frame nested ≥2 levels rebuilds
-      # the intermediate parent frame; `_top` (and a one-level `_parent`, whose parent is the top
-      # context) navigate the main page. Cross-origin frame locality is resolved
+      # the intermediate parent frame; `_top` (and a one-level `_parent`, whose
+      # parent is the top context) navigate the main page. Cross-origin frame locality is resolved
       # against the main page's origin.
       def switch_to_frame(target)
         invalidate_find_cache
@@ -10184,11 +10184,14 @@ module Capybara
         to = :top if to == :self && realm_id.zero?
         # (…a `javascript:` action its target navigated to it — the URL's script run there, where the form's document may
         # run it (location.js `__csimNavigateFrom`): no request is made of it — HTML "submit", "navigate to a javascript:
-        # URL"; one into a new window none)
+        # URL"; one into a new window — or a `data:` one, which a top-level browsing context refuses — none, the window's
+        # about:blank and its script run not modeled)
         if spec['action'].to_s.match?(/\Ajavascript:/i)
           target = {self: realm_id, top: 0}.fetch(to) { to if to.is_a?(Integer) }
           return javascript_form_action(target, spec['action'].to_s, realm_id) if target
+          return if to == :new_window
         end
+        return if to == :new_window && spec['action'].to_s.match?(/\Adata:/i)
         request = form_request(spec, spec['action'].to_s)
         return unless request
 
@@ -10235,7 +10238,12 @@ module Capybara
         navigate_post(url, *post, referrer_policy: policy, replace: replace, origin_null: origin_null, user_activated: activated)
       end
       # …a `javascript:` action's script run in realm `target`'s document, navigated by realm `realm_id`'s.
-      private def javascript_form_action(target, url, realm_id) = @runtime.realm_call(target, '__csimNavigateFrom', url, realm_id)
+      # (…none of a frame realm disposed since it was routed: `realm_call` would run it in the page)
+      private def javascript_form_action(target, url, realm_id)
+        return unless target.zero? || @runtime.frame_realm_alive?(target)
+
+        @runtime.realm_call(target, '__csimNavigateFrom', url, realm_id)
+      end
       # …into a new window the driver opens (or reuses, by its name `name`) — with the opener HTML "get an element's
       # noopener" leaves it (token_list.rs `noopener`: `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a
       # named target keeps it), told its initiator under that document's policy (the default where it sets none), its
