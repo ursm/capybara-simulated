@@ -265,6 +265,23 @@ RSpec.describe 'a nested document navigating itself' do
       poll_until { s.evaluate_script('frames[0].location.pathname') == landed }
       expect(s.evaluate_script('[frames[0].location.pathname, frames[0].document.body?.textContent || ""]')).to eq([landed, landed == '/o' ? 'o' : ''])
     end
+
+    # (…an entered one's as well, which goes on in the frame its error document is committed into)
+    it "ends an entered frame's navigation redirected to #{name}" do
+      s = simulated_session(lambda {|env|
+        case env['PATH_INFO']
+        when '/r' then [302, {'location' => env['QUERY_STRING'].delete_prefix('to=')}, []]
+        when %r{\A/loop(\d+)} then [302, {'location' => "/loop#{::Regexp.last_match(1).to_i + 1}"}, []]
+        when '/' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><iframe src="/o"></iframe>']]
+        else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><p>o']]
+        end
+      })
+      s.visit '/'
+      s.within_frame(0) do
+        s.execute_script("location.href = '#{start}'")
+        expect(s.evaluate_script('[location.pathname, document.body?.textContent || ""]')).to eq([landed, landed == '/o' ? 'o' : ''])
+      end
+    end
   end
 
   # A frame entered with `within_frame` and navigated there loads its new document's subresources — its scripts, its

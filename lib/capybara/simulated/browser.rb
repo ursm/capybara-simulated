@@ -10511,10 +10511,7 @@ module Capybara
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps
           # the frame stack in sync) — re-fetching its current document URL, which
-          # we read from the still-alive realm. (A blob: URL entered this way is
-          # re-fetched through Rack and so does NOT reuse retained bytes — reloading
-          # an *entered* revoked-blob frame is an accepted gap; the common parent-
-          # held path below reuses bytes via _reloadFrame.) Otherwise (a parent's
+          # we read from the still-alive realm. Otherwise (a parent's
           # `iframe.contentWindow.location.reload()`, empty href, or a realm torn
           # down between flag and drain) re-navigate the owning iframe by realm id
           # JS-side, reusing the retained content so blob bytes survive a revoke.
@@ -10522,9 +10519,9 @@ module Capybara
           url   = entry && @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimLocationHref').to_s : ''
           cur   = current_frame_history_entry(realm_id)
           if entry && cur && cur[:body]
-            navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true, initiator: realm_id)
+            navigate_frame_post(cur[:url], cur[:body], cur[:content_type], entry: entry, referrer: realm_referrer_initiator(realm_id), is_reload: true, initiator: realm_id)
           elsif entry && !url.empty?
-            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id), reload: true, initiator: realm_id)
+            navigate_frame(url, entry: entry, referrer: realm_referrer_initiator(realm_id), is_reload: true, initiator: realm_id)
           elsif cur && cur[:body]
             # Reloading a document reached by POST re-POSTS it (isReloadNavigation) with the recorded
             # body, rather than the JS reload path's GET refetch of the frame's src.
@@ -10938,8 +10935,8 @@ module Capybara
         referrer ||= realm_referrer_initiator(realm_id)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
-          return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, reload: is_reload || is_history, record: record,
-                                                                  initiator: initiator || @current_realm_id.to_i, site: site_seed, user_activated: user_activated)
+          return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
+                                                                  initiator: initiator || @current_realm_id.to_i, site_seed: site_seed, origin_null: origin_null, user_activated: user_activated)
         end
         if !is_reload && !is_history
           record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
@@ -10988,8 +10985,8 @@ module Capybara
         referrer ||= realm_referrer_initiator(realm_id)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
-          return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, reload: is_reload || is_history, initiator: initiator || @current_realm_id.to_i,
-                                                              site: site_seed, taint: origin_null, user_activated: user_activated)
+          return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, is_reload: is_reload, is_history: is_history, initiator: initiator || @current_realm_id.to_i,
+                                                              site_seed: site_seed, origin_null: origin_null, user_activated: user_activated)
         end
         # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
         # a fresh submission records history.
@@ -10999,7 +10996,8 @@ module Capybara
         navigate_realm_self(realm_id, url.to_s, body, content_type, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null, referrer: referrer,
                                                                     initiator: initiator, origin_url: origin_url, user_activated: user_activated)
       end
-      # …the navigation of a frame reached via contentWindow, hop by hop (navigation_fetch.rs): a controlled one through
+      # …the navigation of a frame — one reached via contentWindow, or an entered one (`entry`), whose scope follows it to
+      # the document it makes — hop by hop (navigation_fetch.rs): a controlled one through
       # the SW's fetch event first (mode 'navigate' — a POST's body the SW reads via event.request.text()), respondWith
       # serving the document, a network error failing it, none falling through to the network — skipped where an https
       # navigation sits under an insecure ancestor (see frame_navigation_fetch — the http-target carve-out is the
@@ -11019,7 +11017,8 @@ module Capybara
         referrer:,
         initiator:,
         origin_url:,
-        user_activated:
+        user_activated:,
+        entry: nil
       )
         invalidate_find_cache
         site_seed, origin_null = 'cross-site', true if initiator && document_origin_opaque?(initiator.to_i)
@@ -11047,7 +11046,7 @@ module Capybara
         loop do
           command, hop = fetch.begin_hop
           # (…the 21st hop's a network error, its error document at the last URL requested)
-          return commit_frame_error_document(realm_id, target, rid) if command == 'error'
+          return commit_frame_error_document(realm_id, target, rid, entry: entry) if command == 'error'
 
           meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross = hop
           resp_body = nil
@@ -11055,7 +11054,7 @@ module Capybara
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy,
                                                           site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, resulting_client_id: rid))
-            return commit_frame_error_document(realm_id, target, rid) if sw['networkError']
+            return commit_frame_error_document(realm_id, target, rid, entry: entry) if sw['networkError']
 
             status, headers, document = sw['status'].to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
           else
@@ -11071,13 +11070,13 @@ module Capybara
               content_type:      content_type,
               cookie_cross_site: cookie_cross,
               user_activated:    user_activated
-            ) or return commit_frame_error_document(realm_id, target, rid)
+            ) or return commit_frame_error_document(realm_id, target, rid, entry: entry)
             status, headers, resp_body, = response
           end
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
             command, to_get, new_client = fetch.redirect(status.to_i, loc.to_s, referrer_policy_header(headers))
-            return commit_frame_error_document(realm_id, target, rid) if command == 'fail'
+            return commit_frame_error_document(realm_id, target, rid, entry: entry) if command == 'fail'
             return frame_navigation_made_no_document(realm_id) if command == 'hand_off'
 
             # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
@@ -11094,8 +11093,8 @@ module Capybara
 
           tag_frame_entry_post(realm_id, req_body, content_type) if fetch.request_method == 'POST'
           document ||= read_rack_body(resp_body)
-          return reload_frame_realm_by_id(realm_id, target, document, response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: fetch.referrer,
-                                                                        referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
+          return commit_frame_document(realm_id, entry, target, document, response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: fetch.referrer,
+                                                                                    referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
         end
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
@@ -11518,128 +11517,67 @@ module Capybara
       private def opaque_initiator(realm) = document_origin_opaque?(realm.to_i) ? {site_seed: 'cross-site', origin_null: true} : {}
 
       # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
-      # shape) under that document's policy, determined anew at each redirect hop.
-      # (…`reload`: a reload of the document it is at, whose `blob:` URL's bytes it kept — revoked since or not)
-      # (…its request the navigation one of the document of realm `initiator` — the entered frame's own, by default — its
-      # Fetch Metadata that document's, `site` the Sec-Fetch-Site its redirect chain has widened to: `frame_request_headers`)
+      # shape), its request the navigation one of the document of realm `initiator` — the entered frame's own, by default —
+      # fetched hop by hop as a frame's reached by its realm is (`navigate_realm_self`), its scope following it to the
+      # document it makes (`reload_current_frame_realm`).
+      # (…`is_reload` / `is_history`: a reload of the document it is at, or a traversal to it — whose `blob:` URL's bytes
+      # it kept, revoked since or not — which records no entry)
       def navigate_frame(
         url,
-        depth: 0,
         entry: @frame_stack.last,
         referrer: current_referrer_initiator,
-        reload: false,
+        is_reload: false,
+        is_history: false,
         record: true,
         initiator: @current_realm_id.to_i,
-        site: nil,
+        site_seed: nil,
+        origin_null: false,
         user_activated: false
       )
-        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
-        # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
-        return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
-        return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
+        return unless entered_frame_navigates?(entry)
 
         # (…an entry of the frame's session history, as a frame its realm navigates records one: `record_frame_nav` — or,
         # a location's, in place of the current one: `replace_frame_entry`)
         # (…none of a data: URL's, which this frame's fetch makes no document of)
-        if depth.zero? && !reload && !url.to_s.match?(/\Adata:/i)
+        if !is_reload && !is_history && !url.to_s.match?(/\Adata:/i)
           record ? record_frame_nav(entry[:realm_id], url) : replace_frame_entry(entry[:realm_id], url)
         end
-        invalidate_find_cache
-        if url.to_s.match?(ABOUT_BLANK)
-          reload_current_frame_realm('about:blank', '', 'text/html', entry: entry)
-          return
-        end
+        return reload_current_frame_realm('about:blank', '', 'text/html', entry: entry) if url.to_s.match?(ABOUT_BLANK)
         # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
         # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
         # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
-        # `frame_redirect_followed?`.)
+        # navigation_fetch.rs `redirect`.)
         if url.to_s.match?(/\Ablob:/i)
-          blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, reload))
+          blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, is_reload || is_history))
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
-        env = rack_env_for(url, method: 'GET')
-        # (…its Referer the frame document's, under its referrer policy — its `<meta name="referrer">`)
-        site, = frame_request_headers(env, 'GET', url, referrer: referrer, initiator: initiator, site: site, frame: entry[:realm_id], user_activated: user_activated)
-        response = dispatch_rack_or_http(url, env, method: 'GET') or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
-        status, headers, body = response
-        merge_set_cookie(headers, url, env)
-        if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(url, resolve_location(loc, url))
-          body.close if body.respond_to?(:close)
-          return unless frame_redirect_followed?(next_url, depth, entry[:realm_id]) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
-          return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site, user_activated: user_activated)
-        end
-        return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
-        if download_response?(headers)
-          save_downloaded_response(url, headers, body, realm: entry[:realm_id])
-          return
-        end
-        reload_current_frame_realm(url.to_s, read_rack_body(body), response_content_type(headers), entry: entry, csp: response_csp(headers), referrer: env['HTTP_REFERER'],
-                                   referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
+        navigate_realm_self(entry[:realm_id], url.to_s, nil, nil, entry: entry, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null,
+                                                                  referrer: referrer, initiator: initiator, origin_url: nil, user_activated: user_activated)
       end
-
-      # An entered frame's navigation request to `url` (`method`): Fetch Metadata (dest `iframe`), its Referer `referrer`'s
-      # under its policy, a POST's Origin — the initiating document realm `initiator`'s, cross-site and `null` where its
-      # origin is opaque, `null` too where a redirect before it tainted it (`taint`) — `site` the Sec-Fetch-Site the hops
-      # before it widened to; its cookies by frame realm `frame`'s ancestors too (RFC 6265bis "site for cookies", as
-      # `navigate_realm_self`'s). [site widened by this hop, the initiating document's URL].
-      private def frame_request_headers(env, method, url, referrer:, initiator:, site:, frame:, taint: false, user_activated: false)
-        initiator_url, opaque = realm_request_initiator(initiator.to_i)
-        site = opaque ? 'cross-site' : Native.fetch_site(site, initiator_url, url)
-        env['csim.cookie_cross_site'] = true if frame_ancestor_cross_site?(frame, url)
-        navigation_request_headers(env, method: method, initiator_url: referrer[0], origin_url: initiator_url, target: url, dest: 'iframe', referrer_policy: referrer[1],
-                                        site_override: site, origin_null: opaque || taint, user_activated: user_activated)
-        [site, initiator_url]
-      end
+      # …a POST of `body`, its entry recorded but where it re-posts the one it is at.
       def navigate_frame_post(
         url,
         body,
         content_type,
-        depth: 0,
         entry: @frame_stack.last,
         referrer: current_referrer_initiator,
-        reload: false,
+        is_reload: false,
+        is_history: false,
         initiator: @current_realm_id.to_i,
-        site: nil,
-        taint: false,
+        site_seed: nil,
+        origin_null: false,
         user_activated: false
       )
-        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
-        # (…none of a frame whose document is gone — removed by a handler of what began it: HTML "cannot navigate", Chrome)
-        return if depth.zero? && !@runtime.frame_realm_alive?(entry[:realm_id])
-        return if depth.zero? && !prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
+        return unless entered_frame_navigates?(entry)
 
-        record_frame_nav(entry[:realm_id], url) if depth.zero? && !reload
-        invalidate_find_cache
-        env = rack_env_for(url, method: 'POST', input: body)
-        env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
-        env['CONTENT_LENGTH'] = body.bytesize.to_s
-        site, initiator_url = frame_request_headers(env, 'POST', url, referrer: referrer, initiator: initiator, site: site, taint: taint, frame: entry[:realm_id], user_activated: user_activated)
-        response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry)
-        status, headers, resp_body = response
-        merge_set_cookie(headers, url, env)
-        if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(url, resolve_location(loc, url))
-          resp_body.close if resp_body.respond_to?(:close)
-          return unless frame_redirect_followed?(next_url, depth, entry[:realm_id]) { reload_current_frame_realm(url.to_s, '', 'text/html', entry: entry) }
-          # 301/302/303 → GET; 307/308 preserve method + body (same as navigate_post).
-          if Native.redirect_to_get(status.to_i, 'POST')
-            return navigate_frame(next_url, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site, user_activated: user_activated)
-          else
-            return navigate_frame_post(next_url, body, content_type, depth: depth + 1, entry: entry, referrer: referrer, initiator: initiator, site: site, user_activated: user_activated,
-                                                                     taint: Native.redirect_taints_origin(taint, initiator_url, url, next_url))
-          end
-        end
-        return frame_navigation_made_no_document(entry[:realm_id]) if no_content_response?(status)
-        if download_response?(headers)
-          save_downloaded_response(url, headers, resp_body, realm: entry[:realm_id])
-          return
-        end
-        # (…its entry a POST's where the POST answered directly, which a reload or a traversal re-posts:
-        # `tag_frame_entry_post`)
-        tag_frame_entry_post(entry[:realm_id], body, content_type)
-        reload_current_frame_realm(url.to_s, read_rack_body(resp_body), response_content_type(headers), entry: entry, csp: response_csp(headers), referrer: env['HTTP_REFERER'],
-                                   referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
+        record_frame_nav(entry[:realm_id], url) if !is_reload && !is_history
+        navigate_realm_self(entry[:realm_id], url.to_s, body, content_type, entry: entry, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null,
+                                                                            referrer: referrer, initiator: initiator, origin_url: nil, user_activated: user_activated)
+      end
+      # Whether an entered frame's navigation goes ahead: none of a frame whose document is gone — removed by a handler of
+      # what began it (HTML "cannot navigate", Chrome) — nor of one whose document a `beforeunload` handler keeps.
+      private def entered_frame_navigates?(entry)
+        @runtime.frame_realm_alive?(entry[:realm_id]) && prompt_to_unload_frame(entry[:realm_id], entry[:parent_realm_id])
       end
 
       # Tear down a frame's realm and rebuild it from `html`, then re-point the
@@ -11660,7 +11598,7 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, csp: nil, referrer: nil, referrer_policy: nil, refresh: nil)
+      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil, refresh: nil)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
@@ -11671,7 +11609,7 @@ module Capybara
         # `__csimTakeFrameNavBlob`)
         frame_realm_host_call(parent, '__csimForgetFrameLoaded', old_id) unless url.to_s.match?(/\Ablob:/i) && !bytes.to_s.empty?
 
-        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, nil, seed, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh).to_i
+        new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh).to_i
         return if new_id.zero?
         frame_navigation_made_document
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
@@ -12559,8 +12497,14 @@ module Capybara
 
       # A frame's navigation that FAILED — a network error: the frame commits an error document at the target URL (an empty
       # one, as a failed `src` does), not keeping the document it unloaded.
-      def commit_frame_error_document(realm_id, url, client_id)
-        reload_frame_realm_by_id(realm_id, url.to_s, '', 'text/html', client_id: client_id)
+      def commit_frame_error_document(realm_id, url, client_id, entry: nil)
+        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html', client_id: client_id)
+      end
+      # The document a frame's navigation makes, committed into it — an entered one's (`entry`) through its scope.
+      private def commit_frame_document(realm_id, entry, url, bytes, content_type, **response)
+        return reload_current_frame_realm(url, bytes, content_type, entry: entry, **response) if entry
+
+        reload_frame_realm_by_id(realm_id, url, bytes, content_type, **response)
       end
 
       # A top-level navigation that FAILED — a network error: Chrome still commits an error document at the target URL, so
@@ -12587,18 +12531,6 @@ module Capybara
         else navigation_made_no_document(url)
         end
         false
-      end
-      # …and a frame's, its error document committed (the block) where it fails, its document left as it is where it is
-      # handed off.
-      private def frame_redirect_followed?(next_url, depth, realm_id)
-        outcome = redirect_outcome(next_url, depth)
-        yield if outcome == :fail
-        frame_navigation_made_no_document(realm_id) if outcome == :hand_off
-        return false unless outcome == :follow
-
-        # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
-        (id = frame_history_id(realm_id)) && @session_history.set_url(id, next_url.to_s)
-        true
       end
       # …the end itself: `:follow`, `:fail` (a network error) or `:hand_off`.
       private def redirect_outcome(next_url, depth)
