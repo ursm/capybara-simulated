@@ -15,8 +15,8 @@ use crate::dom::{realm, realm_id, register};
 pub(crate) struct Navigation {
     url: String,
     // Whether the navigable its target chose as it was followed is a new top-level one — `_blank`, a name none has, or
-    // another top-level traversable's a name found, which a hyperlink does not navigate: one the host opens, named (but
-    // for `_blank`) by its target.
+    // another top-level traversable's a name found (its navigation not modeled: a new one all the same) — the host
+    // opens, named (but for `_blank`) by its target.
     opens_window: bool,
     name: String,
     opener: bool,
@@ -246,7 +246,10 @@ fn plan<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
 
 // __dom.planNavigation(url, target, opener, referrerPolicy, blob): a hyperlink's navigation planned — `blob` a `blob:`
 // URL's bytes and type taken as it was followed, or undefined — the navigable its target chooses chosen now (HTML
-// "follow the hyperlink"), superseding what the page planned before where that is the page's own.
+// "follow the hyperlink"): its own navigable or one of its tree's top (superseding what the page planned before where
+// that is the page's own), or a new top-level one. None for a frame's — the bindings navigate a frame they reach
+// (dom-nodes.js `namedFrameNavigate`), and one they cannot build (past the nesting limit, deferred by an activating
+// service worker) is navigated by nothing — nor for one its sandbox keeps it from navigating.
 fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     use crate::navigables::{target_keyword, Choice, TARGET_BLANK};
     let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).to_rust_string_lossy(scope);
@@ -256,7 +259,11 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let blob = (!args.get(4).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(4)));
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
-    let opens_window = matches!(arena.choose_navigable(cid, &target), Choice::New | Choice::Window(_));
+    let opens_window = match arena.choose_navigable(cid, &target) {
+        Choice::Current | Choice::TopLevel(_) => false,
+        Choice::New | Choice::Window(_) => true,
+        Choice::Frame(_) | Choice::Blocked => return,
+    };
     let target = String::from_utf16_lossy(&target);
     let name = if target_keyword(&target) == TARGET_BLANK { String::new() } else { target };
     let page = arena.top_level_realm(cid) == cid && !arena.realm_state(cid).is_some_and(|s| s.identity.is_window());

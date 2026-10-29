@@ -1101,10 +1101,10 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 // __dom.hyperlinkRoute(target, auxiliaryOpens) -> `[route, at]`: what a hyperlink followed in the calling realm with
 // the target `target` routes through — "auxiliary", a new auxiliary window the host opens, named `at` ('' for `_blank`)
 // (a name or `_blank` from a frame or a window `window.open` made, where the host opens one: `auxiliaryOpens`; the
-// frame's VM not rebuilt, a fresh window); "navigate", realm `at`'s navigable a navigable this document navigates (`_self` from either its own realm's; `_top` or `_parent`
-// from a frame the one `keyword_navigable` chooses — -1 where its sandbox lets it navigate none, the link then going
-// nowhere); or "unrouted", none of its own (the top-level page's link, whose own navigation its caller takes; a
-// discarded frame's follows none at all: dom-nodes.js `followHyperlink`).
+// frame's VM not rebuilt, a fresh window); "navigate", realm `at`'s navigable, which this document navigates (`_self`
+// from either its own; `_top` or `_parent` from a frame the one `keyword_navigable` chooses — -1 where its sandbox lets
+// it navigate none, the link then going nowhere); or "unrouted", none of its own (the top-level page's link, whose own
+// navigation its caller takes; a discarded frame's follows none at all: dom-nodes.js `followHyperlink`).
 fn hyperlink_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let target = args.get(0).to_rust_string_lossy(scope);
     let auxiliary_opens = args.get(1).is_true();
