@@ -198,6 +198,21 @@ pub(crate) enum Chosen {
     Window(i32),
 }
 
+// What a navigable target name or keyword chooses from a document's navigable (HTML "the rules for choosing a
+// navigable", `RealmArena::choose_navigable`): its own; a frame's navigable, by its container (one with no document yet
+// among them); a top-level traversable of its own tree — the realm its document is in: 0 the page's, else a window's of
+// this isolate; another top-level traversable of its browsing context group, a window's of this isolate that a name
+// found; a new one (`_blank`, a name none has); or none its sandboxing lets it navigate.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum Choice {
+    Current,
+    Frame(NodeId),
+    TopLevel(i32),
+    Window(i32),
+    New,
+    Blocked,
+}
+
 impl RealmArena {
     // The target name of the navigable realm `cid`'s document is the active document of.
     // A frame's window whose document is no longer its navigable's active one — the frame removed, or navigated since —
@@ -697,13 +712,36 @@ impl RealmArena {
     // ("the rules for choosing a navigable": with the sandboxed auxiliary navigation browsing context flag — no
     // `allow-popups` — none is chosen): `_blank`, or a name no navigable it may find has.
     pub(crate) fn auxiliary_refused(&self, current: i32, target: &[u16]) -> bool {
-        if !self.sandboxed(current, crate::sandbox::AUXILIARY_NAVIGATION) {
-            return false;
+        self.sandboxed(current, crate::sandbox::AUXILIARY_NAVIGATION) && self.choose_navigable(current, target) == Choice::New
+    }
+    // What the navigable target name or keyword `target` chooses from realm `current`'s navigable (`Choice`): the one a
+    // keyword names where its document may navigate it (`keyword_navigable`), else the one `find_navigable` finds.
+    pub(crate) fn choose_navigable(&self, current: i32, target: &[u16]) -> Choice {
+        let keyword = target_keyword(&String::from_utf16_lossy(target));
+        match keyword {
+            TARGET_SELF => Choice::Current,
+            TARGET_BLANK => Choice::New,
+            TARGET_TOP | TARGET_PARENT => match self.keyword_navigable(current, keyword) {
+                None => Choice::Blocked,
+                Some(r) => self.live_container(r).map_or(Choice::TopLevel(r), Choice::Frame),
+            },
+            _ => match self.find_navigable(current, target) {
+                Chosen::None => Choice::New,
+                Chosen::Blocked => Choice::Blocked,
+                Chosen::Window(w) => Choice::Window(w),
+                Chosen::Navigable(_, Some((_, container))) => Choice::Frame(container),
+                Chosen::Navigable(realm, None) => Choice::TopLevel(realm.unwrap_or_else(|| self.top_level_realm(current))),
+            },
         }
-        match target_keyword(&String::from_utf16_lossy(target)) {
-            TARGET_BLANK => true,
-            TARGET_NAME => matches!(self.find_navigable(current, target), Chosen::None),
-            _ => false,
+    }
+    // …the realm the active document of the navigable `choice` names is in, from realm `current`'s — none for a new one,
+    // none chosen, or a frame's with no document yet.
+    pub(crate) fn chosen_realm(&self, current: i32, choice: Choice) -> Option<i32> {
+        match choice {
+            Choice::Current => Some(current),
+            Choice::Frame(container) => self.frame_realm(container),
+            Choice::TopLevel(r) | Choice::Window(r) => Some(r),
+            Choice::New | Choice::Blocked => None,
         }
     }
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
@@ -1235,17 +1273,7 @@ fn target_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let target = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let keyword = target_keyword(&String::from_utf16_lossy(&target));
-    let realm = match keyword {
-        TARGET_SELF => Some(cid),
-        TARGET_TOP | TARGET_PARENT => arena.keyword_navigable(cid, keyword),
-        TARGET_BLANK => None,
-        _ => match arena.find_navigable(cid, &target) {
-            Chosen::Navigable(realm, _) => realm,
-            Chosen::Window(realm) => Some(realm),
-            Chosen::None | Chosen::Blocked => None,
-        },
-    };
+    let realm = arena.chosen_realm(cid, arena.choose_navigable(cid, &target));
     rv.set_bool(realm.is_some_and(|realm| arena.unloading(realm)));
 }
 

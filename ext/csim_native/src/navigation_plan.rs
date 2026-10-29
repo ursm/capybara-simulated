@@ -128,27 +128,16 @@ pub(crate) enum Route {
 // The navigable target `target` chooses from frame realm `realm`'s document (HTML "the rules for choosing a navigable":
 // navigables.rs `keyword_navigable`, `find_navigable`) — the top-level traversable of a frame of a window that window's.
 fn route(arena: &crate::dom::RealmArena, realm: i32, target: &str) -> Route {
-    use crate::navigables::{target_keyword, Chosen, TARGET_BLANK, TARGET_PARENT, TARGET_SELF, TARGET_TOP};
-    let keyword = target_keyword(target);
-    let chosen = match keyword {
-        TARGET_SELF => return Route::SelfTarget,
-        TARGET_BLANK => return Route::NewWindow,
-        TARGET_TOP | TARGET_PARENT => match arena.keyword_navigable(realm, keyword) {
-            None => Route::Blocked,
-            Some(0) => Route::Top,
-            // (…a window's own realm, which no container has)
-            Some(r) => arena.live_container(r).map_or(Route::Window, Route::Frame),
-        },
-        _ => match arena.find_navigable(realm, &target.encode_utf16().collect::<Vec<u16>>()) {
-            Chosen::None | Chosen::Window(_) => Route::NewWindow,
-            Chosen::Blocked => Route::Blocked,
-            Chosen::Navigable(_, None) => Route::Top,
-            Chosen::Navigable(_, Some((_, container))) => Route::Frame(container),
-        },
-    };
-    match chosen {
-        Route::Top if arena.top_level_realm(realm) != 0 => Route::Window,
-        other => other,
+    use crate::navigables::Choice;
+    match arena.choose_navigable(realm, &target.encode_utf16().collect::<Vec<u16>>()) {
+        Choice::Current => Route::SelfTarget,
+        Choice::Frame(container) => Route::Frame(container),
+        Choice::TopLevel(0) => Route::Top,
+        // (…a window's of this isolate, its own tree's)
+        Choice::TopLevel(_) => Route::Window,
+        // (…another top-level traversable a name found, which a form's submission does not navigate: a new one)
+        Choice::Window(_) | Choice::New => Route::NewWindow,
+        Choice::Blocked => Route::Blocked,
     }
 }
 // …a form's of realm `realm`'s document with target `target` and link types `rel`, and the Referer it sends: that
