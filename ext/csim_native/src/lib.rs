@@ -355,7 +355,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_set_worker_flag", magnus::function!(sw_registry::set_worker_flag_for_ruby, 4))?;
     native.define_module_function("sw_worker_activated", magnus::function!(sw_registry::worker_activated_for_ruby, 2))?;
     native.define_module_function("sw_match_worker", magnus::function!(sw_registry::match_worker_for_ruby, 3))?;
-    native.define_module_function("sw_controller", magnus::function!(sw_registry::controller_for_ruby, 2))?;
+    native.define_module_function("sw_controller", magnus::function!(sw_registry::controller_for_ruby, 3))?;
     native.define_module_function("sw_note_client", magnus::function!(sw_registry::note_client_for_ruby, 7))?;
     native.define_module_function("sw_set_client_controller", magnus::function!(sw_registry::set_client_controller_for_ruby, 3))?;
     native.define_module_function("sw_forget_client", magnus::function!(sw_registry::forget_client_for_ruby, 2))?;

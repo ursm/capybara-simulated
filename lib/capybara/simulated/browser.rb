@@ -4911,7 +4911,7 @@ module Capybara
             # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
             # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
             # thread.
-            sw_prev_active: service && (ah = sw_serving[sw_scope.to_s]) && @workers[ah] ? {url: @workers[ah][:script_url], handle: ah} : nil
+            sw_prev_active: service && (ah = sw_serving[sw_scope.to_s]) && (prev = sw_controller(ah)) ? {url: prev[2], handle: ah} : nil
           )
         end
         # A nested spawn runs THIS method on a worker thread, so other threads can observe
@@ -5132,7 +5132,7 @@ module Capybara
       # render channel like the image path.
       def sw_script_subresource_fetch(handle, url, client_id, referrer, destination = 'script', mode = 'no-cors', credentials = 'include', binary: false, integrity: '', referrer_policy: nil)
         w = @workers[handle.to_i]
-        return nil unless w && w[:thread]&.alive?
+        return nil unless w && sw_live?(handle)
         # A worker still ACTIVATING can't be waited for here — this caller blocks the
         # main thread synchronously, and the activation may need main-thread JS to
         # settle (the same deadlock the async fetch path avoids by PARKING). Load
@@ -5280,7 +5280,8 @@ module Capybara
 
       def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
         w = @workers[handle.to_i]
-        return false if !w || sw_redundant?(handle)
+        # (…none to a worker whose thread is gone, which would never answer: the network's)
+        return false if !w || sw_redundant?(handle) || !sw_live?(handle)
         # Resolve BEFORE bumping the pending counter: a raise here must not strand @sw_fetch_pending
         # (settle would then block for the full round-trip budget with no fetch ever queued to answer).
         req = sw_fetch_request(req_json.to_s)
@@ -5866,7 +5867,8 @@ module Capybara
         sw_update_worker_state(handle, 'activating')
         scope = sw_mapped_scope(id)
         sw_note_activating(scope, handle) if scope
-        if (_, intercepts, script_url, = sw_controller(handle))
+        # (…a worker whose thread ended still the registration's active worker its clients are told of: Activate)
+        if (_, intercepts, script_url, = sw_controller(handle, live: false))
           broadcast_to_realms('__csim_swRegistrationActivated', handle, script_url, intercepts)
         end
       end
@@ -5946,7 +5948,7 @@ module Capybara
         list = @worker_init_lock.synchronize { w && w.delete(:sw_deferred_fetches) }
         return unless list
 
-        alive = !fallthrough && w[:thread]&.alive?
+        alive = !fallthrough && sw_live?(handle)
         list.each do |m|
           @worker_init_lock.synchronize { @sw_fetch_pending += 1 }
           if alive
@@ -6002,9 +6004,11 @@ module Capybara
       private def broadcast_claim(handle, has_fetch, scope)
         # The claim's has_fetch snapshot predates install — a router-rules-only SW
         # (no fetch handler; addRoutes during install) must still make its claimed
-        # clients route, so the worker-side router can serve its sources.
-        has_fetch ||= Native.sw_controller(@sw_partition, handle.to_i)&.[](1) == true
-        script_url = @workers.dig(handle.to_i, :script_url).to_s
+        # clients route, so the worker-side router can serve its sources: whether it
+        # intercepts as the registry knows it now (sw_registry.rs `intercepts`).
+        _, intercepts, script_url, = sw_controller(handle, live: false)
+        has_fetch ||= intercepts == true
+        script_url = script_url.to_s
         # The claim IS the controller assignment: record it host-side for every client
         # whose MATCHED registration is this scope, so the activation gate
         # (sw_worker_controls_clients?) and matchAll never depend on the realm
@@ -6248,8 +6252,11 @@ module Capybara
       # SW's initial eval) — so the frame is controlled and routes; a controlled subresource fetch simply
       # falls through to the network if no handler materializes. [handle, intercepts, script_url, scope] or nil.
       def sw_client_controller_for(url) = Native.sw_match_worker(@sw_partition, url.to_s, 'client')
-      # …and worker `handle` as a client's controller, in that shape — nil for one gone.
-      def sw_controller(handle) = Native.sw_controller(@sw_partition, handle.to_i)
+      # …and worker `handle` as a client's controller, in that shape — nil for none, and (`live`) for one whose thread is
+      # gone: reaped, or ended on its own.
+      def sw_controller(handle, live: true) = Native.sw_controller(@sw_partition, handle.to_i, live)
+      # …whether its thread is there to answer.
+      def sw_live?(handle) = !sw_controller(handle).nil?
 
       # The handle of the service worker controlling a newly spawned worker, or nil.
       #
@@ -6381,7 +6388,7 @@ module Capybara
         # activation.https flake), not a real loss: keep the recorded controller while
         # its worker lives. A NAVIGATED report (different URL) resets as before.
         prev_url, prev_ctrl = Native.sw_client_entry(@sw_partition, client_id.to_s)
-        if ctrl.nil? && prev_ctrl && prev_url == url.to_s && @workers.dig(prev_ctrl, :thread)&.alive?
+        if ctrl.nil? && prev_ctrl && prev_url == url.to_s && sw_live?(prev_ctrl)
           ctrl = prev_ctrl
         end
         Native.sw_note_client(@sw_partition, client_id.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
@@ -6675,7 +6682,7 @@ module Capybara
       # navigation can actually be routed to (Driver#sw_navigation_fetch dedup +
       # parked-browser reclaim read this).
       def sw_live_scopes
-        sw_serving.select {|_scope, h| @workers[h]&.[](:thread)&.alive? }.keys
+        sw_serving.select {|_scope, h| sw_live?(h) }.keys
       end
 
       # Whether this browser still hosts a live service-worker registration — a closing
@@ -9051,7 +9058,6 @@ module Capybara
           # into this SW's scope can decide (Ruby-side) whether routing through it is worthwhile,
           # and a freshly-built frame client can mint a `controller` naming this script.
           Native.sw_set_worker_flag(@sw_partition, handle, 'fetch', sw_has_fetch)
-          (w = @workers[handle]) && w[:script_url] = url.to_s
           sw_fire_phase = lambda do |phase|
             rt.eval_void("globalThis.__csim_swFireLifecycleEvent(#{JSON.generate(phase)});")
             # Drain microtasks AND timers: a `waitUntil` promise may settle off a
@@ -9314,8 +9320,8 @@ module Capybara
           outbox << {handle: handle, kind: '__error', message: "#{e.class}: #{e.message}"}
         end
       ensure
-        # (…its thread ending, on its own too — a raise, `self.close()` — no request goes to it any more: the registry's
-        # matching skips it)
+        # (…its thread ending, on its own too — a raise — no request goes to it any more: the registry's matching skips
+        # it)
         Native.sw_set_worker_flag(@sw_partition, handle, 'dead', true) if service
         # A service worker exiting with a lifecycle phase still OPEN — a raise on this
         # thread, `self.close()` during a parked install waitUntil, a terminate — can

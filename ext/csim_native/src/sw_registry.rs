@@ -66,7 +66,7 @@ struct Worker {
     lifecycle: Lifecycle,
     // What its isolate made known as it ran, from its own thread: whether it has a `fetch` listener (none known until
     // its initial evaluation ran), whether it added Static Routing rules (which route a request with no fetch listener),
-    // and whether its thread is gone — reaped, or ended on its own (a raise, `self.close()`).
+    // and whether its thread is gone — reaped, or ended on its own (a raise).
     fetch: Option<bool>,
     router: bool,
     dead: bool,
@@ -578,11 +578,11 @@ pub(crate) fn match_worker_for_ruby(partition: u64, url: String, mode: String) -
     Some((handle, intercepts, script_url, scope.to_owned()))
 }
 // …and worker `handle` as a controller a client takes: `[handle, intercepts, script URL, the scope it serves ('' for
-// none)]`, nil where it is gone.
-pub(crate) fn controller_for_ruby(partition: u64, handle: u32) -> Option<(u32, bool, String, String)> {
+// none)]`, nil for none — and, `live`, for one whose thread is gone.
+pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Option<(u32, bool, String, String)> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
-    let w = p.workers.get(&handle).filter(|w| !w.dead)?;
+    let w = p.workers.get(&handle).filter(|w| !(live && w.dead))?;
     let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
     Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }
