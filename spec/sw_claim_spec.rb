@@ -13,6 +13,11 @@ RSpec.describe 'Service Worker clients.claim()' do
   include PollUntil
 
   let(:app) {
+    gated = <<~JS
+      let open;
+      self.addEventListener('activate', (e) => e.waitUntil(new Promise((res) => { open = res; })));
+      self.addEventListener('message', () => open && open());
+    JS
     versioned = <<~JS
       self.addEventListener('activate', (e) => { self.activated = true; e.waitUntil(self.clients.claim()); });
       self.addEventListener('message', async (e) => {
@@ -35,6 +40,7 @@ RSpec.describe 'Service Worker clients.claim()' do
       when '/versioned.js'
         version += 1
         [200, {'content-type' => 'text/javascript'}, ["// v#{version}\n#{versioned}"]]
+      when '/gated.js' then [200, {'content-type' => 'text/javascript'}, [gated]]
       when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>in scope']]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>page']]
       end
@@ -85,5 +91,27 @@ RSpec.describe 'Service Worker clients.claim()' do
       });
     JS
     expect(poll_until { session.evaluate_script('globalThis.__out') }).to eq('activated' => false, 'state' => 'installed', 'claim' => 'InvalidStateError')
+  end
+
+  # A registration unregistered while its worker's activate event is pending is cleared once that event's lifetime
+  # promises settle (Service Workers "Try Clear Registration": no version with a pending event; `waitUntil`'s steps
+  # try again as the last promise settles) — its activation completing first — not at once, its worker made redundant
+  # mid-activation.
+  it 'clears a registration unregistered mid-activation once its activate event settles' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__states = [];
+      navigator.serviceWorker.register('/gated.js', {scope: '/gated/'}).then(async (reg) => {
+        const w = reg.installing || reg.waiting || reg.active;
+        w.addEventListener('statechange', () => __states.push(w.state));
+        await new Promise((res) => { const step = () => (w.state === 'activating' ? res() : w.addEventListener('statechange', step, {once: true})); step(); });
+        await reg.unregister();
+        await new Promise((res) => setTimeout(res, 200));
+        __states.push('released');
+        w.postMessage('open');
+      });
+    JS
+    expect(poll_until { session.evaluate_script("globalThis.__states.includes('redundant') && globalThis.__states") }).to eq(%w[installed activating released activated redundant])
   end
 end

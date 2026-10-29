@@ -492,6 +492,15 @@ pub(crate) fn advance_for_ruby(partition: u64, handle: u32, may_activate: bool) 
     lc.step = next;
     taken
 }
+// Whether the worker `handle` has a lifecycle event pending — its install event dispatched and some `waitUntil` of it
+// unsettled, or its activate event likewise — which Try Clear Registration waits for ("Service Worker Has No Pending
+// Events"); none for one whose thread is gone, which settles no event.
+pub(crate) fn lifecycle_pending_for_ruby(partition: u64, handle: u32) -> bool {
+    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| {
+        let lc = &w.lifecycle;
+        !w.dead && (matches!(lc.step, Step::UpdateFound | Step::Installed) && lc.installed.is_none() || lc.step == Step::Activated && !lc.activated)
+    })
+}
 // Whether the worker `handle` stands at Try Activate (installed, its activation not yet allowed).
 pub(crate) fn awaits_activation_for_ruby(partition: u64, handle: u32) -> bool {
     lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.step == Step::Activating)

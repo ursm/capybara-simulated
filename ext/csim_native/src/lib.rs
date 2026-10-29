@@ -375,6 +375,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_begin_lifecycle", magnus::function!(sw_registry::begin_lifecycle_for_ruby, 2))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;
     native.define_module_function("sw_advance", magnus::function!(sw_registry::advance_for_ruby, 3))?;
+    native.define_module_function("sw_lifecycle_pending", magnus::function!(sw_registry::lifecycle_pending_for_ruby, 2))?;
     native.define_module_function("sw_awaits_activation", magnus::function!(sw_registry::awaits_activation_for_ruby, 2))?;
     native.define_module_function("sw_note_activating", magnus::function!(sw_registry::note_activating_for_ruby, 3))?;
     native.define_module_function("sw_activated", magnus::function!(sw_registry::activated_for_ruby, 3))?;

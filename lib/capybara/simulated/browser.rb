@@ -6099,7 +6099,9 @@ module Capybara
         nil
       end
 
-      # "No client is using the registration and no extended work is pending". A client
+      # "No client is using the registration and no extended work is pending" — of any version: a message it has not
+      # finished, an extendable message event's unsettled `waitUntil`, or its install or activate event's (Service Workers
+      # "Try Clear Registration": "Service Worker Has No Pending Events"). A client
       # record still holding a DEAD active handle keeps the entry parked until that
       # client departs (records are only pruned on client teardown / the last-worker
       # reset) — bounded by the client's lifetime, and nothing outside try_clear itself
@@ -6108,7 +6110,7 @@ module Capybara
         *, active = versions = sw_versions(id)
         return false if active && Native.sw_clients(@sw_partition).any? {|_id, _url, controller| controller == active }
 
-        versions.compact.none? {|h| sw_worker_extended?(h) }
+        versions.compact.none? {|h| sw_worker_extended?(h) || Native.sw_lifecycle_pending(@sw_partition, h) }
       end
 
       private def try_clear_uninstalls
@@ -7342,6 +7344,8 @@ module Capybara
           flush_sw_deferred_fetches(e[:handle].to_i)
           retry_deferred_navigations
         end
+        # (…a registration unregistered while one was pending cleared now, where nothing else holds it)
+        try_clear_uninstalls if sw_phases.any?
         # A reaped SERVICE worker (posted by reap_worker, possibly from a worker thread):
         # main-thread cleanup of the activation-parking state it can no longer satisfy.
         # A job its worker owed an evaluation outcome fails with it (its worker thread posts the
