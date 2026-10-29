@@ -6924,7 +6924,7 @@ module Capybara
               cookie_cross_site: cookie_cross,
               user_activated:    user_activated
             ) or return nil
-            status, headers, resp_body, = response
+            status, headers, resp_body = response
             body = nil   # read only for the terminal hop, below
           end
           if (loc = redirect_location(status, headers))
@@ -10971,7 +10971,7 @@ module Capybara
               cookie_cross_site: cookie_cross,
               user_activated:    user_activated
             ) or return commit_frame_error_document(realm_id, target, entry: entry)
-            status, headers, resp_body, = response
+            status, headers, resp_body = response
           end
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
@@ -11618,18 +11618,6 @@ module Capybara
         begin
           # The document's referrer is the request's, the last hop's (a redirect determines it anew).
           @current_referer = fetch.referrer.to_s
-          # `about:blank` names an empty, network-less document — there's
-          # nothing to fetch. Rack::MockRequest.env_for can't parse the `about:`
-          # scheme (no host/path → nil[]); route straight to an empty document.
-          # `location = 'about:blank'` and navigating an iframe to about:blank
-          # both land here. Mirrors rack_fetch's non-http(s) guard. (Narrow to
-          # about:blank specifically — about:srcdoc carries its own markup.)
-          if url.to_s.match?(ABOUT_BLANK)
-            @current_url = url.to_s
-            record_response(200, {'content-type' => 'text/html'})
-            boot_response_into_ctx('')
-            return
-          end
           # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
           # redirect rewrites: `redirect_history_entry`)
           save_navigation_history unless from_history
@@ -11641,6 +11629,16 @@ module Capybara
             entry.update(body: body, content_type: content_type, origin: origin) if body
             record_history(entry, replace: replace)
           end
+          # `about:blank` names an empty, network-less document — there's
+          # nothing to fetch; route straight to an empty document, its history
+          # entry the one above (HTML "navigate": about:blank's navigation params
+          # made with no fetch). (Narrow to about:blank specifically —
+          # about:srcdoc carries its own markup.)
+          if url.to_s.match?(ABOUT_BLANK)
+            @current_url = url.to_s
+            record_response(200, {'content-type' => 'text/html'})
+            return boot_response_into_ctx('')
+          end
           # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
           # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
@@ -11649,6 +11647,10 @@ module Capybara
             blob ||= blob_snapshot(url)
             return blob ? boot_blob_document(url, blob[:bytes], blob[:type], flushed: true) : fail_blob_document(url)
           end
+          # (…a POST to any URL but an HTTP(S) one a network error, its error document at the URL: Fetch "scheme fetch" —
+          # a `blob:` URL's fetched by a GET alone)
+          return commit_error_document(url) if body && !http_url?(url)
+
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
@@ -11681,7 +11683,7 @@ module Capybara
                 dest:            'document',
                 user_activated:  user_activated
               ) or return commit_error_document(target)
-              status, headers, resp_body, = response
+              status, headers, resp_body = response
             end
             if (loc = redirect_location(status, headers))
               resp_body.close if resp_body.respond_to?(:close)
@@ -12276,20 +12278,6 @@ module Capybara
         end
       end
 
-      # Build + dispatch a navigation request (a frame/document load) — the shared core of the GET
-      # self-nav, the POST self-nav, and the navigation-preload request, so all three send the SAME
-      # Referer / Origin / Fetch-Metadata (dest 'iframe') and can't silently diverge. `site` is the
-      # caller's already-widened Sec-Fetch-Site (threaded across the redirect chain it owns);
-      # `extra_headers` carries any request-specific CGI header (the preload marker). Returns
-      # [status, headers, resp_body] — the caller handles redirects / reload / the preload wire.
-      # RFC 6265bis "site for cookies": a frame's cookie site folds its ANCESTOR chain.
-      # A navigation into frame `realm_id` is cross-site for cookies when ANY ancestor
-      # document (the frame's parents up to the top window) is cross-site with the
-      # target — even if the navigation's own initiator is same-origin. Top-level
-      # navigations have no ancestors and never fold (their strict/lax split is the
-      # initiator-based Sec-Fetch-Site latch).
-      # …and a navigation of a frame in realm `realm_id`'s document: cross-site where that document is, or an ancestor of
-      # it.
       # The mode, credentials mode and referrer policy of the request a subresource's `plan` (subresource_plan.rs) is, as a
       # request the asset cache and `subresource_fetch` make takes them: a no-cors one none — the mode-less request an
       # element's load always was, of no response tainting of its own — but a CORS one's, a plugin's navigation.
@@ -12320,6 +12308,14 @@ module Capybara
         realm_id.to_i.positive? && @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, false) == true
       end
 
+      # Build + dispatch a navigation request (a document's load, a frame's or the page's) — the shared core of every
+      # navigation's hop and of the navigation-preload request, so all of them send the SAME Referer / Origin /
+      # Fetch-Metadata (dest `dest`) and can't silently diverge. `site` is the caller's already-widened Sec-Fetch-Site
+      # (threaded across the redirect chain it owns); `cookie_cross_site` whether its cookies are cross-site by the
+      # documents above the frame it navigates (RFC 6265bis "site for cookies": a frame's folds its ANCESTOR chain, a
+      # top-level navigation's none); `extra_headers` carries any request-specific CGI header (the preload marker).
+      # Returns [status, headers, resp_body], its status an Integer, or nil for a network error — the caller handles
+      # redirects / the document / the preload wire.
       def dispatch_navigation_request(
         url,
         method:,
@@ -12335,7 +12331,8 @@ module Capybara
         origin_url: referrer_source,
         user_activated: false
       )
-        env = rack_env_for(url, method: method, input: body || '')
+        # (…a body's length sent with it alone — a POST's, an empty one's `0` — a GET's none: Fetch "HTTP-network fetch")
+        env = body ? rack_env_for(url, method: method, input: body) : rack_env_for(url, method: method)
         env['csim.cookie_cross_site'] = true if cookie_cross_site
         if content_type
           env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
@@ -12357,8 +12354,7 @@ module Capybara
         response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
-        # (…and the Referer the request sent: the referrer of the document its response makes)
-        [status, headers, resp_body, Native.request_referrer(referrer_policy, referrer_source, url)]
+        [status.to_i, headers, resp_body]
       end
 
       # The Navigation Preload request: a parallel GET the browser issues for a navigation whose
