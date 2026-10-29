@@ -186,23 +186,26 @@ impl RealmArena {
     }
 }
 
-// What a target name chooses (HTML "the rules for choosing a navigable"): no navigable; one the current navigable is not
-// allowed by sandboxing to navigate — which nothing is done for; or a navigable — the realm its active document is in
-// (none yet: an `about:blank` frame no script has looked into) and its container with the realm its node document is
-// in (none: a top-level one); or another top-level traversable of its browsing context group, a window of this isolate's
-// that is no ancestor of it — the realm its document is in.
+// What a target name finds (HTML "the rules for choosing a navigable"): no navigable; one the current navigable is not
+// allowed by sandboxing to navigate — which nothing is done for; a frame's navigable — the realm its active document is
+// in (none yet: an `about:blank` frame no script has looked into) and its container with the realm its node document is
+// in; the top-level traversable of the current one's tree — the realm its document is in; or another top-level
+// traversable of its browsing context group, a window of this isolate's (or the page's, from a window's) that is no
+// ancestor of it — the realm its document is in.
 pub(crate) enum Chosen {
     None,
     Blocked,
-    Navigable(Option<i32>, Option<(i32, NodeId)>),
+    Frame(Option<i32>, (i32, NodeId)),
+    TopLevel(i32),
     Window(i32),
 }
 
 // What a navigable target name or keyword chooses from a document's navigable (HTML "the rules for choosing a
 // navigable", `RealmArena::choose_navigable`): its own; a frame's navigable, by its container (one with no document yet
-// among them); a top-level traversable of its own tree — the realm its document is in: 0 the page's, else a window's of
-// this isolate; another top-level traversable of its browsing context group, a window's of this isolate that a name
-// found; a new one (`_blank`, a name none has); or none its sandboxing lets it navigate.
+// among them); the top-level traversable of its own tree — the realm its document is in: 0 the page's, else a window's
+// of this isolate (or a discarded frame's own, which is its own top); another top-level traversable of its browsing
+// context group a name found — a window's of this isolate, or the page's from a window's; a new one (`_blank`, a name
+// none has); or none its sandboxing lets it navigate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Choice {
     Current,
@@ -634,7 +637,7 @@ impl RealmArena {
         if top != current {
             match self.find_in(top, None, name) {
                 None => {}
-                Some(Chosen::Navigable(_, None)) if self.top_navigation_allowed(current) => return Chosen::Navigable(Some(top), None),
+                Some(Chosen::TopLevel(_)) if self.top_navigation_allowed(current) => return Chosen::TopLevel(top),
                 Some(found) if !self.sandboxed(current, crate::sandbox::NAVIGATION) => return found,
                 Some(_) => return Chosen::Blocked,
             }
@@ -646,7 +649,7 @@ impl RealmArena {
         for window in windows.filter(|&w| !sandboxed || self.navigables.openers.get(&self.window_key(w)) == Some(&current)) {
             match self.find_in(window, None, name) {
                 None => continue,
-                Some(Chosen::Navigable(_, None)) => return Chosen::Window(window),
+                Some(Chosen::TopLevel(_)) => return Chosen::Window(window),
                 Some(found) => return found,
             }
         }
@@ -729,8 +732,8 @@ impl RealmArena {
                 Chosen::None => Choice::New,
                 Chosen::Blocked => Choice::Blocked,
                 Chosen::Window(w) => Choice::Window(w),
-                Chosen::Navigable(_, Some((_, container))) => Choice::Frame(container),
-                Chosen::Navigable(realm, None) => Choice::TopLevel(realm.unwrap_or_else(|| self.top_level_realm(current))),
+                Chosen::Frame(_, (_, container)) => Choice::Frame(container),
+                Chosen::TopLevel(r) => Choice::TopLevel(r),
             },
         }
     }
@@ -747,13 +750,13 @@ impl RealmArena {
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
     fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
         if self.window_name(realm) == name {
-            return Some(Chosen::Navigable(Some(realm), container));
+            return Some(container.map_or(Chosen::TopLevel(realm), |c| Chosen::Frame(Some(realm), c)));
         }
         let doc = *self.navigables.documents.get(&realm)?;
         for frame in self.leaving_elements(doc, true) {
             let found = match self.frame_realm(frame) {
                 Some(r) => self.find_in(r, Some((realm, frame)), name),
-                None => self.get(frame).is_some_and(|n| self.target_name_is(frame, n, name)).then_some(Chosen::Navigable(None, Some((realm, frame)))),
+                None => self.get(frame).is_some_and(|n| self.target_name_is(frame, n, name)).then_some(Chosen::Frame(None, (realm, frame))),
             };
             if found.is_some() {
                 return found;
@@ -1140,7 +1143,8 @@ fn find_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     let (realm, container, window) = match crate::dom::realm(scope, cid).find_navigable(cid, &name) {
         Chosen::None => return rv.set_null(),
         Chosen::Blocked => return rv.set_bool(false),
-        Chosen::Navigable(realm, container) => (realm, container, false),
+        Chosen::Frame(realm, container) => (realm, Some(container), false),
+        Chosen::TopLevel(realm) => (Some(realm), None, false),
         Chosen::Window(realm) => (Some(realm), None, true),
     };
     let parent = v8::Integer::new(scope, container.map_or(-1, |(parent, _)| parent)).into();
@@ -1319,6 +1323,64 @@ fn neuter_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dom::{NodeData, NodeKind};
+    use web_atoms::ns;
+
+    fn element(arena: &mut RealmArena, parent: NodeId, name: &str, attrs: &[(&str, &str)]) -> NodeId {
+        let mut n = NodeData::of_kind(NodeKind::Element, Vec::new());
+        n.local_name = name.into();
+        n.ns = ns!(html);
+        n.attributes = attrs.iter().map(|&(k, v)| (k.to_owned(), v.to_owned())).collect();
+        arena.create(n, Some(parent))
+    }
+    // Realm `realm`'s document, with a body.
+    fn document(arena: &mut RealmArena, realm: i32) -> NodeId {
+        arena.enter(realm);
+        let doc = arena.create(NodeData::of_kind(NodeKind::Document, Vec::new()), None);
+        arena.set_realm_document(realm, doc);
+        element(arena, doc, "body", &[])
+    }
+
+    #[test]
+    fn a_target_chooses_a_navigable_by_keyword_or_name() {
+        let mut arena = RealmArena::default();
+        let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        // The page (0) holds a frame "a" (realm 1), which holds a frame "b" no document was made for yet, and a frame "s".
+        let page = document(&mut arena, 0);
+        let a = element(&mut arena, page, "iframe", &[("name", "a")]);
+        let sibling = element(&mut arena, page, "iframe", &[("name", "s")]);
+        let body = document(&mut arena, 1);
+        let b = element(&mut arena, body, "iframe", &[("name", "b")]);
+        arena.set_frame_realm(a, Some(1));
+        let choose = |arena: &RealmArena, from: i32, target: &str| arena.choose_navigable(from, &units(target));
+        assert_eq!(choose(&arena, 1, ""), Choice::Current);
+        assert_eq!(choose(&arena, 1, "_SELF"), Choice::Current);
+        assert_eq!(choose(&arena, 1, "_top"), Choice::TopLevel(0));
+        assert_eq!(choose(&arena, 1, "_Parent"), Choice::TopLevel(0));
+        assert_eq!(choose(&arena, 1, "_blank"), Choice::New);
+        assert_eq!(choose(&arena, 1, "a"), Choice::Frame(a));
+        assert_eq!(choose(&arena, 0, "b"), Choice::Frame(b));
+        assert_eq!(choose(&arena, 1, "s"), Choice::Frame(sibling));
+        assert_eq!(choose(&arena, 0, "none"), Choice::New);
+        // (…a top-level one's parent and top its own)
+        assert_eq!(choose(&arena, 0, "_parent"), Choice::TopLevel(0));
+        // (…the realm each has a document in: none for a frame with no document yet, nor for a new one)
+        assert_eq!(arena.chosen_realm(1, Choice::Frame(a)), Some(1));
+        assert_eq!(arena.chosen_realm(0, Choice::Frame(b)), None);
+        assert_eq!(arena.chosen_realm(1, Choice::Current), Some(1));
+        assert_eq!(arena.chosen_realm(1, Choice::New), None);
+        // (…a document sandboxed against navigation may choose its own navigable and its descendants, but neither its
+        // top without `allow-top-navigation` nor a sibling's, which it may not navigate; a new one still)
+        arena.enter(1);
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some(""));
+        assert_eq!(choose(&arena, 1, "_top"), Choice::Blocked);
+        assert_eq!(choose(&arena, 1, "s"), Choice::Blocked);
+        assert_eq!(choose(&arena, 1, "a"), Choice::Frame(a));
+        assert_eq!(choose(&arena, 1, "b"), Choice::Frame(b));
+        assert_eq!(choose(&arena, 1, "none"), Choice::New);
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-top-navigation"));
+        assert_eq!(choose(&arena, 1, "_top"), Choice::TopLevel(0));
+    }
 
     #[test]
     fn a_target_keyword_is_matched_ascii_case_insensitively() {

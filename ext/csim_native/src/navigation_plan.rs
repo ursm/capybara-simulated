@@ -126,14 +126,14 @@ pub(crate) enum Route {
 }
 
 // The navigable target `target` chooses from frame realm `realm`'s document (HTML "the rules for choosing a navigable":
-// navigables.rs `keyword_navigable`, `find_navigable`) — the top-level traversable of a frame of a window that window's.
-fn route(arena: &crate::dom::RealmArena, realm: i32, target: &str) -> Route {
+// navigables.rs `choose_navigable`) — the top-level traversable of a frame of a window that window's.
+fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
     use crate::navigables::Choice;
-    match arena.choose_navigable(realm, &target.encode_utf16().collect::<Vec<u16>>()) {
+    match arena.choose_navigable(realm, target) {
         Choice::Current => Route::SelfTarget,
         Choice::Frame(container) => Route::Frame(container),
         Choice::TopLevel(0) => Route::Top,
-        // (…a window's of this isolate, its own tree's)
+        // (…a window's of this isolate, its own tree's — or a discarded frame's own)
         Choice::TopLevel(_) => Route::Window,
         // (…another top-level traversable a name found, which a form's submission does not navigate: a new one)
         Choice::Window(_) | Choice::New => Route::NewWindow,
@@ -142,7 +142,7 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &str) -> Route {
 }
 // …a form's of realm `realm`'s document with target `target` and link types `rel`, and the Referer it sends: that
 // document's, `no-referrer` for its `rel=noreferrer`.
-fn target_route(arena: &mut crate::dom::RealmArena, realm: i32, target: &str, rel: &str) -> (Route, (String, String)) {
+fn target_route(arena: &mut crate::dom::RealmArena, realm: i32, target: &[u16], rel: &str) -> (Route, (String, String)) {
     let policy = if crate::token_list::link_types(rel) & crate::token_list::LINK_NOREFERRER != 0 { "no-referrer" } else { "" };
     let referrer = crate::referrer::navigation_referrer(arena, realm, policy);
     (route(arena, realm, target), referrer)
@@ -150,10 +150,9 @@ fn target_route(arena: &mut crate::dom::RealmArena, realm: i32, target: &str, re
 // …its request's (the bindings' record of it: its `target`, its `rel`).
 fn request_route(scope: &mut v8::PinScope<'_, '_>, realm: i32, request: &v8::Global<v8::Value>) -> (Route, (String, String)) {
     let local = v8::Local::new(scope, request);
-    let member = |scope: &mut v8::PinScope<'_, '_>, name: &str| {
-        v8::Local::<v8::Object>::try_from(local).ok().and_then(|o| crate::dom::member(scope, o, name)).map_or_else(String::new, |v| v.to_rust_string_lossy(scope))
-    };
-    let (target, rel) = (member(scope, "target"), member(scope, "rel"));
+    let request = v8::Local::<v8::Object>::try_from(local).ok();
+    let target = request.and_then(|o| crate::dom::member(scope, o, "target")).map_or_else(Vec::new, |v| crate::dom::utf16_arg(scope, v));
+    let rel = request.and_then(|o| crate::dom::member(scope, o, "rel")).map_or_else(String::new, |v| v.to_rust_string_lossy(scope));
     target_route(&mut crate::dom::dom(scope).arena, realm, &target, &rel)
 }
 // Frame realm `realm`'s navigable navigated otherwise (its own `location`, a reload, a form of its parent's document, a
@@ -504,7 +503,7 @@ fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local
 // the Referer it sends — what the host asks of a submission it makes for the user (an entered frame's form submitted).
 fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
-    let target = args.get(1).to_rust_string_lossy(scope);
+    let target = crate::dom::utf16_arg(scope, args.get(1));
     let rel = args.get(2).to_rust_string_lossy(scope);
     let arena = &mut crate::dom::dom(scope).arena;
     let (route, referrer) = target_route(arena, realm, &target, &rel);
