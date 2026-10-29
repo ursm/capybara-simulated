@@ -273,6 +273,10 @@ pub(crate) fn set_worker_flag_for_ruby(partition: u64, handle: u32, flag: String
         _ => {}
     }
 }
+// …whether its thread is there to answer: none reaped it, nor did it end on its own.
+pub(crate) fn worker_live_for_ruby(partition: u64, handle: u32) -> bool {
+    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| !w.dead)
+}
 // …whether its own activation finished (`note_phase` "activated").
 pub(crate) fn worker_activated_for_ruby(partition: u64, handle: u32) -> bool {
     lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.activated)

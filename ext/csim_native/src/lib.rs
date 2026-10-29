@@ -353,6 +353,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_worker", magnus::function!(sw_registry::worker_for_ruby, 2))?;
     native.define_module_function("sw_set_worker_state", magnus::function!(sw_registry::set_worker_state_for_ruby, 3))?;
     native.define_module_function("sw_set_worker_flag", magnus::function!(sw_registry::set_worker_flag_for_ruby, 4))?;
+    native.define_module_function("sw_worker_live", magnus::function!(sw_registry::worker_live_for_ruby, 2))?;
     native.define_module_function("sw_worker_activated", magnus::function!(sw_registry::worker_activated_for_ruby, 2))?;
     native.define_module_function("sw_match_worker", magnus::function!(sw_registry::match_worker_for_ruby, 3))?;
     native.define_module_function("sw_controller", magnus::function!(sw_registry::controller_for_ruby, 3))?;

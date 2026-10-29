@@ -4911,7 +4911,7 @@ module Capybara
             # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
             # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
             # thread.
-            sw_prev_active: service && (ah = sw_serving[sw_scope.to_s]) && (prev = sw_controller(ah)) ? {url: prev[2], handle: ah} : nil
+            sw_prev_active: service && (ah = sw_serving[sw_scope.to_s]) && (prev = sw_controller(ah, live: false)) ? {url: prev[2], handle: ah} : nil
           )
         end
         # A nested spawn runs THIS method on a worker thread, so other threads can observe
@@ -6256,7 +6256,7 @@ module Capybara
       # gone: reaped, or ended on its own.
       def sw_controller(handle, live: true) = Native.sw_controller(@sw_partition, handle.to_i, live)
       # …whether its thread is there to answer.
-      def sw_live?(handle) = !sw_controller(handle).nil?
+      def sw_live?(handle) = Native.sw_worker_live(@sw_partition, handle.to_i)
 
       # The handle of the service worker controlling a newly spawned worker, or nil.
       #
