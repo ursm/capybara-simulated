@@ -37,7 +37,7 @@ RSpec.describe "a service worker's answer to a link's style sheet" do
 
         [200, {'content-type' => 'text/html'}, [page]]
       }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script("document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/a.css', integrity: '#{good}' }))")
       expect(poll_until { s.evaluate_script("getComputedStyle(document.querySelector('p')).color") == 'rgb(255, 0, 0)' }).to be true
       version = 2

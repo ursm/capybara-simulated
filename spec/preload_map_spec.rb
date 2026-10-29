@@ -263,7 +263,7 @@ RSpec.describe 'map of preloaded resources' do
     ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
     begin
       s = simulated_session(preload_app(served, page, worker)).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script(<<~'JS')
         window.preloads = 0;
         for (const [as, href] of [['image', '/i.png?pre'], ['style', '/s.css'], ['script', '/a.js']]) {
