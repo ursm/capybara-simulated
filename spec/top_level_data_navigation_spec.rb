@@ -19,6 +19,12 @@ RSpec.describe 'a top-level navigation to a data: URL' do
     })
   end
 
+  it 'opens a new window at about:blank for open(data:)' do
+    session.visit '/'
+    session.execute_script("window.popup = open('#{target}')")
+    expect([session.evaluate_script('popup.location.href'), session.title]).to eq(['about:blank', 'start'])
+  end
+
   {
     'a link'              => "document.getElementById('link').click()",
     'location'            => "location.href = 'TARGET'",

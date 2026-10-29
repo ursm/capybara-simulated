@@ -82,7 +82,7 @@ impl RealmLocation {
     }
     // Its document's origin is `text`: an origin's serialization, "null" a new opaque one (sandboxed), `null|<key>` an
     // opaque one inherited with its key (an opaque creator's frame's) — none: its location's.
-    fn set_document_origin(&mut self, text: Option<String>) {
+    pub(crate) fn set_document_origin(&mut self, text: Option<String>) {
         match text.as_deref().and_then(|t| t.strip_prefix("null|")) {
             Some(key) => {
                 self.origin_key = Some(key.to_owned());
@@ -105,6 +105,10 @@ impl RealmLocation {
     // The key its origin is matched by — what a BroadcastChannel is scoped to, a postMessage's target origin matched
     // against: a tuple origin's serialization, an opaque one's a token of the realm `cid` that has it (its own, made
     // the first time it is asked, unless it inherited one), so two unrelated opaque origins never match.
+    // …as far as it is known, none made: none for an opaque one no key was made of yet (which no other realm shares).
+    pub(crate) fn known_origin_key(&self) -> Option<String> {
+        self.origin_key.clone().or_else(|| (self.origin() != "null").then(|| self.origin().to_owned()))
+    }
     pub(crate) fn origin_key(&mut self, cid: i32) -> String {
         if let Some(key) = &self.origin_key {
             return key.clone();

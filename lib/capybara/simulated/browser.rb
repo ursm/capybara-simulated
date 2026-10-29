@@ -918,6 +918,13 @@ module Capybara
         resolve_against_current(url, use_base: true)
       end
 
+      # Whether a document's navigation of a top-level browsing context to `url` is refused — one to a `data:` URL, whose
+      # document would run with no origin of its own: Chrome and Firefox refuse a link's, a form's, `location`'s, a
+      # refresh's, `open(url, '_self')`'s, and leave a new window one opens at about:blank (measured 2026-10-30, for an
+      # HTML, plain-text or SVG one; a browser intervention, no HTML rule). The driver's own `visit` is the user's, which
+      # none refuses.
+      def top_level_data_refused?(url) = url.to_s.match?(/\Adata:/i)
+
       def find_css(css, context_handle = nil)
         s = css.to_s
         return find_xpath(s, context_handle) if xpath_shaped?(s)
@@ -1383,6 +1390,12 @@ module Capybara
       end
 
       def download_link(url, filename_hint = '')
+        # (…a `data:` URL's body its own, decoded: no request made of it)
+        if url.to_s.match?(/\Adata:/i)
+          mime, bytes = Native.data_url(url.to_s)
+          return save_downloaded_response(url, {'content-type' => mime}, [bytes], hint: filename_hint) if mime
+          return
+        end
         env = rack_env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
@@ -6321,10 +6334,12 @@ module Capybara
           referrer_policy = document_policy if referrer_policy.to_s.empty?
         end
         # (…a navigation another document begins — a reload by the document reloading, a window's by the one that navigates
-        # it — by that one, under its own policy: Chrome — the container's attribute none of its)
+        # it — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `referrer_policy`),
+        # else its own: Chrome — the container's attribute none of its)
         source_realm = container_realm
         if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_alive?(initiator_realm.to_i))
-          initiator, referrer_policy = realm_referrer_initiator(initiator_realm.to_i)
+          initiator, document_policy = realm_referrer_initiator(initiator_realm.to_i)
+          referrer_policy = document_policy if referrer_policy.to_s.empty?
           source_realm = initiator_realm
         end
         # (…its site and its Origin that document's — an about:blank one's its creator's, an opaque one's cross-site and
@@ -9765,7 +9780,7 @@ module Capybara
           invalidate_find_cache
           case kind
           when 'location'
-            url, _replace, initiator, _source, _policy, activated, blob = plan
+            url, _replace, initiator, source, policy, activated, blob = plan
           when 'reload'
             activated, blob = plan
             url = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
@@ -9783,7 +9798,7 @@ module Capybara
           # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
           # sent its referrer, its reserved client its own.
           if body.nil? && http_url?(url)
-            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: initiator, download_realm: initiator, user_activated: activated)
+            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: initiator, referrer_policy: policy, download_realm: initiator, user_activated: activated)
             next if resp.nil? || resp['no_document']
 
             headers = resp['headers'] || {}
@@ -9808,8 +9823,10 @@ module Capybara
               referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
               policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
             else
-              source, policy = realm_referrer_initiator(initiator)
-              referrer       = source && Native.request_referrer(policy, source, url)
+              # (…under the policy it navigated under, else the initiator's own)
+              source, own = realm_referrer_initiator(initiator) if source.nil?
+              policy        = own if policy.to_s.empty?
+              referrer      = source && Native.request_referrer(policy, source, url)
             end
             made = {
               doc_origin:      doc_origin,
@@ -9820,6 +9837,8 @@ module Capybara
               referrer_policy: policy
             }
           end
+          # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to)
+          next if body.nil? && top_level_data_refused?(url)
           if body.nil?
             log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
             next
@@ -10189,7 +10208,7 @@ module Capybara
           return javascript_form_action(target, spec['action'].to_s, realm_id) if target
           return if to == :new_window
         end
-        return if to == :new_window && spec['action'].to_s.match?(/\Adata:/i)
+        return if to == :new_window && top_level_data_refused?(spec['action'])
         request = form_request(spec, spec['action'].to_s)
         return unless request
 
@@ -10851,11 +10870,6 @@ module Capybara
       # content type]).
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares and whose origin a POST's Origin carries, that
       # document's: `realm_request_initiator` — one of an opaque origin, a sandboxed frame's, cross-site to every URL)
-      # Whether a document's navigation of the top-level browsing context to `url` is refused — one to a `data:` URL, whose
-      # document would run with no origin of its own: Chrome refuses a link's, a form's, `location`'s and
-      # `open(url, '_self')`'s (measured 2026-10-30; a browser intervention, no HTML rule). The driver's own `visit` is
-      # the user's, which none refuses.
-      private def top_level_data_refused?(url) = url.to_s.match?(/\Adata:/i)
       def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil, user_activated: false)
         return if top_level_data_refused?(url)
 

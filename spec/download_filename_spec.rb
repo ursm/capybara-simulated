@@ -11,6 +11,18 @@ require_relative 'support/session_teardown'
 # none — no header, or one of no filename — under its `download` value (HTML "download the hyperlink": the proposed
 # filename where the response gives none), else its URL's last path segment.
 RSpec.describe 'a download' do
+  # (…a `data:` URL's its own bytes, decoded — no request made of it — under its `download` value)
+  it 'saves a data: link under its download value' do
+    requests = []
+    s = simulated_session(lambda {|env|
+      requests << env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="data:text/csv,a%2Cb" download="x.csv">d</a>']]
+    })
+    s.visit '/'
+    s.click_link 'd'
+    expect([File.binread(File.join(@dir, 'x.csv')), requests]).to eq(['a,b', ['/']])
+  end
+
   around do |example|
     Dir.mktmpdir do |dir|
       prev = ENV['CSIM_DOWNLOADS_DIR']

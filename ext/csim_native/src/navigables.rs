@@ -228,7 +228,8 @@ pub(crate) enum Choice {
 // - `Navigate`: the realm's navigable — `_self` from a frame or such a window, `_top` or `_parent` from a frame, a name
 //   the top-level traversable of a frame's has, a name another top-level traversable of this isolate has — which the
 //   document navigates as its location navigates it;
-// - `Plan`: the top-level page's link (or such a window's not routed above), whose navigation its caller plans
+// - `Plan`: the top-level page's link (or such a window's own, `_top`, `_parent` or new one's, where the host opens
+//   none), whose navigation its caller plans
 //   (navigation_plan.rs `planNavigation`) with this target — `_top` for a name the page has.
 #[derive(Debug, PartialEq)]
 pub(crate) enum LinkRoute {
@@ -693,10 +694,13 @@ impl RealmArena {
             }
         }
         // (…one a document sandboxed against navigation may not navigate is none it finds — a new window then, Chrome — but
-        // the window it made itself, whose permitted sandboxed navigator it is)
+        // the window it made itself, whose permitted sandboxed navigator it is; and none it is not familiar with: a
+        // cross-origin popup's link naming its opener opens a new window, Firefox — Chrome navigates the opener, a Blink
+        // departure from the rules)
         let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
         let windows = std::iter::once(0).chain(self.navigables.windows.iter().copied()).filter(|&w| w != top && !self.is_dropped(w));
-        for window in windows.filter(|&w| !sandboxed || self.navigables.openers.get(&self.window_key(w)) == Some(&current)) {
+        let reachable = |w: i32| (!sandboxed || self.navigables.openers.get(&self.window_key(w)) == Some(&current)) && self.familiar_with(current, w, 0);
+        for window in windows.filter(|&w| reachable(w)) {
             match self.find_in(window, None, name) {
                 None => continue,
                 Some(Chosen::TopLevel(_)) => return Chosen::Window(window),
@@ -704,6 +708,21 @@ impl RealmArena {
             }
         }
         Chosen::None
+    }
+    // HTML "familiar with": whether realm `a`'s browsing context is familiar with realm `b`'s — their documents of one
+    // origin; `a`'s top-level traversable `b`; `b` an auxiliary one (a window `window.open` made) whose opener `a` is
+    // familiar with; or `b` a frame an ancestor of which has a document of `a`'s origin.
+    fn familiar_with(&self, a: i32, b: i32, depth: u8) -> bool {
+        if self.same_origin(a, b) || self.top_level_realm(a) == b || self.ancestor_realms(b).iter().any(|&r| self.same_origin(a, r)) {
+            return true;
+        }
+        depth < 8 && self.window_opener(self.window_key(b)).is_some_and(|opener| self.familiar_with(a, opener, depth + 1))
+    }
+    // Whether realms `a`'s and `b`'s documents are of one origin — by their keys: an opaque one the same only with the
+    // realms that share it (`RealmLocation::origin_key`).
+    fn same_origin(&self, a: i32, b: i32) -> bool {
+        let key = |r: i32| self.realm_state(r).and_then(|s| s.location.known_origin_key());
+        a == b || key(a).is_some_and(|k| key(b) == Some(k))
     }
     // Whether realm `current`'s document may navigate its top-level traversable ("allowed by sandboxing to navigate"): as
     // its window's transient activation lets it — without one, where its sandboxing has no sandboxed top-level
@@ -1560,6 +1579,24 @@ mod tests {
         assert_eq!(arena.open_route(0, &units("b")), OpenRoute::Navigable(None, OpenWindow::Container(b)));
         assert_eq!(arena.open_route(0, &units("")), OpenRoute::New(Vec::new()));
         assert_eq!(arena.open_route(0, &units("w")), OpenRoute::New(units("w")));
+        // (…a window the page opened (realm 2): a link naming it from the page navigates it, and one in it naming the
+        // page navigates the page — familiar with it, the page its opener — but a link in another window, opened by no
+        // one it is familiar with, finds neither)
+        for r in [0, 1] {
+            arena.enter(r);
+            arena.location.set_document_origin(Some("http://a.test".to_owned()));
+        }
+        arena.enter(2);
+        arena.location.set_document_origin(Some("http://a.test".to_owned()));
+        arena.navigables.windows.push(2);
+        arena.navigables.openers.insert(2, 0);
+        arena.set_window_name(2, units("pop"));
+        assert_eq!(route(&arena, 0, "pop", true), LinkRoute::Navigate(2));
+        assert_eq!(route(&arena, 2, "p", true), LinkRoute::Navigate(0));
+        arena.enter(3);
+        arena.location.set_document_origin(Some("http://b.test".to_owned()));
+        arena.navigables.windows.push(3);
+        assert_eq!(route(&arena, 3, "pop", true), LinkRoute::Plan(units("pop")));
     }
 
     #[test]

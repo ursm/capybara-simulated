@@ -139,8 +139,8 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
         Choice::TopLevel(0) => Route::Top,
         // (…a window's of this isolate, its own tree's — or a discarded frame's own)
         Choice::TopLevel(_) => Route::Window,
-        // (…`_blank`'s, named none; another top-level traversable a name found, which a form's submission does not
-        // navigate: a new one of its name)
+        // (…`_blank`'s, named none; another top-level traversable a name found — whose navigation by a form is not
+        // modeled — a new one of its name)
         Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
             Route::NewWindow(Vec::new())
         }
@@ -265,8 +265,9 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let arena = realm(scope, cid);
     let opens_window = match arena.choose_navigable(cid, &target) {
         Choice::Current | Choice::TopLevel(_) => false,
-        Choice::New | Choice::Window(_) => true,
-        Choice::Frame(_) | Choice::Blocked => return,
+        Choice::New => true,
+        // (…another top-level traversable's routed before it is planned: navigables.rs `linkRoute`)
+        Choice::Frame(_) | Choice::Window(_) | Choice::Blocked => return,
     };
     let target = String::from_utf16_lossy(&target);
     let name = if target_keyword(&target) == TARGET_BLANK { String::new() } else { target };

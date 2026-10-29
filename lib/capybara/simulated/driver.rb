@@ -482,6 +482,9 @@ module Capybara
       def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil,
                           user_activated: nil)
         name = name.to_s
+        # (…a document's to a `data:` URL, which a top-level browsing context refuses one's navigation to — a new window
+        # opened at about:blank, a named one left as it is: Browser#top_level_data_refused?)
+        refused = source&.top_level_data_refused?(url)
         # (…the policy the opening hyperlink sets, else its document's)
         referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
         # A blob: URL opened from a different storage partition is forced noopener
@@ -493,6 +496,8 @@ module Capybara
         # LINK, which is noopener) — resolve the opener handle from the source.
         opener_handle ||= handle_for(source) if opener && source
         if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
+          return existing[:handle] if refused
+
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
           # one is made)
           activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
@@ -506,6 +511,7 @@ module Capybara
         end
         # (…the window's own navigation carrying whether its opener had it: the source snapshot's — its plan's, where a
         # hyperlink or a form planned it, else taken as it opens)
+        url = 'about:blank' if refused
         had = source && activation_realm ? source.consume_user_activation(activation_realm) : source.nil?
         activated = user_activated.nil? ? had : user_activated
         @next_window_seq += 1
@@ -569,6 +575,9 @@ module Capybara
       # opener's — and `referrer` / `referrer_policy` its navigation's, the calling document's)
       def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, about_origin = nil, noopener: false, referrer: nil, referrer_policy: nil)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
+        # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to: the window
+        # opened at about:blank, as at an empty URL — a named one left as it is)
+        resolved = nil if opener_browser.top_level_data_refused?(resolved)
         # Opening a blob: URL whose storage partition differs from the opener's
         # top-level site is forced NOOPENER (cross-partition-navigation): the new
         # auxiliary window is its own top-level context in the blob's partition, so the
@@ -771,7 +780,7 @@ module Capybara
       # can navigate immediately (its VM isn't on the stack).
       # (…`user_activated` whether the navigating document's window had transient activation as it began)
       private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false)
-        return if url.nil? || url.to_s.empty?
+        return if url.nil? || url.to_s.empty? || browser.top_level_data_refused?(url)
         # A blob: navigation loads directly from the opener's blob bytes (not
         # rack-navigable, cross-isolate). Only when the target isn't the active
         # window (boot rebuilds its ctx — unsafe mid-call on the running window).
