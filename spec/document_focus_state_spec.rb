@@ -173,6 +173,24 @@ RSpec.describe 'document focus state' do
       expect(has_focus).to eq([true, true])
     end
 
+    # (…and back into a frame whose document's focused element it is still, the focus gone to a sibling frame since —
+    # Chrome: `[true, true, true, false]`)
+    it 'comes back to a focused element of a frame it left' do
+      session.execute_script(<<~JS)
+        const c = document.body.appendChild(document.createElement('iframe'));
+        c.srcdoc = '<input id=k>';
+      JS
+      session.within_frame(1) { expect(session).to have_css('#k') }
+      session.execute_script(<<~JS)
+        window.j = frames[0].frames[0].document.getElementById('j');
+        j.focus();
+        frames[1].document.getElementById('k').focus();
+        j.focus();
+      JS
+      got = session.evaluate_script('[document, frames[0].document, frames[0].frames[0].document, frames[1].document].map((d) => d.hasFocus())')
+      expect(got).to eq([true, true, true, false])
+    end
+
     it "goes into a frame a click lands in, on content that isn't focusable" do
       session.within_frame(0) { session.find('#d').click }
       expect(has_focus).to eq([true, true])
