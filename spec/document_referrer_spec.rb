@@ -31,6 +31,24 @@ RSpec.describe 'document.referrer' do
     expect(session.evaluate_script('frames[1].document.referrer')).to eq('http://www.example.com/top')
   end
 
+  # …its last hop's, a redirect's `Referrer-Policy` the next hop's policy and the Referer each hop sent its referrer
+  # (Fetch "HTTP-redirect fetch": "set request's referrer policy to the result of parsing" it; "main fetch": the request's
+  # referrer the one determined) — a frame's navigation's as a fetch's.
+  it "is a redirected frame navigation's, narrowed by the redirect's referrer policy" do
+    referers = {}
+    s = simulated_session(lambda {|env|
+      referers[env['PATH_INFO']] = env['HTTP_REFERER']
+      next [302, {'location' => '/final', 'referrer-policy' => 'origin'}, []] if env['PATH_INFO'] == '/redir'
+
+      body = env['PATH_INFO'] == '/top' ? '<iframe src="/redir"></iframe>' : env['PATH_INFO']
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    s.visit '/top'
+
+    expect(referers.values_at('/redir', '/final')).to eq(%w[http://www.example.com/top http://www.example.com/])
+    expect(s.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/')
+  end
+
   it "is a POST navigation's" do
     session.visit '/top'
     session.execute_script('p.submit()')

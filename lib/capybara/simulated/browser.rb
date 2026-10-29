@@ -6962,24 +6962,34 @@ module Capybara
         end
         # (…its site and its Origin that document's — an about:blank one's its creator's, an opaque one's cross-site and
         # `null` (`initiating_url`, `opaque_initiator`) — its referrer source the Referer's alone)
-        origin_url  = (source_realm && initiating_url(source_realm)) || initiator
-        opaque      = source_realm ? opaque_initiator(source_realm) : {}
-        meth        = method.to_s.empty? ? 'GET' : method.to_s.upcase
-        req_body    = body.to_s.b
-        req_ct      = content_type
-        site        = opaque[:site_seed]
-        origin_null = opaque.fetch(:origin_null, false)
-        redirected  = false
+        origin_url = (source_realm && initiating_url(source_realm)) || initiator
+        opaque     = source_realm ? opaque_initiator(source_realm) : {}
+        req_body   = body.to_s.b
+        req_ct     = content_type
+        # The chain's hops (navigation_fetch.rs): each one's request, its Referer narrowed by the one before, its site
+        # latched, its origin tainted by a redirect — and its cookies cross-site where the document the frame is in, or one
+        # of ITS ancestors, is: RFC 6265bis "site for cookies" — the realm building it, when it says which.
+        fetch = Native::NavigationFetch.new({
+          method:          method.to_s,
+          url:             url.to_s,
+          body_empty:      req_body.empty?,
+          referrer:        initiator,
+          referrer_policy: referrer_policy.to_s,
+          initiator:       origin_url,
+          origin_null:     opaque.fetch(:origin_null, false),
+          site_seed:       opaque[:site_seed],
+          ancestors:       container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true)
+        })
         # The navigation's reserved client id (`event.resultingClientId`): every hop of the
         # chain carries the SAME id — re-minted when a hop crosses origins (a reserved client
         # is origin-bound) — and the committed document's realm adopts the final one.
-        rid         = mint_resulting_client_id
-        (MAX_FETCH_REDIRECTS + 1).times do
-          resp_body     = nil
-          sent_referrer = nil
-          # (…cross-site for cookies where the document the frame is in, or one of ITS ancestors, is: RFC 6265bis "site
-          # for cookies" — the realm building it, when it says which)
-          cookie_cross = !container_realm.nil? && container_cross_site?(container_realm, target)
+        rid = mint_resulting_client_id
+        loop do
+          command, hop = fetch.begin_hop
+          return nil if command == 'error'
+
+          meth, target, _, ref_source, ref_policy, site_seed, site, origin_null, cookie_cross = hop
+          resp_body = nil
           # A service worker only controls a client whose EVERY ancestor is a secure
           # context: an httpS frame anywhere under an http document loads from the
           # network (secure-context.https). Gated on the target being https — a scope
@@ -6990,12 +7000,9 @@ module Capybara
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
-                                                          referrer_source: initiator, origin_url: origin_url, referrer_policy: referrer_policy, site_seed: site,
+                                                          referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy, site_seed: site_seed,
                                                           origin_null: origin_null, resulting_client_id: rid, cookie_cross_site: cookie_cross))
             return nil if sw['networkError']
-
-            # (…the Referer its request carried, as the network's would have: the referrer of the document it makes)
-            sent_referrer = Native.request_referrer(referrer_policy.to_s, initiator, target)
 
             status  = (sw['status'] || 200).to_i
             headers = sw['headers'] || {}
@@ -7004,10 +7011,10 @@ module Capybara
             response = dispatch_navigation_request(
               target,
               method:            meth,
-              referrer_source:   initiator,
+              referrer_source:   ref_source,
               origin_url:        origin_url,
-              referrer_policy:   referrer_policy,
-              site:              Native.fetch_site(site, origin_url, target),
+              referrer_policy:   ref_policy,
+              site:              site,
               origin_null:       origin_null,
               body:              req_body.empty? ? nil : req_body,
               content_type:      req_ct,
@@ -7015,22 +7022,17 @@ module Capybara
               cookie_cross_site: cookie_cross,
               user_activated:    user_activated
             ) or return nil
-            status, headers, resp_body, sent_referrer = response
+            status, headers, resp_body, = response
             body = nil   # read only for the terminal hop, below
           end
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
-            site        = Native.fetch_site(site, origin_url, target)
-            next_url    = carry_fragment(target, resolve_against(loc, target))
-            origin_null = Native.redirect_taints_origin(origin_null, origin_url, target, next_url)
-            if Native.redirect_to_get(status.to_i, meth)
-              meth     = 'GET'
-              req_body = ''.b
-              req_ct   = nil
-            end
-            rid         = mint_resulting_client_id if url_origin(next_url) != url_origin(target)
-            target      = next_url
-            redirected  = true
+            # (…the next hop — a GET where the redirect makes one — or none: a Location no URL, a scheme no fetch goes to)
+            command, to_get, new_client = fetch.redirect(status.to_i, loc.to_s, referrer_policy_header(headers))
+            return nil if command == 'fail'
+
+            req_body, req_ct = ''.b, nil if to_get
+            rid = mint_resulting_client_id if new_client
             next
           end
           # (…none made of a 204 / 205: the frame stays at the document it is at, `no_document` — `no_content_response?`)
@@ -7047,14 +7049,15 @@ module Capybara
             return {'no_document' => true}
           end
           body ||= read_rack_body(resp_body)
-          out = response_hash(status, headers, body, target, redirected)
+          out = response_hash(status, headers, body, target, fetch.redirected?)
           # The final reserved client id — the JS frame builder hands it to the new realm
           # (create_frame_realm tells the realm its client id + records the adoption).
           out['resulting_client_id'] = rid if out
-          out['referrer'] = sent_referrer if out && sent_referrer
+          # (…the Referer its request carried, a service worker's as the network's would have: the referrer of the document
+          # it makes)
+          out['referrer'] = fetch.referrer if out && fetch.referrer
           return out
         end
-        nil   # redirect loop → failed navigation
       end
 
       # Whether a service worker may control a navigation of realm `realm_id`'s own navigable — the engine's

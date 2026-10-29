@@ -308,11 +308,15 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         rv.set(v8::String::new(scope, &site).unwrap().into());
     }
 }
-// __dom.ancestorDocuments(realm) -> the URLs of the documents of realm `realm`'s ancestors, up to its top-level one (null
-// for one not known): what a request its document makes is cross-site for cookies by, besides its own (`frame_cross_site`).
+// __dom.ancestorDocuments(realm, own) -> the URLs of the documents of realm `realm`'s ancestors, up to its top-level one
+// (null for one not known) — its own first, `own`: what a request its document makes is cross-site for cookies by,
+// besides its own (`frame_cross_site`); a navigation of a frame in it, by its own too.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mut r = args.get(0).int32_value(scope).unwrap_or(0);
     let mut urls = Vec::new();
+    if args.get(1).is_true() {
+        urls.push(known_document(&mut dom(scope).arena, r).map(|d| d.0));
+    }
     while let Some(p) = dom(scope).arena.parent_realm(r) {
         urls.push(known_document(&mut dom(scope).arena, p).map(|d| d.0));
         r = p;
