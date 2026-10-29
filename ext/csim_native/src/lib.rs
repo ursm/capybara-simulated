@@ -286,6 +286,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 0))?;
     native.define_module_function("event_stream_feed", magnus::function!(event_stream::feed_for_ruby, 2))?;
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
+    // …and whether a response is one that announces an event source's connection (event_source_state.rs).
+    native.define_module_function("event_stream_response_ok", magnus::function!(event_source_state::response_ok, 2))?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
@@ -392,7 +394,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("cors_safelisted_response_header", magnus::function!(fetch_rules::cors_safelisted_response_header_for_ruby, 1))?;
     native.define_module_function("forbidden_response_header", magnus::function!(fetch_rules::forbidden_response_header_for_ruby, 1))?;
     native.define_module_function("http_token", magnus::function!(fetch_rules::http_token_for_ruby, 1))?;
-    native.define_module_function("content_type_essence", magnus::function!(mime::content_type_essence_for_ruby, 1))?;
     native.define_module_function("javascript_content", magnus::function!(script::javascript_content_for_ruby, 1))?;
     native.define_module_function("module_content", magnus::function!(script::module_content_for_ruby, 2))?;
     // A driver session's IndexedDB, Cache Storage, Web Locks, system clipboard and emulated position: a new partition of

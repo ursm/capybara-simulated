@@ -139,10 +139,6 @@ pub(crate) fn extract(header: &str) -> Option<MimeType> {
     }
     mime
 }
-// …for the host: the essence of the MIME type a `Content-Type` header's value gives, or nil.
-pub(crate) fn content_type_essence_for_ruby(header: String) -> Option<String> {
-    extract(&header).map(|m| m.essence)
-}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "mimeParse", mime_parse, context_id);

@@ -3872,30 +3872,30 @@ module Capybara
 
       # ── EventSource (SSE) ──────────────────────────────────────────
       #
-      # Mastodon (and any app using Server-Sent Events) opens an
-      # `EventSource` to a streaming endpoint and expects pushed events
-      # to fire `message`/typed listeners on the live instance. Our
-      # implementation:
-      #   1. JS-side `new EventSource(url)` calls `__csim_eventSourceOpen`
-      #      which returns an integer handle and spawns a Ruby thread.
-      #   2. The thread holds a chunked-read HTTP connection open and
-      #      parses the SSE event-stream wire format, pushing each
-      #      `{id:, type:, data:, lastEventId:}` (or `{type: '__open'}`
-      #      / `{type: '__error', message:}` sentinel) onto a
-      #      thread-safe queue.
-      #   3. Settle's drain loop calls `deliver_event_source_events`
-      #      which polls the queue and hands the batch to
+      # Mastodon (and any app using Server-Sent Events) opens an `EventSource` to a streaming endpoint and expects pushed
+      # events to fire `message` / typed listeners on the live instance:
+      #   1. JS-side `new EventSource(url)` calls `__csim_eventSourceOpen` with its request, which returns an integer
+      #      handle and spawns a Ruby thread.
+      #   2. The thread fetches the request as every request is fetched (`rack_fetch`, the engine's FetchPlan: its
+      #      cookies, its CORS check, its redirects) over a connection of its own (`event_stream_transport`), and reads
+      #      the body as it comes, pushing each `{id:, type:, data:, lastEventId:}` (or `{type: '__open', origin:}` /
+      #      `{type: '__error', message:}` sentinel) onto a thread-safe queue.
+      #   3. Settle's drain loop calls `deliver_event_source_events`, which polls the queue and hands the batch to
       #      `__csim_deliverEventSourceEvents` for dispatch.
-      # rusty_racer VMs are single-threaded; only the main
-      # thread ever enters the VM. Background threads only touch the
-      # Queue. `reset!` and per-visit context rebuilds kill all open
-      # threads — the new VM gets a fresh handle space.
-      def event_source_open(url)
-        id     = (@event_source_seq += 1)
-        queue  = @event_source_queue
-        thread = Thread.new do
+      # rusty_racer VMs are single-threaded; only the main thread ever enters the VM. Background threads only touch the
+      # Queue and the engine's plan, which is theirs alone. `reset!` and per-visit context rebuilds kill all open threads —
+      # the new VM gets a fresh handle space.
+      # (…`request` the source's, described by name as a realm's every request to the host is: `rack_fetch_request`)
+      def event_source_open(request)
+        request = request.to_h
+        id      = (@event_source_seq += 1)
+        queue   = @event_source_queue
+        # (…a worker's request of the worker's cookie site, which its thread knows)
+        worker  = Thread.current[:csim_worker_record]
+        thread  = Thread.new do
           Thread.current.report_on_exception = false
-          run_event_source_reader(id, url.to_s, queue)
+          Thread.current[:csim_worker_record] = worker
+          run_event_source_reader(id, request, queue)
         end
         @event_source_threads[id] = thread
         id
@@ -3926,135 +3926,107 @@ module Capybara
         events.size
       end
 
-      # Background-thread entry point. Resolves the URL (relative
-      # paths against current page), opens a raw TCP / TLS socket,
-      # speaks just enough HTTP/1.1 to make the request, and reads
-      # chunked SSE bodies. Net::HTTP would be more natural but
-      # WebMock's `disable_net_connect!(allow_localhost: true)`
-      # routes Net::HTTP through an adapter that buffers chunked
-      # responses until the body completes — which never happens on a
-      # long-lived event stream. TCPSocket is below WebMock's hook
-      # surface so this stays a real network read.
-      private def run_event_source_reader(id, url, queue)
-        target = resolve_against_current(url)
-        socket = nil
-        # Fetch with redirect mode "follow": a 3xx with a Location is followed, re-resolved against the URL it came from,
-        # up to the redirect limit — an HTTP(S) one alone, each hop its own cookies.
-        (MAX_FETCH_REDIRECTS + 1).times do
-          uri = uri_for(target)
-          unless uri.is_a?(URI::HTTP) || uri.is_a?(URI::HTTPS)
-            queue << {id: id, type: '__error', message: "unsupported scheme: #{uri.scheme.inspect}"}
-            return
-          end
-          socket = open_event_source_socket(uri)
-          send_event_source_request(socket, uri)
-          status_line = socket.gets
-          unless status_line
-            queue << {id: id, type: '__error', message: 'empty response'}
-            return
-          end
-          code = status_line[%r{HTTP/[\d.]+\s+(\d+)}, 1].to_i
-          chunked = false
-          content_types = []
-          set_cookies   = []
-          location      = nil
-          while (line = socket.gets) && line.strip != ''
-            chunked = true if line =~ /\Atransfer-encoding:\s*chunked/i
-            raw = line.split(':', 2)[1].to_s.strip
-            # (…a Content-Type's bytes each one character, as Fetch reads a header — a non-ASCII byte a Latin-1 one; a
-            # Location UTF-8, as the URL parser takes it, Latin-1 where it is none)
-            content_types << raw.dup.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8) if line =~ /\Acontent-type:/i
-            set_cookies << raw.b if line =~ /\Aset-cookie:/i   # (…its bytes, as the store keeps them)
-            if line =~ /\Alocation:/i
-              utf8     = raw.dup.force_encoding(Encoding::UTF_8)
-              location = utf8.valid_encoding? ? utf8 : raw.dup.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
-            end
-          end
-          # (…a hop's cookies kept before the next is asked for: a login bounce sets one the stream needs)
-          merge_set_cookie({'set-cookie' => set_cookies}, target) unless set_cookies.empty?
-          if REDIRECT_STATUSES.include?(code) && location
-            socket.close
-            target = carry_fragment(target, resolve_against(location, target))
-            next
-          end
-          # HTML "establish the connection": a response that is not a 200 of `text/event-stream` fails it — no
-          # reconnection.
-          unless code == 200 && Native.content_type_essence(content_types.join(', ')) == 'text/event-stream'
-            queue << {id: id, type: '__error', message: "HTTP #{code} #{content_types.join(', ')}".strip}
-            return
-          end
-          queue << {id: id, type: '__open'}
-          read_event_source_body(socket, id, queue, chunked: chunked)
+      # Background-thread entry point: HTML "establish the connection" — the request fetched, and "process the event
+      # source response": a network error, or a response other than a 200 of `text/event-stream`, fails the connection
+      # (no reconnection); any other announces it, its messages of the origin of the URL it came from, and its body read
+      # as it comes by HTML's "interpret an event stream" (the engine's, the page's too) — a parser kept from chunk to
+      # chunk, so a record or a line a chunk ends in the middle of goes on in the next.
+      private def run_event_source_reader(id, request, queue)
+        status, headers, body, url = rack_fetch_request(request, nil, transport: method(:event_stream_transport), stream: true)
+        unless body
+          queue << {id: id, type: '__error', message: 'network error'}
           return
         end
-        queue << {id: id, type: '__error', message: 'too many redirects'}
-      rescue EOFError, Errno::ECONNRESET
-        # Server closed mid-stream — normal lifecycle, not an error
-        # worth surfacing.
-      rescue StandardError => e
-        queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
+        content_type = header_field(headers, 'content-type')
+        unless Native.event_stream_response_ok(status, content_type ? header_text(content_type) : '')
+          queue << {id: id, type: '__error', message: "HTTP #{status}"}
+          return
+        end
+        queue << {id: id, type: '__open', origin: url_origin(url)}
+        parser = Native.event_stream_open
+        body.each do |chunk|
+          Native.event_stream_feed(parser, chunk).each {|type, data, event_id| queue << {id: id, type: type, data: data, lastEventId: event_id} }
+        end
+      rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
+        # (…the server closing mid-stream: the stream ends, as normal a lifecycle as any)
       ensure
+        Native.event_stream_close(parser) if parser
+        socket = Thread.current[:csim_event_stream_socket]
         begin
           socket.close if socket && !socket.closed?
         rescue StandardError
-          # socket might have been closed concurrently (reset! killed
-          # the thread); the leak is harmless.
+          # (…closed concurrently: reset! killed the thread)
         end
       end
 
-      private def open_event_source_socket(uri)
-        if uri.is_a?(URI::HTTPS)
-          require 'openssl'
-          tcp  = TCPSocket.new(uri.host, uri.port)
-          ctx  = OpenSSL::SSL::SSLContext.new
-          ssl  = OpenSSL::SSL::SSLSocket.new(tcp, ctx)
-          ssl.sync_close = true
-          ssl.hostname   = uri.host
-          ssl.connect
-          ssl
-        else
-          TCPSocket.new(uri.host, uri.port)
-        end
-      end
-
-      private def send_event_source_request(socket, uri)
-        host_header = uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"
-        lines = [
-          "GET #{uri.request_uri} HTTP/1.1",
-          "Host: #{host_header}",
-          'Accept: text/event-stream',
-          'Accept-Encoding: identity',
-          'Cache-Control: no-store',
-          'Connection: keep-alive'
+      # How an event stream's request reaches its server (`rack_fetch`'s `transport`): a connection of its own, raw TCP /
+      # TLS, speaking just enough HTTP/1.1 to send the hop's request as its env has it and to read the response's head —
+      # its body read from the connection as it comes, a chunked one's chunks undone. Net::HTTP would be more natural,
+      # but WebMock's `disable_net_connect!(allow_localhost: true)` routes it through an adapter that buffers a chunked
+      # response until the body completes — which never happens on a long-lived event stream; a TCPSocket is below its
+      # hook surface. :network_error where no response came.
+      private def event_stream_transport(url, env)
+        uri    = uri_for(url)
+        socket = open_event_stream_socket(uri)
+        # (…the hop's connection, which the reader closes however it ends: a redirect's goes with its body)
+        Thread.current[:csim_event_stream_socket] = socket
+        query  = env['QUERY_STRING'].to_s
+        lines  = [
+          "#{env['REQUEST_METHOD']} #{env['PATH_INFO']}#{query.empty? ? '' : "?#{query}"} HTTP/1.1",
+          "Host: #{uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"}",
+          *env_header_fields(env).map {|name, value| "#{name}: #{value}" }
         ]
-        # Forward the streaming host's cookie jar so the server can
-        # authenticate the user the same way the browser would — scoped to
-        # the EventSource target's host, like every other request.
-        cookies = cookie_header_for(uri.to_s, secure: uri.scheme == 'https' || potentially_trustworthy_url?(uri.to_s))
-        lines << "Cookie: #{cookies}" unless cookies.empty?
-        socket.write(lines.join("\r\n") << "\r\n\r\n")
+        socket.write(lines.join("\r\n").b << "\r\n\r\n")
         socket.flush
+        code = socket.gets.to_s[%r{\AHTTP/[\d.]+\s+(\d{3})}, 1] or return :network_error
+        headers = {}
+        while (line = socket.gets) && !line.strip.empty?
+          name, value = line.chomp.split(':', 2)
+          next unless value
+
+          # (…a field's bytes, as the wire has them; a name's repeated fields each kept, as Rack 3 keeps them)
+          value = value.strip.b
+          key   = name.strip.downcase
+          headers[key] = headers.key?(key) ? [*headers[key], value] : value
+        end
+        chunked = header_field(headers, 'transfer-encoding').to_s.match?(/chunked/i)
+        [code.to_i, headers, EventStreamBody.new(socket, chunked)]
+      rescue IOError, SystemCallError, SocketError, OpenSSL::SSL::SSLError
+        :network_error
       end
 
-      # The stream's events as its chunks come, by HTML's "interpret an event stream" (the engine's, the page's too) — a
-      # parser kept from chunk to chunk, so a record or a line a chunk ends in the middle of goes on in the next.
-      private def read_event_source_body(socket, id, queue, chunked:)
-        parser = Native.event_stream_open
-        loop do
-          if chunked
-            size_line = socket.gets
-            break unless size_line
-            size = size_line.strip.to_i(16)
-            break if size.zero?
-            chunk = socket.read(size).to_s
-            socket.read(2)  # trailing CRLF
-          else
-            chunk = socket.readpartial(4096)
+      # An event stream's body as its connection brings it: each chunk as it comes, a chunked one's chunks undone.
+      EventStreamBody = Struct.new(:socket, :chunked) do
+        def each
+          loop do
+            if chunked
+              size = socket.gets.to_s.strip.to_i(16)
+              break if size.zero?
+
+              yield socket.read(size).to_s
+              socket.read(2) # (…the CRLF after it)
+            else
+              yield socket.readpartial(4096)
+            end
           end
-          Native.event_stream_feed(parser, chunk).each {|type, data, event_id| queue << {id: id, type: type, data: data, lastEventId: event_id} }
+        rescue EOFError
+          # (…the stream's end)
         end
-      ensure
-        Native.event_stream_close(parser) if parser
+
+        def close
+          socket.close unless socket.closed?
+        end
+      end
+
+      private def open_event_stream_socket(uri)
+        tcp = TCPSocket.new(uri.host, uri.port)
+        return tcp unless uri.is_a?(URI::HTTPS)
+
+        ssl = OpenSSL::SSL::SSLSocket.new(tcp, OpenSSL::SSL::SSLContext.new)
+        ssl.sync_close = true
+        ssl.hostname   = uri.host
+        ssl.connect
+        ssl
       end
 
       def reset_event_sources
@@ -9138,7 +9110,8 @@ module Capybara
       # A request a realm's script makes the host fetch (`__rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
       # worker's imported script), described by name (document-origin.js `hostRequest`) — its client the realm's own
       # document, its frame's ancestors given — and `body` its bytes.
-      def rack_fetch_request(request, body, env_extras: nil)
+      # (…`transport` and `stream` as `rack_fetch` takes them)
+      def rack_fetch_request(request, body, env_extras: nil, transport: nil, stream: false)
         r = request.to_h
         rack_fetch(
           r['method'],
@@ -9162,7 +9135,9 @@ module Capybara
           navigation:        r['navigation'] == true,
           dest:              r['dest'],
           user_activated:    r['userActivated'] == true,
-          env_extras:        env_extras
+          env_extras:        env_extras,
+          transport:         transport,
+          stream:            stream
         )
       end
 
@@ -9173,8 +9148,11 @@ module Capybara
       # (…`dest` the request's destination where an element's load makes it — `image`, `script`, `style`, `font`, … —
       # which its Fetch Metadata reports, its mode `cors_mode`, else `no-cors`: Fetch "main fetch", an element's load a
       # no-cors request but where it asks for CORS)
+      # (…`transport` what sends each hop where it is not the app's or Net::HTTP's — `dispatch_rack_or_http` — and
+      # `stream` whether the response is answered with its body unread, `[status, headers, body, url]`, for a reader that
+      # takes it as it comes: an event stream's)
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
-                     user_activated: false, ancestors: nil)
+                     user_activated: false, ancestors: nil, transport: nil, stream: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9305,7 +9283,7 @@ module Capybara
             # context, which its later response is stored by)
             Thread.current[:csim_fetch_env] = env
           end
-          response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
+          response = dispatch_rack_or_http(target, env, method: method, body: body, transport: transport) or return nil
           status, resp_headers, resp_body = response
           step, *args = plan.response(status.to_i, response_fields(resp_headers), env.key?('HTTP_AUTHORIZATION'))
           # Transparent HTTP Basic auth (RFC 7617; http_auth.rs `answers_challenge`): a request carrying CHALLENGE
@@ -9314,7 +9292,7 @@ module Capybara
           if step == 'retry_auth'
             resp_body.close if resp_body.respond_to?(:close)
             env['HTTP_AUTHORIZATION'] = args[0]
-            response = dispatch_rack_or_http(target, env, method: method, body: body) or return nil
+            response = dispatch_rack_or_http(target, env, method: method, body: body, transport: transport) or return nil
             status, resp_headers, resp_body = response
             step, *args = plan.response(status.to_i, response_fields(resp_headers), true)
           end
@@ -9362,6 +9340,10 @@ module Capybara
             next
           end
           kind, null_body, store, expose, total_delay, tainted, nav = args
+          if stream
+            trace_network(method, target, status, hop_headers, body, resp_headers, nil, t0, false)
+            return [status.to_i, expose.nil? ? resp_headers : cors_exposed_headers(resp_headers, expose), resp_body, target]
+          end
           # (…a body the wire cut short read as far as it came, and then fails — no response the cache keeps)
           cut_short = resp_body.is_a?(CutShortBody)
           body_str  = read_rack_body(resp_body)
@@ -11920,7 +11902,9 @@ module Capybara
       # server's paths, and the external server's redirect back to the
       # app host needs to come through @app again. Real-browser drivers
       # get this for free; we have to detect the boundary. nil for a network error (`framed_response`).
-      def dispatch_rack_or_http(url, env, method: 'GET', body: nil)
+      # (…`transport` the caller's own, where it sends every hop itself — an event stream's, which Net::HTTP would read
+      # whole: `event_stream_transport`)
+      def dispatch_rack_or_http(url, env, method: 'GET', body: nil, transport: nil)
         # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
         # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
         env = env.reject {|k, _| k.start_with?('HTTP_SEC_FETCH_') } unless potentially_trustworthy_url?(url)
@@ -11929,7 +11913,7 @@ module Capybara
         # otherwise handle it, matching the pre-cross-host behavior
         # for tests that route through an external OAuth provider URL
         # without intending the call to land.
-        remote = net_http_fetch(url, env, method: method, body: body) unless url_is_local?(url)
+        remote = transport ? transport.(url, env) : (net_http_fetch(url, env, method: method, body: body) unless url_is_local?(url))
         return nil if remote == :network_error
 
         response = framed_response(method, *(remote || @app.call(env))) or return nil
@@ -12044,10 +12028,7 @@ module Capybara
         uri = uri_for(url)
         Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https', open_timeout: 5, read_timeout: 30) do |http|
           req = Net::HTTP.const_get(method.to_s.capitalize).new(uri.request_uri)
-          env.each_pair do |k, v|
-            next unless k.is_a?(String) && k.start_with?('HTTP_') && k != 'HTTP_COOKIE' && k != 'HTTP_HOST'
-            req[k.sub(/\AHTTP_/, '').split('_').map(&:capitalize).join('-')] = v.to_s
-          end
+          env_header_fields(env).each {|name, value| req[name] = value unless name == 'Cookie' }
           req['Content-Type'] = env['CONTENT_TYPE'] if env['CONTENT_TYPE']
           req.body = body if body && !body.empty?
           resp = http.request(req)
@@ -12065,6 +12046,12 @@ module Capybara
         :network_error
       rescue Exception  # WebMock::NetConnectNotAllowedError descends from Exception, not StandardError
         nil
+      end
+
+      # The header fields a Rack env's request sends, by their names on the wire: its `HTTP_*` entries but `Host`, which the
+      # connection's URL names.
+      def env_header_fields(env)
+        env.filter_map {|k, v| [k.delete_prefix('HTTP_').split('_').map(&:capitalize).join('-'), v.to_s] if k.is_a?(String) && k.start_with?('HTTP_') && k != 'HTTP_HOST' }
       end
 
       # Whether a URL is of a potentially trustworthy origin (Secure Contexts, the engine's: url_ops.rs

@@ -1,5 +1,6 @@
-// An EventSource object's connection as the page sees it (HTML §9.2): its URL and the origin its messages carry, whether
-// it sends credentials, its ready state, and the host's id for its connection — on a handle the bindings' object wraps
+// An EventSource object's connection as the page sees it (HTML §9.2): its URL and the origin its messages carry — its
+// URL's until a response announces the connection, then the URL's that response came from — whether it sends
+// credentials, its ready state, and the host's id for its connection — on a handle the bindings' object wraps
 // (`__dom.EventSourceStateBase`). The constructor's URL, `close()`, what each event the host delivers does to it, and
 // which response a controlling service worker may answer it with are here; the stream, its reading (event_stream.rs)
 // and the socket are the host's, and the events' objects the bindings'.
@@ -179,25 +180,34 @@ fn delivered(ready_state: u32, kind: &str) -> (u32, u32) {
         _ => (ready_state, FIRE_MESSAGE),
     }
 }
-// …and what a controlling service worker's response of `status` and `content_type` does to it (HTML "process the event
-// source response"): nothing for one closed already; a status other than 200, or a MIME type whose essence is not
-// `text/event-stream`, fails it — an `error`; any other announces it — open, an `open` — its body's events read after.
+// Whether a response of `status` and `content_type` announces a source's connection (HTML "process the event source
+// response"): a 200 of a MIME type whose essence is `text/event-stream` — any other fails it. The host's reading of a
+// live connection's response (Capybara::Simulated::Native.event_stream_response_ok) and a service worker's answer's.
+pub(crate) fn response_ok(status: u32, content_type: String) -> bool {
+    status == 200 && crate::mime::extract(&content_type).is_some_and(|m| m.essence == "text/event-stream")
+}
+// …and what a controlling service worker's response does to a source: nothing for one closed already; one that does not
+// announce it fails it — an `error`; any other announces it — open, an `open` — its body's events read after.
 fn served(ready_state: u32, status: u32, content_type: &str) -> (u32, u32) {
     if ready_state == CLOSED {
         return (CLOSED, FIRE_NONE);
     }
-    let accepted = status == 200 && crate::mime::extract(content_type).is_some_and(|m| m.essence == "text/event-stream");
-    if accepted { delivered(ready_state, "__open") } else { delivered(ready_state, "__fail") }
+    if response_ok(status, content_type.to_owned()) { delivered(ready_state, "__open") } else { delivered(ready_state, "__fail") }
 }
 
-// __dom.esDeliver(state, kind) -> the event one event the host delivered fires (`delivered`), the source changed as it
-// says.
+// __dom.esDeliver(state, kind, origin) -> the event one event the host delivered fires (`delivered`), the source changed
+// as it says — an `__open` that opens it of the `origin` its response's URL is, where the host names one (HTML "announce
+// the connection": the origin its messages carry).
 fn deliver_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let kind = args.get(1).to_rust_string_lossy(scope);
+    let origin = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
     let mut s = source.borrow_mut();
     let (ready_state, fire) = delivered(s.ready_state, &kind);
     s.ready_state = ready_state;
+    if let Some(origin) = origin.filter(|_| fire == FIRE_OPEN) {
+        s.origin = origin;
+    }
     rv.set_uint32(fire);
 }
 
