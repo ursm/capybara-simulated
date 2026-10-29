@@ -47,7 +47,7 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
                <script>
                  const log = [];
                  addEventListener('pagehide', () => { log.push('pagehide ' + document.visibilityState); document.open(); document.write('written'); document.close() });
-                 document.addEventListener('visibilitychange', () => log.push('visibilitychange ' + document.visibilityState));
+                 addEventListener('visibilitychange', () => log.push('visibilitychange ' + document.visibilityState));
                  addEventListener('unload', () => {
                    log.push('unload ' + document.visibilityState, 'confirm ' + confirm('c'), 'body ' + document.getElementById('t')?.textContent);
                    history.pushState(null, '', '/pushed');
