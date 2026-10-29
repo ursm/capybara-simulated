@@ -6,11 +6,19 @@ require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 
 # `clients.claim()` claims for an active worker alone (Service Workers §4.3.4): one evaluating or installing is no
-# active worker yet — an InvalidStateError — where one activating is its registration's active worker already.
+# active worker yet — an InvalidStateError — where one activating is its registration's active worker already. And a
+# worker's activate event is Activate's to fire (§8): an update waiting while the worker before it controls a client runs
+# no activate handler — a cache cleanup the old version still serves from — and claims nothing.
 RSpec.describe 'Service Worker clients.claim()' do
   include PollUntil
 
   let(:app) {
+    versioned = <<~JS
+      self.addEventListener('activate', (e) => { self.activated = true; e.waitUntil(self.clients.claim()); });
+      self.addEventListener('message', async (e) => {
+        e.source.postMessage({activated: !!self.activated, state: self.serviceWorker.state, claim: await self.clients.claim().then(() => 'claimed', (x) => x.name)});
+      });
+    JS
     worker = <<~JS
       const outcome = (p) => p.then(() => 'claimed', (e) => e.name);
       const seen = {evaluation: outcome(self.clients.claim())};
@@ -20,9 +28,14 @@ RSpec.describe 'Service Worker clients.claim()' do
         e.source.postMessage({evaluation: await seen.evaluation, install: await seen.install, activate: await seen.activate});
       });
     JS
+    version = 0
     lambda {|env|
       case env['PATH_INFO']
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/versioned.js'
+        version += 1
+        [200, {'content-type' => 'text/javascript'}, ["// v#{version}\n#{versioned}"]]
+      when '/scope/page.html' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>in scope']]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body>page']]
       end
     }
@@ -51,5 +64,26 @@ RSpec.describe 'Service Worker clients.claim()' do
     expect(poll_until { session.evaluate_script('globalThis.__out') }).to eq(
       'evaluation' => 'InvalidStateError', 'install' => 'InvalidStateError', 'activate' => 'claimed'
     )
+  end
+
+  it 'runs no activate handler of an update waiting for the worker before it' do
+    session = simulated_session(app)
+    session.visit '/'
+    session.execute_script(<<~JS)
+      globalThis.__out = null;
+      const settled = (w, state) => new Promise((res) => { const step = () => (w.state === state ? res() : w.addEventListener('statechange', step, {once: true})); step(); });
+      navigator.serviceWorker.register('/versioned.js', {scope: '/scope/'}).then(async (reg) => {
+        await settled(reg.installing || reg.waiting || reg.active, 'activated');
+        const f = document.createElement('iframe');
+        f.src = '/scope/page.html';
+        await new Promise((res) => { f.onload = res; document.body.appendChild(f); });
+        await reg.update();
+        await settled(reg.installing || reg.waiting, 'installed');
+        await new Promise((res) => setTimeout(res, 200));
+        navigator.serviceWorker.onmessage = (e) => { globalThis.__out = e.data; };
+        reg.waiting.postMessage('tell');
+      });
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__out') }).to eq('activated' => false, 'state' => 'installed', 'claim' => 'InvalidStateError')
   end
 end

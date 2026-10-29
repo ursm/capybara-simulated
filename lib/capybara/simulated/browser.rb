@@ -5864,6 +5864,9 @@ module Capybara
         sw_retire(outgoing) if outgoing && outgoing != handle
         sw_set_version(id, 'active', handle)
         sw_set_version(id, 'waiting', nil) if waiting == handle
+        # (…its activate event dispatched now, on its own thread — not as its install settled — ahead of anything a client
+        # sends it once told it is activating: a `clients.claim()` that asks it then is an active worker's)
+        @workers[handle]&.dig(:inbox)&.push({kind: 'sw_activate'})
         sw_update_worker_state(handle, 'activating')
         scope = sw_mapped_scope(id)
         sw_note_activating(scope, handle) if scope
@@ -9038,7 +9041,9 @@ module Capybara
           end
         end
         rt.drain_microtasks
-        # Drive the service worker's lifecycle: fire `install`, then `activate`, each phase
+        # Drive the service worker's lifecycle: fire `install`, then — once the host's Activate
+        # step reaches it ('sw_activate': Try Activate let it, the outgoing worker no longer
+        # holding clients or it skipped waiting) — `activate`, each phase
         # ADVANCING ONLY WHEN ITS `waitUntil` PROMISES HAVE ALL SETTLED — a promise parked on
         # a client message (extendable-event-waituntil's SYN/ACK, fetch-waits-for-activate's
         # 'ACTIVATE') settles from a later inbox dispatch, so the settle check runs at the
@@ -9065,19 +9070,17 @@ module Capybara
             rt.drain_microtasks
             rt.drain_timers
           end
-          # 'install' pending → 'activate' pending → nil (done, or install failed — a
-          # failed version fires no activate; the client terminates this worker).
+          # 'install' pending → 'activation' (installed: waiting for the host's Activate step,
+          # its activate handler not run while the outgoing worker still serves — Service
+          # Workers "Activate" dispatches it) → 'activate' pending → nil (done, or install
+          # failed — a failed version fires no activate; the client terminates this worker).
           sw_phase_pending = 'install'
           sw_check_phase = lambda do
             while sw_phase_pending && (t = rt.call('__csim_swPhaseTake'))
               if t['phase'] == 'install'
                 ok = t['ok'] != false
                 outbox << {handle: handle, kind: 'sw_phase', phase: 'install', ok: ok}
-                sw_phase_pending = nil unless ok
-                next unless ok
-
-                sw_phase_pending = 'activate'
-                sw_fire_phase.call('activate')
+                sw_phase_pending = ok ? 'activation' : nil
               else
                 outbox << {handle: handle, kind: 'sw_phase', phase: 'activated'}
                 sw_phase_pending = nil
@@ -9199,6 +9202,13 @@ module Capybara
                 rt.call('__csimPortEndDeliver', msg[:end], msg[:data])
               ensure
                 outbox << {handle: handle, kind: 'swack'}
+              end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_activate'
+              # The host's Activate step reached this installed worker: its activate event now.
+              if sw_phase_pending == 'activation'
+                sw_phase_pending = 'activate'
+                sw_fire_phase.call('activate')
+                sw_check_phase.call
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'client_navigate_result'
               # The outcome of a WindowClient.navigate() this worker is awaiting — settles the

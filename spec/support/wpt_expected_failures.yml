@@ -5680,8 +5680,6 @@ service-workers/service-worker/about-blank-replacement.https.html:
   final Client.
 service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
-service-workers/service-worker/claim-using-registration.https.html:
-- Test for the waiting worker claims a client which is using the same registration
 service-workers/service-worker/claim-worker-fetch.https.html:
 - "[harness] TIMEOUT"
 - fetch() in blob URL Worker should be intercepted after the client is claimed.
@@ -5895,8 +5893,6 @@ service-workers/service-worker/service-worker-csp-script.https.html:
 - importScripts test for script-src
 service-workers/service-worker/skip-waiting-installed.https.html:
 - Test skipWaiting when a installed worker is waiting
-service-workers/service-worker/skip-waiting-without-using-registration.https.html:
-- Test skipWaiting while a client is not being controlled
 service-workers/service-worker/svg-target-reftest.https.html:
 - "== service-workers/service-worker/resources/svg-target-reftest-001.html (a frame
   the painter never enters)"
