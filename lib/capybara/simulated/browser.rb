@@ -449,11 +449,6 @@ module Capybara
         # True while any realm holds a frame element whose navigation was deferred by an
         # activating registration — the activated marker broadcasts the retry only when set.
         @sw_navs_deferred = false
-        # The bytes the Update algorithm just fetched and byte-checked at a scope (`pending_body`,
-        # `pending_imports`), consumed by the next service worker_spawn there (the new version must
-        # run EXACTLY those bytes, not a re-fetch that could hit the HTTP cache or a newer server
-        # response).
-        @sw_scope_meta    = {}
         # Unregistered registrations (their numbers) whose Clear Registration is deferred:
         # unregister only unmaps the scope, and the workers live on until no client is using the
         # registration and no extended work is pending (see sw_unregister / try_clear_uninstalls).
@@ -4757,7 +4752,8 @@ module Capybara
       # main settle drains.
       # (…`cluster_key` the agent cluster key of the context making it, which a dedicated worker's is: realm_location.rs
       # `agent_cluster_key`)
-      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil)
+      def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
+                       sw_body: nil, sw_imports: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -4804,13 +4800,12 @@ module Capybara
         # blob registry; calling into the main runtime from a
         # non-owning thread SEGVs (V8 isolates are thread-
         # bound).
-        # A registration UPDATE parked the bytes it fetched and byte-checked
-        # (sw_registration_update_fetch) — the new version runs exactly those. The
-        # import PROBE results ride along as its script resource map (importScripts
-        # consume them instead of re-fetching — a 404 the byte-check saw stays a 404).
-        pending_imports = service ? (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_imports) : nil
-        body = if service && (pending = (@sw_scope_meta[sw_scope.to_s] || {}).delete(:pending_body))
-          pending
+        # A service worker runs the bytes its job fetched and byte-checked (`sw_body`:
+        # sw_registration_update_fetch) — exactly those, not a re-fetch that could hit the HTTP cache or a newer server
+        # response. The import PROBE results ride along as its script resource map (`sw_imports`: importScripts consume
+        # them instead of re-fetching — a 404 the byte-check saw stays a 404).
+        body = if service && sw_body
+          sw_body
         elsif !sw_script
           fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id),
                               opaque: creator_key.to_s.start_with?('opaque:'), dest: shared ? 'sharedworker' : 'worker')
@@ -4903,7 +4898,7 @@ module Capybara
             # The registration's updateViaCache mode — its job's, which commits only once this
             # evaluation ran — a SERVICE worker's importScripts reads ('none' bypasses the HTTP cache).
             sw_uvc: service ? update_via_cache || sw_scope_update_via_cache(sw_scope) : nil,
-            sw_imports_map: pending_imports,
+            sw_imports_map: sw_imports,
             # The registration's CURRENT active version at spawn time — its script URL and handle, the new
             # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
             # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
@@ -5717,7 +5712,8 @@ module Capybara
 
         realm = realm.to_i
         realm.zero? ? @runtime.call('__csim_swReportClient') : (@runtime.realm_call(realm, '__csim_swReportClient') if @runtime.frame_realm_alive?(realm))
-        handle = worker_spawn(script_url, service: true, creator_key: creator_key, sw_scope: scope, script_type: script_type, update_via_cache: update_via_cache).to_i
+        handle = worker_spawn(script_url, service: true, creator_key: creator_key, sw_scope: scope, script_type: script_type, update_via_cache: update_via_cache,
+                                          sw_body: fetched['body'], sw_imports: fetched['imports']).to_i
         return sw_settle_job(id, 'TypeError', "Failed to #{verb} a ServiceWorker: the worker could not be started.") unless handle.positive?
 
         @sw_job_evals[handle] = id
@@ -6080,7 +6076,6 @@ module Capybara
       # try_activate delivery point, and both re-run this check. Whether the map held one.
       private def sw_unregister(scope)
         id = Native.sw_unregister(@sw_partition, scope.to_s)
-        @sw_scope_meta.delete(scope.to_s)
         @sw_pending_uninstalls << id if id
         try_clear_uninstalls
         # A navigation parked on this scope's activation must not wait forever for an
@@ -6166,7 +6161,7 @@ module Capybara
       # script — through the HTTP cache only in 'all' mode, else revalidating (no-cache) —
       # and, when it comes back byte-identical, each recorded IMPORTED script ('none'
       # bypasses the cache; 'imports'/'all' read it). ANY difference ⇒ a new version
-      # installs; the fetched main bytes are parked for its spawn. Failure classes map to
+      # installs, of the main bytes fetched and the imports probed (`body`, `imports`). Failure classes map to
       # update()'s rejections: 'redirect' (a SW script fetch must not redirect) and
       # 'network' are TypeErrors, 'mime' a SecurityError.
       # `uvc_override` carries a register() call's OWN mode before it is committed — a
@@ -6229,12 +6224,7 @@ module Capybara
             break
           end
         end
-        if changed
-          meta = (@sw_scope_meta[scope.to_s] ||= {})
-          meta[:pending_body]    = body
-          meta[:pending_imports] = probed if probed.any?
-        end
-        {'changed' => changed}
+        changed ? {'changed' => true, 'body' => body, 'imports' => (probed if probed.any?)} : {'changed' => false}
       end
 
       # Whether a Content-Type is a JavaScript MIME type's ("fetch a classic worker script" requires one; a service worker
@@ -8456,7 +8446,6 @@ module Capybara
         @keepalive_lock.synchronize { @keepalive_results.clear }
         Native.keepalive_clear(@keepalive_session)
         @sw_navs_deferred    = false
-        @sw_scope_meta       = {}
         Native.sw_forget_clients(@sw_partition)
         @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
