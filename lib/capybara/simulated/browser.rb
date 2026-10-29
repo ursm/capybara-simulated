@@ -2436,7 +2436,15 @@ module Capybara
         # (…its frames' entries, each frame's document made again — the one it leaves snapshotted first, so a traversal
         # forward again restores it, keeping how it was reached: a POST entry re-POSTs)
         frames = changes.filter_map {|nav, id, same_document| [nav, id, navigable_realm(nav)] unless same_document }
-        frames.each {|_, _, realm| leave_frame_entry(realm) if realm }
+        # (…each asked first whether it may be unloaded, before the step applies — HTML "apply the history step" — what
+        # its handlers would do to the session history ignored, as the page's are (Chrome and Firefox: the step stands);
+        # one a handler removed traversed no more, and its navigation asks it no second time: `prompt_to_unload_frame`)
+        urls = frames.to_h {|_, _, realm| [realm, realm && frame_realm_url(realm)] }
+        frozen_history do
+          frames.select! {|_, _, realm| realm.nil? || (prompt_to_unload_frame(realm) && @runtime.frame_realm_alive?(realm)) }
+        end
+        @prompted_frames = frames.filter_map {|_, _, realm| realm }.to_set
+        frames.each {|_, _, realm| leave_frame_entry(realm, urls[realm]) if realm }
         # (…the history as it stood kept, for a step none of whose documents is made after all — every frame's entry's
         # response making none, a 204's, a download's: `frame_navigation_made_no_document` — which then leaves the frames
         # and the step where they were; one whose others' are made applies, the frame whose is not staying at its own
@@ -2456,6 +2464,7 @@ module Capybara
         end
       ensure
         @traversing_frames = nil
+        @prompted_frames   = nil
         # (…none of the page's documents made again, after all: the page stays, and what its flushed timers planned
         # still stands — taken once the traversal is in)
         restore_flushed_nav_intents if flushed
@@ -7908,10 +7917,10 @@ module Capybara
       # The session history out of a page's reach while `block` runs a handler of its whose document is on its way out
       # (`history_state` / `history_push` ignore what it asks).
       private def frozen_history
-        @history_frozen = true
+        was, @history_frozen = @history_frozen, true
         yield
       ensure
-        @history_frozen = false
+        @history_frozen = was
       end
       # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a traversal's, a reload's
       # too — "check if unloading is canceled"): `beforeunload` at its document, then at its frames' documents, its unload
@@ -10671,9 +10680,11 @@ module Capybara
       # loaded it, so a later traversal back re-POSTs rather than GET-ing) — and its form state again as the document is
       # unloaded (`frame_document_unloaded`): what its pagehide / unload handlers left is what a traversal back restores
       # (Chrome). The snapshot taken now stands when the navigation never commits.
-      def leave_frame_entry(realm_id)
+      # (…`url` its document's URL as the navigation began, where a handler since may have moved its location: a
+      # traversal's, which asked it first)
+      def leave_frame_entry(realm_id, url = frame_realm_url(realm_id))
         # (…a document no entry was recorded for — a blob's, a data: one's — leaving the entry before it as it is)
-        return unless Native.history_recordable_url(url = frame_realm_url(realm_id))
+        return unless Native.history_recordable_url(url)
         return unless (id = frame_history_id(realm_id))
 
         @session_history.set_url(id, url)
@@ -11217,7 +11228,10 @@ module Capybara
       # A frame's navigation asks its document whether it may be unloaded before it fetches anything (HTML "check if
       # unloading is canceled": its `beforeunload`, and its frames' — `__csimPromptToUnloadFrame`): false when a handler
       # removed the frame, the navigation then going no further.
+      # (…none a second time of one a traversal asked as it applied its step: `perform_history_traverse`)
       def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id))
+        return true if @prompted_frames&.delete?(realm_id)
+
         frame_realm_host_call(parent, '__csimPromptToUnloadFrame', realm_id) != false
       end
       # …and, its response in, its document unloaded (pagehide and unload, its frames' after it) while still the frame's
