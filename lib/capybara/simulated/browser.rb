@@ -11621,7 +11621,9 @@ module Capybara
           # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
           # redirect rewrites: `redirect_history_entry`)
           save_navigation_history unless from_history
-          unless from_history
+          # (…none for about:blank in a window of no entry yet — its initial about:blank, which a navigation to about:blank
+          # leaves the initial one, the next navigation replacing it: HTML "navigate", historyHandling "replace")
+          unless from_history || (url.to_s.match?(ABOUT_BLANK) && !@session_history.active(0))
             capture_outgoing_form_state
             # (…the request as it was sent — a POST's body and origin, its referrer and referrer policy — what a reload or
             # a traversal refers by again, a POST's re-posts: HTML's document state)

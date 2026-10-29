@@ -51,4 +51,16 @@ RSpec.describe 'the page navigation request' do
     session.go_back
     expect(session).to have_current_path('/top')
   end
+
+  # …but none for a window's initial about:blank, which the navigation after it replaces.
+  it "replaces a window's initial about:blank" do
+    session.visit 'about:blank'
+    session.visit '/a'
+    expect(session.evaluate_script('history.length')).to eq(1)
+    window = session.open_new_window
+    session.within_window(window) do
+      session.visit '/x'
+      expect(session.evaluate_script('history.length')).to eq(1)
+    end
+  end
 end
