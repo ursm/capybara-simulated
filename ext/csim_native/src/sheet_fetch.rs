@@ -43,6 +43,8 @@ pub(crate) struct SheetRequest {
     failed: Option<(String, Option<v8::Global<v8::Value>>)>,
     // (…a `blob:` URL's sheet texts, by URL, `charset` and integrity)
     blob_texts: HashMap<String, Option<String>>,
+    // (…and whether it made none — its fetch failed — which asking again would only fetch again)
+    pub(crate) made_none: bool,
 }
 
 // A realm's own: the encodings its sheets decoded in, by URL; an `@import`'s service worker answers, by controller and
@@ -61,9 +63,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "styleResolveImports", resolve_imports_op, context_id);
 }
 
-// A sheet as a response of it makes it: its text — None where it failed (none, or none to use), '' where it is no style
-// sheet, a sheet with no rules (what the CSSOM exposes for one: Chrome, Firefox, and what the cascade keeps rather than
-// fetch it again) — whether it is CORS-same-origin, which makes the sheet origin-clean (CSSOM; HTML's link "process the
+// A sheet as a response of it makes it: its text — None where it failed (none, none to use, or one that is no style
+// sheet: a status not ok, a type not text/css outside quirks mode — HTML "process the linked resource", CSSOM "fetch a CSS
+// style sheet": no sheet) — whether it is CORS-same-origin, which makes the sheet origin-clean (CSSOM; HTML's link "process the
 // linked resource": a response of type `basic` or `cors`, an HTTP error's too, none of another origin nor a network
 // error), its location (the URL its response came from — a redirect's last, a worker's answer's — `url` for a
 // scheme's), its `Referrer-Policy`, the host's facts of the response (`meta`) and the worker's answer (`answer`), and
@@ -83,7 +85,7 @@ impl Sheet {
     }
     // …of `verdict` on a response whose text is `text`.
     fn of_verdict(verdict: u32, text: Option<String>, location: String) -> Sheet {
-        let text = text.map(|t| if verdict & V_OK != 0 { t } else { String::new() });
+        let text = text.filter(|_| verdict & V_OK != 0);
         Sheet { text, clean: verdict & (V_FETCHED | V_CROSS_ORIGIN) == V_FETCHED, location, policy: None, meta: None, answer: None, network: false }
     }
 }
@@ -113,7 +115,7 @@ fn header(scope: &mut v8::PinScope<'_, '_>, obj: Option<v8::Local<'_, v8::Object
 }
 
 // The owner `id`'s request of the sheet it obtains now, made where it has none of its sheet's count.
-fn request_of(arena: &mut crate::dom::RealmArena, id: NodeId) -> &mut SheetRequest {
+pub(crate) fn request_of(arena: &mut crate::dom::RealmArena, id: NodeId) -> &mut SheetRequest {
     let (sheet_gen, integrity) = arena.get(id).map_or((0, String::new()), |n| (n.sheet_gen, n.plain_attr("integrity").unwrap_or("").to_owned()));
     if arena.sheet_requests.get(&id).is_none_or(|r| r.sheet_gen != sheet_gen) {
         arena.sheet_requests.insert(id, SheetRequest { sheet_gen, integrity, ..Default::default() });
@@ -236,13 +238,7 @@ fn blob_sheet_text(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'
     let Some((bytes, content_type)) = crate::subresource_obtain::scheme_response(scope, host, url)? else { return Ok(None) };
     let facts = crate::subresource_obtain::scheme_facts(content_type.clone());
     let verdict = judge_sheet(scope, cid, env, owner, &facts, SRC_SCHEME, &|| bytes.clone());
-    let text = if verdict == 0 {
-        None
-    } else if verdict & V_OK != 0 {
-        Some(decode(scope, cid, env, url, &bytes, &content_type, owner, environment))
-    } else {
-        Some(String::new())
-    };
+    let text = (verdict & V_OK != 0).then(|| decode(scope, cid, env, url, &bytes, &content_type, owner, environment));
     match owner {
         Some(o) => {
             request_of(realm(scope, cid), o.id).blob_texts.insert(key, text.clone());
@@ -265,9 +261,9 @@ fn preloaded_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'
     let Some(resp) = response else { return Ok(Some(Sheet::none(url))) };
     let facts = resp.facts();
     let verdict = judge_sheet(scope, cid, env, owner, &facts, SRC_NETWORK, &|| resp.body().to_vec());
-    let text = if verdict & V_OK != 0 { decode(scope, cid, env, url, resp.body(), resp.header("content-type").unwrap_or(""), owner, environment) } else { String::new() };
+    let text = (verdict & V_OK != 0).then(|| decode(scope, cid, env, url, resp.body(), resp.header("content-type").unwrap_or(""), owner, environment));
     let location = if resp.url().is_empty() { url.to_owned() } else { resp.url().to_owned() };
-    let mut sheet = Sheet::of_verdict(verdict, Some(text), location);
+    let mut sheet = Sheet::of_verdict(verdict, text, location);
     sheet.policy = resp.header("referrer-policy").map(str::to_owned);
     Ok(Some(sheet))
 }
@@ -379,7 +375,7 @@ fn network_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
     let body_text = body.map(|b| b.to_rust_string_lossy(scope));
     let location = string_member(scope, facts_obj, "url").filter(|u| !u.is_empty()).unwrap_or_else(|| url.to_owned());
     let mut sheet = Sheet::of_verdict(verdict, body_text, location.clone());
-    if sheet.text.as_ref().is_some_and(|t| !t.is_empty()) {
+    if sheet.text.is_some() {
         let content_type = header(scope, facts_obj, "content-type").unwrap_or_default();
         sheet.text = Some(decode(scope, cid, env, url, &raw, &content_type, owner, environment));
     }

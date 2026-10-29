@@ -8,9 +8,11 @@ require_relative 'support/session_teardown'
 # `rel=stylesheet`, and CSS Cascade's `@import` — unless the document is in quirks mode and the sheet is same-origin,
 # where the type is ignored. Applied whatever its type, a page whose `@import` a catch-all app answered with the page
 # itself cascaded the page's HTML as 16,900 rules. Measured (a `text/plain` sheet): Chrome and Firefox apply neither in
-# a standards-mode document and both in a quirks-mode one, and expose each as a sheet with no rules. The link's event is
-# the spec's `error` and Firefox's; Chrome fires `load` for a sheet it refuses to apply, a Blink quirk. A sheet served
-# with NO type both apply (as `application/x-unknown-content-type`, what a missing header is sniffed as).
+# a standards-mode document and both in a quirks-mode one, and expose each as a sheet with no rules — where the spec
+# makes none (HTML "process the linked resource": "If success is true: Create a CSS style sheet"; CSSOM "fetch a CSS
+# style sheet" returns before one), which this follows (ursm 2026-10-29): `.sheet` and `styleSheet` null. The link's
+# event is the spec's `error` and Firefox's; Chrome fires `load` for a sheet it refuses to apply, a Blink quirk. A sheet
+# served with NO type both apply (as `application/x-unknown-content-type`, what a missing header is sniffed as).
 RSpec.describe 'a stylesheet served as something other than CSS' do
   def outcome(doctype:, type:, back: false)
     headers = type ? {'content-type' => type} : {}
@@ -31,7 +33,7 @@ RSpec.describe 'a stylesheet served as something other than CSS' do
     s.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
     s.evaluate_script(<<~JS)
       (() => {
-        const rules = (sheet) => { try { return sheet.cssRules.length; } catch (e) { return e.name; } };
+        const rules = (sheet) => { if (!sheet) return null; try { return sheet.cssRules.length; } catch (e) { return e.name; } };
         return [window.L, getComputedStyle(document.getElementById('p')).display, getComputedStyle(document.getElementById('q')).display,
                 rules(document.querySelector('link').sheet), rules(document.querySelector('style').sheet.cssRules[0].styleSheet)];
       })()
@@ -44,9 +46,9 @@ RSpec.describe 'a stylesheet served as something other than CSS' do
     end
   end
 
-  it 'applies none served as anything else in a standards-mode document, and exposes each with no rules' do
-    expect(outcome(doctype: '<!DOCTYPE html>', type: 'text/plain')).to eq(['error', 'block', 'inline', 0, 0])
-    expect(outcome(doctype: '<!DOCTYPE html>', type: 'text/html')).to eq(['error', 'block', 'inline', 0, 0])
+  it 'applies none served as anything else in a standards-mode document, and makes no sheet of it' do
+    expect(outcome(doctype: '<!DOCTYPE html>', type: 'text/plain')).to eq(['error', 'block', 'inline', nil, nil])
+    expect(outcome(doctype: '<!DOCTYPE html>', type: 'text/html')).to eq(['error', 'block', 'inline', nil, nil])
   end
 
   it 'applies a same-origin one whatever its type in a quirks-mode document' do
@@ -58,7 +60,7 @@ RSpec.describe 'a stylesheet served as something other than CSS' do
   it 'applies none another origin redirected to it, in a quirks-mode document' do
     prev = ENV['CSIM_LOCAL_ALL_HOSTS']
     ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
-    expect(outcome(doctype: '', type: 'text/plain', back: true)).to eq(%w[error block inline SecurityError SecurityError])
+    expect(outcome(doctype: '', type: 'text/plain', back: true)).to eq(['error', 'block', 'inline', nil, nil])
   ensure
     ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end

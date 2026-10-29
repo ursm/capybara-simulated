@@ -175,8 +175,8 @@ fn style_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
 // list — at the URL its response came from, origin-clean where that was CORS-same-origin, its `@import`s decoded in the
 // encoding it decoded in. Where it was not fetched — its `href` no URL, or no response to use: a network error, a
 // status not ok, a type not text/css — none (HTML "process the linked resource": a CSS style sheet is created only
-// where it succeeded, and an associated one removed first), its `.sheet` null; asked again the next time, of the
-// response its request kept (sheet_fetch.rs).
+// where it succeeded, and an associated one removed first), its `.sheet` null; not asked again until it obtains another
+// (its request's `made_none`, sheet_fetch.rs).
 fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: NodeId) -> Result<Option<(u32, u32)>, Terminated> {
     let arena = realm(scope, cid);
     let Some(n) = arena.get(owner) else { return Ok(None) };
@@ -195,6 +195,9 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
     let quirks = arena.document_mode(doc).0;
     // (…its origin-clean flag the kept sheet's, which a sheet made anew of its text takes too)
     let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count).and_then(|m| Some((m.text.clone()?, m.base.clone(), m.id)));
+    if kept.is_none() && crate::sheet_fetch::request_of(arena, owner).made_none {
+        return Ok(None);
+    }
     let (text, location, clean) = match kept {
         Some((text, location, id)) => {
             let clean = arena.sheets.stored_mut(id).is_some_and(|s| !s.origin_dirty);
@@ -208,7 +211,10 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
             };
             match sheet {
                 Some(crate::sheet_fetch::Sheet { text: Some(text), clean, location, .. }) => (Rc::from(text), location, clean),
-                _ => return Ok(None),
+                _ => {
+                    crate::sheet_fetch::request_of(realm(scope, cid), owner).made_none = true;
+                    return Ok(None);
+                }
             }
         }
     };
