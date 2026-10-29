@@ -10783,7 +10783,9 @@ module Capybara
           entered = @frame_stack.find {|e| e[:realm_id] == realm_id }
           return reload_current_frame_realm('about:blank', '', 'text/html', entry: entered) if entered
 
-          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url)
+          # (…not asked again where a traversal asked it before its step: `perform_history_traverse`)
+          prompted = @prompted_frames&.delete?(realm_id) ? true : false
+          return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, prompted)
         end
         # An entry reached by a POST submission re-POSTS (with the recorded body); a normal entry
         # re-GETs. The method drives both the SW fetch event and the network fallback.

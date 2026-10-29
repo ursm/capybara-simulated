@@ -106,6 +106,27 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
     expect(poll_until { s.evaluate_script('frames[0].location.pathname').then {|p| p if p == '/f2' } }).to eq('/f2')
   end
 
+  # …once: a traversal to its about:blank entry, made as a navigation to it is, asks it no second time.
+  it "asks a frame once as a traversal goes to its about:blank entry" do
+    beacons = []
+    app = lambda do |env|
+      beacons << env['PATH_INFO'] if env['REQUEST_METHOD'] == 'POST'
+      body = env['PATH_INFO'] == '/top' ? '<iframe src="/f1"></iframe>' : "<script>addEventListener('beforeunload', () => navigator.sendBeacon('/bu-f1'))</script>f1"
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/top'
+    s.execute_script("frames[0].location = 'about:blank'")
+    poll_until { s.evaluate_script('frames[0].location.href') == 'about:blank' }
+    s.go_back
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/f1' }
+    beacons.clear
+    s.go_forward
+    poll_until { s.evaluate_script('frames[0].location.href') == 'about:blank' }
+
+    expect(beacons).to eq(%w[/bu-f1])
+  end
+
   # …and a hyperlink or a form a handler navigates it with ignored, as a `location` navigation is — not taken once the
   # navigation asking it ends in no document (a 204), whose page stays (Chrome and Firefox request neither).
   it "ignores a hyperlink or a form a beforeunload handler navigates the page with" do
