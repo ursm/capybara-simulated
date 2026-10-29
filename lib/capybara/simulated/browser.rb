@@ -838,7 +838,7 @@ module Capybara
       # and navigation (a link / form submit whose default action loads a new
       # document) all route into the frame — the target frame's realm is rebuilt
       # from the fetched document, leaving the top page untouched (see
-      # `navigate_frame` / `frame_nav_target_entry`). A `_parent`-targeted link
+      # `navigate_frame`, the engine choosing the navigable a target names). A `_parent`-targeted link
       # or form from a frame nested ≥2 levels rebuilds the intermediate parent
       # frame; `_top` (and a one-level `_parent`, whose parent is the top
       # context) navigate the main page. Cross-origin frame locality is resolved
@@ -916,29 +916,6 @@ module Capybara
       # private). Honours `<base href>` like the page's own links do.
       def resolve_document_url(url)
         resolve_against_current(url, use_base: true)
-      end
-
-      # The keywords a navigable target name is (navigables.rs `target_keyword`, ASCII case-insensitive).
-      TARGET_NAME, TARGET_SELF, TARGET_TOP, TARGET_PARENT, TARGET_BLANK = 0, 1, 2, 3, 4
-      def target_keyword(target) = Native.target_keyword(target.to_s)
-
-      # Does a link/form `target` load into the CURRENT frame? Empty or `_self`
-      # do; `_top` / `_blank` / `_parent` / a named context do not.
-      def frame_self_target?(target) = target_keyword(target) == TARGET_SELF
-
-      # Resolve a link/form `target` to the frame stack entry its navigation
-      # should rebuild, or nil when it targets the top page / a new context
-      # (the caller then falls through to a full-page `navigate` or aux window).
-      # Only meaningful inside a frame (`@current_realm_id` set):
-      #   - `''` / `_self` → the current frame.
-      #   - `_parent` → the intermediate parent frame, but only when nested ≥2
-      #     levels deep; at one level the parent IS the top browsing context, so
-      #     it returns nil and the full-page path handles it (same as `_top`).
-      def frame_nav_target_entry(target)
-        return nil unless @current_realm_id
-        return @frame_stack.last if frame_self_target?(target)
-        return @frame_stack[-2] if target_keyword(target) == TARGET_PARENT && @frame_stack.size >= 2
-        nil
       end
 
       def find_css(css, context_handle = nil)
@@ -3333,83 +3310,8 @@ module Capybara
       def submit_form_spec_in_document(spec)
         invalidate_find_cache
         return unless spec.is_a?(Hash)
-        # (…an entered frame's `_top` / `_parent` routed as a submission its document planned is: the navigable it chooses,
-        # its sandbox, its Referer and `noreferrer` — the frame's)
-        if @current_realm_id && [TARGET_TOP, TARGET_PARENT].include?(target_keyword(spec['target'].to_s))
-          return submit_form_in_realm(@current_realm_id.to_i, spec)
-        end
-        # (…its action resolved as it was submitted: the document's URL where it has none)
-        action_url = resolve_against_current(spec['action'].to_s)
-        action_url = parse_url(action_url.to_s)&.fetch(:href) || action_url.to_s
-        request = form_request(spec, action_url)
-        return unless request
 
-        method, url, body, content_type = request
-        # A form submitted inside a frame whose target is that frame (self, or a
-        # `_parent` of a ≥2-deep frame) navigates the FRAME, not the top page.
-        frame_entry = frame_nav_target_entry(spec['target'])
-        target  = spec['target'].to_s
-        keyword = target_keyword(target)
-        named   = frame_entry.nil? && keyword == TARGET_NAME
-        # A name chooses the navigable it is the target name of (`choose_named_navigable`): a frame's anywhere in the page
-        # — navigated as the frame's own navigation is, this browsing context its initiator — or this window's (navigated
-        # in place), or one a sandbox keeps this document from navigating (nothing is); a name no navigable has, and
-        # `_blank`, submit into a NEW browsing context — an aux window opened (or reused), mirroring the link
-        # `target=_blank` branch.
-        chosen = named ? choose_named_navigable(@current_realm_id.to_i, target) : nil
-        return if chosen == :blocked
-        named_frame = chosen if chosen.is_a?(Integer)
-        new_window  = frame_entry.nil? && [nil, :new_window].include?(chosen) && new_window_target?(target)
-        window_name = keyword == TARGET_BLANK ? '' : target
-        # Opener exposure for a `<form target>` new context: HTML "get an element's noopener", the engine's
-        # (token_list.rs `noopener`) — `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a named target
-        # keeps it. `noreferrer` also empties the referrer.
-        no_referrer = Native.link_noreferrer(spec['rel'].to_s)
-        keep_opener = !Native.link_noopener(spec['rel'].to_s, target)
-        # (…replacing the session history entry of the form's document where that is not completely loaded yet: the
-        # page's, whose own navigable it navigates — `request.replace`)
-        replace = spec['replace'] == true
-        # (…and whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
-        activated = spec['userActivated'] == true
-        # (…and whatever it navigates — a new window too — is told its initiator, the form's document under its policy or
-        # the one `noreferrer` sets: HTML "plan to navigate" sets the referrer policy "no-referrer" where the form's link
-        # types include it)
-        initiator = realm_referrer_initiator(@current_realm_id.to_i)
-        initiator = [initiator[0], 'no-referrer'] if no_referrer
-        policy    = no_referrer ? 'no-referrer' : nil
-        # (…a new window's under that document's policy, the default where it sets none: not the page's)
-        window_policy = initiator[1].to_s.empty? ? DEFAULT_REFERRER_POLICY : initiator[1]
-        if @current_realm_id && !new_window && !named_frame && !frame_entry
-          # (…an entered frame's form whose target names the page navigates it as the frame's `_top` does: its Referer and
-          # site the frame document's)
-          post = method == 'GET' ? nil : [body, content_type]
-          in_top_context { navigate_top_from(@current_realm_id.to_i, initiator, url, post: post, user_activated: activated) }
-        elsif method == 'GET'
-          if new_window
-            @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
-                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy, user_activated: activated)
-          elsif named_frame
-            navigate_realm_self_get(named_frame, url, referrer: initiator, initiator: @current_realm_id.to_i, user_activated: activated)
-          elsif frame_entry
-            navigate_frame(url, entry: frame_entry, referrer: initiator, user_activated: activated)
-          else
-            navigate(url, referrer_policy: policy, replace: replace, user_activated: activated)
-          end
-        else
-          # (…a POST's Origin the form document's: `realm_request_initiator`)
-          site, origin_null = realm_request_initiator(@current_realm_id.to_i)
-          if new_window
-            @driver.open_aux_window(url, name: window_name, source: self, activation_realm: @current_realm_id.to_i,
-                                    opener: keep_opener, referrer: initiator[0].to_s, referrer_policy: window_policy, user_activated: activated,
-                                    post: {body: body, content_type: content_type, initiator: site, origin_null: origin_null})
-          elsif named_frame
-            navigate_realm_self_post(named_frame, url, body, content_type, referrer: initiator, initiator: @current_realm_id.to_i, user_activated: activated)
-          elsif frame_entry
-            navigate_frame_post(url, body, content_type, entry: frame_entry, referrer: initiator, user_activated: activated)
-          else
-            navigate_post(url, body, content_type, referrer_policy: policy, replace: replace, origin_null: origin_null, user_activated: activated)
-          end
-        end
+        submit_form_in_realm(@current_realm_id.to_i, spec)
       end
 
       # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET — or
@@ -9979,19 +9881,19 @@ module Capybara
         return unless realm_id
 
         invalidate_find_cache
-        submit_frame_route(realm_id, spec, [:top, [source, policy]])
+        submit_routed_form(realm_id, spec, {to: :top, referrer: [source, policy]})
       rescue StandardError => e
         log_console('warn', "nested-context form submission failed: #{e.message}")
       end
       # The submissions frames' documents made that the host routes, taken as the task ends one at a time in the order
       # they were made (navigation_plan.rs `takeRoutedSubmission`: the frame one chose may have a new document by the next):
-      # each its realm, its request, the navigable its target chose (`frame_submission_route`'s) and its Referer.
+      # each its realm, its request, the navigable its target chose (`submission_route`'s) and its Referer.
       # (Never while the form's `submit()` is still on the V8 stack.)
       def consume_pending_frame_submit
-        while (realm_id, spec, kind, chosen_realm, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
+        while (realm_id, spec, kind, at, source, policy = @runtime.call('__csimTakeRoutedSubmission'))
           invalidate_find_cache
           begin
-            submit_frame_route(realm_id, spec, [route_chosen(kind, chosen_realm), [source, policy]])
+            submit_routed_form(realm_id, spec, submission_route(kind, at, source, policy))
           rescue StandardError => e
             log_console('warn', "nested-context form submission failed: #{e.message}")
           end
@@ -10255,61 +10157,91 @@ module Capybara
                                                                                                    initiator: is_reload ? realm_id : nil, origin_url: (origin unless origin == 'null'),
                                                                                                    user_activated: false, commit: commit)
       end
-      # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
-      # its shadow trees' controls left out, its action resolved against its document): routed, then navigated.
+      # A form submitted in realm `realm_id`'s document — the page's, an entered frame's, one a frame's script submitted —
+      # its request as it was submitted (`spec`, serialized in that realm: its shadow trees' controls left out, its action
+      # resolved against its document): routed, then navigated.
       def submit_form_in_realm(realm_id, spec)
-        submit_frame_route(realm_id, spec, frame_submission_route(realm_id, spec))
+        submit_routed_form(realm_id, spec, form_route(realm_id, spec))
       end
-      # The navigable a route the engine answers (navigation_plan.rs `route_items`) chooses: `:self` its own frame (a
-      # self-targeted link's navigation: within_frame's `navigate_frame`, else its iframe re-navigated by realm id), `:top`
-      # the page (`_top`, a `_parent` that is the page, or a name the page has), a frame's realm (a name's, `_parent`'s:
-      # made now, where its navigable has no document yet), `:window` a same-isolate window's (its navigation not
-      # modeled), `:new_window` a new window (not modeled), `:blocked` none its sandbox lets it navigate.
-      def route_chosen(kind, realm) = kind == 'frame' ? realm : kind.to_sym
-      # …where a form of frame realm `realm_id` goes, as the engine routes it (`submissionRoute`): [chosen, initiator] —
-      # and its Referer: the frame's document's, under its policy or `noreferrer`'s.
-      def frame_submission_route(realm_id, spec)
-        kind, chosen, source, policy = @runtime.call('__csimSubmissionRoute', realm_id.to_i, spec['target'].to_s, spec['rel'].to_s)
-        [route_chosen(kind, chosen), [source, policy]]
+      # …where it goes, as the engine routes it (navigation_plan.rs `submissionRoute`).
+      def form_route(realm_id, spec)
+        kind, at, source, policy = @runtime.call('__csimSubmissionRoute', realm_id.to_i, spec['target'].to_s, spec['rel'].to_s)
+        submission_route(kind, at, source, policy)
       end
-      def submit_frame_route(realm_id, spec, route)
-        chosen, initiator = route
+      # The route a submission takes, as the engine answers it (navigation_plan.rs `route_items`): `to` the navigable it
+      # chose — `:self` its own document's, `:top` the page (`_top`, a `_parent` that is the page, or a name the page has),
+      # a frame's realm (a name's, `_parent`'s: made now, where its navigable has no document yet), `:window` a
+      # same-isolate window's (its navigation not modeled), `:new_window` a new one, named `name` ('' for `_blank`),
+      # `:blocked` / `:none` none (its sandbox refuses it; the frame is gone) — and its Referer: the form document's, under
+      # its policy or `noreferrer`'s.
+      def submission_route(kind, at, source, policy) = {to: kind == 'frame' ? at : kind.to_sym, name: (at.to_s if kind == 'new_window'), referrer: [source, policy]}
+      def submit_routed_form(realm_id, spec, route)
         request = form_request(spec, spec['action'].to_s)
         return unless request
 
         method, url, body, content_type = request
+        post = method == 'GET' ? nil : [body, content_type]
+        initiator = route[:referrer]
         # (…whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
         activated = spec['userActivated'] == true
-        case chosen
-        when :self
-          if method == 'GET'
-            navigate_realm_self_get(realm_id, url, referrer: initiator, initiator: realm_id, user_activated: activated)
+        to = route[:to]
+        # (…the page's own navigable its top-level traversable; and a new window, where the driver opens none, the page)
+        to = :top if to == :self && realm_id.zero?
+        to = :top if to == :new_window && realm_id.zero? && !@driver.respond_to?(:open_aux_window)
+        case to
+        when :self, Integer
+          frame = to == :self ? realm_id : to
+          if post
+            navigate_realm_self_post(frame, url, *post, referrer: initiator, initiator: realm_id, user_activated: activated)
           else
-            navigate_realm_self_post(realm_id, url, body, content_type, referrer: initiator, initiator: realm_id, user_activated: activated)
+            navigate_realm_self_get(frame, url, referrer: initiator, initiator: realm_id, user_activated: activated)
           end
         when :top
-          # (…adding the page's entry, whether the frame's document is completely loaded or not: a form's replaces only its
-          # own navigable's — HTML "plan to navigate", the form document the target's active document)
-          in_top_context { navigate_top_from(realm_id, initiator, url, post: method == 'GET' ? nil : [body, content_type], user_activated: activated) }
-        when Integer
-          if method == 'GET'
-            navigate_realm_self_get(chosen, url, referrer: initiator, initiator: realm_id, user_activated: activated)
-          else
-            navigate_realm_self_post(chosen, url, body, content_type, referrer: initiator, initiator: realm_id, user_activated: activated)
-          end
-        when :window
-          log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
+          submit_into_page(realm_id, spec, url, post, initiator, activated)
         when :new_window
-          log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a new window is not modeled")
+          submit_into_new_window(realm_id, spec, route[:name], url, post, initiator, activated)
+        when :window
+          log_console('warn', "form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
         end
       end
-      # The navigable a target name chooses from realm `realm_id`'s browsing context (`frame_submission_route`): a frame's
-      # realm, `:top`, `:window`, `:blocked`, or `:new_window` (none has the name).
-      def choose_named_navigable(realm_id, target) = frame_submission_route(realm_id, {'target' => target})[0]
-      # Whether a link's or a form's target opens a new browsing context — `_blank`, or a name no navigable has (the page
-      # chose the one that has it first: `choose_named_navigable`).
-      def new_window_target?(target)
-        [TARGET_NAME, TARGET_BLANK].include?(target_keyword(target)) && @driver.respond_to?(:open_aux_window)
+      # …into the page: the page's own form navigating it in place — replacing its session history entry where it is not
+      # completely loaded yet (`spec['replace']`), with no Referer for `rel=noreferrer` — or a frame's adding the page's
+      # entry, whether the frame's document is completely loaded or not: a form's replaces only its own navigable's (HTML
+      # "plan to navigate", the form document the target's active document).
+      private def submit_into_page(realm_id, spec, url, post, initiator, activated)
+        unless realm_id.zero?
+          return in_top_context { navigate_top_from(realm_id, initiator, url, post: post, user_activated: activated) }
+        end
+
+        policy  = Native.link_noreferrer(spec['rel'].to_s) ? 'no-referrer' : nil
+        replace = spec['replace'] == true
+        return navigate(url, referrer_policy: policy, replace: replace, user_activated: activated) unless post
+
+        # (…a POST's Origin the form document's: `realm_request_initiator`)
+        _site, origin_null = realm_request_initiator(realm_id)
+        navigate_post(url, *post, referrer_policy: policy, replace: replace, origin_null: origin_null, user_activated: activated)
+      end
+      # …into a new window the driver opens (or reuses, by its name `name`) — with the opener HTML "get an element's
+      # noopener" leaves it (token_list.rs `noopener`: `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a
+      # named target keeps it), told its initiator under that document's policy (the default where it sets none), its
+      # request a POST's where it is one.
+      private def submit_into_new_window(realm_id, spec, name, url, post, initiator, activated)
+        unless @driver.respond_to?(:open_aux_window)
+          return log_console('warn', "form submit (target=#{spec['target'].to_s.inspect}) into a new window is not modeled")
+        end
+
+        site, origin_null = realm_request_initiator(realm_id) if post
+        @driver.open_aux_window(
+          url,
+          name:             name.to_s,
+          source:           self,
+          activation_realm: realm_id,
+          opener:           !Native.link_noopener(spec['rel'].to_s, spec['target'].to_s),
+          referrer:         initiator[0].to_s,
+          referrer_policy:  initiator[1].to_s.empty? ? DEFAULT_REFERRER_POLICY : initiator[1],
+          user_activated:   activated,
+          post:             post && {body: post[0], content_type: post[1], initiator: site, origin_null: origin_null}
+        )
       end
 
       # A self-targeted GET form submit in the initiating frame realm: navigate

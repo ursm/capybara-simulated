@@ -30,6 +30,8 @@ RSpec.describe 'a frame\'s form submission' do
              when '/gone' then '<iframe id=xf name=x src=/gx></iframe><iframe name=y src=/y0></iframe>'
              when '/gx'   then form.('posted', 'y', 'post')
              when '/own'  then '<iframe name=x src=/gx></iframe><iframe name=y src=/y0></iframe>'
+             when '/new'  then '<iframe src=/fn></iframe>'
+             when '/fn'   then form.('popped', '_blank', 'post')
              when '/js'   then js_frame
              when '/jsy0' then js_other
              else "<p>#{env['PATH_INFO'].delete_prefix('/')}</p>"
@@ -44,6 +46,15 @@ RSpec.describe 'a frame\'s form submission' do
     poll_until { text.(2) == 't0' }
     session.execute_script('frames[1].f.submit(); frames[0].f.submit()')
     expect(poll_until { text.(2) == 'fromx' && text.(2) }).to eq('fromx')
+  end
+
+  it 'opens a new window for one whose target is `_blank`, the page staying where it is' do
+    session.visit '/new'
+    poll_until { session.evaluate_script("frames[0].document.getElementById('f') !== null") }
+    session.execute_script('frames[0].f.submit()')
+    poll_until { session.windows.size == 2 }
+    popup = session.windows.last
+    expect([hits.include?('POST /popped'), session.within_window(popup) { session.text }, text.(0)]).to eq([true, 'popped', ''])
   end
 
   it 'sends none of a frame removed after it submitted' do

@@ -333,7 +333,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // Whether a response downloads, and the name it is saved under (downloads.rs).
     native.define_module_function("download_response", magnus::function!(downloads::is_download_for_ruby, 1))?;
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;
-    native.define_module_function("target_keyword", magnus::function!(navigables::target_keyword_for_ruby, 1))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;

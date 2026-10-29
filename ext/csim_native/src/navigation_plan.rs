@@ -118,14 +118,14 @@ impl RoutedSubmissions {
 
 // Where a frame's form submission goes (`route`): its own navigable, the top-level traversable, another frame's — by its
 // container, whatever document it has by the time the host navigates it (none made yet: the host makes it one) — a
-// window's of this isolate or a new one (neither modeled), or none its sandbox lets it navigate.
-#[derive(Clone, Copy)]
+// window's of this isolate (not modeled) or a new one — named by its target, '' for `_blank` — or none its sandbox lets
+// it navigate.
 pub(crate) enum Route {
     SelfTarget,
     Top,
     Frame(crate::dom::NodeId),
     Window,
-    NewWindow,
+    NewWindow(Vec<u16>),
     Blocked,
 }
 
@@ -140,7 +140,10 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
         // (…a window's of this isolate, its own tree's — or a discarded frame's own)
         Choice::TopLevel(_) => Route::Window,
         // (…another top-level traversable a name found, which a form's submission does not navigate: a new one)
-        Choice::Window(_) | Choice::New => Route::NewWindow,
+        Choice::Window(_) | Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
+            Route::NewWindow(Vec::new())
+        }
+        Choice::Window(_) | Choice::New => Route::NewWindow(target.to_vec()),
         Choice::Blocked => Route::Blocked,
     }
 }
@@ -465,7 +468,7 @@ fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let (route, referrer) = request_route(scope, cid, &request);
     let arena = &mut crate::dom::dom(scope).arena;
     // (…one targeting its own navigable replacing what that planned: the host's navigation of it, a parent's form)
-    let own = matches!(route, Route::SelfTarget) || matches!((route, container), (Route::Frame(c), Some(own)) if c == own);
+    let own = matches!(route, Route::SelfTarget) || matches!((&route, container), (Route::Frame(c), Some(own)) if *c == own);
     if let (true, Some(c)) = (own, container) {
         arena.frame_navigations.cancel_form(c);
         if let Some(host) = arena.frame_navigations.host_mut(c) {
@@ -488,29 +491,33 @@ fn hold_routed_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     supersede_routed(scope, cid);
 }
-// A route as the host takes it: [kind, realm, container] — "self", "top", "window" (a window's of this isolate),
-// "new_window", "blocked", or for another frame's "frame" and the realm of the document its container's navigable has
-// now, or "unbuilt" and the realm of the container's own document and the container, its navigable with none made yet;
-// else null.
+// A route as the host takes it: [kind, at, container] — "self", "top", "window" (a window's of this isolate),
+// "new_window" and the name it opens under ('' for `_blank`), "blocked", or for another frame's "frame" and the realm of
+// the document its container's navigable has now, or "unbuilt" and the realm of the container's own document and the
+// container, its navigable with none made yet ("none" where the container is gone); else null.
 fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local<'s, v8::Value>; 3] {
     let arena = &crate::dom::dom(scope).arena;
-    let (kind, at, container) = match route {
+    let (kind, realm, container) = match route {
         Route::SelfTarget => ("self", None, None),
         Route::Top => ("top", None, None),
         Route::Frame(c) => match (arena.frame_realm(c), arena.get(c).map(|n| n.realm)) {
             (Some(r), _) => ("frame", Some(r), None),
             (None, Some(parent)) => ("unbuilt", Some(parent), Some(c)),
-            (None, None) => ("new_window", None, None),
+            // (…a container gone with its document: nothing to navigate)
+            (None, None) => ("none", None, None),
         },
         Route::Window => ("window", None, None),
-        Route::NewWindow => ("new_window", None, None),
+        Route::NewWindow(name) => {
+            let name = crate::dom::utf16_value(scope, &name);
+            return [v8::String::new(scope, "new_window").unwrap().into(), name, v8::null(scope).into()];
+        }
         Route::Blocked => ("blocked", None, None),
     };
-    let at: v8::Local<v8::Value> = match at {
+    let at: v8::Local<v8::Value> = match realm {
         Some(r) => v8::Integer::new(scope, r).into(),
         None => v8::null(scope).into(),
     };
-    let container = match (container, at.int32_value(scope)) {
+    let container = match (container, realm) {
         (Some(c), Some(parent)) => crate::dom::nodes_value(scope, parent, &[c]),
         _ => v8::null(scope).into(),
     };
@@ -554,8 +561,8 @@ fn take_routed_submission(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionC
         // (…its navigation begun now, as the task that planned it ended — HTML "plan to navigate" queues it — sandboxed as
         // the chosen frame's container says then: frame_navigation.rs `begin_submission`)
         let arena = &mut crate::dom::dom(scope).arena;
-        match (route, arena.live_container(e.source)) {
-            (Route::SelfTarget, Some(c)) | (Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
+        match (&route, arena.live_container(e.source)) {
+            (Route::SelfTarget, Some(c)) | (&Route::Frame(c), _) => crate::frame_navigation::FrameNavigations::begin_submission(arena, c),
             _ => {}
         }
         let [kind, at, container] = route_items(scope, route);

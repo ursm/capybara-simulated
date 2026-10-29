@@ -867,10 +867,6 @@ pub(crate) fn target_keyword(target: &str) -> u32 {
         _ => TARGET_NAME,
     }
 }
-// …for the host.
-pub(crate) fn target_keyword_for_ruby(target: String) -> u32 {
-    target_keyword(&target)
-}
 // The window open steps' features (HTML §7.2.2.1): `features` tokenized ("tokenize the features") — a name and a value
 // each, ASCII-lowercased, between feature separators (ASCII whitespace, `=` and `,`), a later one of a name replacing
 // the earlier — and what it sets: OPEN_NOOPENER where `noopener` is set or `noreferrer` is, which implies it,
