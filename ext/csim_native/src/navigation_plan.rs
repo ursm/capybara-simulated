@@ -270,7 +270,7 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     };
     let target = String::from_utf16_lossy(&target);
     let name = if target_keyword(&target) == TARGET_BLANK { String::new() } else { target };
-    let page = arena.top_level_realm(cid) == cid && !arena.realm_state(cid).is_some_and(|s| s.identity.is_window());
+    let page = arena.is_page(cid);
     let activated = arena.transiently_activated(cid);
     let plan = &mut arena.navigation_plan;
     if page && !opens_window {
@@ -309,7 +309,7 @@ fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let page_only = args.get(0).is_true();
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
-    if !page_only || (arena.top_level_realm(cid) == cid && !arena.realm_state(cid).is_some_and(|s| s.identity.is_window())) {
+    if !page_only || arena.is_page(cid) {
         arena.navigation_plan.supersede();
     }
 }

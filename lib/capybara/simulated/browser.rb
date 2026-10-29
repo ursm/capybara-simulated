@@ -2919,7 +2919,7 @@ module Capybara
 
       # What a task the page ran left the browser to do, done: a navigation it planned (`drain_pending_navigation`), a
       # hyperlink it followed, a form it submitted, a download it started — of the first three the one planned last,
-      # each superseding the others as it is planned (location.js `supersedePlannedNavigation`). Whichever task — a timer's (Forem's comment-edit form `preventDefault`s
+      # each superseding the others as it is planned (navigation_plan.rs `supersedePlanned`). Whichever task — a timer's (Forem's comment-edit form `preventDefault`s
       # its submit, polls for the CSRF meta tag inside `setInterval(…, 1)` and calls `form.submit()` once it is there,
       # long after the click returned), a script the driver ran (`execute_script('form.submit()')` on an idle page, where
       # no step follows to take it), or a synthetic click on an `<a download>` (Avo's action download: file-saver's

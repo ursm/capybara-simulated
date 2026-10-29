@@ -817,6 +817,27 @@ impl RealmArena {
             _ => LinkRoute::Plan(target),
         }
     }
+    // Whether realm `cid`'s document is the page's: a top-level one's that no `window.open` made.
+    pub(crate) fn is_page(&self, cid: i32) -> bool {
+        self.top_level_realm(cid) == cid && !self.realm_state(cid).is_some_and(|s| s.identity.is_window())
+    }
+    // Whether the navigable target `target` chooses from realm `current`'s is its own: `_self`, a top-level one's `_top`
+    // or `_parent`, its own name.
+    pub(crate) fn targets_own(&self, current: i32, target: &[u16]) -> bool {
+        match self.choose_navigable(current, target) {
+            Choice::Current => true,
+            Choice::TopLevel(r) => r == current,
+            Choice::Frame(container) => self.frame_realm(container) == Some(current),
+            Choice::Window(_) | Choice::New | Choice::Blocked => false,
+        }
+    }
+    // …the container of the frame's navigable it chooses where that container is in realm `current`'s document.
+    pub(crate) fn chosen_child_frame(&self, current: i32, target: &[u16]) -> Option<NodeId> {
+        match self.choose_navigable(current, target) {
+            Choice::Frame(c) if self.get(c).is_some_and(|n| n.realm == current) => Some(c),
+            _ => None,
+        }
+    }
     // Where `window.open(url, target)` called in realm `current` goes (`OpenRoute`; HTML "window open steps": an empty
     // target `_blank`, where a link's is its own navigable).
     pub(crate) fn open_route(&self, current: i32, target: &[u16]) -> OpenRoute {
@@ -1233,24 +1254,14 @@ fn open_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn targets_own_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let target = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    rv.set_bool(match arena.choose_navigable(cid, &target) {
-        Choice::Current => true,
-        Choice::TopLevel(r) => r == cid,
-        Choice::Frame(container) => arena.frame_realm(container) == Some(cid),
-        Choice::Window(_) | Choice::New | Choice::Blocked => false,
-    });
+    rv.set_bool(crate::dom::realm(scope, cid).targets_own(cid, &target));
 }
 // __dom.chosenChildFrame(target) -> the container of the frame's navigable target `target` chooses from the calling
 // realm's (`RealmArena::choose_navigable`) where that container is in this realm's document — null for any other.
 fn chosen_child_frame(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let target = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let container = match arena.choose_navigable(cid, &target) {
-        Choice::Frame(c) if arena.get(c).is_some_and(|n| n.realm == cid) => Some(c),
-        _ => None,
-    };
+    let container = crate::dom::realm(scope, cid).chosen_child_frame(cid, &target);
     rv.set(crate::dom::node_value(scope, container));
 }
 // __dom.childNavigables(docNid, limit) -> the containers of the document's document-tree child navigables, in tree order —
@@ -1497,6 +1508,20 @@ mod tests {
         assert_eq!(route(&arena, 1, "w", true), LinkRoute::Refused);
         assert_eq!(route(&arena, 1, "s", true), LinkRoute::None);
         assert_eq!(route(&arena, 1, "_top", true), LinkRoute::None);
+        // (…a target its own — `_self`, a top-level one's `_top`, its own name — and a frame of its own document)
+        arena.location.sandbox = 0;
+        assert!(arena.targets_own(1, &units("")) && arena.targets_own(1, &units("a")) && arena.targets_own(0, &units("_top")));
+        assert!(arena.targets_own(0, &units("p")) && !arena.targets_own(1, &units("_top")) && !arena.targets_own(0, &units("a")));
+        assert_eq!(arena.chosen_child_frame(0, &units("a")), Some(a));
+        assert_eq!(arena.chosen_child_frame(1, &units("b")), Some(b));
+        assert_eq!(arena.chosen_child_frame(1, &units("a")), None);
+        assert_eq!(arena.chosen_child_frame(1, &units("_parent")), None);
+        // (…and where `window.open` goes from either: its own window, another navigable, a new one named)
+        assert_eq!(arena.open_route(1, &units("_self")), OpenRoute::Own);
+        assert_eq!(arena.open_route(1, &units("_top")), OpenRoute::Navigable(Some(0), None, false));
+        assert_eq!(arena.open_route(0, &units("b")), OpenRoute::Navigable(None, Some(b), false));
+        assert_eq!(arena.open_route(0, &units("")), OpenRoute::New(Vec::new()));
+        assert_eq!(arena.open_route(0, &units("w")), OpenRoute::New(units("w")));
     }
 
     #[test]
