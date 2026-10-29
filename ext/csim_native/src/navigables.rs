@@ -1098,10 +1098,10 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
 }
-// __dom.hyperlinkRoute(target, auxiliaryOpens) -> `[route, realm]`: what a hyperlink followed in the calling realm with
-// the target `target` routes through — "auxiliary", a new auxiliary window the host opens (a name or `_blank` from a
-// frame or a window `window.open` made, where the host opens one: `auxiliaryOpens`; the frame's VM not rebuilt, a fresh
-// window); "navigate", a navigable this document navigates (`_self` from either its own realm's; `_top` or `_parent`
+// __dom.hyperlinkRoute(target, auxiliaryOpens) -> `[route, at]`: what a hyperlink followed in the calling realm with
+// the target `target` routes through — "auxiliary", a new auxiliary window the host opens, named `at` ('' for `_blank`)
+// (a name or `_blank` from a frame or a window `window.open` made, where the host opens one: `auxiliaryOpens`; the
+// frame's VM not rebuilt, a fresh window); "navigate", realm `at`'s navigable a navigable this document navigates (`_self` from either its own realm's; `_top` or `_parent`
 // from a frame the one `keyword_navigable` chooses — -1 where its sandbox lets it navigate none, the link then going
 // nowhere); or "unrouted", none of its own (the top-level page's link, whose own navigation its caller takes; a
 // discarded frame's follows none at all: dom-nodes.js `followHyperlink`).
@@ -1112,7 +1112,8 @@ fn hyperlink_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let arena = crate::dom::realm(scope, cid);
     let nested = arena.live_container(cid).is_some();
     let window = arena.realm_state(cid).is_some_and(|s| s.identity.is_window());
-    let (route, realm) = match target_keyword(&target) {
+    let keyword = target_keyword(&target);
+    let (route, realm) = match keyword {
         TARGET_NAME | TARGET_BLANK if (nested || window) && auxiliary_opens => ("auxiliary", -1),
         TARGET_NAME | TARGET_BLANK => ("unrouted", -1),
         TARGET_SELF if nested || window => ("navigate", cid),
@@ -1120,7 +1121,11 @@ fn hyperlink_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         keyword if nested => ("navigate", arena.keyword_navigable(cid, keyword).unwrap_or(-1)),
         _ => ("unrouted", -1),
     };
-    let items = [v8::String::new(scope, route).unwrap().into(), v8::Integer::new(scope, realm).into()];
+    let at = match route {
+        "auxiliary" => v8::String::new(scope, if keyword == TARGET_BLANK { "" } else { &target }).unwrap().into(),
+        _ => v8::Integer::new(scope, realm).into(),
+    };
+    let items = [v8::String::new(scope, route).unwrap().into(), at];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.navigationAllowed(target) -> whether this realm's document may navigate realm `target`'s navigable

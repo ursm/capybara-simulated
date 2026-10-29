@@ -14,7 +14,11 @@ use crate::dom::{realm, realm_id, register};
 
 pub(crate) struct Navigation {
     url: String,
-    target: String,
+    // Whether the navigable its target chose as it was followed is a new top-level one — `_blank`, a name none has, or
+    // another top-level traversable's a name found, which a hyperlink does not navigate: one the host opens, named (but
+    // for `_blank`) by its target.
+    opens_window: bool,
+    name: String,
     opener: bool,
     referrer_policy: String,
     blob: Option<v8::Global<v8::Value>>,
@@ -241,17 +245,27 @@ fn plan<'a>(scope: &'a mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
 }
 
 // __dom.planNavigation(url, target, opener, referrerPolicy, blob): a hyperlink's navigation planned — `blob` a `blob:`
-// URL's bytes and type taken as it was followed, or undefined — after `supersedePlanned` where it navigates the top-level
-// document.
+// URL's bytes and type taken as it was followed, or undefined — the navigable its target chooses chosen now (HTML
+// "follow the hyperlink"), superseding what the page planned before where that is the page's own.
 fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    use crate::navigables::{target_keyword, Choice, TARGET_BLANK};
     let text = |scope: &mut v8::PinScope<'_, '_>, i: i32| args.get(i).to_rust_string_lossy(scope);
-    let (url, target, referrer_policy) = (text(scope, 0), text(scope, 1), text(scope, 3));
+    let (url, referrer_policy) = (text(scope, 0), text(scope, 3));
+    let target = crate::dom::utf16_arg(scope, args.get(1));
     let opener = args.get(2).is_true();
     let blob = (!args.get(4).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(4)));
     let cid = realm_id(scope, &args);
     let arena = realm(scope, cid);
+    let opens_window = matches!(arena.choose_navigable(cid, &target), Choice::New | Choice::Window(_));
+    let target = String::from_utf16_lossy(&target);
+    let name = if target_keyword(&target) == TARGET_BLANK { String::new() } else { target };
+    let page = arena.top_level_realm(cid) == cid && !arena.realm_state(cid).is_some_and(|s| s.identity.is_window());
     let activated = arena.transiently_activated(cid);
-    arena.navigation_plan.navigation = Some(Navigation { url, target, opener, referrer_policy, blob, activated });
+    let plan = &mut arena.navigation_plan;
+    if page && !opens_window {
+        plan.supersede();
+    }
+    plan.navigation = Some(Navigation { url, opens_window, name, opener, referrer_policy, blob, activated });
 }
 
 // __dom.planSubmission(request): a form's submission planned, its request as the bindings made it as it was submitted
@@ -294,29 +308,26 @@ fn navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(plan.navigation.is_some() || (plan.submission.is_some() && !elsewhere));
 }
 
-// __dom.takeNavigation(newWindowOnly) -> [url, target, opener, referrerPolicy, blob, activated] of the navigation planned, which the
-// realm plans no more — or, `newWindowOnly`, only where it opens a new window (its target `_blank` or a name: what a
+// __dom.takeNavigation(newWindowOnly) -> [url, opensWindow, name, opener, referrerPolicy, blob, activated] of the
+// navigation planned, which the realm plans no more — or, `newWindowOnly`, only where it opens a new window (what a
 // script's `click()` with no user action behind it opens mid-task) — or null.
 fn take_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let new_window_only = args.get(0).is_true();
     let plan = plan(scope, &args);
-    let opens_window = |n: &Navigation| {
-        matches!(crate::navigables::target_keyword(&n.target), crate::navigables::TARGET_NAME | crate::navigables::TARGET_BLANK)
-    };
-    if new_window_only && !plan.navigation.as_ref().is_some_and(opens_window) {
+    if new_window_only && !plan.navigation.as_ref().is_some_and(|n| n.opens_window) {
         return;
     }
     let Some(n) = plan.navigation.take() else { return };
     let blob = n.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b));
-    let (Some(url), Some(target), Some(policy)) =
-        (v8::String::new(scope, &n.url), v8::String::new(scope, &n.target), v8::String::new(scope, &n.referrer_policy))
+    let (Some(url), Some(name), Some(policy)) = (v8::String::new(scope, &n.url), v8::String::new(scope, &n.name), v8::String::new(scope, &n.referrer_policy))
     else {
         return;
     };
+    let opens_window = v8::Boolean::new(scope, n.opens_window).into();
     let opener = v8::Boolean::new(scope, n.opener).into();
     let activated = v8::Boolean::new(scope, n.activated).into();
-    rv.set(v8::Array::new_with_elements(scope, &[url.into(), target.into(), opener, policy.into(), blob, activated]).into());
+    rv.set(v8::Array::new_with_elements(scope, &[url.into(), opens_window, name.into(), opener, policy.into(), blob, activated]).into());
 }
 
 // __dom.takeSubmission() -> the request of the submission planned, which the realm plans no more, or null.
