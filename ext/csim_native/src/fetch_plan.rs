@@ -10,11 +10,9 @@ use std::cell::RefCell;
 
 use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RModule, Ruby, TryConvert, Value};
 
+use crate::fetch_chain::{Followed, Headers, Judged, RequestChain};
 use crate::fetch_hop::{ClientFacts, FetchHops};
-use crate::fetch_rules::{bad_port, follow_redirect, redirect_status, request_body_header, Redirected, Redirecting};
-
-// Fetch caps a chain at 20 redirects: the 21st is a network error (one dispatch more than the redirects followed).
-const MAX_REDIRECTS: u32 = 20;
+use crate::fetch_rules::{bad_port, redirect_status};
 // Request cache modes that never read the store, and those that serve a stored response however stale.
 const SKIP_READ: [&str; 2] = ["no-store", "reload"];
 const SERVE_STALE: [&str; 2] = ["force-cache", "only-if-cached"];
@@ -27,22 +25,12 @@ const NULL_BODY: [u32; 3] = [204, 205, 304];
 const REDIRECT_ERROR: &str = "[capybara-simulated] fetch: redirect blocked by redirect=error mode";
 const TOO_MANY: &str = "[capybara-simulated] fetch exceeded 20 redirects";
 
-type Headers = Vec<(Vec<u8>, Vec<u8>)>;
-
-// The request as it stands, and the chain's latches.
+// The request as it stands (fetch_chain.rs: its origin as its hops send it the request's, 'null' once a redirect tainted
+// it, none for a mode-less load), and the chain's latches.
 struct State {
-    method: String,
-    target: String,
-    headers: Headers,
-    body_empty: bool,
-    // Its origin as its hops send it: the request's, 'null' once a redirect tainted it; none for a mode-less load.
-    effective_origin: Option<String>,
-    ref_policy: Option<String>,
-    ref_source: Option<String>,
+    chain: RequestChain,
     crossed: bool,
     tainted: bool,
-    redirected: bool,
-    dispatches: u32,
     delay_ms: i64,
     // This hop's: the Referer it sent, whether it is a CORS hop to another origin, whether it sent cookies, whether it
     // revalidates a stored response, whether it answered a challenge.
@@ -102,14 +90,6 @@ fn http_origin(url: &str) -> Option<String> {
 }
 fn port_blocked(url: &ada_url::Url) -> bool {
     url.port().parse::<u32>().is_ok_and(bad_port)
-}
-// (…a header's bytes as URL text: as they are where they are UTF-8, else each byte past ASCII percent-encoded — what
-// Chrome sends for a Location of bytes no UTF-8, redirect-location-escape)
-fn url_text(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_owned(),
-        Err(_) => bytes.iter().map(|&b| if b < 0x80 { (b as char).to_string() } else { format!("%{b:02X}") }).collect(),
-    }
 }
 fn has_userinfo(url: &str) -> bool {
     ada_url::Url::parse(url, None).is_ok_and(|u| !u.username().is_empty() || !u.password().is_empty())
@@ -213,17 +193,19 @@ impl FetchPlan {
             preflight_cache: sessions.0,
             auth_entries: sessions.1,
             st: RefCell::new(State {
-                method: text("method")?.unwrap_or_else(|| "GET".to_owned()),
-                target,
-                headers,
-                body_empty: flag("body_empty")?,
-                effective_origin: if flag("origin_null")? { Some("null".to_owned()) } else { origin },
-                ref_policy: text("referrer_policy")?,
-                ref_source,
+                chain: RequestChain {
+                    method: text("method")?.unwrap_or_else(|| "GET".to_owned()),
+                    target,
+                    headers,
+                    body_empty: flag("body_empty")?,
+                    effective_origin: if flag("origin_null")? { Some("null".to_owned()) } else { origin },
+                    ref_policy: text("referrer_policy")?,
+                    ref_source,
+                    redirected: false,
+                    dispatches: 0,
+                },
                 crossed: false,
                 tainted: false,
-                redirected: false,
-                dispatches: 0,
                 delay_ms: 0,
                 referer: None,
                 cross_origin: false,
@@ -236,18 +218,18 @@ impl FetchPlan {
 
     // #target / #request_method / #redirected?: the request as it stands.
     fn target(&self) -> String {
-        self.st.borrow().target.clone()
+        self.st.borrow().chain.target.clone()
     }
     fn request_method(&self) -> String {
-        self.st.borrow().method.clone()
+        self.st.borrow().chain.method.clone()
     }
     fn redirected(&self) -> bool {
-        self.st.borrow().redirected
+        self.st.borrow().chain.redirected
     }
     // Whether the HTTP cache may be read for this hop: a GET, no author conditional, a mode that reads it, and the chain
     // at its client's origin still (a cross-origin hop always goes to the network, so the mode filtering runs).
     fn reads_cache(st: &State, plan: &FetchPlan) -> bool {
-        st.method == "GET" && !plan.skip_cache && !st.crossed && !SKIP_READ.contains(&plan.cache_mode.as_str())
+        st.chain.method == "GET" && !plan.skip_cache && !st.crossed && !SKIP_READ.contains(&plan.cache_mode.as_str())
     }
     // …and written with its response: a GET, not `no-store`, no author conditional.
     fn writes_cache(&self, method: &str) -> bool {
@@ -256,8 +238,8 @@ impl FetchPlan {
     // Whether the request is CORS-unsafe — no safelisted method, or a header no CORS-safelisted one: its CORS-preflight's
     // method and header names, None for a safe one.
     fn unsafe_request(st: &State) -> Option<Vec<String>> {
-        let names = crate::cors::unsafe_header_names(&st.headers);
-        (!crate::fetch_rules::cors_safelisted_method(st.method.to_ascii_uppercase().as_bytes()) || !names.is_empty()).then_some(names)
+        let names = crate::cors::unsafe_header_names(&st.chain.headers);
+        (!crate::fetch_rules::cors_safelisted_method(st.chain.method.to_ascii_uppercase().as_bytes()) || !names.is_empty()).then_some(names)
     }
 
     // #begin_hop(cache, now) -> the next step of the chain, the stored response for its URL being `cache` ([status,
@@ -272,13 +254,12 @@ impl FetchPlan {
     fn begin_hop(ruby: &Ruby, rb_self: &Self, cache: Option<(u32, bool, RArray)>, now: f64) -> Result<RArray, Error> {
         let plan = rb_self;
         let mut st = plan.st.borrow_mut();
-        st.dispatches += 1;
-        if st.dispatches > MAX_REDIRECTS + 1 {
+        if st.chain.dispatch().is_none() {
             return Ok(command(ruby, "error", &[TOO_MANY.into_value_with(ruby)]));
         }
         // (…cross-origin-ness for the request's mode and its response's type, latched: a tainted origin is of none)
-        let target_origin = http_origin(&st.target);
-        let tainted_origin = st.effective_origin.as_deref() == Some("null");
+        let target_origin = http_origin(&st.chain.target);
+        let tainted_origin = st.chain.effective_origin.as_deref() == Some("null");
         st.crossed |= plan.doc_origin.as_deref().is_some_and(|d| tainted_origin || target_origin.as_deref() != Some(d));
         st.tainted |= plan.client_origin.as_deref() == Some("null") || target_origin.as_deref() != plan.client_origin.as_deref();
         if plan.same_origin && st.crossed {
@@ -313,40 +294,39 @@ impl FetchPlan {
         }
         // Fetch "fetch" step 12-13 / "HTTP-network-or-cache fetch": a bodyless request sends Content-Length: 0 only where
         // its method is POST or PUT (send-entity-body-none, request-headers custom-method).
-        let upper = st.method.to_ascii_uppercase();
-        let drop_length = st.body_empty && upper != "POST" && upper != "PUT";
-        // The Referer: the hop's policy over the source the previous hop left (redirect-referrer-override).
-        let referer = st.ref_source.as_deref().and_then(|s| crate::referrer::request_referrer(st.ref_policy.as_deref().unwrap_or(""), s, &st.target));
-        let (cross_origin, send_cookies, origin, sec, cookie_site, lax) = plan.hops.hop(st.target.clone(), st.method.clone(), st.effective_origin.clone(), st.ref_policy.clone());
+        let upper = st.chain.method.to_ascii_uppercase();
+        let drop_length = st.chain.body_empty && upper != "POST" && upper != "PUT";
+        let referer = st.chain.referer();
+        let (cross_origin, send_cookies, origin, sec, cookie_site, lax) = plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone());
         st.referer = referer.clone();
         st.cross_origin = cross_origin;
         st.send_cookies = send_cookies;
         st.answered = false;
         // (…an authentication entry sent ahead of a challenge, where the request includes credentials, sent no
         // Authorization of its own and brought none to answer one with)
-        let sent_authorization = st.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(b"authorization"));
+        let sent_authorization = st.chain.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(b"authorization"));
         let preemptive = if send_cookies && !sent_authorization && plan.challenge.is_none() {
-            crate::http_auth::entry(plan.auth_entries, st.target.clone())
+            crate::http_auth::entry(plan.auth_entries, st.chain.target.clone())
         } else {
             None
         };
         // A CORS request to a URL with credentials is a network error (access-control-and-redirects "user info").
-        if cross_origin && has_userinfo(&st.target) {
+        if cross_origin && has_userinfo(&st.chain.target) {
             return Ok(command(ruby, "error", &[ruby.qnil().as_value()]));
         }
         // The CORS-preflight, judged at every hop: a cross-origin CORS-unsafe request's, unless the cache covers it.
-        let origin_sent = st.effective_origin.clone().unwrap_or_default();
+        let origin_sent = st.chain.effective_origin.clone().unwrap_or_default();
         let preflight = if cross_origin {
             Self::unsafe_request(&st)
-                .filter(|names| !crate::cors::covers_request(plan.preflight_cache, origin_sent.clone(), st.target.clone(), plan.credentials == "include", st.method.clone(), names.clone(), now))
+                .filter(|names| !crate::cors::covers_request(plan.preflight_cache, origin_sent.clone(), st.chain.target.clone(), plan.credentials == "include", st.chain.method.clone(), names.clone(), now))
                 .map(|names| (names, origin_sent))
         } else {
             None
         };
         let facts = ruby.ary_from_iter([
-            st.method.clone().into_value_with(ruby),
-            st.target.clone().into_value_with(ruby),
-            pairs(ruby, &st.headers).as_value(),
+            st.chain.method.clone().into_value_with(ruby),
+            st.chain.target.clone().into_value_with(ruby),
+            pairs(ruby, &st.chain.headers).as_value(),
             drop_length.into_value_with(ruby),
             referer.into_value_with(ruby),
             send_cookies.into_value_with(ruby),
@@ -367,20 +347,20 @@ impl FetchPlan {
         let mut st = self.st.borrow_mut();
         let (status, acao, acac, methods, headers, max_age, delay) = response;
         st.delay_ms += delay;
-        let origin = st.effective_origin.clone().unwrap_or_default();
+        let origin = st.chain.effective_origin.clone().unwrap_or_default();
         let names = Self::unsafe_request(&st).unwrap_or_default();
         let granted = crate::cors::grant_preflight(
             self.preflight_cache,
             (status, acao, acac, methods, headers, max_age),
             origin.clone(),
-            st.target.clone(),
+            st.chain.target.clone(),
             self.credentials == "include",
-            st.method.clone(),
+            st.chain.method.clone(),
             names,
             now,
         );
         if !granted {
-            crate::cors::forget(self.preflight_cache, origin, st.target.clone());
+            crate::cors::forget(self.preflight_cache, origin, st.chain.target.clone());
         }
         granted
     }
@@ -410,7 +390,7 @@ impl FetchPlan {
         }
         // (…the credentials an answered challenge brought kept for the origin that did not refuse them again)
         if let Some(challenge) = plan.challenge.as_ref().filter(|_| st.answered && status != 401) {
-            crate::http_auth::accepted(plan.auth_entries, st.target.clone(), challenge.clone());
+            crate::http_auth::accepted(plan.auth_entries, st.chain.target.clone(), challenge.clone());
         }
         let credentialed = plan.credentials == "include";
         let expose = st.cross_origin.then_some(credentialed);
@@ -421,10 +401,10 @@ impl FetchPlan {
         // Fetch "CORS check", on every cross-origin response — a redirect's too; a request that took the preflight path
         // failing it lets the preflight cache's entries for its origin and URL go.
         if st.cross_origin {
-            let origin = st.effective_origin.clone();
+            let origin = st.chain.effective_origin.clone();
             if !crate::cors::check(acao.as_deref(), acac.as_deref(), origin.as_deref(), credentialed) {
                 if Self::unsafe_request(&st).is_some() {
-                    crate::cors::forget(plan.preflight_cache, origin.unwrap_or_default(), st.target.clone());
+                    crate::cors::forget(plan.preflight_cache, origin.unwrap_or_default(), st.chain.target.clone());
                 }
                 return Ok(command(ruby, "error", &[ruby.qnil().as_value()]));
             }
@@ -440,23 +420,19 @@ impl FetchPlan {
             }
             return Ok(command(ruby, "opaque_redirect", &[]));
         }
-        let store = plan.writes_cache(&st.method);
+        let store = plan.writes_cache(&st.chain.method);
         if redirect_status(status) {
             let referer = st.referer.clone();
             match plan.follow(&mut st, status, locations)? {
                 Followed::Answer => {}
                 Followed::Fail => return Ok(command(ruby, "error", &[ruby.qnil().as_value(), store.into_value_with(ruby)])),
                 Followed::Follow(_, to_get) => {
-                    // (…the next hop's referrer source what this hop sent, its policy a redirect's Referrer-Policy)
-                    st.ref_source = referer;
-                    if policy.is_some() {
-                        st.ref_policy = policy;
-                    }
+                    st.chain.refer_on(referer, policy);
                     return Ok(command(ruby, "follow", &[store.into_value_with(ruby), to_get.into_value_with(ruby)]));
                 }
             }
         }
-        let null_body = st.method.eq_ignore_ascii_case("HEAD") || NULL_BODY.contains(&status);
+        let null_body = st.chain.method.eq_ignore_ascii_case("HEAD") || NULL_BODY.contains(&status);
         let kind = if plan.no_cors && st.crossed {
             "opaque"
         } else if st.crossed {
@@ -465,7 +441,7 @@ impl FetchPlan {
             "basic"
         };
         let tainted = st.tainted && !st.crossed;
-        let navigation = plan.navigation.then(|| (st.method.clone(), st.referer.clone()));
+        let navigation = plan.navigation.then(|| (st.chain.method.clone(), st.referer.clone()));
         Ok(command(
             ruby,
             "final",
@@ -481,57 +457,12 @@ impl FetchPlan {
         ))
     }
 
-    // Fetch "HTTP-redirect fetch" over a redirect of `status` whose Location fields are `locations`, the request moved on
-    // where it is followed: its URL, its method and body, its `Authorization` and request-body headers, its origin.
+    // Fetch "HTTP-redirect fetch" (fetch_chain.rs `follow`), the request judged as this fetch's mode has it.
     fn follow(&self, st: &mut State, status: u32, locations: RArray) -> Result<Followed, Error> {
-        let mut distinct: Vec<Vec<u8>> = Vec::new();
-        for l in locations {
-            let bytes = crate::fetch_rules::ruby_bytes(magnus::RString::try_convert(l)?);
-            if !distinct.contains(&bytes) {
-                distinct.push(bytes);
-            }
-        }
-        // (…a Location given more than once, differently, a network error: "extract header list values"; bytes no UTF-8
-        // percent-encoded, as Chrome sends them)
-        if distinct.len() > 1 {
-            return Ok(Followed::Fail);
-        }
-        let location = distinct.first().map(|b| url_text(b));
-        let request = Redirecting {
-            method: st.method.as_bytes(),
-            current: &st.target,
-            cors_mode: self.cors,
-            origin: self.origin.as_deref().unwrap_or(""),
-            tainting_cors: self.cors && st.crossed,
-            tainted_origin: st.effective_origin.as_deref() == Some("null"),
-        };
-        let step = match follow_redirect(&request, status, &st.target, location.as_deref()) {
-            Redirected::Answer => return Ok(Followed::Answer),
-            Redirected::Fail(_) => return Ok(Followed::Fail),
-            Redirected::Follow(step) => step,
-        };
-        let from = std::mem::replace(&mut st.target, step.url);
-        st.redirected = true;
-        if step.tainted_origin {
-            st.effective_origin = Some("null".to_owned());
-        }
-        if step.drop_authorization {
-            st.headers.retain(|(k, _)| !k.eq_ignore_ascii_case(b"authorization"));
-        }
-        if step.to_get {
-            st.method = "GET".to_owned();
-            st.body_empty = true;
-            st.headers.retain(|(k, _)| !request_body_header(k) && !k.eq_ignore_ascii_case(b"content-length"));
-        }
-        Ok(Followed::Follow(from, step.to_get))
+        let locations = locations.into_iter().map(|l| magnus::RString::try_convert(l).map(crate::fetch_rules::ruby_bytes)).collect::<Result<Vec<_>, _>>()?;
+        let judged = Judged { cors: self.cors, origin: self.origin.as_deref().unwrap_or(""), tainting_cors: self.cors && st.crossed };
+        Ok(st.chain.follow(status, &locations, &judged))
     }
-}
-
-enum Followed {
-    Answer,
-    Fail,
-    // The hop's URL it was followed from, and whether its body went.
-    Follow(String, bool),
 }
 
 pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {

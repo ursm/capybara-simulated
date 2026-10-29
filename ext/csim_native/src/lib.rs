@@ -101,6 +101,7 @@ mod response_state;
 mod search_params;
 mod select_options;
 mod session_history;
+mod fetch_chain;
 mod fetch_hop;
 mod fetch_plan;
 mod sw_router;
