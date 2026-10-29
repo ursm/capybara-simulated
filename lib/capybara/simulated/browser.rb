@@ -7897,7 +7897,8 @@ module Capybara
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
       end
       # The document-teardown pair (pagehide+unload), this window AND its nested
-      # frames, parent-first — fired by the Driver before an explicitly-closed aux
+      # frames, parent-first — fired as a navigation replaces the page's document
+      # (`boot_response_into_ctx`), and by the Driver before an explicitly-closed aux
       # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
       def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)
 
@@ -11945,6 +11946,10 @@ module Capybara
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
+        # …and the document it replaces unloaded first (HTML "unload a document and its descendants"): its pagehide and
+        # unload, and its frames', while its realms still live — what their handlers send (a beacon, a keepalive fetch)
+        # is the old document's, its fetch group's quota with it (`keepalive_retire` below).
+        fire_document_teardown
         @flushed_nav_intents = nil
         # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
         @session_history.clear_queued
