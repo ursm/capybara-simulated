@@ -405,4 +405,32 @@ RSpec.describe 'a nested document navigating itself' do
     s.evaluate_script('1')
     expect(hits).to eq(['/c0'])
   end
+
+  # A frame's navigation redirected to a URL of no fetch scheme is handed off, as the page's is (HTML "create navigation
+  # params by fetching": non-fetch-scheme navigation params): the frame stays at its document — whether the page builds
+  # it or its own `location` navigates it.
+  %w[mailto:a@b.c myapp://cb].each do |target|
+    it "stays at its document when its navigation is redirected to #{target}" do
+      app = lambda do |env|
+        next [302, {'location' => target}, []] if env['PATH_INFO'] == '/away'
+
+        body = env['PATH_INFO'] == '/top' ? '<iframe id=f src="/o"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><p>#{body}"]]
+      end
+      s = simulated_session(app)
+      s.visit '/top'
+      poll_until { s.evaluate_script('frames[0].document.body?.textContent') == '/o' }
+      s.execute_script(%q{frames[0].eval('location = "http://www.example.com/away"')})
+      s.execute_script('setTimeout(() => window.settled = true, 50)')
+      poll_until { s.evaluate_script('window.settled === true') }
+
+      expect(s.evaluate_script('[frames[0].location.pathname, frames[0].document.body.textContent]')).to eq(['/o', '/o'])
+      # (…and one the page's container sets: the frame left at its initial about:blank)
+      s.execute_script('document.getElementById("f").src = "/away"')
+      s.execute_script('setTimeout(() => window.settled2 = true, 50)')
+      poll_until { s.evaluate_script('window.settled2 === true') }
+
+      expect(s.evaluate_script('frames[0].location.pathname')).to eq('/o')
+    end
+  end
 end

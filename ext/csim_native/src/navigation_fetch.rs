@@ -31,6 +31,9 @@ pub(crate) struct NavigationFetch {
     st: RefCell<Nav>,
 }
 
+// The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
+const FETCH_SCHEMES: [&str; 6] = ["about:", "blob:", "data:", "file:", "http:", "https:"];
+
 fn static_site(site: &str) -> &'static str {
     match site {
         "same-origin" => "same-origin",
@@ -107,8 +110,10 @@ impl NavigationFetch {
 
     // #redirect(status, location, policy) -> what a redirect response of the hop makes of the navigation, its Location
     // `location`, its `Referrer-Policy` (parsed) `policy`: ['follow', body gone, new client] — the next hop, its request
-    // a GET where the redirect makes one, a hop to another origin wanting the reserved client made anew — or ['fail']: a
-    // network error (a Location no URL, a scheme no fetch goes to, a port blocked).
+    // a GET where the redirect makes one, a hop to another origin wanting the reserved client made anew — ['hand_off'] —
+    // a URL of no fetch scheme (`mailto:`, an app's own), handed off to external software, the navigable keeping its
+    // document (HTML "create navigation params by fetching": non-fetch-scheme navigation params) — or ['fail']: a
+    // network error (a Location no URL, a fetch scheme no HTTP(S) one, a port blocked, the 21st hop).
     fn redirect(ruby: &Ruby, rb_self: &Self, status: u32, location: magnus::RString, policy: Option<String>) -> Result<RArray, Error> {
         let mut st = rb_self.st.borrow_mut();
         let out = ruby.ary_new();
@@ -117,7 +122,9 @@ impl NavigationFetch {
         let sent = st.chain.referer();
         st.site = Some(wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), &target)));
         let judged = Judged { cors: false, origin: &rb_self.origin, tainting_cors: false };
-        match st.chain.follow(status, &[crate::fetch_rules::ruby_bytes(location)], &judged) {
+        let location = crate::fetch_rules::ruby_bytes(location);
+        let location_text = String::from_utf8_lossy(&location).into_owned();
+        match st.chain.follow(status, &[location], &judged) {
             Followed::Follow(from, to_get) => {
                 st.chain.refer_on(sent, policy);
                 let new_client = http_origin(&from) != http_origin(&st.chain.target);
@@ -126,16 +133,20 @@ impl NavigationFetch {
                 let _ = out.push(new_client);
             }
             Followed::Answer | Followed::Fail => {
-                let _ = out.push("fail");
+                let handed_off = ada_url::Url::parse(&location_text, Some(&target)).is_ok_and(|u| !FETCH_SCHEMES.contains(&u.protocol()));
+                let _ = out.push(if handed_off { "hand_off" } else { "fail" });
             }
         }
         Ok(out)
     }
 
-    // #target / #redirected? / #referrer: the request as it stands, and the Referer its last hop sent — the referrer of
-    // the document its response makes.
+    // #target / #request_method / #redirected? / #referrer: the request as it stands, and the Referer its last hop sent
+    // — the referrer of the document its response makes.
     fn target(&self) -> String {
         self.st.borrow().chain.target.clone()
+    }
+    fn request_method(&self) -> String {
+        self.st.borrow().chain.method.clone()
     }
     fn redirected(&self) -> bool {
         self.st.borrow().chain.redirected
@@ -151,6 +162,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("begin_hop", method!(NavigationFetch::begin_hop, 0))?;
     class.define_method("redirect", method!(NavigationFetch::redirect, 3))?;
     class.define_method("target", method!(NavigationFetch::target, 0))?;
+    class.define_method("request_method", method!(NavigationFetch::request_method, 0))?;
     class.define_method("redirected?", method!(NavigationFetch::redirected, 0))?;
     class.define_method("referrer", method!(NavigationFetch::referrer, 0))?;
     Ok(())

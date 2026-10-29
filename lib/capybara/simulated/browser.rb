@@ -7030,6 +7030,8 @@ module Capybara
             # (…the next hop — a GET where the redirect makes one — or none: a Location no URL, a scheme no fetch goes to)
             command, to_get, new_client = fetch.redirect(status.to_i, loc.to_s, referrer_policy_header(headers))
             return nil if command == 'fail'
+            # (…one handed off, the frame staying at the document it is at)
+            return {'no_document' => true} if command == 'hand_off'
 
             req_body, req_ct = ''.b, nil if to_get
             rid = mint_resulting_client_id if new_client
@@ -10920,34 +10922,15 @@ module Capybara
       # `location.replace`, a navigation of a document not completely loaded yet: `replace_frame_entry`).
       # (…`initiator` the realm whose document navigates it, where one is named: an opaque origin's cross-site, its Origin
       # `null` — `opaque_initiator` — and the initiator of an entered frame's, which navigates through `navigate_frame`)
-      def navigate_realm_self_get(
-        realm_id,
-        get_url,
-        depth: 0,
-        is_reload: false,
-        is_history: false,
-        record: true,
-        site_seed: nil,
-        origin_null: false,
-        resulting_client_id: nil,
-        referrer: nil,
-        initiator: nil,
-        origin_url: nil,
-        user_activated: false
-      )
-        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
+      def navigate_realm_self_get(realm_id, get_url, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, referrer: nil, initiator: nil,
+                                  origin_url: nil, user_activated: false)
         referrer ||= realm_referrer_initiator(realm_id)
-        site_seed, origin_null = 'cross-site', true if initiator && depth.zero? && document_origin_opaque?(initiator.to_i)
-        origin_url ||= initiating_url(initiator || realm_id)
-        # The navigation's reserved client id — threaded through the redirect re-entries
-        # (re-minted on a cross-origin hop) and adopted by the rebuilt realm on commit.
-        rid = resulting_client_id || mint_resulting_client_id
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
           return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, reload: is_reload || is_history, record: record,
                                                                   initiator: initiator || @current_realm_id.to_i, site: site_seed, user_activated: user_activated)
         end
-        if depth.zero? && !is_reload && !is_history
+        if !is_reload && !is_history
           record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
         end
         # A frame reached via contentWindow (not on the entered stack). An ABSOLUTE http(s) target is
@@ -10966,73 +10949,10 @@ module Capybara
         # network fetch whose response (reload_frame_realm_by_id) would find no container and be thrown
         # away — the fetch's cookie / server side effects would fire for a navigation that never commits.
         return unless @runtime.frame_realm_alive?(realm_id)
-        return if depth.zero? && !prompt_to_unload_frame(realm_id, parent)
+        return unless prompt_to_unload_frame(realm_id, parent)
 
-        invalidate_find_cache
-        # The frame's ancestor-chain cookie verdict (see frame_ancestor_cross_site?) —
-        # a property of the frame the document commits into, so it rides the SW fetch
-        # event too (a rewritten request keeps it; the initiator latch doesn't apply).
-        cookie_cross = frame_ancestor_cross_site?(realm_id, get_url)
-        # A controlled navigation goes to the SW's fetch event first (mode 'navigate'); respondWith
-        # serves the document, a network error fails it, nil falls through to the network GET below.
-        # Skipped when an https navigation sits under an insecure ancestor (see
-        # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
-        source, referrer_policy = referrer
-        origin_url ||= source
-        if (!get_url.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
-           (sw = any_window_sw_navigation_fetch(get_url, method: 'GET', is_reload: is_reload, is_history: is_history,
-                                                          referrer_source: source, origin_url: origin_url, referrer_policy: referrer_policy,
-                                                          site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
-          return commit_frame_error_document(realm_id, get_url, rid) if sw['networkError']
-
-          # An SW-served redirect is FOLLOWED like a network one (the recursion
-          # re-enters interception at the new URL — a redirect out of this SW's scope
-          # lands on the network or another registration's SW, as in the top-level
-          # navigate path). The chain latches Sec-Fetch-Site exactly like the network
-          # redirect branch below.
-          if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
-            next_url = carry_fragment(get_url, resolve_against(loc, get_url))
-            return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, get_url, rid) }
-            return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
-                                                     user_activated: user_activated,
-                                                     site_seed: Native.fetch_site(site_seed, origin_url, get_url),
-                                                     origin_null: Native.redirect_taints_origin(origin_null, origin_url, get_url, next_url),
-                                                     resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
-          end
-          return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
-          return reload_frame_realm_by_id(realm_id, get_url, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                          referrer: Native.request_referrer(referrer_policy.to_s, source, get_url), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
-        end
-        site      = Native.fetch_site(site_seed, origin_url, get_url)
-        response = dispatch_navigation_request(
-          get_url,
-          method:            'GET',
-          referrer_source:   source,
-          origin_url:        origin_url,
-          referrer_policy:   referrer_policy,
-          site:              site,
-          origin_null:       origin_null,
-          cookie_cross_site: cookie_cross,
-          user_activated:    user_activated
-        ) or return commit_frame_error_document(realm_id, get_url, rid)
-        status, headers, resp_body, sent_referrer = response
-        if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(get_url, resolve_against(loc, get_url))
-          resp_body.close if resp_body.respond_to?(:close)
-          return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, get_url, rid) }
-          # Latch the redirect chain's Fetch-Metadata: Sec-Fetch-Site widens to include this hop, and
-          # a form POST's Origin taints to 'null' per Native.redirect_taints_origin (moot for GET — no Origin).
-          return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
-                                                     user_activated: user_activated,
-                                                   site_seed: site, origin_null: Native.redirect_taints_origin(origin_null, origin_url, get_url, next_url),
-                                                   resulting_client_id: url_origin(next_url) == url_origin(get_url) ? rid : nil)
-        end
-        return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
-        if download_response?(headers)
-          return save_downloaded_response(get_url, headers, resp_body, realm: realm_id)
-        end
-        reload_frame_realm_by_id(realm_id, get_url, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: sent_referrer,
-                                 referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
+        navigate_realm_self(realm_id, get_url, nil, nil, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null, referrer: referrer,
+                                                         initiator: initiator, origin_url: origin_url, user_activated: user_activated)
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
@@ -11040,124 +10960,104 @@ module Capybara
       # a frame reached via contentWindow has no stack entry, so rebuild it by
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
-      def navigate_realm_self_post(
-        realm_id,
-        url,
-        body,
-        content_type,
-        depth: 0,
-        is_reload: false,
-        is_history: false,
-        site_seed: nil,
-        origin_null: false,
-        resulting_client_id: nil,
-        referrer: nil,
-        initiator: nil,
-        origin_url: nil,
-        user_activated: false
-      )
-        raise 'too many redirects' if depth > NAVIGATION_REDIRECT_LIMIT
+      def navigate_realm_self_post(realm_id, url, body, content_type, is_reload: false, is_history: false, site_seed: nil, origin_null: false, referrer: nil, initiator: nil,
+                                   origin_url: nil, user_activated: false)
         referrer ||= realm_referrer_initiator(realm_id)
-        site_seed, origin_null = 'cross-site', true if initiator && depth.zero? && document_origin_opaque?(initiator.to_i)
-        origin_url ||= initiating_url(initiator || realm_id)
-        # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
-        # a fresh submission records history. The POST method/body is tagged onto the entry AFTER a
-        # DIRECT (non-redirect) response (tag_frame_entry_post below): a POST that redirects (the
-        # Post/Redirect/Get pattern) resolves to a GET document, so its entry must NOT re-POST on a
-        # later reload / back — only a directly-served POST does.
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
           return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, reload: is_reload || is_history, initiator: initiator || @current_realm_id.to_i,
                                                               site: site_seed, taint: origin_null, user_activated: user_activated)
         end
-        record_frame_nav(realm_id, url) if depth.zero? && !is_reload && !is_history
-        return if depth.zero? && !prompt_to_unload_frame(realm_id)
+        # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
+        # a fresh submission records history.
+        record_frame_nav(realm_id, url) if !is_reload && !is_history
+        return unless prompt_to_unload_frame(realm_id)
 
+        navigate_realm_self(realm_id, url.to_s, body, content_type, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null, referrer: referrer,
+                                                                    initiator: initiator, origin_url: origin_url, user_activated: user_activated)
+      end
+      # …the navigation of a frame reached via contentWindow, hop by hop (navigation_fetch.rs): a controlled one through
+      # the SW's fetch event first (mode 'navigate' — a POST's body the SW reads via event.request.text()), respondWith
+      # serving the document, a network error failing it, none falling through to the network — skipped where an https
+      # navigation sits under an insecure ancestor (see frame_navigation_fetch — the http-target carve-out is the
+      # app-suite fiction). Its redirects followed, an SW's as the network's: a POST's 307 / 308 re-POSTing, the others
+      # GETting, its session history entry the redirect's; its reserved client id threaded through, re-minted on a hop to
+      # another origin, and adopted by the rebuilt realm. The POST method and body tagged onto the entry once a POST's
+      # response makes the document — a Post/Redirect/Get one's entry stays a GET's (`tag_frame_entry_post`).
+      private def navigate_realm_self(realm_id, url, body, content_type, is_reload:, is_history:, site_seed:, origin_null:, referrer:, initiator:, origin_url:, user_activated:)
         invalidate_find_cache
-        # The navigation's reserved client id — same threading as navigate_realm_self_get.
-        rid = resulting_client_id || mint_resulting_client_id
-        # The frame's ancestor-chain cookie verdict — same as navigate_realm_self_get.
-        cookie_cross = frame_ancestor_cross_site?(realm_id, url)
-        # A controlled POST navigation goes to the SW's fetch event first (mode 'navigate', method
-        # POST — the SW reads the body via event.request.text()); respondWith serves the document,
-        # a network error fails it, nil falls through to the network POST below.
-        # Skipped when an https navigation sits under an insecure ancestor (see
-        # frame_navigation_fetch — the http-target carve-out is the app-suite fiction).
+        site_seed, origin_null = 'cross-site', true if initiator && document_origin_opaque?(initiator.to_i)
         source, referrer_policy = referrer
-        origin_url ||= source
-        if (!url.to_s.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
-           (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body, content_type: content_type, is_reload: is_reload, is_history: is_history,
-                                                      referrer_source: source, origin_url: origin_url, referrer_policy: referrer_policy,
-                                                      site_seed: site_seed, origin_null: origin_null, cookie_cross_site: cookie_cross, resulting_client_id: rid))
-          return commit_frame_error_document(realm_id, url, rid) if sw['networkError']
-
-          # SW-served redirect: 307/308 re-POST, everything else GETs — the same split
-          # as the network branch below, re-entering interception at the new URL.
-          if (loc = redirect_location(sw['status'].to_i, sw['headers'] || {}))
-            next_url = carry_fragment(url, resolve_location(loc, url))
-            return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, url, rid) }
-            site     = Native.fetch_site(site_seed, origin_url, url.to_s)
-            taint    = Native.redirect_taints_origin(origin_null, origin_url, url.to_s, next_url)
-            next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
-            if [307, 308].include?(sw['status'].to_i)
-              return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, user_activated: user_activated,
-                                                         site_seed: site, origin_null: taint, resulting_client_id: next_rid)
-            end
-
-            return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, record: false, user_activated: user_activated,
-                                                     site_seed: site, origin_null: taint, resulting_client_id: next_rid)
-          end
-          return frame_navigation_made_no_document(realm_id) if no_content_response?(sw['status'])
-          tag_frame_entry_post(realm_id, body, content_type)
-          reload_frame_realm_by_id(realm_id, url.to_s, Base64.decode64(sw['body_b64'].to_s), response_content_type(sw['headers'] || {}), client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                   referrer: Native.request_referrer(referrer_policy.to_s, source, url.to_s), referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
-          return
-        end
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
         # (`initiating_url`), its Referer the referrer source's — not the top document `current_browsing_context_url`
-        # returns for a non-entered frame. A form POST
-        # navigation carries that document's Origin + a Referer under its Referrer-Policy + the
-        # Fetch-Metadata triple (Sec-Fetch-Dest 'iframe' for a subframe).
-        site      = Native.fetch_site(site_seed, origin_url, url.to_s)
-        response = dispatch_navigation_request(
-          url,
-          method:            'POST',
-          referrer_source:   source,
-          origin_url:        origin_url,
-          referrer_policy:   referrer_policy,
-          site:              site,
-          origin_null:       origin_null,
-          body:              body,
-          content_type:      content_type,
-          cookie_cross_site: cookie_cross,
-          user_activated:    user_activated
-        ) or return commit_frame_error_document(realm_id, url, rid)
-        status, headers, resp_body, sent_referrer = response
-        if (loc = redirect_location(status, headers))
-          next_url = carry_fragment(url, resolve_location(loc, url))
-          resp_body.close if resp_body.respond_to?(:close)
-          return unless frame_redirect_followed?(next_url, depth, realm_id) { commit_frame_error_document(realm_id, url, rid) }
-          # 307/308 preserve method + body; 301/302/303 → GET the frame — the same split as the SW branch above, the
-          # navigation going on (its document prompted to unload once, at its start). Latch the redirect chain's
-          # Sec-Fetch-Site (widened) + Origin taint (Native.redirect_taints_origin).
-          taint    = Native.redirect_taints_origin(origin_null, origin_url, url.to_s, next_url)
-          next_rid = url_origin(next_url) == url_origin(url.to_s) ? rid : nil
-          unless Native.redirect_to_get(status.to_i, 'POST')
-            return navigate_realm_self_post(realm_id, next_url, body, content_type, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, user_activated: user_activated,
-                                                       site_seed: site, origin_null: taint, resulting_client_id: next_rid)
-          end
+        # returns for a non-entered frame.
+        origin_url ||= initiating_url(initiator || realm_id) || source
+        req_body = body.to_s.b
+        fetch = Native::NavigationFetch.new({
+          method:          body ? 'POST' : 'GET',
+          url:             url,
+          body_empty:      req_body.empty?,
+          referrer:        source,
+          referrer_policy: referrer_policy.to_s,
+          initiator:       origin_url,
+          origin_null:     origin_null,
+          site_seed:       site_seed,
+          # (…its cookies cross-site by the frame's ancestors' documents — a property of the frame the document commits
+          # into, so it rides the SW fetch event too: a rewritten request keeps it, the initiator latch doesn't apply)
+          ancestors:       @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i)
+        })
+        rid    = mint_resulting_client_id
+        target = url
+        loop do
+          command, hop = fetch.begin_hop
+          # (…the 21st hop's a network error, its error document at the last URL requested)
+          return commit_frame_error_document(realm_id, target, rid) if command == 'error'
 
-          return navigate_realm_self_get(realm_id, next_url, depth: depth + 1, initiator: initiator, origin_url: origin_url, referrer: referrer, is_reload: is_reload, is_history: is_history, record: false, user_activated: user_activated,
-                                                   site_seed: site, origin_null: taint, resulting_client_id: next_rid)
+          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross = hop
+          resp_body = nil
+          if (!target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
+             (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
+                                                          referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy,
+                                                          site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, resulting_client_id: rid))
+            return commit_frame_error_document(realm_id, target, rid) if sw['networkError']
+
+            status, headers, document = sw['status'].to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
+          else
+            response = dispatch_navigation_request(
+              target,
+              method:            meth,
+              referrer_source:   ref_source,
+              origin_url:        origin_url,
+              referrer_policy:   ref_policy,
+              site:              site,
+              origin_null:       tainted,
+              body:              req_body.empty? ? nil : req_body,
+              content_type:      content_type,
+              cookie_cross_site: cookie_cross,
+              user_activated:    user_activated
+            ) or return commit_frame_error_document(realm_id, target, rid)
+            status, headers, resp_body, = response
+          end
+          if (loc = redirect_location(status, headers))
+            resp_body.close if resp_body.respond_to?(:close)
+            command, to_get, new_client = fetch.redirect(status.to_i, loc.to_s, referrer_policy_header(headers))
+            return commit_frame_error_document(realm_id, target, rid) if command == 'fail'
+            return frame_navigation_made_no_document(realm_id) if command == 'hand_off'
+
+            # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
+            (id = frame_history_id(realm_id)) && @session_history.set_url(id, fetch.target)
+            req_body, content_type = ''.b, nil if to_get
+            rid = mint_resulting_client_id if new_client
+            next
+          end
+          return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
+          return save_downloaded_response(target, headers, resp_body || [document.to_s], realm: realm_id) if download_response?(headers)
+
+          tag_frame_entry_post(realm_id, req_body, content_type) if fetch.request_method == 'POST'
+          document ||= read_rack_body(resp_body)
+          return reload_frame_realm_by_id(realm_id, target, document, response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: fetch.referrer,
+                                                                        referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
         end
-        return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
-        if download_response?(headers)
-          save_downloaded_response(url, headers, resp_body, realm: realm_id)
-          return
-        end
-        tag_frame_entry_post(realm_id, body, content_type)
-        reload_frame_realm_by_id(realm_id, url.to_s, read_rack_body(resp_body), response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: sent_referrer,
-                                 referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
       # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
