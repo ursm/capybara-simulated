@@ -6594,14 +6594,6 @@ module Capybara
         [*@runtime.frame_realm_ids, 0].each {|rid| sw_unregister_client(rid) }
       end
 
-      # A browsing context was discarded. HTML hands focus back to the top-level traversable
-      # when the focused navigable goes away, so a realm that held the focus chain must not
-      # keep it — otherwise `WindowClient.focused` stays true for a client that no longer exists.
-      def note_realm_discarded(realm_id)
-        focus_changed if @runtime.realm_direct_call(0, '__csimBlurRealm', realm_id.to_i)
-        nil
-      end
-
       # The focus moved to another BROWSING CONTEXT (HTML "focused area of the top-level
       # traversable" — the engine's: navigables.rs `set_focused_realm`), which feeds
       # `WindowClient.focused` — the registry's, which a service worker reads (it can't query
@@ -10449,9 +10441,11 @@ module Capybara
       # Navigable of frame realm `realm_id` and its parent's (0 the page), and the parent realm — nil for a realm that is
       # no frame of this page's (a same-isolate window's).
       def frame_navigable(realm_id)
-        parent = @runtime.frame_realm_parent(realm_id).to_i
+        return nil if realm_id.to_i.zero?
+
+        parent, _, nav, = @runtime.frame_realm_tree(realm_id)
         return nil if frame_container_handle(realm_id, parent).zero?
-        return nil if (nav = @runtime.frame_realm_navigable(realm_id)).zero?
+        return nil if nav.zero?
 
         parent_nav = parent.zero? ? 0 : @runtime.frame_realm_navigable(parent)
         return nil if parent_nav.zero? && !parent.zero?

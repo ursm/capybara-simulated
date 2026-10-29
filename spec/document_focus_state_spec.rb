@@ -138,4 +138,53 @@ RSpec.describe 'document focus state' do
     JS
     expect(got).to eq([true, false, true, true, 'iframe', true, false])
   end
+
+  # …on as the frame navigates, its container its parent's focused area still (Chrome 156: `[true, true]`); its parent's
+  # where its container leaves, the frame's own focused area the viewport (HTML "focus fixup"); into a frame whose
+  # content a click lands on, focusable or not (Chrome: `[true, true]`); and away from the page while a window it opened
+  # holds it — the focusing steps run for that window's document — back once that one closes (headless Chrome gives a
+  # popup no system focus at all: `[true, false]` before and after its focus(), `true` after the close).
+  context 'with frames and windows' do
+    let(:session) do
+      simulated_session(lambda {|env|
+        body = case env['PATH_INFO']
+               when '/' then '<input id=t><iframe id=f src="/a"></iframe>'
+               when '/a' then '<input id=i><div id=d>d</div><iframe id=g srcdoc="<input id=j>"></iframe>'
+               else env['PATH_INFO']
+               end
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8>#{body}"]]
+      })
+    end
+
+    before { session.visit '/' }
+
+    def has_focus = session.evaluate_script('[document.hasFocus(), frames[0]?.document.hasFocus() ?? null]')
+
+    it 'stays in a frame that navigates' do
+      session.execute_script('frames[0].document.getElementById("i").focus(); frames[0].location.href = "/b"')
+      session.within_frame(0) { expect(session).to have_text('/b') }
+      expect(has_focus).to eq([true, true])
+    end
+
+    it "goes to a removed frame's parent" do
+      session.execute_script('frames[0].frames[0].document.getElementById("j").focus()')
+      expect(session.evaluate_script('frames[0].frames[0].document.hasFocus()')).to be(true)
+      session.execute_script('frames[0].document.getElementById("g").remove()')
+      expect(has_focus).to eq([true, true])
+    end
+
+    it "goes into a frame a click lands in, on content that isn't focusable" do
+      session.within_frame(0) { session.find('#d').click }
+      expect(has_focus).to eq([true, true])
+      session.find('#t').click
+      expect(has_focus).to eq([true, false])
+    end
+
+    it 'leaves the page for a window it opened, and comes back as that one closes' do
+      session.execute_script('window.w = open(""); w.document.body.innerHTML = "<input id=p>"; w.document.getElementById("p").focus()')
+      expect(session.evaluate_script('[document.hasFocus(), w.document.hasFocus()]')).to eq([false, true])
+      session.execute_script('w.close()')
+      expect(session.evaluate_script('document.hasFocus()')).to be(true)
+    end
+  end
 end
