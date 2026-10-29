@@ -6887,10 +6887,7 @@ module Capybara
         # is origin-bound) — and the committed document's realm adopts the final one.
         rid = mint_resulting_client_id
         loop do
-          command, hop = fetch.begin_hop
-          return nil if command == 'error'
-
-          meth, target, _, ref_source, ref_policy, site_seed, site, origin_null, cookie_cross = hop
+          meth, target, _, ref_source, ref_policy, site_seed, site, origin_null, cookie_cross = fetch.begin_hop
           resp_body = nil
           # A service worker only controls a client whose EVERY ancestor is a secure
           # context: an httpS frame anywhere under an http document loads from the
@@ -7031,9 +7028,10 @@ module Capybara
         # preload request NOW (main thread, before dispatching the event) and hand the response to the
         # SW as `event.preloadResponse`. GET only (the feature does not support other methods). The SW
         # that serves `respondWith(event.preloadResponse)` echoes this response back — the server is hit
-        # exactly once. (EARNED GAP: if the SW instead FALLS THROUGH, this method returns nil and the
-        # caller re-fetches from the network — a second hit; the spec reuses the preload response for
-        # the fall-through. No vendored subtest enables preload then falls through.)
+        # exactly once. One that FALLS THROUGH makes this return nil and the caller fetch from the network
+        # — a second hit, as the spec has it: "Create Fetch Event and Dispatch" returns null where
+        # respondWith was never called, and main fetch goes on to the network; the preload response is no
+        # fall-through's.
         # `dest` distinguishes a TOP-LEVEL navigation ('document') from a frame's ('iframe'):
         # the preload request must report the navigation's own Sec-Fetch-Dest — the SameSite
         # Lax cookie gate only applies to a top-level document GET.
@@ -9676,8 +9674,9 @@ module Capybara
         cache[[eff, url]] ||= parse_url(url.to_s, eff)&.fetch(:href) || url
       end
 
-      # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count) — a navigation's and a service
-      # worker's chain counted here (a fetch's by its plan, fetch_plan.rs), each dispatching 20 hops and the response.
+      # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count) — an event source's and a
+      # worker script's chain counted here (a navigation's by its fetch, navigation_fetch.rs; a fetch's by its plan,
+      # fetch_plan.rs), each dispatching 20 hops and the response.
       MAX_FETCH_REDIRECTS = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
@@ -10909,14 +10908,9 @@ module Capybara
           # into, so it rides the SW fetch event too: a rewritten request keeps it, the initiator latch doesn't apply)
           ancestors:       @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i)
         })
-        rid    = mint_resulting_client_id
-        target = url
+        rid = mint_resulting_client_id
         loop do
-          command, hop = fetch.begin_hop
-          # (…the 21st hop's a network error, its error document at the last URL requested)
-          return commit_frame_error_document(realm_id, target, entry: entry) if command == 'error'
-
-          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross = hop
+          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross = fetch.begin_hop
           resp_body = nil
           if (!target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
@@ -11635,11 +11629,7 @@ module Capybara
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
           loop do
-            command, hop = fetch.begin_hop
-            # (…the 21st hop's a network error, its error document at the last URL requested)
-            return commit_error_document(fetch.target) if command == 'error'
-
-            meth, target, _, ref_source, ref_policy, seed, site, tainted, = hop
+            meth, target, _, ref_source, ref_policy, seed, site, tainted, = fetch.begin_hop
             @current_referer = fetch.referrer.to_s
             hop_body = req_body.to_s.empty? ? nil : req_body
             resp_body = nil

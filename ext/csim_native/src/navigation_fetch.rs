@@ -79,21 +79,17 @@ impl NavigationFetch {
         })
     }
 
-    // #begin_hop -> ['error'] where it would be the 21st dispatch, else ['fetch', [method, URL, body gone, referrer
-    // source, referrer policy, site seed, Sec-Fetch-Site, origin tainted, cookies cross-site]]: the hop to make — through
-    // a service worker that controls it (its request of the site seed so far) or the network (its Sec-Fetch-Site this
-    // hop's).
+    // #begin_hop -> [method, URL, body gone, referrer source, referrer policy, site seed, Sec-Fetch-Site, origin tainted,
+    // cookies cross-site]: the hop to make — through a service worker that controls it (its request of the site seed so
+    // far) or the network (its Sec-Fetch-Site this hop's). (…never a 22nd: `redirect` fails the 21st's redirect as it is
+    // reached)
     fn begin_hop(ruby: &Ruby, rb_self: &Self) -> RArray {
         let mut st = rb_self.st.borrow_mut();
-        let out = ruby.ary_new();
-        if st.chain.dispatch().is_none() {
-            let _ = out.push("error");
-            return out;
-        }
+        st.chain.dispatch();
         let target = st.chain.target.clone();
         let hop_site = wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), &target));
         let cross = st.ancestors.as_ref().is_some_and(|a| a.iter().any(|u| cross_site_for_cookies(u.as_deref(), &target)));
-        let facts = ruby.ary_from_iter([
+        ruby.ary_from_iter([
             st.chain.method.clone().into_value_with(ruby),
             target.into_value_with(ruby),
             st.chain.body_empty.into_value_with(ruby),
@@ -103,10 +99,7 @@ impl NavigationFetch {
             hop_site.into_value_with(ruby),
             (st.chain.effective_origin.as_deref() == Some("null")).into_value_with(ruby),
             cross.into_value_with(ruby),
-        ]);
-        let _ = out.push("fetch");
-        let _ = out.push(facts);
-        out
+        ])
     }
 
     // #redirect(status, location, policy) -> what a redirect response of the hop makes of the navigation, its Location
