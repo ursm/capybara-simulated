@@ -425,12 +425,35 @@ RSpec.describe 'a nested document navigating itself' do
       poll_until { s.evaluate_script('window.settled === true') }
 
       expect(s.evaluate_script('[frames[0].location.pathname, frames[0].document.body.textContent]')).to eq(['/o', '/o'])
-      # (…and one the page's container sets: the frame left at its initial about:blank)
+      # (…and one the page's container sets: the frame left at the document it is at)
       s.execute_script('document.getElementById("f").src = "/away"')
       s.execute_script('setTimeout(() => window.settled2 = true, 50)')
       poll_until { s.evaluate_script('window.settled2 === true') }
 
       expect(s.evaluate_script('frames[0].location.pathname')).to eq('/o')
     end
+  end
+
+  # A navigation redirected a 21st time is a network error as that redirect is reached (Fetch "HTTP-redirect fetch"):
+  # its error document at the 21st URL, which the frame's session history entry stays at — a reload requests that one.
+  it "stays at the 21st URL of a navigation redirected once too often" do
+    seen = []
+    app = lambda do |env|
+      seen << env['PATH_INFO']
+      if (n = env['PATH_INFO'][%r{\A/r(\d+)\z}, 1])
+        next [302, {'location' => "/r#{n.to_i + 1}"}, []]
+      end
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><iframe src="/o"></iframe>']]
+    end
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script(%q{frames[0].eval('location = "http://www.example.com/r0"')})
+    poll_until { seen.include?('/r20') }
+    seen.clear
+    s.execute_script('frames[0].location.reload()')
+    poll_until { seen.any? }
+
+    expect(seen.first).to eq('/r20')
   end
 end

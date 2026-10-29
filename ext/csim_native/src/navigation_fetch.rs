@@ -10,7 +10,7 @@ use std::cell::RefCell;
 
 use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RModule, Ruby, TryConvert, Value};
 
-use crate::fetch_chain::{Followed, Judged, RequestChain};
+use crate::fetch_chain::{Followed, Judged, RequestChain, MAX_REDIRECTS};
 use crate::referrer::{cross_site_for_cookies, fetch_site, http_origin, wider_site};
 
 struct Nav {
@@ -117,6 +117,12 @@ impl NavigationFetch {
     fn redirect(ruby: &Ruby, rb_self: &Self, status: u32, location: magnus::RString, policy: Option<String>) -> Result<RArray, Error> {
         let mut st = rb_self.st.borrow_mut();
         let out = ruby.ary_new();
+        // (…the 21st hop's redirect a network error as it is reached — Fetch "HTTP-redirect fetch": a request redirected 20
+        // times already — not a hop of its own)
+        if st.chain.dispatches > MAX_REDIRECTS {
+            let _ = out.push("fail");
+            return Ok(out);
+        }
         let target = st.chain.target.clone();
         // (…the Referer it sent: the next hop's referrer source; the site it was at, latched)
         let sent = st.chain.referer();

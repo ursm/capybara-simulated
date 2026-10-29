@@ -10922,8 +10922,19 @@ module Capybara
       # `location.replace`, a navigation of a document not completely loaded yet: `replace_frame_entry`).
       # (…`initiator` the realm whose document navigates it, where one is named: an opaque origin's cross-site, its Origin
       # `null` — `opaque_initiator` — and the initiator of an entered frame's, which navigates through `navigate_frame`)
-      def navigate_realm_self_get(realm_id, get_url, is_reload: false, is_history: false, record: true, site_seed: nil, origin_null: false, referrer: nil, initiator: nil,
-                                  origin_url: nil, user_activated: false)
+      def navigate_realm_self_get(
+        realm_id,
+        get_url,
+        is_reload: false,
+        is_history: false,
+        record: true,
+        site_seed: nil,
+        origin_null: false,
+        referrer: nil,
+        initiator: nil,
+        origin_url: nil,
+        user_activated: false
+      )
         referrer ||= realm_referrer_initiator(realm_id)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
@@ -10960,8 +10971,20 @@ module Capybara
       # a frame reached via contentWindow has no stack entry, so rebuild it by
       # realm id (recovering its container element + parent realm) and fire the
       # iframe element's load event the GET/src path would.
-      def navigate_realm_self_post(realm_id, url, body, content_type, is_reload: false, is_history: false, site_seed: nil, origin_null: false, referrer: nil, initiator: nil,
-                                   origin_url: nil, user_activated: false)
+      def navigate_realm_self_post(
+        realm_id,
+        url,
+        body,
+        content_type,
+        is_reload: false,
+        is_history: false,
+        site_seed: nil,
+        origin_null: false,
+        referrer: nil,
+        initiator: nil,
+        origin_url: nil,
+        user_activated: false
+      )
         referrer ||= realm_referrer_initiator(realm_id)
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
@@ -10984,7 +11007,20 @@ module Capybara
       # GETting, its session history entry the redirect's; its reserved client id threaded through, re-minted on a hop to
       # another origin, and adopted by the rebuilt realm. The POST method and body tagged onto the entry once a POST's
       # response makes the document — a Post/Redirect/Get one's entry stays a GET's (`tag_frame_entry_post`).
-      private def navigate_realm_self(realm_id, url, body, content_type, is_reload:, is_history:, site_seed:, origin_null:, referrer:, initiator:, origin_url:, user_activated:)
+      private def navigate_realm_self(
+        realm_id,
+        url,
+        body,
+        content_type,
+        is_reload:,
+        is_history:,
+        site_seed:,
+        origin_null:,
+        referrer:,
+        initiator:,
+        origin_url:,
+        user_activated:
+      )
         invalidate_find_cache
         site_seed, origin_null = 'cross-site', true if initiator && document_origin_opaque?(initiator.to_i)
         source, referrer_policy = referrer
@@ -11050,7 +11086,10 @@ module Capybara
             rid = mint_resulting_client_id if new_client
             next
           end
-          return frame_navigation_made_no_document(realm_id) if no_content_response?(status)
+          if no_content_response?(status)
+            resp_body.close if resp_body.respond_to?(:close)
+            return frame_navigation_made_no_document(realm_id)
+          end
           return save_downloaded_response(target, headers, resp_body || [document.to_s], realm: realm_id) if download_response?(headers)
 
           tag_frame_entry_post(realm_id, req_body, content_type) if fetch.request_method == 'POST'
@@ -11060,8 +11099,8 @@ module Capybara
         end
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
-      # reload / history traversal re-POSTS it. Applied only on a DIRECT response (not a redirect),
-      # so a Post/Redirect/Get entry stays a GET.
+      # reload / history traversal re-POSTS it — once a POST's response makes the document (a 307 /
+      # 308's re-POST's too), so a Post/Redirect/Get entry stays a GET.
       def tag_frame_entry_post(realm_id, body, content_type)
         id = frame_history_id(realm_id)
         @session_history.update(id, {body: body.to_s, content_type: content_type}) if id
@@ -11543,7 +11582,7 @@ module Capybara
       # under its policy, a POST's Origin — the initiating document realm `initiator`'s, cross-site and `null` where its
       # origin is opaque, `null` too where a redirect before it tainted it (`taint`) — `site` the Sec-Fetch-Site the hops
       # before it widened to; its cookies by frame realm `frame`'s ancestors too (RFC 6265bis "site for cookies", as
-      # `navigate_realm_self_get`'s). [site widened by this hop, the initiating document's URL].
+      # `navigate_realm_self`'s). [site widened by this hop, the initiating document's URL].
       private def frame_request_headers(env, method, url, referrer:, initiator:, site:, frame:, taint: false, user_activated: false)
         initiator_url, opaque = realm_request_initiator(initiator.to_i)
         site = opaque ? 'cross-site' : Native.fetch_site(site, initiator_url, url)
