@@ -9702,9 +9702,7 @@ module Capybara
           # this a hash assignment reloaded the page, discarding all JS state.
           if pure_fragment_navigation?(url)
             update_current_hash(url)
-          elsif url.match?(/\Adata:/i)
-            # A navigation of the top-level browsing context to a `data:` URL: Chrome and Firefox refuse it (the URL's
-            # document would run with no origin of its own).
+          elsif top_level_data_refused?(url)
             nil
           elsif initiator
             realm, referrer = initiator
@@ -10221,9 +10219,7 @@ module Capybara
       # entry, whether the frame's document is completely loaded or not: a form's replaces only its own navigable's (HTML
       # "plan to navigate", the form document the target's active document).
       private def submit_into_page(realm_id, spec, url, post, initiator, activated)
-        # (…none to a `data:` URL, which the top-level browsing context refuses a document's navigation to, as its
-        # `location`'s: `consume_pending_location`)
-        return if url.match?(/\Adata:/i)
+        return if top_level_data_refused?(url)
 
         unless realm_id.zero?
           return in_top_context { navigate_top_from(realm_id, initiator, url, post: post, user_activated: activated) }
@@ -10855,7 +10851,14 @@ module Capybara
       # content type]).
       # (…the navigation's initiator, whose site `Sec-Fetch-Site` compares and whose origin a POST's Origin carries, that
       # document's: `realm_request_initiator` — one of an opaque origin, a sandboxed frame's, cross-site to every URL)
+      # Whether a document's navigation of the top-level browsing context to `url` is refused — one to a `data:` URL, whose
+      # document would run with no origin of its own: Chrome refuses a link's, a form's, `location`'s and
+      # `open(url, '_self')`'s (measured 2026-10-30; a browser intervention, no HTML rule). The driver's own `visit` is
+      # the user's, which none refuses.
+      private def top_level_data_refused?(url) = url.to_s.match?(/\Adata:/i)
       def navigate_top_from(realm, initiator, url, post: nil, replace: false, blob: nil, user_activated: false)
+        return if top_level_data_refused?(url)
+
         source, policy = initiator
         site           = realm_creator_url(realm)
         opaque         = opaque_initiator(realm)
