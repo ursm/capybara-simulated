@@ -10586,7 +10586,7 @@ module Capybara
       # (…`url` its document's URL as the navigation began, where a handler since may have moved its location: a
       # traversal's, which asked it first)
       def leave_frame_entry(realm_id, url = frame_realm_url(realm_id))
-        # (…a document no entry was recorded for — a blob's, a data: one's — leaving the entry before it as it is)
+        # (…a document no entry was recorded for — a data: one's, a srcdoc one's — leaving the entry before it as it is)
         return unless Native.history_recordable_url(url)
         return unless (id = frame_history_id(realm_id))
 
@@ -10676,7 +10676,10 @@ module Capybara
       # captured form state (before the element load fires). Used for a history traversal
       # (isHistoryNavigation) AND for a reload of the current entry (isReloadNavigation — e.g.
       # `history.go(0)` / `location.reload()` after a back/forward, where the frame's `src` is stale
-      # and only the current entry names the right URL).
+      # and only the current entry names the right URL). Fetched as any navigation of the frame is,
+      # hop by hop (`navigate_realm_self`): an entry reached by a POST re-POSTS its recorded body, a
+      # traversal is a user's — of no initiator, Sec-Fetch-Site `none` — a reload the frame
+      # document's own.
       def reload_frame_to_entry(realm_id, entry, is_reload: false, is_history: true)
         url = entry[:url].to_s
         return if url.empty?
@@ -10690,69 +10693,24 @@ module Capybara
           prompted = @prompted_frames&.delete?(realm_id) ? true : false
           return frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, nil, prompted)
         end
-        # An entry reached by a POST submission re-POSTS (with the recorded body); a normal entry
-        # re-GETs. The method drives both the SW fetch event and the network fallback.
-        is_post   = entry.key?(:body)
-        body      = entry[:body].to_s
-        post_args = is_post ? {method: 'POST', body: body, content_type: entry[:content_type]} : {}
-        # A history TRAVERSAL restores the entry's persisted form state (bfcache); a RELOAD gives a
-        # fresh document, so it must NOT restore the (possibly stale) snapshot the entry was left with.
-        restore = is_reload ? nil : entry[:form_state]
-        # …and its classic history API state, which the document made starts with (as the page's: `replay_history_entry`),
-        # as `[state]`.
-        history_state = is_reload ? nil : [entry[:state]]
-        # A traversal / reload is a navigation: route it through the controlling SW's fetch event
-        # first — the refetch happens here, Ruby-side, bypassing the __csimFrameWindow interception
-        # the initial load uses. A respondWith serves the document; a network error fails the
-        # navigation; nil falls through to the network below. Same secure-ancestors gate as
-        # navigate_realm_self_get. KNOWN GAP: an SW-served REDIRECT here commits the redirect
-        # response's body instead of following it (no vendored test reloads into a redirecting
-        # respondWith; following would need the entry/restore plumbing threaded through the
-        # re-entry) — extend when a test pins the behavior.
-        # A reload / traversal creates a fresh document, so it gets its own reserved
-        # client id, adopted by the rebuilt realm (same model as a fresh navigation).
-        rid = mint_resulting_client_id
-        referrer_source, referrer_policy = realm_referrer_initiator(realm_id)
+        # A history TRAVERSAL restores the entry's persisted form state (bfcache) and its classic history API state, which
+        # the document made starts with (as the page's: `replay_history_entry`), as `[state]` — and the referrer the
+        # entry's document was made with (HTML's document state); a RELOAD gives a fresh document, so it must NOT restore
+        # the (possibly stale) snapshot the entry was left with, its referrer the request's (Chrome).
+        commit = is_reload ? {} : {restore_state: entry[:form_state], history_state: [entry[:state]]}
+        commit[:referrer] = entry[:referrer] if !is_reload && entry.key?(:referrer)
         return unless prompt_to_unload_frame(realm_id)
 
-        if (!url.to_s.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
-           (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
-                                                      referrer_source: referrer_source, referrer_policy: referrer_policy,
-                                                      resulting_client_id: rid, **post_args))
-          return commit_frame_error_document(realm_id, url) if sw['networkError']
-          return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(sw['status'])
-
-          # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
-          # does the single utf8_text re-tag, matching the network path below.
-          reload_frame_realm_by_id(realm_id, url, Base64.decode64(sw['body_b64'].to_s),
-                                   response_content_type(sw['headers'] || {}), restore_state: restore, history_state: history_state, client_id: rid, csp: response_csp(sw['headers'] || {}),
-                                   referrer: frame_entry_referrer(entry, is_reload) { Native.request_referrer(referrer_policy.to_s, referrer_source, url) },
-                                   referrer_policy: referrer_policy_header(sw['headers']), refresh: refresh_header(sw['headers']))
-          return
+        # A `blob:` URL, which no server answers: the blob its container loaded the document of, for a reload, else the
+        # one it names now in this window's registry (`__csimTakeFrameNavBlob`) — none a failed load at the URL.
+        if url.match?(/\Ablob:/i)
+          blob = host_blob(frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimTakeFrameNavBlob', realm_id, url, is_reload))
+          return reload_frame_realm_by_id(realm_id, url, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', **commit)
         end
-        env = rack_env_for(url, method: is_post ? 'POST' : 'GET', input: is_post ? body : '')
-        if is_post
-          env['CONTENT_TYPE']   = entry[:content_type].to_s.empty? ? 'application/x-www-form-urlencoded' : entry[:content_type]
-          env['CONTENT_LENGTH'] = body.bytesize.to_s
-        end
-        apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, referrer_source, url))
-        response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url)
-        status, headers, resp_body = response
-        merge_set_cookie(headers, url, env)
-        # (…none made of a download, nor of a 204 / 205 — a reload's changing no history, a traversal's its own to settle:
-        # `perform_history_traverse`)
-        return save_downloaded_response(url, headers, resp_body, realm: is_reload ? nil : realm_id) if download_response?(headers)
-        return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(status)
-        reload_frame_realm_by_id(realm_id, url, read_rack_body(resp_body), response_content_type(headers),
-                                 restore_state: restore, history_state: history_state, csp: response_csp(headers),
-                                 referrer: frame_entry_referrer(entry, is_reload) { Native.request_referrer(referrer_policy.to_s, referrer_source, url) },
-                                 referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
-      end
-      # The referrer of the document a traversal (or, `is_reload`, a reload) to frame session history entry `entry` makes:
-      # the one the entry's document was made with (HTML's document state) for a traversal, the request's — the block's —
-      # for a reload, which refers by the document reloading (Chrome).
-      private def frame_entry_referrer(entry, is_reload)
-        is_reload ? yield : entry.fetch(:referrer) { yield }
+        navigate_realm_self(realm_id, url, entry.key?(:body) ? entry[:body].to_s : nil, entry[:content_type], is_reload: is_reload, is_history: is_history, site_seed: nil,
+                                                                                                   origin_null: false, referrer: realm_referrer_initiator(realm_id),
+                                                                                                   initiator: is_reload ? realm_id : nil, origin_url: nil, user_activated: false,
+                                                                                                   commit: commit)
       end
       # A form submitted inside frame realm `realm_id`, its request as it was submitted (`spec`, serialized in that realm:
       # its shadow trees' controls left out, its action resolved against its document): routed, then navigated.
@@ -10918,14 +10876,16 @@ module Capybara
         initiator:,
         origin_url:,
         user_activated:,
-        entry: nil
+        entry: nil,
+        commit: {}
       )
         invalidate_find_cache
         site_seed, origin_null = 'cross-site', true if initiator && document_origin_opaque?(initiator.to_i)
         source, referrer_policy = referrer
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
         # (`initiating_url`), its Referer the referrer source's — not the top document `current_browsing_context_url`
-        # returns for a non-entered frame.
+        # returns for a non-entered frame. (…a traversal's a user's, of no initiator — Sec-Fetch-Site `none`, as the page's
+        # is: `replay_history_entry` — its origin the frame document's all the same)
         origin_url ||= initiating_url(initiator || realm_id) || source
         req_body = body.to_s.b
         fetch = Native::NavigationFetch.new({
@@ -10934,7 +10894,8 @@ module Capybara
           body_empty:      req_body.empty?,
           referrer:        source,
           referrer_policy: referrer_policy.to_s,
-          initiator:       origin_url,
+          initiator:       (origin_url unless is_history),
+          origin:          (url_origin(origin_url) if is_history),
           origin_null:     origin_null,
           site_seed:       site_seed,
           # (…its cookies cross-site by the frame's ancestors' documents — a property of the frame the document commits
@@ -10993,8 +10954,11 @@ module Capybara
 
           tag_frame_entry_post(realm_id, req_body, content_type) if fetch.request_method == 'POST'
           document ||= read_rack_body(resp_body)
-          return commit_frame_document(realm_id, entry, target, document, response_content_type(headers), client_id: rid, csp: response_csp(headers), referrer: fetch.referrer,
-                                                                                    referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers))
+          # (…and what the caller's document state gives it — a traversal's form state, history state and referrer —
+          # the referrer the request's where a redirect made it anew)
+          response = {client_id: rid, csp: response_csp(headers), referrer: fetch.referrer, referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers)}
+          response.update(fetch.redirected? ? commit.except(:referrer) : commit)
+          return commit_frame_document(realm_id, entry, target, document, response_content_type(headers), **response)
         end
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later

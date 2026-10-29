@@ -153,12 +153,16 @@ struct Queued {
 // The navigable a list belongs to: 0 the traversable's own.
 const TOP: u32 = 0;
 
-// Whether a frame's entry at `url` can be made again by a traversal alone: one of an http(s) URL, or about:blank's —
-// what a frame's document at another records no entry for.
+// Whether a frame's entry at `url` can be made again by a traversal alone: one of an http(s) URL, a `blob:` one's —
+// fetched anew from the window's blob URL store, a revoked one's a network error (HTML "apply the history step": its
+// document made by fetching) — or about:blank's; what a frame's document at another records no entry for.
 pub(crate) fn recordable(url: &str) -> bool {
     let scheme = url.split_once(':').map_or("", |(s, _)| s);
     if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") {
         return url[scheme.len()..].starts_with("://");
+    }
+    if scheme.eq_ignore_ascii_case("blob") {
+        return true;
     }
     let rest = url.get(..11).filter(|s| s.eq_ignore_ascii_case("about:blank")).map(|_| &url[11..]);
     rest.is_some_and(|rest| rest.is_empty() || rest.starts_with(['?', '#']))
@@ -412,7 +416,7 @@ impl Traversable {
     }
 
     // …the plan of a traversal by `delta` as the host applies it: past a step whose frame's entry it cannot make again
-    // alone — a srcdoc or a blob document it left, a data: one's, which have no bytes to come back to (`recordable`) —
+    // alone — a srcdoc document it left, a data: one's, which have no bytes to come back to (`recordable`) —
     // on to the next step that way.
     fn traversal(&self, mut delta: i64) -> Option<(i64, Vec<Change>)> {
         let way = if delta > 0 { 1 } else { -1 };
@@ -768,6 +772,7 @@ mod tests {
         assert!(!h.is_queued());
         assert_eq!(h.last_token(), t2);
         assert!(recordable("about:blank#x") && recordable("HTTPS://a.test/") && !recordable("about:blanky") && !recordable("data:,x"));
+        assert!(recordable("blob:http://a.test/0d3c") && recordable("BLOB:null/x"));
     }
 
     // The page navigated to a new document: its frames' entries stay steps of the one it left; traversing back to that
