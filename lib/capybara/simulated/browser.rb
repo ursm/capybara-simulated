@@ -5838,6 +5838,9 @@ module Capybara
         sw_set_version(id, 'installing', nil) if installing == handle
         sw_retire(waiting) if waiting && waiting != handle
         sw_update_worker_state(handle, 'installed')
+        # (…its install event no longer pending: a registration unregistered meanwhile cleared, where nothing else holds
+        # it — `waitUntil`'s steps, Try Clear Registration)
+        try_clear_uninstalls
       end
 
       # …or its install failed (a rejected install `waitUntil` — Install "installFailed"): redundant without ever
@@ -5849,6 +5852,7 @@ module Capybara
         sw_retire(handle)
         scope = sw_mapped_scope(id)
         sw_unregister(scope) if scope && sw_versions(id).none?
+        try_clear_uninstalls
       end
 
       # installed → activating, once Try Activate allows it: the one it replaces retired first (Activate's order), then
@@ -5882,6 +5886,8 @@ module Capybara
         scope = sw_mapped_scope(id)
         sw_register_scope(scope, handle) if scope && sw_versions(id)[2] == handle
         sw_update_worker_state(handle, 'activated')
+        # (…and its activate event's: likewise)
+        try_clear_uninstalls
       end
 
       # A version retired: redundant, and its isolate terminated.
@@ -7344,8 +7350,6 @@ module Capybara
           flush_sw_deferred_fetches(e[:handle].to_i)
           retry_deferred_navigations
         end
-        # (…a registration unregistered while one was pending cleared now, where nothing else holds it)
-        try_clear_uninstalls if sw_phases.any?
         # A reaped SERVICE worker (posted by reap_worker, possibly from a worker thread):
         # main-thread cleanup of the activation-parking state it can no longer satisfy.
         # A job its worker owed an evaluation outcome fails with it (its worker thread posts the
