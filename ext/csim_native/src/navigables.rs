@@ -713,8 +713,9 @@ impl RealmArena {
     // Realm `source`'s document's navigation of realm `target`'s navigable to `url` (absolute): "refused" where it may not
     // navigate it (`navigation_allowed`, asked where `check_allowed`: another window's `location` set — a SecurityError
     // its caller throws), "ignored" for a `javascript:` URL across origins (HTML "navigate to a javascript: URL": the
-    // initiator origin same origin-domain with the target's document, none across origins), else "navigate".
-    pub(crate) fn navigation_verdict(&self, source: i32, target: i32, url: &str, check_allowed: bool) -> &'static str {
+    // initiator origin same origin-domain with the target's document — same origin here, `document.domain` not
+    // modeled), else "navigate".
+    fn navigation_verdict(&self, source: i32, target: i32, url: &str, check_allowed: bool) -> &'static str {
         if check_allowed && !self.navigation_allowed(source, target) {
             return "refused";
         }
@@ -730,8 +731,9 @@ impl RealmArena {
         }
         depth < 8 && self.window_opener(self.window_key(b)).is_some_and(|opener| self.familiar_with(a, opener, depth + 1))
     }
-    // Whether realms `a`'s and `b`'s documents are of one origin — by their keys: an opaque one the same only with the
-    // realms that share it (`RealmLocation::origin_key`).
+    // Whether realms `a`'s and `b`'s documents are of one origin — by their keys, as far as they are known
+    // (`RealmLocation::known_origin_key`, none made: a realm that shares an opaque origin was given its key as it did, so
+    // an opaque one with none is no other's).
     fn same_origin(&self, a: i32, b: i32) -> bool {
         let key = |r: i32| self.realm_state(r).and_then(|s| s.location.known_origin_key());
         a == b || key(a).is_some_and(|k| key(b) == Some(k))
@@ -748,7 +750,7 @@ impl RealmArena {
     // its own or a descendant's always; its own top-level traversable as `top_navigation_allowed` lets it; any other one
     // where its sandboxing has no sandboxed navigation browsing context flag — a top-level one it opened itself, whose one
     // permitted sandboxed navigator it is, all the same.
-    pub(crate) fn navigation_allowed(&self, source: i32, target: i32) -> bool {
+    fn navigation_allowed(&self, source: i32, target: i32) -> bool {
         if source == target || self.ancestor_realms(target).contains(&source) {
             return true;
         }
@@ -1276,10 +1278,14 @@ fn link_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let items = [v8::String::new(scope, kind).unwrap().into(), at, container];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
+// A realm id argument — none for anything but an int32 (no `valueOf` run to make one).
+fn realm_arg(scope: &mut v8::PinScope<'_, '_>, value: v8::Local<'_, v8::Value>) -> Option<i32> {
+    value.is_int32().then(|| value.int32_value(scope)).flatten()
+}
 // __dom.navigationVerdict(source, target, url, checkAllowed) -> `RealmArena::navigation_verdict` — "refused" for a
-// source or target that names no realm.
+// source or target that is no realm id.
 fn navigation_verdict(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let (Some(source), Some(target)) = (args.get(0).int32_value(scope).filter(|_| args.get(0).is_int32()), args.get(1).int32_value(scope).filter(|_| args.get(1).is_int32())) else {
+    let (Some(source), Some(target)) = (realm_arg(scope, args.get(0)), realm_arg(scope, args.get(1))) else {
         return rv.set(v8::String::new(scope, "refused").unwrap().into());
     };
     let url = args.get(2).to_rust_string_lossy(scope);
@@ -1363,8 +1369,8 @@ fn realm_in_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return };
     let on = args.get(1).is_true();
-    let opener = args.get(2).int32_value(scope).filter(|_| args.get(2).is_int32());
-    let key = args.get(3).int32_value(scope).filter(|_| args.get(3).is_int32()).unwrap_or(realm);
+    let opener = realm_arg(scope, args.get(2));
+    let key = realm_arg(scope, args.get(3)).unwrap_or(realm);
     let cid = realm_id(scope, &args);
     crate::dom::realm(scope, cid).set_stepped_window(realm, on, opener, key);
 }
@@ -1619,6 +1625,18 @@ mod tests {
         arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-scripts"));
         assert_eq!(arena.navigation_verdict(1, 0, "http://a.test/", true), "refused");
         assert_eq!(arena.navigation_verdict(1, 1, "http://a.test/", true), "navigate");
+        // (…opaque origins: two new ones none's, one shared by its key the same)
+        arena.location.sandbox = 0;
+        for (r, origin) in [(2, "null"), (3, "null")] {
+            arena.enter(r);
+            arena.location.set_document_origin(Some(origin.to_owned()));
+        }
+        assert_eq!(arena.navigation_verdict(3, 2, "javascript:void 0", false), "ignored");
+        for r in [2, 3] {
+            arena.enter(r);
+            arena.location.set_document_origin(Some("null|k".to_owned()));
+        }
+        assert_eq!(arena.navigation_verdict(3, 2, "javascript:void 0", false), "navigate");
     }
 
     #[test]
