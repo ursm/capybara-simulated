@@ -226,7 +226,8 @@ pub(crate) enum Choice {
 // - `Auxiliary`: a new window the host opens, so named ('' for `_blank`), for a name or `_blank` followed in a frame or
 //   a window `window.open` made, where the host opens one (the frame's VM not rebuilt, a fresh window);
 // - `Navigate`: the realm's navigable — `_self` from a frame or such a window, `_top` or `_parent` from a frame, a name
-//   the top-level traversable of a frame's has — which the document navigates as its location navigates it;
+//   the top-level traversable of a frame's has, a name another top-level traversable of this isolate has — which the
+//   document navigates as its location navigates it;
 // - `Plan`: the top-level page's link (or such a window's not routed above), whose navigation its caller plans
 //   (navigation_plan.rs `planNavigation`) with this target — `_top` for a name the page has.
 #[derive(Debug, PartialEq)]
@@ -813,7 +814,10 @@ impl RealmArena {
                     target = "_top".encode_utf16().collect();
                     keyword = TARGET_TOP;
                 }
-                Chosen::Window(_) | Chosen::None => {}
+                // (…another top-level traversable a name found — a window `window.open` made in this isolate, or the page
+                // from one — navigated as `window.open` navigates it: its own plan's)
+                Chosen::Window(w) => return LinkRoute::Navigate(w),
+                Chosen::None => {}
             }
         }
         if self.auxiliary_refused(link_realm, &target) {
