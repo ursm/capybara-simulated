@@ -101,7 +101,7 @@ impl Navigables {
     }
     // …and whether its document is fully active (HTML): its context not disposed — by its frame's removal, or a
     // navigation that replaced it.
-    fn fully_active(&self, cid: i32) -> bool {
+    pub(crate) fn fully_active(&self, cid: i32) -> bool {
         !self.discarded.contains(&cid)
     }
 }

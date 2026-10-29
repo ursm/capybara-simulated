@@ -24,7 +24,7 @@ struct Entry {
     step: i64,
     url: String,
     doc: u64,
-    // (…shared with the copies a saved history keeps, a change to it made on its own: `Arc::make_mut`)
+    // (…shared with the copies a saved history keeps: a change to it makes a new one, theirs left as it was)
     data: Arc<Data>,
 }
 
@@ -554,9 +554,12 @@ impl SessionHistory {
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
+    // (…`fields` read with the history unlocked: a Ruby conversion may run code that reads it)
     fn update(ruby: &magnus::Ruby, rb_self: &Self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
+        let Some(mut data) = rb_self.lock().state.entry(id).map(|e| Data::clone(&e.data)) else { return Ok(()) };
+        data.merge(ruby, fields)?;
         if let Some(e) = rb_self.lock().state.entry_mut(id) {
-            Arc::make_mut(&mut e.data).merge(ruby, fields)?;
+            e.data = Arc::new(data);
         }
         Ok(())
     }
@@ -932,6 +935,7 @@ pub(crate) fn length_of(id: u64) -> Option<usize> {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
+    crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
 }
 
 // __dom.setSessionHistory(id) — the session history of the isolate's window (`SessionHistory#id`), the host's to say.
@@ -940,15 +944,38 @@ fn set_session_history(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     crate::dom::dom(scope).session_history = id;
 }
 
-// __dom.historyLength(realm) -> `history.length` of realm `realm`'s document: its window's session history's — the
-// page's, its frames' with it — or, a realm of another traversable (a window `window.open` made in this isolate) or a
-// frame's no longer in the page, 1: the one entry of its initial document.
+// Whether realm `realm`'s `history` is its window's session history: a realm of the page's, or of a frame of it — every
+// container up to the page's in a live document (navigables.rs `realm_in_tree`) — not one of another traversable (a
+// window `window.open` made in this isolate, or a frame of one).
+fn of_page(arena: &crate::dom::RealmArena, realm: i32) -> bool {
+    arena.realm_in_tree(realm) && arena.top_level_realm(realm) == 0
+}
+
+// __dom.historyLength() -> `history.length` of the calling realm's document: its window's session history's — the
+// page's, its frames' with it — or 1, the one entry of its initial document, for a realm of another traversable; a
+// SecurityError for a document that is not fully active (HTML's History `length` getter).
 fn history_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let of_page = arena.top_level_realm(realm) == 0 && (realm == 0 || arena.live_container(realm).is_some());
+    if !arena.navigables.fully_active(cid) {
+        let Some(message) = v8::String::new(
+            scope,
+            "Failed to read the 'length' property from 'History': May not use a History object associated with a Document that is not fully active",
+        ) else {
+            return;
+        };
+        return crate::clone::throw_dom_exception(scope, message, "SecurityError");
+    }
+    let of_page = of_page(arena, cid);
     let id = crate::dom::dom(scope).session_history;
     let length = if of_page { length_of(id).unwrap_or(1) } else { 1 };
     rv.set_uint32(length as u32);
+}
+
+// __dom.historyOfPage(realm) -> whether realm `realm`'s `history` is its window's session history (`of_page`), the
+// host's to ask of a pushState or a traversal one asked for.
+fn history_of_page_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
+    rv.set_bool(of_page(crate::dom::realm(scope, cid), realm));
 }

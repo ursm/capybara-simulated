@@ -178,6 +178,28 @@ RSpec.describe 'the joint session history' do
     expect(session.current_path).to eq('/b')
   end
 
+  # HTML's History `length` getter: a SecurityError for a document that is not fully active — a frame's whose own frame
+  # was removed, or one its frame navigated away from — not the page's length, which the frame's own container, live in
+  # a document no longer active, made it look part of.
+  it "refuses the history length of a document that is not fully active" do
+    nested_app = lambda {|env|
+      body = case env['PATH_INFO']
+             when '/top' then '<iframe src="/f1"></iframe>'
+             when '/f1' then '<iframe src="/g"></iframe>'
+             else 'G'
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    }
+    s = simulated_session(nested_app)
+    s.visit '/top'
+    s.execute_script("window.inner = frames[0].frames[0].history; window.mid = frames[0].history; history.pushState(1, '')")
+    expect(s.evaluate_script('[inner.length, mid.length, history.length]')).to eq([2, 2, 2])
+    s.execute_script("document.querySelector('iframe').remove()")
+
+    read = '(h => { try { return h.length } catch (e) { return e.name } })'
+    expect(s.evaluate_script("[#{read}(inner), #{read}(mid), history.length]")).to eq(%w[SecurityError SecurityError] + [2])
+  end
+
   # A traversal is a task of its own (the session history traversal queue, which answers in parallel): a same-document
   # one's popstate after the script that asked, its microtasks and the tasks due as it ends — timers set before it and
   # after (Chrome and Firefox, measured 2026-10-24 in real time).

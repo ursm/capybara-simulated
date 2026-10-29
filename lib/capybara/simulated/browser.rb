@@ -11340,9 +11340,9 @@ module Capybara
         nil
       end
 
-      # Whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it.
-      # (`history.length` the realms read themselves: session_history.rs `historyLength`)
-      private def history_of_page?(realm) = realm.to_i.zero? || !frame_navigable(realm.to_i).nil?
+      # Whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it — the
+      # engine's to say, as `history.length` asks it (session_history.rs `historyOfPage`).
+      private def history_of_page?(realm) = realm.to_i.zero? || @runtime.call('__csimHistoryOfPage', realm.to_i) == true
       # The host a URL names, or nil for one with none (about:blank / data: / a relative current_url before the first
       # navigate).
       def cookie_host(url)
