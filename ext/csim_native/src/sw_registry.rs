@@ -70,12 +70,28 @@ struct Worker {
     fetch: Option<bool>,
     router: bool,
     dead: bool,
+    // …and what holds it, set as it runs: `skipWaiting()` called, an extendable message event's `waitUntil` unsettled,
+    // and the messages queued to it it has not finished dispatching.
+    skip_waiting: bool,
+    extended: bool,
+    messages: u32,
 }
 
 impl Worker {
     // Whether a request is worth routing to it: one with a `fetch` listener, or not known to have none, or with rules.
     fn intercepts(&self) -> bool {
         self.fetch != Some(false) || self.router
+    }
+    // Whether it has events pending that extend its lifetime — a message it has not finished, an unsettled `waitUntil` of
+    // one — none for one whose thread is gone.
+    fn extended(&self) -> bool {
+        !self.dead && (self.extended || self.messages > 0)
+    }
+    // …or a lifecycle event of its own: its install event's, from its job's end until the step its outcome makes is
+    // taken, or its activate event's, from its activating step until its activated one — none for one waiting at Try
+    // Activate.
+    fn lifecycle_pending(&self) -> bool {
+        !self.dead && matches!(self.lifecycle.step, Step::UpdateFound | Step::Installed | Step::Activated)
     }
 }
 
@@ -252,6 +268,9 @@ pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: Strin
         fetch: None,
         router: false,
         dead: false,
+        skip_waiting: false,
+        extended: false,
+        messages: 0,
     };
     lock().partition(partition).workers.insert(handle, worker);
 }
@@ -276,6 +295,21 @@ pub(crate) fn set_worker_flag_for_ruby(partition: u64, handle: u32, flag: String
 // …whether its thread is there to answer: none reaped it, nor did it end on its own.
 pub(crate) fn worker_live_for_ruby(partition: u64, handle: u32) -> bool {
     lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| !w.dead)
+}
+// …a hold of it set or let go, from whichever thread (`what` "skip_waiting": it called `skipWaiting()`; "extended": an
+// extendable message event's `waitUntil` unsettled, `on`, or not; "message": a message queued to it, `on`, or one it
+// finished dispatching): whether it has none of the last two left — a release that may let a successor activate.
+pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool) -> bool {
+    let mut reg = lock();
+    let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return true };
+    match what.as_str() {
+        "skip_waiting" => w.skip_waiting = true,
+        "extended" => w.extended = on,
+        "message" if on => w.messages += 1,
+        "message" => w.messages = w.messages.saturating_sub(1),
+        _ => {}
+    }
+    !w.extended && w.messages == 0
 }
 // …whether its own activation finished (`note_phase` "activated").
 pub(crate) fn worker_activated_for_ruby(partition: u64, handle: u32) -> bool {
@@ -465,12 +499,13 @@ pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok
     }
 }
 // The worker `handle`'s next lifecycle step, taken: "updatefound", "installed", "install_failed", "activating" —
-// where `may_activate` (Try Activate's verdict: the outgoing worker holds no clients and no extended work, or the worker
-// skipped waiting) — or "activated"; else what it waits for: "install" or "activation" (its own phase), "try_activate"
-// (the verdict), or "done" (no step left — finished, failed, redundant, or no such worker).
-pub(crate) fn advance_for_ruby(partition: u64, handle: u32, may_activate: bool) -> &'static str {
+// where Try Activate lets it (`may_activate`) — or "activated"; else what it waits for: "install" or "activation" (its
+// own phase), "try_activate" (the verdict), or "done" (no step left — finished, failed, redundant, or no such worker).
+pub(crate) fn advance_for_ruby(partition: u64, handle: u32) -> &'static str {
     let mut reg = lock();
-    let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return "done" };
+    let Some(p) = reg.existing(partition) else { return "done" };
+    let may_activate = may_activate(p, handle);
+    let Some(w) = p.workers.get_mut(&handle) else { return "done" };
     if w.state == "redundant" {
         w.lifecycle.step = Step::Idle;
         return "done";
@@ -492,15 +527,39 @@ pub(crate) fn advance_for_ruby(partition: u64, handle: u32, may_activate: bool) 
     lc.step = next;
     taken
 }
-// Whether the worker `handle` has a lifecycle event pending — its install event's, from its job's end until the step
-// its outcome makes is taken, or its activate event's, from its activating step until its activated one — which Try
-// Clear Registration waits for ("Service Worker Has No Pending Events"); none for one waiting at Try Activate, nor for one
-// whose thread is gone, which settles no event.
-pub(crate) fn lifecycle_pending_for_ruby(partition: u64, handle: u32) -> bool {
-    lock()
-        .existing(partition)
-        .and_then(|p| p.workers.get(&handle))
-        .is_some_and(|w| !w.dead && matches!(w.lifecycle.step, Step::UpdateFound | Step::Installed | Step::Activated))
+// ── Try Activate and Try Clear Registration ──
+// Whether the worker `handle` (the registration's outgoing active one) is used by a client: Try Activate's "no service
+// worker client is using the registration" — one controlled by it, or one whose MATCHED registration is the one it
+// serves, controlled or not: an unclaimed in-scope document holds the handover too. Matching by URL keeps the verdict
+// deterministic — a client's controller is re-reported by realms and can read stale for a moment (the activation.https
+// flake), its URL and the scope do not. (Try Clear's "using" is the controller alone: `clearable`.)
+fn controls_clients(p: &Partition, handle: u32) -> bool {
+    let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map(|r| r.scope.as_str());
+    p.clients.iter().any(|c| c.controller == Some(handle) || scope.is_some_and(|s| scope_match(p, &c.url, false).is_some_and(|(_, m)| m == s)))
+}
+// Try Activate's verdict for the worker `candidate` of its registration: no outgoing active worker to displace, or one
+// with no events pending — which holds an installed successor even past skipWaiting (activation.https "skipWaiting
+// bypasses no controllee requirement": it bypasses only the controllee half) — and either no client using the
+// registration or the candidate having skipped waiting.
+fn may_activate(p: &Partition, candidate: u32) -> bool {
+    let Some(w) = p.workers.get(&candidate) else { return false };
+    let Some(outgoing) = p.registrations.iter().find(|r| r.id == w.registration).and_then(|r| r.active) else { return true };
+    if outgoing == candidate {
+        return true;
+    }
+    !p.workers.get(&outgoing).is_some_and(Worker::extended) && (w.skip_waiting || !controls_clients(p, outgoing))
+}
+// Try Clear Registration's verdict for the registration `id`: no client controlled by its active worker, and no version
+// with an event pending ("Service Worker Has No Pending Events") — a message's, an extendable message event's, its
+// install or activate event's.
+pub(crate) fn registration_clearable_for_ruby(partition: u64, id: u32) -> bool {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return true };
+    let Some(r) = p.registrations.iter().find(|r| r.id == id) else { return true };
+    if r.active.is_some_and(|a| p.clients.iter().any(|c| c.controller == Some(a))) {
+        return false;
+    }
+    r.workers().iter().filter_map(|h| p.workers.get(h)).all(|w| !w.extended() && !w.lifecycle_pending())
 }
 // Whether the worker `handle` stands at Try Activate (installed, its activation not yet allowed).
 pub(crate) fn awaits_activation_for_ruby(partition: u64, handle: u32) -> bool {
@@ -650,6 +709,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn lets_a_worker_activate_as_try_activate_has_it() {
+        let p = partition_new_for_ruby();
+        let scope = || "https://a.test/".to_owned();
+        let id = note_registered_for_ruby(p, scope());
+        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
+        set_version_for_ruby(p, id, "active".into(), Some(1));
+        activated_for_ruby(p, scope(), 1);
+        set_version_for_ruby(p, id, "waiting".into(), Some(2));
+        let verdict = || may_activate(lock().existing(p).expect("made"), 2);
+        // (…no client using the registration: it may)
+        assert!(verdict());
+        // (…an in-scope client holds it, controlled or not — unless the candidate skipped waiting)
+        note_client_for_ruby(p, "c".into(), "https://a.test/page".into(), "window".into(), "top-level".into(), None, None);
+        assert!(!verdict());
+        hold_for_ruby(p, 2, "skip_waiting".into(), true);
+        assert!(verdict());
+        // (…but the outgoing worker's pending events hold it even past skipWaiting, until the last is let go)
+        hold_for_ruby(p, 1, "message".into(), true);
+        assert!(!hold_for_ruby(p, 1, "extended".into(), true));
+        assert!(!verdict());
+        assert!(!hold_for_ruby(p, 1, "message".into(), false));
+        assert!(hold_for_ruby(p, 1, "extended".into(), false));
+        assert!(verdict());
+        // (…one whose thread is gone holds nothing)
+        hold_for_ruby(p, 1, "extended".into(), true);
+        set_worker_flag_for_ruby(p, 1, "dead".into(), true);
+        assert!(verdict());
+        clear_for_ruby(p);
+    }
+
+    #[test]
     fn matches_a_request_to_the_worker_its_longest_scope_routes_to() {
         let p = partition_new_for_ruby();
         let m = |url: &str, mode: &str| match_worker_for_ruby(p, url.into(), mode.into()).map(|r| (r.0, r.3));
@@ -737,30 +828,37 @@ mod tests {
     fn steps_a_version_from_installing_to_activated() {
         let p = partition_new_for_ruby();
         worker_new_for_ruby(p, 3, "a/sw.js".into(), "classic".into());
-        assert_eq!(advance_for_ruby(p, 3, true), "done");
+        assert_eq!(advance_for_ruby(p, 3), "done");
         begin_lifecycle_for_ruby(p, 3);
-        assert_eq!(advance_for_ruby(p, 3, true), "updatefound");
-        assert_eq!(advance_for_ruby(p, 3, true), "install");
+        assert_eq!(advance_for_ruby(p, 3), "updatefound");
+        assert_eq!(advance_for_ruby(p, 3), "install");
         note_phase_for_ruby(p, 3, "install".into(), true);
-        assert_eq!(advance_for_ruby(p, 3, true), "installed");
+        assert_eq!(advance_for_ruby(p, 3), "installed");
         assert!(awaits_activation_for_ruby(p, 3));
-        assert_eq!(advance_for_ruby(p, 3, false), "try_activate");
-        assert_eq!(advance_for_ruby(p, 3, true), "activating");
-        assert_eq!(advance_for_ruby(p, 3, true), "activation");
+        // (…held at Try Activate while the active worker it replaces controls a client, let go once that one goes)
+        let id = note_registered_for_ruby(p, "https://a.test/".into());
+        worker_new_for_ruby(p, 9, "a/sw.js".into(), "classic".into());
+        set_version_for_ruby(p, id, "active".into(), Some(9));
+        set_version_for_ruby(p, id, "waiting".into(), Some(3));
+        note_client_for_ruby(p, "c".into(), "https://b.test/".into(), "window".into(), "top-level".into(), None, Some(9));
+        assert_eq!(advance_for_ruby(p, 3), "try_activate");
+        forget_client_for_ruby(p, "c".into());
+        assert_eq!(advance_for_ruby(p, 3), "activating");
+        assert_eq!(advance_for_ruby(p, 3), "activation");
         note_phase_for_ruby(p, 3, "activated".into(), true);
-        assert_eq!(advance_for_ruby(p, 3, true), "activated");
-        assert_eq!(advance_for_ruby(p, 3, true), "done");
+        assert_eq!(advance_for_ruby(p, 3), "activated");
+        assert_eq!(advance_for_ruby(p, 3), "done");
         // A failed install ends it; a redundant worker takes no step.
         worker_new_for_ruby(p, 4, "a/sw.js".into(), "classic".into());
         begin_lifecycle_for_ruby(p, 4);
-        assert_eq!(advance_for_ruby(p, 4, true), "updatefound");
+        assert_eq!(advance_for_ruby(p, 4), "updatefound");
         note_phase_for_ruby(p, 4, "install".into(), false);
-        assert_eq!(advance_for_ruby(p, 4, true), "install_failed");
-        assert_eq!(advance_for_ruby(p, 4, true), "done");
+        assert_eq!(advance_for_ruby(p, 4), "install_failed");
+        assert_eq!(advance_for_ruby(p, 4), "done");
         worker_new_for_ruby(p, 5, "a/sw.js".into(), "classic".into());
         begin_lifecycle_for_ruby(p, 5);
         set_worker_state_for_ruby(p, 5, "redundant".into());
-        assert_eq!(advance_for_ruby(p, 5, true), "done");
+        assert_eq!(advance_for_ruby(p, 5), "done");
         clear_for_ruby(p);
     }
 

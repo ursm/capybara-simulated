@@ -4954,39 +4954,11 @@ module Capybara
         @sw_message_pending += 1
         # A message the worker hasn't finished dispatching is a PENDING functional
         # event — it must hold a successor's activation exactly like an unsettled
-        # waitUntil (sw_worker_extended?): the client posts 'wait' and calls update()
-        # in the same turn, so the gate can run before the worker even popped it.
-        # Locked: the worker thread decrements (run_worker's dispatch ensure), and an
-        # unsynchronized read-modify-write can lose an increment — the gate would then
-        # read 0 with a message still queued and activate prematurely.
-        @worker_init_lock.synchronize { w[:sw_msgs] = w[:sw_msgs].to_i + 1 }
+        # waitUntil: the client posts 'wait' and calls update() in the same turn, so the
+        # gate can run before the worker even popped it — counted by the registry, under
+        # its lock against the worker thread's release (sw_registry.rs `hold`).
+        Native.sw_hold(@sw_partition, handle.to_i, 'message', true)
         w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
-      end
-
-      # Does this worker have PENDING WORK that extends its lifetime — an unsettled
-      # ExtendableMessageEvent.waitUntil (the `extended` hook) or a message it hasn't
-      # finished dispatching? Holds an installed successor's activation EVEN past
-      # skipWaiting (activation.https "skipWaiting bypasses no controllee requirement" —
-      # it bypasses only the controllee half).
-      def sw_worker_extended?(handle)
-        w = @workers[handle.to_i]
-        return false unless w
-
-        !!w[:extended] || w[:sw_msgs].to_i.positive?
-      end
-
-      # HTML "try activate", decided in ONE host call (the client-side gate used to make three
-      # reads — extended?, the realm-local skipWaiting flag, controls? — and the splits raced:
-      # a skipWaiting delivered before the realm built its worker objects was lost outright).
-      # The OUTGOING worker's pending extended work holds activation even PAST skipWaiting
-      # (activation.https "skipWaiting bypasses no controllee requirement" — it bypasses only
-      # the controllee half); skipWaiting is read off the CANDIDATE's worker record, where the
-      # worker's own thread set it at post time.
-      private def sw_may_activate?(outgoing_handle, candidate_handle)
-        return false if sw_worker_extended?(outgoing_handle)
-        return true if @workers.dig(candidate_handle.to_i, :skip_waiting)
-
-        !sw_worker_controls_clients?(outgoing_handle)
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
@@ -5801,7 +5773,7 @@ module Capybara
         @sw_steps_queued.delete(handle)
         worker = sw_worker(handle) or return
         id   = worker[3]
-        step = Native.sw_advance(@sw_partition, handle, sw_may_activate_in?(id, handle))
+        step = Native.sw_advance(@sw_partition, handle)
         if %w[install activation try_activate].include?(step)
           @sw_step_waits[handle] = step
           return
@@ -5816,13 +5788,6 @@ module Capybara
         when 'activated'      then sw_activated(id, handle)
         end
         sw_queue_step(handle) if %w[updatefound installed activating].include?(step)
-      end
-
-      # Try Activate's verdict for the worker `handle` of the registration `id`: no outgoing worker to displace, or one
-      # that may be displaced (sw_may_activate?).
-      private def sw_may_activate_in?(id, handle)
-        outgoing = sw_versions(id)[2]
-        !outgoing || outgoing == handle || sw_may_activate?(outgoing, handle)
       end
 
       # installing → installed: the waiting worker. A version already SITTING there is retired now — per Update State
@@ -5899,26 +5864,6 @@ module Capybara
       private def sw_update_found(id)
         broadcast_to_realms('__csim_swRegistrationUpdateFound', id.to_i)
         nil
-      end
-
-      # Does `handle` still control any client? HTML's "try activate" holds an installed worker in
-      # the WAITING slot for exactly as long as the outgoing worker has controllees — that is what
-      # makes `registration.waiting` non-null, which is how every "a new version is available"
-      # banner detects an update.
-      def sw_worker_controls_clients?(handle)
-        h = handle.to_i
-        return false if h.zero?
-        # Try Activate's gate is "no service worker client is USING the registration" —
-        # a client uses it when the registration is its MATCHED one (scope match on the
-        # client URL), controlled or not: an unclaimed in-scope document still blocks
-        # the handover. Matching by URL is also what makes the verdict DETERMINISTIC —
-        # the per-client controller handle is re-reported by realms and can transiently
-        # read stale (the activation.https flake), while the URL and the scope are not.
-        scope   = sw_serving.key(h)
-        clients = Native.sw_clients(@sw_partition)
-        return clients.any? {|_id, _url, controller| controller == h } unless scope
-
-        clients.any? {|_id, url, controller| controller == h || Native.sw_match_worker(@sw_partition, url.to_s, 'served')&.last == scope }
       end
 
       # A Register job made the registration at `scope` (its first worker evaluated): its number. Idempotent; undone by
@@ -6007,7 +5952,7 @@ module Capybara
         script_url = script_url.to_s
         # The claim IS the controller assignment: record it host-side for every client
         # whose MATCHED registration is this scope, so the activation gate
-        # (sw_worker_controls_clients?) and matchAll never depend on the realm
+        # (sw_registry.rs `controls_clients`) and matchAll never depend on the realm
         # re-report round trip that can race a load-time report (activation.https).
         # The claim's longest-registration-wins checks (host record below, realm-side
         # self-check via all_scopes) must see EVERY registration whose lifecycle has an
@@ -6100,24 +6045,11 @@ module Capybara
         nil
       end
 
-      # "No client is using the registration and no extended work is pending" — of any version: a message it has not
-      # finished, an extendable message event's unsettled `waitUntil`, or its install or activate event's (Service Workers
-      # "Try Clear Registration": "Service Worker Has No Pending Events"). A client
-      # record still holding a DEAD active handle keeps the entry parked until that
-      # client departs (records are only pruned on client teardown / the last-worker
-      # reset) — bounded by the client's lifetime, and nothing outside try_clear itself
-      # kills an uninstalling registration's worker today.
-      private def sw_registration_clearable?(id)
-        *, active = versions = sw_versions(id)
-        return false if active && Native.sw_clients(@sw_partition).any? {|_id, _url, controller| controller == active }
-
-        versions.compact.none? {|h| sw_worker_extended?(h) || Native.sw_lifecycle_pending(@sw_partition, h) }
-      end
-
       private def try_clear_uninstalls
         return if @sw_pending_uninstalls.empty?
 
-        ready, @sw_pending_uninstalls = @sw_pending_uninstalls.partition {|id| sw_registration_clearable?(id) }
+        # (…once no client is using the registration and no version has an event pending: sw_registry.rs `clearable`)
+        ready, @sw_pending_uninstalls = @sw_pending_uninstalls.partition {|id| Native.sw_registration_clearable(@sw_partition, id) }
         ready.each do |id|
           # Clear Registration: the versions emptied, then each worker redundant in every realm — a `statechange`
           # listener already finds the registration empty, as in Chrome (each realm runs its microtasks after each
@@ -7358,7 +7290,7 @@ module Capybara
           end
         end
         # `skipWaiting()` — Try Activate again for the worker (the flag is host state, recorded before
-        # this marker was even queued — sw_may_activate? reads it).
+        # this marker was even queued — sw_registry.rs `may_activate` reads it).
         skip_waits.each {|e| sw_resume_step(e[:handle].to_i, 'try_activate') }
         # A worker's extended-lifetime work drained to 0 — a successor parked in
         # `waiting` may now activate (the waitUntil half of "try activate"; the
@@ -8782,12 +8714,12 @@ module Capybara
           client_record:  ->(client_id) { Native.sw_client(@sw_partition, handle, sw_origin, client_id.to_s)&.to_a },
           match_clients:  ->(include_uncontrolled, type) { Native.sw_match_clients(@sw_partition, handle, sw_origin, !!include_uncontrolled, type.to_s).map(&:to_a) },
           # skipWaiting() — record the flag HERE, on the worker's own thread, before the
-          # broadcast is even queued: the activation gate (sw_may_activate?) reads it from the
-          # worker record, so a broadcast consumed before the registering realm built its
+          # broadcast is even queued: the activation gate (sw_registry.rs `may_activate`) reads it
+          # from the registry's worker, so a broadcast consumed before the registering realm built its
           # worker objects can no longer lose it (the skip-waiting.https TIMEOUT flake). The
           # outbox event's only remaining job is resuming a parked activation.
           skip_waiting:   ->                  {
-            (wk = @workers[handle]) && wk[:skip_waiting] = true
+            Native.sw_hold(@sw_partition, handle, 'skip_waiting', true)
             outbox << {handle: handle, kind: 'sw_skip_waiting'}
           },
           # self.registration.unregister() — an Unregister job, scheduled on the main thread
@@ -8807,7 +8739,7 @@ module Capybara
           # while any are pending an installed successor keeps waiting (activation.https),
           # and the 0-transition re-runs try-activate to release it.
           extended:       ->(n) {
-            (wk = @workers[handle]) && wk[:extended] = n.to_i.positive?
+            Native.sw_hold(@sw_partition, handle, 'extended', n.to_i.positive?)
             outbox << {handle: handle, kind: 'sw_try_activate'} unless n.to_i.positive?
           },
           fetch_respond:  ->(fetch_id, resp, realm_id) { sw_deliver_fetch_response(handle, fetch_id.to_i, resp.to_s, outbox, realm_id.to_i) },
@@ -9154,15 +9086,10 @@ module Capybara
                 # hold-clearing transition posts its own try_activate — this one, the
                 # extended 0-transition, unregister_client, skipWaiting, reap_worker —
                 # so the gate's cross-thread reads only ever miss a wakeup that a later
-                # one repeats. Locked against the main thread's increment (a lost
-                # increment would read as "no holds" with a message still queued).
-                if (wk = @workers[handle])
-                  none_left = @worker_init_lock.synchronize {
-                    wk[:sw_msgs] = [0, wk[:sw_msgs].to_i - 1].max
-                    !wk[:extended] && wk[:sw_msgs].zero?
-                  }
-                  outbox << {handle: handle, kind: 'sw_try_activate'} if none_left
-                end
+                # one repeats. Under the registry's lock against the main thread's
+                # increment (a lost increment would read as "no holds" with a message
+                # still queued).
+                outbox << {handle: handle, kind: 'sw_try_activate'} if Native.sw_hold(@sw_partition, handle, 'message', false)
                 outbox << {handle: handle, kind: 'swack'}
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'ws'
