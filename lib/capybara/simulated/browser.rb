@@ -10819,7 +10819,7 @@ module Capybara
            (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: is_history,
                                                       referrer_source: referrer_source, referrer_policy: referrer_policy,
                                                       resulting_client_id: rid, **post_args))
-          return commit_frame_error_document(realm_id, url, rid) if sw['networkError']
+          return commit_frame_error_document(realm_id, url) if sw['networkError']
           return (frame_navigation_made_no_document(realm_id) unless is_reload) if no_content_response?(sw['status'])
 
           # Raw decoded bytes (like read_rack_body's byte-tagged output); reload_frame_realm_by_id
@@ -10836,7 +10836,7 @@ module Capybara
           env['CONTENT_LENGTH'] = body.bytesize.to_s
         end
         apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, referrer_source, url))
-        response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url, rid)
+        response = dispatch_rack_or_http(url, env, method: is_post ? 'POST' : 'GET', body: is_post ? body : nil) or return commit_frame_error_document(realm_id, url)
         status, headers, resp_body = response
         merge_set_cookie(headers, url, env)
         # (…none made of a download, nor of a 204 / 205 — a reload's changing no history, a traversal's its own to settle:
@@ -11046,7 +11046,7 @@ module Capybara
         loop do
           command, hop = fetch.begin_hop
           # (…the 21st hop's a network error, its error document at the last URL requested)
-          return commit_frame_error_document(realm_id, target, rid, entry: entry) if command == 'error'
+          return commit_frame_error_document(realm_id, target, entry: entry) if command == 'error'
 
           meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross = hop
           resp_body = nil
@@ -11054,7 +11054,7 @@ module Capybara
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy,
                                                           site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, resulting_client_id: rid))
-            return commit_frame_error_document(realm_id, target, rid, entry: entry) if sw['networkError']
+            return commit_frame_error_document(realm_id, target, entry: entry) if sw['networkError']
 
             status, headers, document = sw['status'].to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
           else
@@ -11070,13 +11070,13 @@ module Capybara
               content_type:      content_type,
               cookie_cross_site: cookie_cross,
               user_activated:    user_activated
-            ) or return commit_frame_error_document(realm_id, target, rid, entry: entry)
+            ) or return commit_frame_error_document(realm_id, target, entry: entry)
             status, headers, resp_body, = response
           end
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
             command, to_get, new_client = fetch.redirect(status.to_i, loc.to_s, referrer_policy_header(headers))
-            return commit_frame_error_document(realm_id, target, rid, entry: entry) if command == 'fail'
+            return commit_frame_error_document(realm_id, target, entry: entry) if command == 'fail'
             return frame_navigation_made_no_document(realm_id) if command == 'hand_off'
 
             # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
@@ -12496,9 +12496,10 @@ module Capybara
       def registrable_site(url) = Native.site(url.to_s)
 
       # A frame's navigation that FAILED — a network error: the frame commits an error document at the target URL (an empty
-      # one, as a failed `src` does), not keeping the document it unloaded.
-      def commit_frame_error_document(realm_id, url, client_id, entry: nil)
-        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html', client_id: client_id)
+      # one, as a failed `src` does), not keeping the document it unloaded — one of inline content, made with no reserved
+      # client (HTML "create a document for inline content"), so no service worker's client nor one it controls.
+      def commit_frame_error_document(realm_id, url, entry: nil)
+        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html')
       end
       # The document a frame's navigation makes, committed into it — an entered one's (`entry`) through its scope.
       private def commit_frame_document(realm_id, entry, url, bytes, content_type, **response)

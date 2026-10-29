@@ -14,8 +14,10 @@ RSpec.describe 'Service Worker entered frame navigation' do
   let(:app) {
     worker = <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+      self.addEventListener('message', e => e.waitUntil(self.clients.get(self.failedFor).then(c => e.source.postMessage(String(c?.url)))));
       self.addEventListener('fetch', e => {
         const u = new URL(e.request.url);
+        if (u.pathname === '/scope/failed') { self.failedFor = e.resultingClientId; return e.respondWith(Response.error()); }
         if (u.pathname !== '/scope/answered') return;
         e.respondWith(e.request.text().then(body => new Response(
           `<!DOCTYPE html><meta charset=utf-8><p id=a>${e.request.mode} ${e.request.method} ${body}</p>`,
@@ -26,6 +28,7 @@ RSpec.describe 'Service Worker entered frame navigation' do
     page = <<~HTML
       <!DOCTYPE html><meta charset=utf-8>
       <a id=l href="/scope/answered">l</a>
+      <a id=f href="/scope/failed">f</a>
       <form method=post action="/scope/answered"><input name=q value=v><button id=b>b</button></form>
     HTML
     Rack::Builder.new {
@@ -76,5 +79,17 @@ RSpec.describe 'Service Worker entered frame navigation' do
         expect(session.find('#a').text).to eq(answer.strip)
       end
     end
+  end
+
+  # (…and what it fails makes an error document at the URL, one of inline content no client was reserved for: the
+  # client the worker was told of none — HTML "create a document for inline content")
+  it 'makes no client of the reserved one for a navigation the worker fails' do
+    session = controlled_frame_session
+    session.within_frame(0) { session.click_link 'f' }
+    session.execute_script(<<~JS)
+      navigator.serviceWorker.onmessage = e => { globalThis.__client = e.data; };
+      navigator.serviceWorker.getRegistration('/scope/').then(r => r.active.postMessage('ask'));
+    JS
+    expect(poll_until { session.evaluate_script('globalThis.__client') }).to eq('undefined')
   end
 end
