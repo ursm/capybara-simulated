@@ -6313,7 +6313,7 @@ module Capybara
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil, initiator_realm: nil, sandbox: nil, download_realm: container_realm, user_activated: false)
+                                 referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6334,12 +6334,12 @@ module Capybara
           referrer_policy = document_policy if referrer_policy.to_s.empty?
         end
         # (…a navigation another document begins — a reload by the document reloading, a window's by the one that navigates
-        # it — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `referrer_policy`),
-        # else its own: Chrome — the container's attribute none of its)
+        # it — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `link_policy`), else
+        # its own: Chrome — the container's attribute none of its)
         source_realm = container_realm
         if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_alive?(initiator_realm.to_i))
-          initiator, document_policy = realm_referrer_initiator(initiator_realm.to_i)
-          referrer_policy = document_policy if referrer_policy.to_s.empty?
+          initiator, referrer_policy = realm_referrer_initiator(initiator_realm.to_i)
+          referrer_policy = link_policy unless link_policy.to_s.empty?
           source_realm = initiator_realm
         end
         # (…its site and its Origin that document's — an about:blank one's its creator's, an opaque one's cross-site and
@@ -9798,7 +9798,7 @@ module Capybara
           # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
           # sent its referrer, its reserved client its own.
           if body.nil? && http_url?(url)
-            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: initiator, referrer_policy: policy, download_realm: initiator, user_activated: activated)
+            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: initiator, link_policy: policy, download_realm: initiator, user_activated: activated)
             next if resp.nil? || resp['no_document']
 
             headers = resp['headers'] || {}

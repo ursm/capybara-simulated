@@ -696,7 +696,8 @@ impl RealmArena {
         // (…one a document sandboxed against navigation may not navigate is none it finds — a new window then, Chrome — but
         // the window it made itself, whose permitted sandboxed navigator it is; and none it is not familiar with: a
         // cross-origin popup's link naming its opener opens a new window, Firefox — Chrome navigates the opener, a Blink
-        // departure from the rules)
+        // departure from the rules — judged against the window, where HTML judges the navigable the name finds: a
+        // same-origin frame of a window it is not familiar with is found by none here, a gap)
         let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
         let windows = std::iter::once(0).chain(self.navigables.windows.iter().copied()).filter(|&w| w != top && !self.is_dropped(w));
         let reachable = |w: i32| (!sandboxed || self.navigables.openers.get(&self.window_key(w)) == Some(&current)) && self.familiar_with(current, w, 0);
