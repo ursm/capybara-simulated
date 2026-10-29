@@ -303,7 +303,7 @@ pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool)
     let mut reg = lock();
     let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return true };
     match what.as_str() {
-        "skip_waiting" => w.skip_waiting = true,
+        "skip_waiting" => w.skip_waiting = on,
         "extended" => w.extended = on,
         "message" if on => w.messages += 1,
         "message" => w.messages = w.messages.saturating_sub(1),

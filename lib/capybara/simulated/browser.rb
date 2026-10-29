@@ -4949,7 +4949,8 @@ module Capybara
       # `swack`) so settle waits for the SW to process it and any client.postMessage reply.
       def service_worker_post_message(handle, data, client_id = nil, client_url = nil)
         w = @workers[handle.to_i]
-        return if !w || sw_redundant?(handle)
+        # (…none to a worker whose thread is gone, which would never dispatch it nor let its count go)
+        return if !w || sw_redundant?(handle) || !sw_live?(handle)
 
         @sw_message_pending += 1
         # A message the worker hasn't finished dispatching is a PENDING functional
@@ -7164,8 +7165,8 @@ module Capybara
         (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @port_ends = {}; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
-        # A dead SERVICE worker's holds are cleared with its record (extended / sw_msgs read
-        # false once it's gone, and its scopes were just dropped): that is a hold-clearing
+        # A dead SERVICE worker's holds are let go (the registry's holds read none of a worker
+        # marked dead, and its scopes were just dropped): that is a hold-clearing
         # transition like any other, so it must post its wakeup — a candidate parked on a
         # now-dead outgoing worker would otherwise only resume on unrelated client churn.
         # Rides the outbox (thread-safe; sw_try_activate is a no-op where nothing waits).
@@ -9239,7 +9240,7 @@ module Capybara
         end
       ensure
         # (…its thread ending, on its own too — a raise — no request goes to it any more: the registry's matching skips
-        # it)
+        # it, and its holds let go: a release a successor parked at Try Activate waits for, its wakeup posted below)
         Native.sw_set_worker_flag(@sw_partition, handle, 'dead', true) if service
         # A service worker exiting with a lifecycle phase still OPEN — a raise on this
         # thread, `self.close()` during a parked install waitUntil, a terminate — can
@@ -9254,6 +9255,8 @@ module Capybara
             {handle: handle, kind: 'sw_phase', phase: 'activated'}
           end
         end
+        # (…the wakeup after the phase marker, so a clear it lets run follows the step the marker resumes)
+        outbox << {handle: handle, kind: 'sw_try_activate'} if service
         # A raise between the busy bump and its matching decrement would strand the
         # counter; balance it here so worker_pending? can't stick true after this thread dies.
         @worker_init_lock.synchronize { @worker_busy -= 1 } if busy_held
