@@ -710,6 +710,17 @@ impl RealmArena {
         }
         Chosen::None
     }
+    // Realm `source`'s document's navigation of realm `target`'s navigable to `url` (absolute): "refused" where it may not
+    // navigate it (`navigation_allowed`, asked where `check_allowed`: another window's `location` set — a SecurityError
+    // its caller throws), "ignored" for a `javascript:` URL across origins (HTML "navigate to a javascript: URL": the
+    // initiator origin same origin-domain with the target's document, none across origins), else "navigate".
+    pub(crate) fn navigation_verdict(&self, source: i32, target: i32, url: &str, check_allowed: bool) -> &'static str {
+        if check_allowed && !self.navigation_allowed(source, target) {
+            return "refused";
+        }
+        let javascript = url.get(..11).is_some_and(|scheme| scheme.eq_ignore_ascii_case("javascript:"));
+        if javascript && !self.same_origin(source, target) { "ignored" } else { "navigate" }
+    }
     // HTML "familiar with": whether realm `a`'s browsing context is familiar with realm `b`'s — their documents of one
     // origin; `a`'s top-level traversable `b`; `b` an auxiliary one (a window `window.open` made) whose opener `a` is
     // familiar with; or `b` a frame an ancestor of which has a document of `a`'s origin.
@@ -1050,7 +1061,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "chosenChildFrame", chosen_child_frame, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
     crate::dom::register(scope, ns, "linkRoute", link_route, context_id);
-    crate::dom::register(scope, ns, "navigationAllowed", navigation_allowed, context_id);
+    crate::dom::register(scope, ns, "navigationVerdict", navigation_verdict, context_id);
     crate::dom::register(scope, ns, "downloadAllowed", download_allowed, context_id);
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
@@ -1265,15 +1276,17 @@ fn link_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let items = [v8::String::new(scope, kind).unwrap().into(), at, container];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.navigationAllowed(target) -> whether this realm's document may navigate realm `target`'s navigable
-// (`RealmArena::navigation_allowed`) — none it may that names no realm.
-fn navigation_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    if !args.get(0).is_int32() {
-        return rv.set_bool(false);
-    }
-    let target = args.get(0).int32_value(scope).unwrap_or(0);
+// __dom.navigationVerdict(source, target, url, checkAllowed) -> `RealmArena::navigation_verdict` — "refused" for a
+// source or target that names no realm.
+fn navigation_verdict(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(source), Some(target)) = (args.get(0).int32_value(scope).filter(|_| args.get(0).is_int32()), args.get(1).int32_value(scope).filter(|_| args.get(1).is_int32())) else {
+        return rv.set(v8::String::new(scope, "refused").unwrap().into());
+    };
+    let url = args.get(2).to_rust_string_lossy(scope);
+    let check_allowed = args.get(3).is_true();
     let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).navigation_allowed(cid, target));
+    let verdict = crate::dom::realm(scope, cid).navigation_verdict(source, target, &url, check_allowed);
+    rv.set(v8::String::new(scope, verdict).unwrap().into());
 }
 // __dom.openRoute(target) -> `[route, realm, window, container]`: `RealmArena::open_route` of `window.open` in the
 // calling realm — "own"; "navigable" (`realm` -1 for none yet; `window` "top", "parent", "container" — `container` it —
@@ -1598,6 +1611,14 @@ mod tests {
         arena.location.set_document_origin(Some("http://b.test".to_owned()));
         arena.navigables.windows.push(3);
         assert_eq!(route(&arena, 3, "pop", true), LinkRoute::Plan(units("pop")));
+        // (…a location navigation: a javascript: URL ignored across origins, one its sandbox does not allow refused)
+        assert_eq!(arena.navigation_verdict(0, 2, "JavaScript:void 0", false), "navigate");
+        assert_eq!(arena.navigation_verdict(3, 2, "javascript:void 0", false), "ignored");
+        assert_eq!(arena.navigation_verdict(3, 2, "http://a.test/", false), "navigate");
+        arena.enter(1);
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-scripts"));
+        assert_eq!(arena.navigation_verdict(1, 0, "http://a.test/", true), "refused");
+        assert_eq!(arena.navigation_verdict(1, 1, "http://a.test/", true), "navigate");
     }
 
     #[test]
