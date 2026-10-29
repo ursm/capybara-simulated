@@ -1897,6 +1897,9 @@ module Capybara
         # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `__csim_wsSend` is the window's as it is
         c.attach('__csim_wsOpen',  ->(url, protocols) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
         c.attach('__csim_wsClose', ->(id, code, reason) { sw_hooks[:ws_close].call(id, code, reason); nil }) if sw_hooks[:ws_close]
+        # …and its EventSources, likewise
+        c.attach('__csim_eventSourceOpen',  ->(request) { sw_hooks[:es_open].call(request) }) if sw_hooks[:es_open]
+        c.attach('__csim_eventSourceClose', ->(id) { sw_hooks[:es_close].call(id); nil }) if sw_hooks[:es_close]
         # Service-worker → main-thread signals route through the thread-safe outbox (delivered by
         # deliver_worker_messages): client.postMessage, clients.claim (set the client's controller),
         # and a controlled fetch's respondWith result. See run_worker for the closures.

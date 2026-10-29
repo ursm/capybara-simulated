@@ -342,8 +342,12 @@ module Capybara
         # awaiting delivery into the VM. Threads do the long-lived
         # HTTP read; the main thread polls the Queue in `settle` and
         # dispatches via `__csim_deliverEventSourceEvents`.
+        # A worker's source rides the same machinery from its own thread, its reader's events into the worker's inbox
+        # (WorkerSink) — so the id counter and the registries are taken under `@event_source_lock`.
         @event_source_seq     = 0
         @event_source_threads = {}
+        @event_source_workers = {}   # id → the handle of the worker that opened it (none: the window's)
+        @event_source_lock    = Mutex.new
         @event_source_queue   = Thread::Queue.new
         # WebSocket — per-Browser handle counter, background frame-reader
         # threads, the csim-side socket end of each connection (for writing
@@ -354,7 +358,7 @@ module Capybara
         # connection rides the in-process `rack.hijack` socket Action Cable
         # (and any Rack WebSocket middleware) takes over.
         # A worker's WebSocket rides the same machinery from its own thread, its reader's events into the worker's inbox
-        # (WsWorkerSink) — so the id counter and the registries below are taken under `@websocket_lock`.
+        # (WorkerSink) — so the id counter and the registries below are taken under `@websocket_lock`.
         @websocket_seq        = 0
         @websocket_threads    = {}
         @websocket_sockets    = {}   # id → csim's socket end
@@ -3057,10 +3061,10 @@ module Capybara
         probe = dom_call('__csimEventLoopProbe')
         {
           'raf'        => !!probe['raf'],
-          # A live WS reader counts as async so the drain loop yields the GVL to it each frame — see
+          # A live WS or event stream reader counts as async so the drain loop yields the GVL to it each frame — see
           # websocket_reader_active?. Without it a binary echo can be starved past the idle-bail.
           # Ruby-side worker work counts too (worker_drive_pending?) — the JS probe can't see it.
-          'async'      => !!probe['async'] || websocket_reader_active? || worker_drive_pending?,
+          'async'      => !!probe['async'] || websocket_reader_active? || event_source_reader_active? || worker_drive_pending?,
           # ms until the nearest scheduled timer (-1 = none). Lets a caller keep
           # advancing while a near-future `setTimeout` is parked (a `step_timeout`-
           # style wait) instead of declaring the page idle — see `__csimEventLoopProbe`.
@@ -3885,26 +3889,42 @@ module Capybara
       # rusty_racer VMs are single-threaded; only the main thread ever enters the VM. Background threads only touch the
       # Queue and the engine's plan, which is theirs alone. `reset!` and per-visit context rebuilds kill all open threads —
       # the new VM gets a fresh handle space.
-      # (…`request` the source's, described by name as a realm's every request to the host is: `rack_fetch_request`)
-      def event_source_open(request)
+      # (…`request` the source's, described by name as a realm's every request to the host is: `rack_fetch_request`;
+      # `worker` the WorkerSink of the worker that opens it — none for the window's)
+      def event_source_open(request, worker = nil)
         request = request.to_h
-        id      = (@event_source_seq += 1)
-        queue   = @event_source_queue
+        queue   = worker || @event_source_queue
         # (…a worker's request of the worker's cookie site, which its thread knows)
-        worker  = Thread.current[:csim_worker_record]
-        thread  = Thread.new do
-          Thread.current.report_on_exception = false
-          Thread.current[:csim_worker_record] = worker
-          run_event_source_reader(id, request, queue)
+        record  = Thread.current[:csim_worker_record]
+        @event_source_lock.synchronize do
+          id = (@event_source_seq += 1)
+          @event_source_workers[id] = worker.handle if worker
+          @event_source_threads[id] = Thread.new do
+            Thread.current.report_on_exception = false
+            Thread.current[:csim_worker_record] = record
+            run_event_source_reader(id, request, queue)
+          end
+          id
         end
-        @event_source_threads[id] = thread
-        id
       end
 
       def event_source_close(id)
-        thread = @event_source_threads.delete(id.to_i)
+        thread = @event_source_lock.synchronize {
+          @event_source_workers.delete(id.to_i)
+          @event_source_threads.delete(id.to_i)
+        }
         thread&.kill
         nil
+      end
+
+      # The sources of a worker that ended: each closed with it (HTML "worker event loop" teardown).
+      private def event_source_drop_worker(handle)
+        threads = @event_source_lock.synchronize {
+          ids = @event_source_workers.select {|_id, h| h == handle }.keys
+          ids.each {|id| @event_source_workers.delete(id) }
+          ids.filter_map {|id| @event_source_threads.delete(id) }
+        }
+        threads.each(&:kill)
       end
 
       def event_source_poll
@@ -3912,6 +3932,9 @@ module Capybara
       end
 
       def event_source_pending? = !@event_source_queue.empty?
+      # …and whether a connection's reader is still at work — connecting, or reading a stream that may yet bring events —
+      # which the event-loop drain yields the GVL to as it does a WebSocket's (websocket_reader_active?).
+      def event_source_reader_active? = !@event_source_threads.empty? && @event_source_lock.synchronize { @event_source_threads.any? {|_id, t| t.alive? } }
 
       # Drain any queued events into the VM. Cheap when no SSE
       # connection is active (no threads → no queue items → empty
@@ -3955,8 +3978,11 @@ module Capybara
         queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
       ensure
         Native.event_stream_close(parser) if parser
+        # (…the body let go however the stream ended — an app's, which may hold a thread or a connection of its own for
+        # it; and the socket of the hop under way where it is a transport's)
         socket = Thread.current[:csim_event_stream_socket]
         begin
+          body.close if body.respond_to?(:close)
           socket.close if socket && !socket.closed?
         rescue StandardError
           # (…closed concurrently: reset! killed the thread)
@@ -4037,7 +4063,7 @@ module Capybara
       # (…its host the name or address the URL gives — an IPv6 one without its brackets — given as long to answer as
       # Net::HTTP's every other request is)
       private def open_event_stream_socket(uri)
-        tcp = Socket.tcp(uri.hostname, uri.port, connect_timeout: 5)
+        tcp = TCPSocket.new(uri.hostname, uri.port, connect_timeout: 5)
         return tcp unless uri.is_a?(URI::HTTPS)
 
         begin
@@ -4053,8 +4079,11 @@ module Capybara
       end
 
       def reset_event_sources
-        @event_source_threads.each_value(&:kill)
-        @event_source_threads.clear
+        threads = @event_source_lock.synchronize {
+          @event_source_workers.clear
+          @event_source_threads.values.tap { @event_source_threads.clear }
+        }
+        threads.each(&:kill)
         @event_source_queue.clear
       end
 
@@ -4073,15 +4102,15 @@ module Capybara
       # the main thread — events drain into the VM at `settle`, like SSE).
       WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
       private_constant :WS_GUID
-      # The worker a WebSocket was opened in: its reader's events go to the worker's inbox, which the worker's own loop
-      # delivers into its isolate (`run_worker`) — the main thread's queue is the window's alone — and its handshake
-      # comes from the worker's URL.
-      WsWorker = Struct.new(:handle, :inbox, :url) do
-        def <<(event) = (inbox << {kind: 'ws', event: event})
-      end
-      private_constant :WsWorker
+      # The worker a WebSocket or an EventSource was opened in: its reader's events go to the worker's inbox as `kind`'s,
+      # which the worker's own loop delivers into its isolate (`run_worker`) — the main thread's queues are the
+      # window's alone — and a WebSocket's handshake comes from the worker's URL.
+      WorkerSink = Struct.new(:handle, :inbox, :url, :kind) {
+        def <<(event) = (inbox << {kind: kind, event: event})
+      }
+      private_constant :WorkerSink
 
-      # (`worker`: the WsWorker that opens it — none for the window's)
+      # (`worker`: the WorkerSink that opens it — none for the window's)
       def ws_open(url, protocols = nil, worker = nil)
         queue    = worker || @websocket_queue
         client   = worker ? worker.url : @current_url
@@ -4185,7 +4214,7 @@ module Capybara
       # reader) — the only things that can revive an apparently-idle page from OUTSIDE
       # the JS event loop. The WPT runner's post-idle-bail grace window gates on this,
       # so the plain-DOM majority of files never pays the real-time wait.
-      def cross_thread_actors? = @workers.any? {|_h, w| w[:thread]&.alive? } || websocket_reader_active?
+      def cross_thread_actors? = @workers.any? {|_h, w| w[:thread]&.alive? } || websocket_reader_active? || event_source_reader_active?
 
       def deliver_websocket_events
         return 0 if @websocket_threads.empty? && @websocket_queue_head.nil? && @websocket_queue.empty?
@@ -8327,8 +8356,11 @@ module Capybara
         sw_origin = url_origin(url).to_s
         sw_hooks = {
           # The worker's WebSockets: opened and written from this thread, their events into this worker's inbox.
-          ws_open:        ->(ws_url, protocols) { ws_open(ws_url, protocols, WsWorker.new(handle, inbox, url)) },
+          ws_open:        ->(ws_url, protocols) { ws_open(ws_url, protocols, WorkerSink.new(handle, inbox, url, 'ws')) },
           ws_close:       ->(id, code, reason) { ws_close(id, code, reason, hold: false) },
+          # …and its EventSources, their events into this worker's inbox too.
+          es_open:        ->(request) { event_source_open(request, WorkerSink.new(handle, inbox, url, 'es')) },
+          es_close:       ->(id) { event_source_close(id) },
           # A script exception the worker's global left unhandled, for its Worker's `error` (workers.js).
           report_error:   ->(message, filename, lineno, colno) { outbox << {handle: handle, kind: '__scripterror', message: message.to_s, filename: filename.to_s, lineno: lineno.to_i, colno: colno.to_i} },
           post_to_client: ->(client_id, data) { outbox << {handle: handle, kind: 'sw_client_msg', client: client_id, data: data.to_s} },
@@ -8729,6 +8761,9 @@ module Capybara
               else
                 rt.call('__csim_deliverWebSocketEvents', [ev])
               end
+            elsif msg.is_a?(Hash) && msg[:kind] == 'es'
+              # One of this worker's EventSources: its event delivered here, as the window's are at settle.
+              rt.call('__csim_deliverEventSourceEvents', [msg[:event]])
             elsif msg.is_a?(Hash) && msg[:kind] == 'port_msg'
               # A message for a channel end THIS worker holds: deliver it to that port. Counted like an
               # sw_message (deliver_port_message incremented @sw_message_pending), so ack AFTER dispatch
@@ -8888,8 +8923,9 @@ module Capybara
         # counter; balance it here so worker_pending? can't stick true after this thread dies.
         @worker_init_lock.synchronize { @worker_busy -= 1 } if busy_held
         release_init.call   # guarantee the init count is released on an early raise
-        # Its WebSockets go with it (HTML "worker event loop" teardown: each made to disappear).
+        # Its WebSockets and EventSources go with it (HTML "worker event loop" teardown: each made to disappear).
         ws_drop_client(handle)
+        event_source_drop_worker(handle)
         # Take the runtime back from the boundary BEFORE destroying it, and destroy it while
         # holding the lock: terminating a disposed isolate is a use-after-free, and the two calls
         # are on different threads. Whoever holds the lock owns the pointer for that moment.
@@ -11925,8 +11961,9 @@ module Capybara
       # server's paths, and the external server's redirect back to the
       # app host needs to come through @app again. Real-browser drivers
       # get this for free; we have to detect the boundary. nil for a network error (`framed_response`).
-      # (…`transport` the caller's own, where it sends every hop itself — an event stream's, which Net::HTTP would read
-      # whole: `event_stream_transport`)
+      # (…`transport` the caller's own, where it sends every hop the app does not serve itself — an event stream's, which
+      # Net::HTTP would read whole: `event_stream_transport`; the app's own it answers as it answers any, on the caller's
+      # thread, its body read as the app writes it)
       def dispatch_rack_or_http(url, env, method: 'GET', body: nil, transport: nil)
         # (…its Fetch Metadata sent to a potentially trustworthy URL alone — Fetch "append the Fetch metadata headers for a
         # request" — which the request's own verdicts read all the same: its SameSite cookies, already attached)
@@ -11936,7 +11973,7 @@ module Capybara
         # otherwise handle it, matching the pre-cross-host behavior
         # for tests that route through an external OAuth provider URL
         # without intending the call to land.
-        remote = transport ? transport.(url, env) : (net_http_fetch(url, env, method: method, body: body) unless url_is_local?(url))
+        remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless url_is_local?(url)
         return nil if remote == :network_error
 
         response = framed_response(method, *(remote || @app.call(env))) or return nil
@@ -12032,8 +12069,12 @@ module Capybara
       def current_url_parts
         return nil if @current_url.nil?
         return @current_url_parts if @current_url_parts_for.equal?(@current_url)
-        @current_url_parts_for = @current_url
-        @current_url_parts     = parse_url(@current_url)
+        # (…the parts kept before the URL they are of: another thread — an event stream's reader — asks too, and must
+        # never find the URL's mark beside another's parts)
+        url, parts             = @current_url, parse_url(@current_url)
+        @current_url_parts     = parts
+        @current_url_parts_for = url
+        parts
       end
 
       def effective_port(url)

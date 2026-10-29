@@ -279,6 +279,18 @@ class Server:
         self.stash = Stash(stash_path)
 
 
+# A handler that streams for good — an event stream's `while True: write(…); time.sleep(2)` (eventsource
+# message2.py) — never returns here, where its sleeps take no time and its body is buffered whole: it is cut
+# off, as a server whose client stopped waiting closes the connection, once it has slept past any test's
+# timeout or written more than any test reads. A BaseException, so a handler's own `except Exception`
+# cannot swallow it.
+class _PastTheHorizon(BaseException):
+    pass
+
+HORIZON_SECONDS = 120.0
+HORIZON_BYTES = 16 * 1024 * 1024
+
+
 class Writer:
     """wptserve response.writer: handlers that stream status/headers/body directly."""
     def __init__(self):
@@ -308,6 +320,8 @@ class Writer:
     def write(self, data):
         self.used = True
         self.body += _to_bytes(data)
+        if len(self.body) > HORIZON_BYTES:
+            raise _PastTheHorizon()
 
 
 class _H2Frame:
@@ -615,7 +629,11 @@ def main():
     # emit them as `X-Csim-Server-Delay-Ms`; the async XHR defers delivery by that many VIRTUAL ms, so
     # a shorter x.timeout wins the race (xhr timeout cluster). The handler returns immediately.
     _accum_sleep = [0.0]
-    _time_mod.sleep = lambda s=0: _accum_sleep.__setitem__(0, _accum_sleep[0] + (float(s) if s else 0.0))
+    def _virtual_sleep(s=0):
+        _accum_sleep[0] += float(s) if s else 0.0
+        if _accum_sleep[0] > HORIZON_SECONDS:
+            raise _PastTheHorizon()
+    _time_mod.sleep = _virtual_sleep
     # wptserve runs handlers with the WPT root on sys.path, so a handler can do the
     # package-style `from cookies.resources.helpers import …` (namespace packages —
     # no __init__.py needed). Mirror that here or any such import 500s the handler.
@@ -625,7 +643,11 @@ def main():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     if callable(getattr(module, 'main', None)):
-        result = module.main(request, response)
+        try:
+            result = module.main(request, response)
+        except _PastTheHorizon:
+            # (…what it wrote by then its response, the connection closed after it)
+            result = None
     elif hasattr(module, 'handle_data') or hasattr(module, 'handle_headers'):
         # HTTP/2 frame handler (e.g. echo-content.h2.py): emulate a single-frame buffered
         # request — deliver the headers, then the whole body as one DATA frame. True
