@@ -11734,10 +11734,9 @@ module Capybara
         @session_history.set_url(id, url)
         @session_history.update(id, {body: nil, origin: nil, referer: nil, referrer_policy: nil}) if get
       end
-      # …the history kept as it stood before, for a window that has a document to stay at.
-      private def save_navigation_history
-        window_has_document? ? @session_history.save(0) : @session_history.forget(0)
-      end
+      # …the history kept as it stood before — none, for a window at its initial about:blank — for a navigation that makes
+      # no document to leave it as it was.
+      private def save_navigation_history = @session_history.save(0)
       # Whether a navigation's response is a 204 / 205 — HTML "navigate" ("populate a session history entry's document"):
       # the navigation aborted, the navigable at the document it is at, no `load` and no session history entry (Chrome,
       # measured 2026-10-24: the page's link and form, a frame's form, link, `location` and `src` alike).
@@ -11752,23 +11751,22 @@ module Capybara
         navigation_made_no_document(url)
       end
       # …as a navigation handed off to external software makes none (navigation_fetch.rs `redirect`).
+      # (…a window with none yet left with no entry of it either: still at its initial about:blank, which the navigation
+      # after it replaces)
       private def navigation_made_no_document(url)
-        if window_has_document?
-          @session_history.restore(0)
-        else
-          @current_url = url
-        end
+        @current_url = url unless window_has_document?
+        @session_history.restore(0)
         @session_history.forget(0)
         restore_flushed_nav_intents
         nil
       end
       # …and as a 204 / 205 makes none (`no_content_response?`): a window with no document yet — one `window.open` made
-      # on such a URL — left at the initial about:blank it was made with, which its URL and its session history entry are
-      # (Chrome: `about:blank`, from the window and its opener alike).
+      # on such a URL — left at the initial about:blank it was made with: its URL about:blank (Chrome: `about:blank`, from
+      # the window and its opener alike), its session history none of the navigation's.
       private def navigation_made_no_content(url)
         return navigation_made_no_document(url) if window_has_document?
 
-        (id = @session_history.active(0)) && @session_history.set_url(id, 'about:blank')
+        @session_history.restore(0)
         @session_history.forget(0)
         @current_url     = 'about:blank'
         @current_referer = ''   # (…its referrer its creator's, none of the navigation that made no document)

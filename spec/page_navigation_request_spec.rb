@@ -14,6 +14,8 @@ RSpec.describe 'the page navigation request' do
     simulated_session(lambda {|env|
       seen << [env['REQUEST_METHOD'], env['PATH_INFO'], env['CONTENT_LENGTH']]
       next ['302', {'location' => '/final'}, []] if env['PATH_INFO'] == '/r'
+      next [204, {}, []] if env['PATH_INFO'] == '/nc'
+      next [200, {'content-type' => 'application/octet-stream', 'content-disposition' => 'attachment; filename=d.bin'}, ['d']] if env['PATH_INFO'] == '/dl'
 
       body = case env['PATH_INFO']
              when '/top' then '<form id=g action="/r"></form><form id=p method=post action="/r"></form>' \
@@ -61,6 +63,20 @@ RSpec.describe 'the page navigation request' do
     session.within_window(window) do
       session.visit '/x'
       expect(session.evaluate_script('history.length')).to eq(1)
+    end
+  end
+
+  # …a window's whose first navigation made no document — a 204's, a download's — as well: still at its initial
+  # about:blank, of no entry of that navigation's.
+  [%w[/nc about:blank], %w[/nc /y], %w[/dl about:blank], %w[/dl /y]].each do |first, second|
+    it "replaces a window's initial about:blank its navigation to #{first} left it at, by #{second}" do
+      session.visit '/top'
+      session.execute_script("window.open('#{first}', 'nw', 'noopener')")
+      session.execute_script("window.open('#{second}', 'nw', 'noopener')")
+      session.within_window(session.windows.last) do
+        expect(session).to have_current_path(second == '/y' ? '/y' : 'about:blank', url: second != '/y')
+        expect(session.evaluate_script('history.length')).to eq(1)
+      end
     end
   end
 end
