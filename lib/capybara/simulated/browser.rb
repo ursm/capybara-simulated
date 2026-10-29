@@ -10179,6 +10179,16 @@ module Capybara
         }
       end
       def submit_routed_form(realm_id, spec, route)
+        to = route[:to]
+        # (…the page's own navigable its top-level traversable)
+        to = :top if to == :self && realm_id.zero?
+        # (…a `javascript:` action its target navigated to it — the URL's script run there, where the form's document may
+        # run it (location.js `__csimNavigateFrom`): no request is made of it — HTML "submit", "navigate to a javascript:
+        # URL"; one into a new window none)
+        if spec['action'].to_s.match?(/\Ajavascript:/i)
+          target = {self: realm_id, top: 0}.fetch(to) { to if to.is_a?(Integer) }
+          return javascript_form_action(target, spec['action'].to_s, realm_id) if target
+        end
         request = form_request(spec, spec['action'].to_s)
         return unless request
 
@@ -10187,9 +10197,6 @@ module Capybara
         initiator = route[:referrer]
         # (…whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
         activated = spec['userActivated'] == true
-        to = route[:to]
-        # (…the page's own navigable its top-level traversable)
-        to = :top if to == :self && realm_id.zero?
         case to
         when :self, Integer
           frame = to == :self ? realm_id : to
@@ -10211,6 +10218,10 @@ module Capybara
       # entry, whether the frame's document is completely loaded or not: a form's replaces only its own navigable's (HTML
       # "plan to navigate", the form document the target's active document).
       private def submit_into_page(realm_id, spec, url, post, initiator, activated)
+        # (…none to a `data:` URL, which the top-level browsing context refuses a document's navigation to, as its
+        # `location`'s: `consume_pending_location`)
+        return if url.match?(/\Adata:/i)
+
         unless realm_id.zero?
           return in_top_context { navigate_top_from(realm_id, initiator, url, post: post, user_activated: activated) }
         end
@@ -10223,6 +10234,8 @@ module Capybara
         _site, origin_null = realm_request_initiator(realm_id)
         navigate_post(url, *post, referrer_policy: policy, replace: replace, origin_null: origin_null, user_activated: activated)
       end
+      # …a `javascript:` action's script run in realm `target`'s document, navigated by realm `realm_id`'s.
+      private def javascript_form_action(target, url, realm_id) = @runtime.realm_call(target, '__csimNavigateFrom', url, realm_id)
       # …into a new window the driver opens (or reuses, by its name `name`) — with the opener HTML "get an element's
       # noopener" leaves it (token_list.rs `noopener`: `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a
       # named target keeps it), told its initiator under that document's policy (the default where it sets none), its
