@@ -54,8 +54,9 @@ RSpec.describe 'Service Worker lifecycle order' do
           __log.push(`w2 ${w2.state} / waiting ${w3 && w3.state}`);
           w3?.addEventListener('statechange', () => __log.push(`w3 ${w3.state}`));
         });
+        // (…the newer worker's own install awaited: `waiting` is still the retiring one while it installs)
         await reg.update();
-        await settled(reg.waiting, 'installed');
+        await settled(reg.installing || reg.waiting, 'installed');
         await new Promise((res) => setTimeout(res, 100));
         __log.push('done');
       })();
