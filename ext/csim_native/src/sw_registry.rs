@@ -75,6 +75,11 @@ struct Worker {
     skip_waiting: bool,
     extended: bool,
     messages: u32,
+    // …and, for the host, whether its next lifecycle step is queued as a task, what a step it took waits for ("install",
+    // "activation", "try_activate"), and whether its activating step retired the worker it replaces already.
+    step_queued: bool,
+    waits: Option<&'static str>,
+    retired_outgoing: bool,
 }
 
 impl Worker {
@@ -157,6 +162,29 @@ struct Partition {
 }
 
 impl Partition {
+    // Update Worker State: the worker `handle` in `state` — whether that is a change, which every realm is to be told.
+    fn set_state(&mut self, handle: u32, state: &str) -> bool {
+        let Some(w) = self.workers.get_mut(&handle) else { return false };
+        if state == "redundant" {
+            w.waits = None;
+        }
+        let changed = w.state != state;
+        state.clone_into(&mut w.state);
+        changed
+    }
+    // The registration `id`, which a Register job made: one made earlier only to hold its job's updateViaCache mode takes
+    // its place in the registration order now, as the registration it then becomes.
+    fn register(&mut self, id: u32) -> &mut Registration {
+        let list = &mut self.registrations;
+        let mut i = list.iter().position(|r| r.id == id).expect("a registration of the partition");
+        if !list[i].registered {
+            let r = list.remove(i);
+            list.push(r);
+            i = list.len() - 1;
+            list[i].registered = true;
+        }
+        &mut list[i]
+    }
     // The registration the map holds at `scope`.
     fn mapped(&mut self, scope: &str) -> Option<&mut Registration> {
         self.registrations.iter_mut().find(|r| r.mapped && r.scope == scope)
@@ -206,15 +234,7 @@ impl Registry {
     // registration order now, as the registration it then becomes (the job of one that failed left it behind).
     fn registered(&mut self, partition: u64, scope: &str) -> &mut Registration {
         let id = self.at(partition, scope).id;
-        let list = &mut self.partition(partition).registrations;
-        let mut i = list.iter().position(|r| r.id == id).expect("just made");
-        if !list[i].registered {
-            let r = list.remove(i);
-            list.push(r);
-            i = list.len() - 1;
-            list[i].registered = true;
-        }
-        &mut list[i]
+        self.partition(partition).register(id)
     }
 }
 
@@ -245,18 +265,6 @@ pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option
     let [installing, waiting, active] = lock().existing(partition).and_then(|p| p.by_id(id)).map_or([None; 3], |r| r.versions());
     (installing, waiting, active)
 }
-// Its `slot` ("installing", "waiting" or "active") set to the worker `handle` — a version of it from then on — or
-// emptied.
-pub(crate) fn set_version_for_ruby(partition: u64, id: u32, slot: String, handle: Option<u32>) {
-    let mut reg = lock();
-    let Some(p) = reg.existing(partition) else { return };
-    if let Some(s) = p.by_id(id).and_then(|r| r.slot(&slot)) {
-        *s = handle;
-    }
-    if let Some(w) = handle.and_then(|h| p.workers.get_mut(&h)) {
-        w.registration = id;
-    }
-}
 // A service worker of the session, spawned: its script's URL and type, 'parsed' until a registration holds it.
 pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: String, script_type: String) {
     let worker = Worker {
@@ -271,6 +279,9 @@ pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: Strin
         skip_waiting: false,
         extended: false,
         messages: 0,
+        step_queued: false,
+        waits: None,
+        retired_outgoing: false,
     };
     lock().partition(partition).workers.insert(handle, worker);
 }
@@ -315,13 +326,9 @@ pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool)
 pub(crate) fn worker_activated_for_ruby(partition: u64, handle: u32) -> bool {
     lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.activated)
 }
-// …its state moved to `state`: whether that is a change.
+// …its state moved to `state`: whether that is a change. A redundant one waits for no step any more.
 pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: String) -> bool {
-    let mut reg = lock();
-    let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return false };
-    let changed = w.state != state;
-    w.state = state;
-    changed
+    lock().existing(partition).is_some_and(|p| p.set_state(handle, &state))
 }
 // ── The clients ──
 // A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order).
@@ -481,12 +488,6 @@ pub(crate) fn registered_at_for_ruby(partition: u64, scope: String) -> u32 {
     lock().existing(partition).and_then(|p| p.mapped(&scope)).filter(|r| r.registered).map_or(0, |r| r.id)
 }
 
-// The worker `handle` begins its lifecycle (its job made it its registration's installing worker): `updatefound` next.
-pub(crate) fn begin_lifecycle_for_ruby(partition: u64, handle: u32) {
-    if let Some(w) = lock().existing(partition).and_then(|p| p.workers.get_mut(&handle)) {
-        w.lifecycle.step = Step::UpdateFound;
-    }
-}
 // The worker `handle` finished a phase of its own: its install ('install', `ok` whether every `waitUntil` fulfilled) or
 // its activation ('activated').
 pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok: bool) {
@@ -498,34 +499,34 @@ pub(crate) fn note_phase_for_ruby(partition: u64, handle: u32, phase: String, ok
         }
     }
 }
-// The worker `handle`'s next lifecycle step, taken: "updatefound", "installed", "install_failed", "activating" —
-// where Try Activate lets it (`may_activate`) — or "activated"; else what it waits for: "install" or "activation" (its
-// own phase), "try_activate" (the verdict), or "done" (no step left — finished, failed, redundant, or no such worker).
-pub(crate) fn advance_for_ruby(partition: u64, handle: u32) -> &'static str {
-    let mut reg = lock();
-    let Some(p) = reg.existing(partition) else { return "done" };
-    let may_activate = may_activate(p, handle);
-    let Some(w) = p.workers.get_mut(&handle) else { return "done" };
-    if w.state == "redundant" {
-        w.lifecycle.step = Step::Idle;
-        return "done";
+impl Partition {
+    // The worker `handle`'s next lifecycle step, taken: "updatefound", "installed", "install_failed", "activating" —
+    // where Try Activate lets it (`may_activate`) — or "activated"; else what it waits for: "install" or "activation"
+    // (its own phase), "try_activate" (the verdict), or "done" (no step left — finished, failed, redundant, or none).
+    fn advance(&mut self, handle: u32) -> &'static str {
+        let may_activate = may_activate(self, handle);
+        let Some(w) = self.workers.get_mut(&handle) else { return "done" };
+        if w.state == "redundant" {
+            w.lifecycle.step = Step::Idle;
+            return "done";
+        }
+        let lc = &mut w.lifecycle;
+        let (next, taken) = match lc.step {
+            Step::Idle => return "done",
+            Step::UpdateFound => (Step::Installed, "updatefound"),
+            Step::Installed => match lc.installed {
+                None => return "install",
+                Some(true) => (Step::Activating, "installed"),
+                Some(false) => (Step::Idle, "install_failed"),
+            },
+            Step::Activating if !may_activate => return "try_activate",
+            Step::Activating => (Step::Activated, "activating"),
+            Step::Activated if !lc.activated => return "activation",
+            Step::Activated => (Step::Idle, "activated"),
+        };
+        lc.step = next;
+        taken
     }
-    let lc = &mut w.lifecycle;
-    let (next, taken) = match lc.step {
-        Step::Idle => return "done",
-        Step::UpdateFound => (Step::Installed, "updatefound"),
-        Step::Installed => match lc.installed {
-            None => return "install",
-            Some(true) => (Step::Activating, "installed"),
-            Some(false) => (Step::Idle, "install_failed"),
-        },
-        Step::Activating if !may_activate => return "try_activate",
-        Step::Activating => (Step::Activated, "activating"),
-        Step::Activated if !lc.activated => return "activation",
-        Step::Activated => (Step::Idle, "activated"),
-    };
-    lc.step = next;
-    taken
 }
 // ── Try Activate and Try Clear Registration ──
 // Whether the worker `handle` (the registration's outgoing active one) is used by a client: Try Activate's "no service
@@ -560,21 +561,6 @@ pub(crate) fn registration_clearable_for_ruby(partition: u64, id: u32) -> bool {
         return false;
     }
     r.workers().iter().filter_map(|h| p.workers.get(h)).all(|w| !w.extended() && !w.lifecycle_pending())
-}
-// Whether the worker `handle` stands at Try Activate (installed, its activation not yet allowed).
-pub(crate) fn awaits_activation_for_ruby(partition: u64, handle: u32) -> bool {
-    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.step == Step::Activating)
-}
-// The worker `handle` is activating the registration at `scope`.
-pub(crate) fn note_activating_for_ruby(partition: u64, scope: String, handle: u32) {
-    lock().at(partition, &scope).activating = Some(handle);
-}
-// …and it is activated, the worker its navigations route to.
-pub(crate) fn activated_for_ruby(partition: u64, scope: String, handle: u32) {
-    let mut reg = lock();
-    let r = reg.registered(partition, &scope);
-    r.serving = Some(handle);
-    r.activating = None;
 }
 // The registration at `scope` unregistered — out of the map, its mode and navigation preload with it: its number, nil
 // where the map held none. One with no version left is gone at once; another stays until it is cleared.
@@ -659,6 +645,217 @@ pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Op
     let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
     Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }
+// ── The lifecycle, as the host takes its steps (Service Workers §8 Install, Try Activate, Activate) ──
+// What a step makes the host do, in order — the registry's state committed first: tell every realm a worker's new state
+// ("state", handle, state), end a worker's isolate ("terminate"), fire a registration's `updatefound` ("update_found",
+// registration), have a worker fire its activate event ("activate"), tell every realm a worker is its registration's
+// active one ("activated", handle, script URL, whether it intercepts), queue a worker's next step as a task of the
+// window's ("queue_step"), take the rest of a step once what came before it was done ("continue"), unregister the
+// registration at a scope ("unregister", 0, scope), and try to clear the registrations unregistered ("try_clear").
+pub(crate) type Cmd = (&'static str, u32, String, bool);
+fn cmd(kind: &'static str, n: u32) -> Cmd {
+    (kind, n, String::new(), false)
+}
+
+impl Partition {
+    fn set_version(&mut self, id: u32, slot: &str, handle: Option<u32>) {
+        if let Some(s) = self.by_id(id).and_then(|r| r.slot(slot)) {
+            *s = handle;
+        }
+        if let Some(w) = handle.and_then(|h| self.workers.get_mut(&h)) {
+            w.registration = id;
+        }
+    }
+    fn mapped_scope(&self, id: u32) -> Option<String> {
+        self.registrations.iter().find(|r| r.id == id && r.mapped).map(|r| r.scope.clone())
+    }
+    // A version retired: redundant, and its isolate ended.
+    fn retire(&mut self, handle: u32, out: &mut Vec<Cmd>) {
+        if self.set_state(handle, "redundant") {
+            out.push(("state", handle, "redundant".to_owned(), false));
+        }
+        out.push(cmd("terminate", handle));
+    }
+    fn tell_state(&mut self, handle: u32, state: &str, out: &mut Vec<Cmd>) {
+        if self.set_state(handle, state) {
+            out.push(("state", handle, state.to_owned(), false));
+        }
+    }
+    // The worker's next step queued, where it is not already.
+    fn queue_step(&mut self, handle: u32, out: &mut Vec<Cmd>) {
+        if let Some(w) = self.workers.get_mut(&handle).filter(|w| !w.step_queued) {
+            w.step_queued = true;
+            out.push(cmd("queue_step", handle));
+        }
+    }
+    // Install: the job's worker `handle` evaluated, the registration `id`'s installing worker now — superseding one
+    // still installing there (an update supersedes a pending worker, NOT the active one, and a WAITING worker keeps
+    // waiting until the newer one is installed: skip-waiting.https) — its lifecycle begun.
+    fn install(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
+        let (pending, active) = self.by_id(id).map_or((None, None), |r| (r.installing, r.active));
+        self.set_version(id, "installing", Some(handle));
+        if let Some(p) = pending.filter(|&p| Some(p) != active && p != handle) {
+            self.retire(p, out);
+        }
+        if let Some(w) = self.workers.get_mut(&handle) {
+            w.lifecycle.step = Step::UpdateFound;
+        }
+        self.tell_state(handle, "installing", out);
+        self.queue_step(handle, out);
+    }
+    // The worker `handle`'s next step taken — the task queued for it, or a wait resumed — or, where it waits, what for.
+    fn step(&mut self, handle: u32, out: &mut Vec<Cmd>) {
+        let Some(w) = self.workers.get_mut(&handle) else { return };
+        w.step_queued = false;
+        let id = w.registration;
+        let taken = self.advance(handle);
+        if let Some(w) = self.workers.get_mut(&handle) {
+            w.waits = matches!(taken, "install" | "activation" | "try_activate").then_some(taken);
+        }
+        match taken {
+            "updatefound" => {
+                out.push(cmd("update_found", id));
+                self.queue_step(handle, out);
+            }
+            "installed" => self.installed(id, handle, out),
+            "install_failed" => self.install_failed(id, handle, out),
+            "activating" => self.activating(id, handle, out),
+            "activated" => self.activated(id, handle, out),
+            _ => {}
+        }
+    }
+    // installing → installed: the waiting worker. A version already SITTING there is retired now — per Update State
+    // "installed", the previous waiting worker goes redundant the moment a newer one reaches installed (skip-waiting.https:
+    // url2 redundant once url3 installs) — and, its install event no longer pending, a registration unregistered
+    // meanwhile cleared, where nothing else holds it (`waitUntil`'s steps).
+    fn installed(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
+        let (installing, waiting) = self.by_id(id).map_or((None, None), |r| (r.installing, r.waiting));
+        self.set_version(id, "waiting", Some(handle));
+        if installing == Some(handle) {
+            self.set_version(id, "installing", None);
+        }
+        if let Some(old) = waiting.filter(|&w| w != handle) {
+            self.retire(old, out);
+        }
+        self.tell_state(handle, "installed", out);
+        out.push(cmd("try_clear", 0));
+        self.queue_step(handle, out);
+    }
+    // …or its install failed (a rejected install `waitUntil` — Install "installFailed"): redundant without ever occupying
+    // the waiting or active slot, and a registration left with no version at all leaves the map (a failed install must not
+    // resurrect an unregistered scope — unregister-then-register-new-script — nor leave a phantom registration a later
+    // getRegistration() would find).
+    fn install_failed(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
+        if self.by_id(id).is_some_and(|r| r.installing == Some(handle)) {
+            self.set_version(id, "installing", None);
+        }
+        self.retire(handle, out);
+        if let Some(scope) = self.mapped_scope(id).filter(|_| self.by_id(id).is_some_and(|r| r.workers().is_empty())) {
+            out.push(("unregister", 0, scope, false));
+        }
+        out.push(cmd("try_clear", 0));
+    }
+    // installed → activating, once Try Activate allows it: the one it replaces retired first (Activate's order — its
+    // `statechange` seeing the registration as it was), then the rest (`continue_activating`).
+    fn activating(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
+        let outgoing = self.by_id(id).and_then(|r| r.active).filter(|&o| o != handle);
+        match outgoing {
+            Some(o) => {
+                if let Some(w) = self.workers.get_mut(&handle) {
+                    w.retired_outgoing = true;
+                }
+                self.retire(o, out);
+                out.push(cmd("continue", handle));
+            }
+            None => self.continue_activating(id, handle, out),
+        }
+    }
+    // …the active worker now — its activate event dispatched, on its own thread, ahead of anything a client sends it once
+    // told it is activating (a `clients.claim()` asked then is an active worker's) — and the host told it EXISTS but is
+    // still activating (Handle Fetch parks functional events against the scope until it is activated:
+    // fetch-waits-for-activate), where the map still holds it. Every client using the registration takes it as its
+    // controller now (Activate: Notify Controller Change) — a worker whose thread ended its active worker all the same.
+    fn continue_activating(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
+        let waiting = self.by_id(id).and_then(|r| r.waiting);
+        self.set_version(id, "active", Some(handle));
+        if waiting == Some(handle) {
+            self.set_version(id, "waiting", None);
+        }
+        out.push(cmd("activate", handle));
+        self.tell_state(handle, "activating", out);
+        if let Some(r) = self.registrations.iter_mut().find(|r| r.id == id && r.mapped) {
+            r.activating = Some(handle);
+        }
+        if let Some(w) = self.workers.get(&handle) {
+            out.push(("activated", handle, w.script_url.clone(), w.intercepts()));
+        }
+        self.queue_step(handle, out);
+    }
+    // …→ activated, once its activation completed: the worker serving its scope — before the state flips, a synchronous
+    // `statechange` listener reading `navigator.serviceWorker.controller` already seeing the claim its activate handler
+    // made — while it is still its registration's active worker and the map still holds that; and a registration
+    // unregistered meanwhile cleared, where nothing else holds it.
+    fn activated(&mut self, id: u32, handle: u32, out: &mut Vec<Cmd>) {
+        if self.registrations.iter().any(|r| r.id == id && r.mapped && r.active == Some(handle)) {
+            let r = self.register(id);
+            r.serving = Some(handle);
+            r.activating = None;
+        }
+        self.tell_state(handle, "activated", out);
+        out.push(cmd("try_clear", 0));
+    }
+}
+
+// The job's worker `handle` evaluated, the registration `id`'s installing worker (Install): what the host does.
+pub(crate) fn install_for_ruby(partition: u64, id: u32, handle: u32) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.install(id, handle, &mut out);
+    }
+    out
+}
+// The worker `handle`'s queued step taken (`__csim_swStep`): what the host does.
+pub(crate) fn step_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.step(handle, &mut out);
+    }
+    out
+}
+// …the rest of its activating step, once the worker it replaces was retired.
+pub(crate) fn continue_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        let id = p.workers.get_mut(&handle).and_then(|w| std::mem::take(&mut w.retired_outgoing).then_some(w.registration));
+        if let Some(id) = id {
+            p.continue_activating(id, handle, &mut out);
+        }
+    }
+    out
+}
+// …a step that waits for `what` resumed, where the worker's waits for it — its install or activation phase arrived
+// ("install", "activation"), or Try Activate's holds let go ("try_activate"): every worker waiting at Try Activate where
+// `handle` is 0.
+pub(crate) fn resume_for_ruby(partition: u64, handle: u32, what: String) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        let mut waiting: Vec<u32> = p.workers.iter().filter(|&(&h, w)| (handle == 0 || h == handle) && w.waits == Some(what.as_str())).map(|(&h, _)| h).collect();
+        waiting.sort_unstable();
+        for h in waiting {
+            p.step(h, &mut out);
+        }
+    }
+    out
+}
+// The workers whose next step is queued — the outgoing page's tasks, the new page's to run.
+pub(crate) fn queued_steps_for_ruby(partition: u64) -> Vec<u32> {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return Vec::new() };
+    let mut queued: Vec<u32> = p.workers.iter().filter(|(_, w)| w.step_queued).map(|(&h, _)| h).collect();
+    queued.sort_unstable();
+    queued
+}
+
 // The registrations of a session made already (none for one gone).
 fn registrations_mut(reg: &mut Registry, partition: u64) -> &mut [Registration] {
     reg.existing(partition).map_or(&mut [], |p| p.registrations.as_mut_slice())
@@ -707,6 +904,64 @@ pub(crate) fn set_navigation_preload_for_ruby(partition: u64, scope: String, ena
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // What the host's steps do to the registry, made directly.
+    fn part<R>(p: u64, f: impl FnOnce(&mut Partition) -> R) -> R {
+        f(lock().existing(p).expect("a partition made"))
+    }
+    fn set_version_for_ruby(p: u64, id: u32, slot: String, handle: Option<u32>) {
+        part(p, |q| q.set_version(id, &slot, handle));
+    }
+    fn begin_lifecycle_for_ruby(p: u64, handle: u32) {
+        part(p, |q| q.workers.get_mut(&handle).expect("a worker made").lifecycle.step = Step::UpdateFound);
+    }
+    fn advance_for_ruby(p: u64, handle: u32) -> &'static str {
+        part(p, |q| q.advance(handle))
+    }
+    fn awaits_activation_for_ruby(p: u64, handle: u32) -> bool {
+        part(p, |q| q.workers.get(&handle).is_some_and(|w| w.lifecycle.step == Step::Activating))
+    }
+    fn note_activating_for_ruby(p: u64, scope: String, handle: u32) {
+        lock().at(p, &scope).activating = Some(handle);
+    }
+    fn activated_for_ruby(p: u64, scope: String, handle: u32) {
+        let mut reg = lock();
+        let r = reg.registered(p, &scope);
+        r.serving = Some(handle);
+        r.activating = None;
+    }
+
+    #[test]
+    fn has_the_host_take_each_lifecycle_step_in_order() {
+        let p = partition_new_for_ruby();
+        let id = note_registered_for_ruby(p, "https://a.test/".into());
+        let kinds = |cmds: Vec<Cmd>| cmds.into_iter().map(|(k, n, t, _)| format!("{k} {n} {t}").trim_end().to_owned()).collect::<Vec<_>>();
+        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
+        assert_eq!(kinds(install_for_ruby(p, id, 1)), ["state 1 installing", "queue_step 1"]);
+        // (…one step a task: updatefound, then the install phase waited for, then installed and Try Activate)
+        assert_eq!(kinds(step_for_ruby(p, 1)), [format!("update_found {id}"), "queue_step 1".into()]);
+        assert!(kinds(step_for_ruby(p, 1)).is_empty());
+        assert!(kinds(resume_for_ruby(p, 1, "activation".into())).is_empty());
+        note_phase_for_ruby(p, 1, "install".into(), true);
+        assert_eq!(kinds(resume_for_ruby(p, 1, "install".into())), ["state 1 installed", "try_clear 0", "queue_step 1"]);
+        assert_eq!(kinds(step_for_ruby(p, 1)), ["activate 1", "state 1 activating", "activated 1 https://a.test/sw.js", "queue_step 1"]);
+        assert!(kinds(step_for_ruby(p, 1)).is_empty());
+        note_phase_for_ruby(p, 1, "activated".into(), true);
+        assert_eq!(kinds(resume_for_ruby(p, 1, "activation".into())), ["state 1 activated", "try_clear 0"]);
+        assert_eq!(match_worker_for_ruby(p, "https://a.test/x".into(), "navigation".into()).map(|m| m.0), Some(1));
+        // (…an update replacing it: the outgoing worker retired before the versions move, the rest continued after)
+        worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
+        install_for_ruby(p, id, 2);
+        step_for_ruby(p, 2);
+        note_phase_for_ruby(p, 2, "install".into(), true);
+        step_for_ruby(p, 2);
+        assert_eq!(kinds(step_for_ruby(p, 2)), ["state 1 redundant", "terminate 1", "continue 2"]);
+        assert_eq!(versions_for_ruby(p, id), (None, Some(2), Some(1)));
+        assert_eq!(kinds(continue_for_ruby(p, 2)), ["activate 2", "state 2 activating", "activated 2 https://a.test/sw.js", "queue_step 2"]);
+        assert_eq!(versions_for_ruby(p, id), (None, None, Some(2)));
+        assert_eq!(queued_steps_for_ruby(p), [2]);
+        clear_for_ruby(p);
+    }
 
     #[test]
     fn lets_a_worker_activate_as_try_activate_has_it() {

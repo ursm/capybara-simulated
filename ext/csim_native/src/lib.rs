@@ -348,7 +348,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
     native.define_module_function("sw_note_registered", magnus::function!(sw_registry::note_registered_for_ruby, 2))?;
     native.define_module_function("sw_versions", magnus::function!(sw_registry::versions_for_ruby, 2))?;
-    native.define_module_function("sw_set_version", magnus::function!(sw_registry::set_version_for_ruby, 4))?;
     native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 4))?;
     native.define_module_function("sw_worker", magnus::function!(sw_registry::worker_for_ruby, 2))?;
     native.define_module_function("sw_set_worker_state", magnus::function!(sw_registry::set_worker_state_for_ruby, 3))?;
@@ -372,14 +371,14 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_registrations_of_origin", magnus::function!(sw_registry::registrations_of_origin_for_ruby, 2))?;
     native.define_module_function("sw_match_registration", magnus::function!(sw_registry::match_registration_for_ruby, 3))?;
     native.define_module_function("sw_registered_at", magnus::function!(sw_registry::registered_at_for_ruby, 2))?;
-    native.define_module_function("sw_begin_lifecycle", magnus::function!(sw_registry::begin_lifecycle_for_ruby, 2))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;
-    native.define_module_function("sw_advance", magnus::function!(sw_registry::advance_for_ruby, 2))?;
     native.define_module_function("sw_hold", magnus::function!(sw_registry::hold_for_ruby, 4))?;
     native.define_module_function("sw_registration_clearable", magnus::function!(sw_registry::registration_clearable_for_ruby, 2))?;
-    native.define_module_function("sw_awaits_activation", magnus::function!(sw_registry::awaits_activation_for_ruby, 2))?;
-    native.define_module_function("sw_note_activating", magnus::function!(sw_registry::note_activating_for_ruby, 3))?;
-    native.define_module_function("sw_activated", magnus::function!(sw_registry::activated_for_ruby, 3))?;
+    native.define_module_function("sw_install", magnus::function!(sw_registry::install_for_ruby, 3))?;
+    native.define_module_function("sw_step", magnus::function!(sw_registry::step_for_ruby, 2))?;
+    native.define_module_function("sw_continue", magnus::function!(sw_registry::continue_for_ruby, 2))?;
+    native.define_module_function("sw_resume", magnus::function!(sw_registry::resume_for_ruby, 3))?;
+    native.define_module_function("sw_queued_steps", magnus::function!(sw_registry::queued_steps_for_ruby, 1))?;
     native.define_module_function("sw_unregister", magnus::function!(sw_registry::unregister_for_ruby, 2))?;
     native.define_module_function("sw_clear_registration", magnus::function!(sw_registry::clear_registration_for_ruby, 2))?;
     native.define_module_function("sw_forget_worker", magnus::function!(sw_registry::forget_worker_for_ruby, 2))?;
