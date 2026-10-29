@@ -5555,13 +5555,12 @@ module Capybara
       private def sw_redundant?(handle) = sw_worker(handle)&.dig(2) == 'redundant'
 
       # Update Worker State: the worker `handle` in `state`, which every realm's ServiceWorker of it takes, its
-      # `statechange` fired (and, activated, a client it now controls has its `ready`) — where that is a change; and a
-      # job waiting for this worker's install runs once it is installed, or failed.
+      # `statechange` fired (and, activated, a client it now controls has its `ready`) — where that is a change.
       private def sw_update_worker_state(handle, state)
-        return unless (cmds = Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s))
+        return unless Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
 
         broadcast_to_realms('__csim_swWorkerStateChanged', handle.to_i, state.to_s)
-        sw_run(cmds)
+        nil
       end
 
       # ── The Register, Update and Unregister jobs (Service Workers §8) ──
@@ -5570,8 +5569,8 @@ module Capybara
 
       # A client's register() (`kind` 'register': its script URL and scope — nil: the script's directory — against the
       # client's `base` and `origin`, Start Register's checks first), a registration's update() or unregister() ('update' /
-      # 'unregister': its number and scope), scheduled: `['job', its number]` — an equivalent register() joins the one
-      # before it — or `[error name, message]`.
+      # 'unregister': its number and scope), scheduled: `['job', its number]` — an equivalent job joins the one before it
+      # — or `[error name, message]`: update() of a registration with no worker an InvalidStateError.
       # Service Workers are modeled only in a universal-server context (the WPT runner, where every host is served
       # in-process): a real app keeps the "not supported" rejection, so its registration-failed branch runs rather than
       # a half-modeled success path.
@@ -5582,7 +5581,7 @@ module Capybara
           ok, script_url, scope = Native.service_worker_start_register(script_url.to_s, scope&.to_s, base.to_s, origin.to_s)
           return [ok, script_url] unless ok == 'ok'
         end
-        id, cmds = Native.sw_schedule_job(
+        scheduled = Native.sw_schedule_job(
           @sw_partition,
           kind.to_s,
           scope.to_s,
@@ -5593,6 +5592,9 @@ module Capybara
           realm_id.to_i,
           creator_key.to_s
         )
+        return ['InvalidStateError', 'Failed to update a ServiceWorker: the registration has no worker.'] unless scheduled
+
+        id, cmds = scheduled
         sw_run(cmds)
         ['job', id]
       end
@@ -5667,7 +5669,6 @@ module Capybara
           when 'queue_job'     then @runtime.call('__csim_swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
           when 'report_client' then sw_report_client(n)
-          when 'finish'        then sw_run(Native.sw_finish_job(@sw_partition, n))
           when 'settled'       then broadcast_to_realms('__csim_swJobSettled', n, *args)
           when 'answer'        then @workers[n]&.dig(:inbox)&.push({kind: 'unregister_result', ok: args[0]})
           end

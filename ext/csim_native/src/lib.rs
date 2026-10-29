@@ -370,7 +370,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_job_spawned", magnus::function!(sw_registry::job_spawned_for_ruby, 3))?;
     native.define_module_function("sw_job_evaluated", magnus::function!(sw_registry::job_evaluated_for_ruby, 4))?;
     native.define_module_function("sw_job_worker_gone", magnus::function!(sw_registry::job_worker_gone_for_ruby, 2))?;
-    native.define_module_function("sw_finish_job", magnus::function!(sw_registry::finish_job_for_ruby, 2))?;
     native.define_module_function("sw_queued_jobs", magnus::function!(sw_registry::queued_jobs_for_ruby, 1))?;
     native.define_module_function("sw_registrations_of_origin", magnus::function!(sw_registry::registrations_of_origin_for_ruby, 2))?;
     native.define_module_function("sw_match_registration", magnus::function!(sw_registry::match_registration_for_ruby, 3))?;
