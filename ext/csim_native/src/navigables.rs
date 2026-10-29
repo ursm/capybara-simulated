@@ -229,20 +229,6 @@ pub(crate) enum Choice {
 //   the top-level traversable of a frame's has — which the document navigates as its location navigates it;
 // - `Plan`: the top-level page's link (or such a window's not routed above), whose navigation its caller plans
 //   (navigation_plan.rs `planNavigation`) with this target — `_top` for a name the page has.
-// Where `window.open` goes (`RealmArena::open_route`), as the navigable its target chooses has it: its own window
-// (navigated as its location is), another navigable — the realm its active document is in (none yet: a frame no
-// script has looked into), its container (a frame's), whether it is another top-level traversable a name found — it
-// navigates and returns the window of, none (one its sandbox does not let it navigate), a new window its document may
-// not open (no `allow-popups`), or a new one, so named ('' for `_blank`).
-#[derive(Debug, PartialEq)]
-pub(crate) enum OpenRoute {
-    Own,
-    Navigable(Option<i32>, Option<NodeId>, bool),
-    None,
-    Refused,
-    New(Vec<u16>),
-}
-
 #[derive(Debug, PartialEq)]
 pub(crate) enum LinkRoute {
     None,
@@ -252,6 +238,31 @@ pub(crate) enum LinkRoute {
     Auxiliary(Vec<u16>),
     Navigate(i32),
     Plan(Vec<u16>),
+}
+
+// Where `window.open` goes (`RealmArena::open_route`), as the navigable its target chooses has it: its own window
+// (navigated as its location is), another navigable — the realm its active document is in (none yet: a frame no
+// script has looked into) and the WindowProxy its caller returns of it (`OpenWindow`) — it navigates, none (one its
+// sandbox does not let it navigate), a new window its document may not open (no `allow-popups`), or a new one, so named
+// ('' for `_blank`).
+#[derive(Debug, PartialEq)]
+pub(crate) enum OpenRoute {
+    Own,
+    Navigable(Option<i32>, OpenWindow),
+    None,
+    Refused,
+    New(Vec<u16>),
+}
+
+// …that WindowProxy: the caller's `top` or `parent` (`_top`, `_parent`, the top a name found), its container's
+// `contentWindow` (a frame a name found — which its caller makes a document for where it has none — as `frames[name]`
+// in its container's document has it), or another top-level traversable's window a name found.
+#[derive(Debug, PartialEq)]
+pub(crate) enum OpenWindow {
+    Top,
+    Parent,
+    Container(NodeId),
+    Window,
 }
 
 impl RealmArena {
@@ -841,16 +852,25 @@ impl RealmArena {
     // Where `window.open(url, target)` called in realm `current` goes (`OpenRoute`; HTML "window open steps": an empty
     // target `_blank`, where a link's is its own navigable).
     pub(crate) fn open_route(&self, current: i32, target: &[u16]) -> OpenRoute {
-        let blank: Vec<u16> = "_blank".encode_utf16().collect();
-        let target = if target.is_empty() { &blank } else { target };
+        let blank: Vec<u16>;
+        let target = if target.is_empty() {
+            blank = "_blank".encode_utf16().collect();
+            &blank
+        } else {
+            target
+        };
+        let parent = target_keyword(&String::from_utf16_lossy(target)) == TARGET_PARENT;
         match self.choose_navigable(current, target) {
             Choice::Current => OpenRoute::Own,
-            Choice::TopLevel(r) if r == current => OpenRoute::Own,
-            Choice::TopLevel(r) => OpenRoute::Navigable(Some(r), None, false),
-            Choice::Frame(c) => OpenRoute::Navigable(self.frame_realm(c), Some(c), false),
-            Choice::Window(w) => OpenRoute::Navigable(Some(w), None, true),
+            Choice::TopLevel(r) | Choice::Window(r) if r == current => OpenRoute::Own,
+            Choice::Frame(c) if self.frame_realm(c) == Some(current) => OpenRoute::Own,
+            Choice::TopLevel(r) => OpenRoute::Navigable(Some(r), if parent { OpenWindow::Parent } else { OpenWindow::Top }),
+            Choice::Frame(c) if parent => OpenRoute::Navigable(self.frame_realm(c), OpenWindow::Parent),
+            Choice::Frame(c) => OpenRoute::Navigable(self.frame_realm(c), OpenWindow::Container(c)),
+            Choice::Window(w) => OpenRoute::Navigable(Some(w), OpenWindow::Window),
             Choice::Blocked => OpenRoute::None,
-            Choice::New if self.auxiliary_refused(current, target) => OpenRoute::Refused,
+            // (…the choice a new one already: refused where its sandbox lets it make none)
+            Choice::New if self.sandboxed(current, crate::sandbox::AUXILIARY_NAVIGATION) => OpenRoute::Refused,
             Choice::New if target_keyword(&String::from_utf16_lossy(target)) == TARGET_BLANK => OpenRoute::New(Vec::new()),
             Choice::New => OpenRoute::New(target.to_vec()),
         }
@@ -1227,26 +1247,34 @@ fn navigation_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).navigation_allowed(cid, target));
 }
-// __dom.openRoute(target) -> `[route, realm, container, window]`: `RealmArena::open_route` of `window.open` in the calling
-// realm — "own"; "navigable" (`realm` -1 for none yet, `container` null for a top-level one, `window` whether it is
-// another top-level traversable a name found); "none"; "refused"; "new" (`realm` the name).
+// __dom.openRoute(target) -> `[route, realm, window, container]`: `RealmArena::open_route` of `window.open` in the
+// calling realm — "own"; "navigable" (`realm` -1 for none yet; `window` "top", "parent", "container" — `container` it —
+// or "window"); "none"; "refused"; "new" (`realm` the name).
 fn open_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let target = utf16_arg(scope, args.get(0));
     let cid = realm_id(scope, &args);
     let route = crate::dom::realm(scope, cid).open_route(cid, &target);
-    let (kind, at, container, window) = match route {
-        OpenRoute::Own => ("own", None, None, false),
-        OpenRoute::Navigable(realm, container, window) => ("navigable", Some(v8::Integer::new(scope, realm.unwrap_or(-1)).into()), container, window),
-        OpenRoute::None => ("none", None, None, false),
-        OpenRoute::Refused => ("refused", None, None, false),
-        OpenRoute::New(name) => ("new", Some(crate::dom::utf16_value(scope, &name)), None, false),
+    let (kind, at, window, container) = match route {
+        OpenRoute::Own => ("own", None, "", None),
+        OpenRoute::Navigable(realm, window) => {
+            let at = Some(v8::Integer::new(scope, realm.unwrap_or(-1)).into());
+            match window {
+                OpenWindow::Top => ("navigable", at, "top", None),
+                OpenWindow::Parent => ("navigable", at, "parent", None),
+                OpenWindow::Container(c) => ("navigable", at, "container", Some(c)),
+                OpenWindow::Window => ("navigable", at, "window", None),
+            }
+        }
+        OpenRoute::None => ("none", None, "", None),
+        OpenRoute::Refused => ("refused", None, "", None),
+        OpenRoute::New(name) => ("new", Some(crate::dom::utf16_value(scope, &name)), "", None),
     };
     let container = crate::dom::node_value(scope, container);
     if crate::dom::factory_threw(scope) {
         return;
     }
     let at = at.unwrap_or_else(|| v8::null(scope).into());
-    let items = [v8::String::new(scope, kind).unwrap().into(), at, container, v8::Boolean::new(scope, window).into()];
+    let items = [v8::String::new(scope, kind).unwrap().into(), at, v8::String::new(scope, window).unwrap().into(), container];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.targetsOwnNavigable(target) -> whether the navigable target `target` chooses from the calling realm's
@@ -1518,8 +1546,10 @@ mod tests {
         assert_eq!(arena.chosen_child_frame(1, &units("_parent")), None);
         // (…and where `window.open` goes from either: its own window, another navigable, a new one named)
         assert_eq!(arena.open_route(1, &units("_self")), OpenRoute::Own);
-        assert_eq!(arena.open_route(1, &units("_top")), OpenRoute::Navigable(Some(0), None, false));
-        assert_eq!(arena.open_route(0, &units("b")), OpenRoute::Navigable(None, Some(b), false));
+        assert_eq!(arena.open_route(1, &units("_top")), OpenRoute::Navigable(Some(0), OpenWindow::Top));
+        assert_eq!(arena.open_route(1, &units("_parent")), OpenRoute::Navigable(Some(0), OpenWindow::Parent));
+        assert_eq!(arena.open_route(1, &units("a")), OpenRoute::Own);
+        assert_eq!(arena.open_route(0, &units("b")), OpenRoute::Navigable(None, OpenWindow::Container(b)));
         assert_eq!(arena.open_route(0, &units("")), OpenRoute::New(Vec::new()));
         assert_eq!(arena.open_route(0, &units("w")), OpenRoute::New(units("w")));
     }
