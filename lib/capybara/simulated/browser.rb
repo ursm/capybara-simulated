@@ -3878,7 +3878,7 @@ module Capybara
       #      handle and spawns a Ruby thread.
       #   2. The thread fetches the request as every request is fetched (`rack_fetch`, the engine's FetchPlan: its
       #      cookies, its CORS check, its redirects) over a connection of its own (`event_stream_transport`), and reads
-      #      the body as it comes, pushing each `{id:, type:, data:, lastEventId:}` (or `{type: '__open', origin:}` /
+      #      the body as it comes, pushing each `{id:, type:, data:, lastEventId:}` (or `{type: '__open', url:}` /
       #      `{type: '__error', message:}` sentinel) onto a thread-safe queue.
       #   3. Settle's drain loop calls `deliver_event_source_events`, which polls the queue and hands the batch to
       #      `__csim_deliverEventSourceEvents` for dispatch.
@@ -3942,13 +3942,17 @@ module Capybara
           queue << {id: id, type: '__error', message: "HTTP #{status}"}
           return
         end
-        queue << {id: id, type: '__open', origin: url_origin(url)}
+        queue << {id: id, type: '__open', url: url}
         parser = Native.event_stream_open
         body.each do |chunk|
-          Native.event_stream_feed(parser, chunk).each {|type, data, event_id| queue << {id: id, type: type, data: data, lastEventId: event_id} }
+          Native.event_stream_feed(parser, chunk).each do |type, data, event_id|
+            queue << {id: id, type: type, data: data, lastEventId: event_id}
+          end
         end
       rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
         # (…the server closing mid-stream: the stream ends, as normal a lifecycle as any)
+      rescue StandardError => e
+        queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
       ensure
         Native.event_stream_close(parser) if parser
         socket = Thread.current[:csim_event_stream_socket]
@@ -3976,27 +3980,39 @@ module Capybara
           "Host: #{uri.port == uri.default_port ? uri.host : "#{uri.host}:#{uri.port}"}",
           *env_header_fields(env).map {|name, value| "#{name}: #{value}" }
         ]
-        socket.write(lines.join("\r\n").b << "\r\n\r\n")
+        # (…each line its bytes: a header's value may be text or the bytes a cookie holds)
+        socket.write(lines.map(&:b).join("\r\n") << "\r\n\r\n")
         socket.flush
-        code = socket.gets.to_s[%r{\AHTTP/[\d.]+\s+(\d{3})}, 1] or return :network_error
+        # (…an interim response — a 100, a 103 — read past: the final one follows it, RFC 9110 §15.2)
+        loop do
+          code    = socket.gets.to_s[%r{\AHTTP/[\d.]+\s+(\d{3})}, 1] or return :network_error
+          headers = read_event_stream_head(socket)
+          next if code.start_with?('1')
+
+          chunked = header_field(headers, 'transfer-encoding').to_s.match?(/chunked/i)
+          return [code.to_i, headers, EventStreamBody.new(socket, chunked)]
+        end
+      rescue IOError, SystemCallError, SocketError, OpenSSL::SSL::SSLError
+        :network_error
+      end
+
+      # A response head's fields as the connection brings them, by lowercased name: each field's bytes, as the wire has
+      # them, and a name's repeated fields each kept, as Rack 3 keeps them.
+      private def read_event_stream_head(socket)
         headers = {}
         while (line = socket.gets) && !line.strip.empty?
           name, value = line.chomp.split(':', 2)
           next unless value
 
-          # (…a field's bytes, as the wire has them; a name's repeated fields each kept, as Rack 3 keeps them)
-          value = value.strip.b
-          key   = name.strip.downcase
+          key          = name.strip.downcase
+          value        = value.strip.b
           headers[key] = headers.key?(key) ? [*headers[key], value] : value
         end
-        chunked = header_field(headers, 'transfer-encoding').to_s.match?(/chunked/i)
-        [code.to_i, headers, EventStreamBody.new(socket, chunked)]
-      rescue IOError, SystemCallError, SocketError, OpenSSL::SSL::SSLError
-        :network_error
+        headers
       end
 
       # An event stream's body as its connection brings it: each chunk as it comes, a chunked one's chunks undone.
-      EventStreamBody = Struct.new(:socket, :chunked) do
+      EventStreamBody = Struct.new(:socket, :chunked) {
         def each
           loop do
             if chunked
@@ -4016,17 +4032,24 @@ module Capybara
         def close
           socket.close unless socket.closed?
         end
-      end
+      }
 
+      # (…its host the name or address the URL gives — an IPv6 one without its brackets — given as long to answer as
+      # Net::HTTP's every other request is)
       private def open_event_stream_socket(uri)
-        tcp = TCPSocket.new(uri.host, uri.port)
+        tcp = Socket.tcp(uri.hostname, uri.port, connect_timeout: 5)
         return tcp unless uri.is_a?(URI::HTTPS)
 
-        ssl = OpenSSL::SSL::SSLSocket.new(tcp, OpenSSL::SSL::SSLContext.new)
-        ssl.sync_close = true
-        ssl.hostname   = uri.host
-        ssl.connect
-        ssl
+        begin
+          ssl = OpenSSL::SSL::SSLSocket.new(tcp, OpenSSL::SSL::SSLContext.new)
+          ssl.sync_close = true
+          ssl.hostname   = uri.hostname
+          ssl.connect
+          ssl
+        rescue StandardError
+          tcp.close
+          raise
+        end
       end
 
       def reset_event_sources
@@ -11922,9 +11945,9 @@ module Capybara
       end
 
       # A body that ended before its Content-Length did: the bytes that came, and then a network error.
-      CutShortBody = Struct.new(:bytes) do
+      CutShortBody = Struct.new(:bytes) {
         def each = yield(bytes)
-      end
+      }
 
       # A response read as an HTTP/1.1 client reads it off the wire (RFC 9112 §6.3) — the app's, and a remote one as
       # Net::HTTP gave it (a body short of its length read as far as it came, a decoded one given its decoded length):
@@ -12051,7 +12074,11 @@ module Capybara
       # The header fields a Rack env's request sends, by their names on the wire: its `HTTP_*` entries but `Host`, which the
       # connection's URL names.
       def env_header_fields(env)
-        env.filter_map {|k, v| [k.delete_prefix('HTTP_').split('_').map(&:capitalize).join('-'), v.to_s] if k.is_a?(String) && k.start_with?('HTTP_') && k != 'HTTP_HOST' }
+        env.filter_map {|k, v|
+          next unless k.is_a?(String) && k.start_with?('HTTP_') && k != 'HTTP_HOST'
+
+          [k.delete_prefix('HTTP_').split('_').map(&:capitalize).join('-'), v.to_s]
+        }
       end
 
       # Whether a URL is of a potentially trustworthy origin (Secure Contexts, the engine's: url_ops.rs

@@ -182,9 +182,13 @@ fn delivered(ready_state: u32, kind: &str) -> (u32, u32) {
 }
 // Whether a response of `status` and `content_type` announces a source's connection (HTML "process the event source
 // response"): a 200 of a MIME type whose essence is `text/event-stream` — any other fails it. The host's reading of a
-// live connection's response (Capybara::Simulated::Native.event_stream_response_ok) and a service worker's answer's.
-pub(crate) fn response_ok(status: u32, content_type: String) -> bool {
-    status == 200 && crate::mime::extract(&content_type).is_some_and(|m| m.essence == "text/event-stream")
+// live connection's response and a service worker's answer's.
+fn response_ok(status: u32, content_type: &str) -> bool {
+    status == 200 && crate::mime::extract(content_type).is_some_and(|m| m.essence == "text/event-stream")
+}
+// Capybara::Simulated::Native.event_stream_response_ok(status, content_type)
+pub(crate) fn response_ok_for_ruby(status: u32, content_type: String) -> bool {
+    response_ok(status, &content_type)
 }
 // …and what a controlling service worker's response does to a source: nothing for one closed already; one that does not
 // announce it fails it — an `error`; any other announces it — open, an `open` — its body's events read after.
@@ -192,34 +196,46 @@ fn served(ready_state: u32, status: u32, content_type: &str) -> (u32, u32) {
     if ready_state == CLOSED {
         return (CLOSED, FIRE_NONE);
     }
-    if response_ok(status, content_type.to_owned()) { delivered(ready_state, "__open") } else { delivered(ready_state, "__fail") }
+    if response_ok(status, content_type) { delivered(ready_state, "__open") } else { delivered(ready_state, "__fail") }
 }
 
-// __dom.esDeliver(state, kind, origin) -> the event one event the host delivered fires (`delivered`), the source changed
-// as it says — an `__open` that opens it of the `origin` its response's URL is, where the host names one (HTML "announce
-// the connection": the origin its messages carry).
+// What an event that opened a source makes of the origin its messages carry: the origin of `url`, the URL of the response
+// that announced the connection — where a redirect led — where it names one (HTML: "the serialization of the origin of
+// the event stream's final URL").
+fn opened_at(s: &mut Source, fire: u32, url: Option<String>) {
+    if let Some(parsed) = url.filter(|_| fire == FIRE_OPEN).and_then(|u| ada_url::Url::parse(&u, None).ok()) {
+        s.origin = parsed.origin();
+    }
+}
+// (…the argument `i` as text, where it is a string)
+fn text_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>, i: i32) -> Option<String> {
+    args.get(i).is_string().then(|| args.get(i).to_rust_string_lossy(scope))
+}
+
+// __dom.esDeliver(state, kind, url) -> the event one event the host delivered fires (`delivered`), the source changed as
+// it says — an `__open` of the `url` its response came from (`opened_at`).
 fn deliver_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let kind = args.get(1).to_rust_string_lossy(scope);
-    let origin = args.get(2).is_string().then(|| args.get(2).to_rust_string_lossy(scope));
+    let url = text_arg(scope, &args, 2);
     let mut s = source.borrow_mut();
     let (ready_state, fire) = delivered(s.ready_state, &kind);
     s.ready_state = ready_state;
-    if let Some(origin) = origin.filter(|_| fire == FIRE_OPEN) {
-        s.origin = origin;
-    }
+    opened_at(&mut s, fire, url);
     rv.set_uint32(fire);
 }
 
-// __dom.esServed(state, status, contentType) -> the event a controlling service worker's response fires (`served`), the
-// source changed as it says.
+// __dom.esServed(state, status, contentType, url) -> the event a controlling service worker's response fires (`served`),
+// the source changed as it says — opened of the `url` the response is of (`opened_at`).
 fn served_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(source) = source(scope, args.get(0)) else { return };
     let status = args.get(1).uint32_value(scope).unwrap_or(0);
     let content_type = args.get(2).to_rust_string_lossy(scope);
+    let url = text_arg(scope, &args, 3);
     let mut s = source.borrow_mut();
     let (ready_state, fire) = served(s.ready_state, status, &content_type);
     s.ready_state = ready_state;
+    opened_at(&mut s, fire, url);
     rv.set_uint32(fire);
 }
 

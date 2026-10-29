@@ -16,8 +16,10 @@ use crate::fetch_rules::{bad_port, redirect_status};
 // Request cache modes that never read the store, and those that serve a stored response however stale.
 const SKIP_READ: [&str; 2] = ["no-store", "reload"];
 const SERVE_STALE: [&str; 2] = ["force-cache", "only-if-cached"];
-// An author's conditional header: the caller revalidates itself, so a request of the default cache mode is a no-store one
-// (Fetch "HTTP-network-or-cache fetch"; request-cache-default-conditional: "treated similarly to no-store").
+// An author's conditional header: the caller revalidates itself — an externally conditionalized request, whose validators
+// and whose 304 are its own (RFC 9111 §4.3.2; Chrome's and Firefox's) — so the HTTP cache neither answers nor stores it,
+// whatever its mode, and a request of the default cache mode is a no-store one (Fetch "HTTP-network-or-cache fetch";
+// request-cache-default-conditional: "treated similarly to no-store").
 const CONDITIONAL: [&str; 5] = ["if-none-match", "if-modified-since", "if-match", "if-unmodified-since", "if-range"];
 // The statuses whose response has no body (Fetch "null body status"), and a HEAD's response has none either.
 const NULL_BODY: [u32; 3] = [204, 205, 304];
@@ -54,6 +56,7 @@ pub(crate) struct FetchPlan {
     credentials: String,
     redirect_mode: String,
     cache_mode: String,
+    conditional: bool,
     navigation: bool,
     // The credentials an XHR's `open()` brought, as an `Authorization` value, answering a Basic challenge.
     challenge: Option<String>,
@@ -154,8 +157,9 @@ impl FetchPlan {
             .iter()
             .position(|(k, _)| k.eq_ignore_ascii_case(b"x-csim-auth-challenge"))
             .map(|i| format!("Basic {}", String::from_utf8_lossy(&headers.remove(i).1)));
+        let conditional = headers.iter().any(|(k, _)| CONDITIONAL.contains(&lower(k).as_str()));
         let mut cache_mode = named("cache")?.unwrap_or_else(|| "default".to_owned());
-        if cache_mode == "default" && headers.iter().any(|(k, _)| CONDITIONAL.contains(&lower(k).as_str())) {
+        if conditional && cache_mode == "default" {
             cache_mode = "no-store".to_owned();
         }
         let of_mode = |m: &str| mode.as_deref() == Some(m);
@@ -189,6 +193,7 @@ impl FetchPlan {
             credentials,
             redirect_mode: named("redirect")?.unwrap_or_else(|| "follow".to_owned()),
             cache_mode,
+            conditional,
             navigation,
             challenge,
             preflight_cache: sessions.0,
@@ -227,19 +232,22 @@ impl FetchPlan {
     fn redirected(&self) -> bool {
         self.st.borrow().chain.redirected
     }
-    // Whether the HTTP cache may be read for this hop: a GET, a mode that reads it, and the chain at its client's origin
-    // still (a cross-origin hop always goes to the network, so the mode filtering runs).
+    // Whether the HTTP cache may be read for this hop: a GET, no author conditional, a mode that reads it, and the chain
+    // at its client's origin still (a cross-origin hop always goes to the network, so the mode filtering runs).
     fn reads_cache(st: &State, plan: &FetchPlan) -> bool {
-        st.chain.method == "GET" && !st.crossed && !SKIP_READ.contains(&plan.cache_mode.as_str())
+        st.chain.method == "GET" && !plan.conditional && !st.crossed && !SKIP_READ.contains(&plan.cache_mode.as_str())
     }
-    // …and written with its response: a GET, not `no-store`.
+    // …and written with its response: a GET, not `no-store`, no author conditional.
     fn writes_cache(&self, method: &str) -> bool {
-        method == "GET" && self.cache_mode != "no-store"
+        method == "GET" && self.cache_mode != "no-store" && !self.conditional
     }
     // The header list a hop sends: the request's, and what its cache mode appends where the request has none of its own
     // (Fetch "HTTP-network-or-cache fetch", to the hop's copy alone — the request's own is what a CORS-preflight is
     // judged by): a no-cache request asks every cache on the way to revalidate, a no-store or reload one to step aside.
-    fn sent_headers(&self, headers: &Headers) -> Headers {
+    fn sent_headers<'h>(&self, headers: &'h Headers) -> std::borrow::Cow<'h, Headers> {
+        if !matches!(self.cache_mode.as_str(), "no-cache" | "no-store" | "reload") {
+            return std::borrow::Cow::Borrowed(headers);
+        }
         let mut sent = headers.clone();
         let mut append = |name: &[u8], value: &[u8]| {
             if !sent.iter().any(|(k, _)| k.eq_ignore_ascii_case(name)) {
@@ -254,7 +262,7 @@ impl FetchPlan {
             }
             _ => {}
         }
-        sent
+        std::borrow::Cow::Owned(sent)
     }
     // Whether the request is CORS-unsafe — no safelisted method, or a header no CORS-safelisted one: its CORS-preflight's
     // method and header names, None for a safe one.
