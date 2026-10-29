@@ -7055,7 +7055,8 @@ module Capybara
           out['resulting_client_id'] = rid if out
           # (…the Referer its request carried, a service worker's as the network's would have: the referrer of the document
           # it makes)
-          out['referrer'] = fetch.referrer if out && fetch.referrer
+          sent = fetch.referrer
+          out['referrer'] = sent if out && sent
           return out
         end
       end
