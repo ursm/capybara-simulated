@@ -378,6 +378,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_step", magnus::function!(sw_registry::step_for_ruby, 2))?;
     native.define_module_function("sw_continue", magnus::function!(sw_registry::continue_for_ruby, 2))?;
     native.define_module_function("sw_resume", magnus::function!(sw_registry::resume_for_ruby, 3))?;
+    native.define_module_function("sw_waiting", magnus::function!(sw_registry::waiting_for_ruby, 2))?;
     native.define_module_function("sw_queued_steps", magnus::function!(sw_registry::queued_steps_for_ruby, 1))?;
     native.define_module_function("sw_unregister", magnus::function!(sw_registry::unregister_for_ruby, 2))?;
     native.define_module_function("sw_clear_registration", magnus::function!(sw_registry::clear_registration_for_ruby, 2))?;

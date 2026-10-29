@@ -5566,12 +5566,10 @@ module Capybara
       private def sw_redundant?(handle) = sw_worker(handle)&.dig(2) == 'redundant'
 
       # Update Worker State: the worker `handle` in `state`, which every realm's ServiceWorker of it takes, its
-      # `statechange` fired (and, activated, a client it now controls has its `ready`).
+      # `statechange` fired (and, activated, a client it now controls has its `ready`) — where that is a change.
       private def sw_update_worker_state(handle, state)
-        sw_state_told(handle, state) if Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
-      end
-      # …the realms told of a state the registry moved it to.
-      private def sw_state_told(handle, state)
+        return unless Native.sw_set_worker_state(@sw_partition, handle.to_i, state.to_s)
+
         broadcast_to_realms('__csim_swWorkerStateChanged', handle.to_i, state.to_s)
         # (…a job waiting for this worker's install runs once it is installed, or failed)
         if state.to_s != 'installing' && (id = @sw_jobs_behind.delete(handle.to_i))
@@ -5741,8 +5739,7 @@ module Capybara
       # begun.
       private def sw_install(id, handle) = sw_run(Native.sw_install(@sw_partition, id.to_i, handle.to_i))
 
-      # …the worker `handle`'s lifecycle resumed where it waits for `what` — every worker waiting at Try Activate, for
-      # `handle` 0.
+      # …the worker `handle`'s lifecycle resumed where it waits for `what`.
       private def sw_resume_step(handle, what) = sw_run(Native.sw_resume(@sw_partition, handle.to_i, what))
 
       # …and its queued step taken.
@@ -5753,7 +5750,7 @@ module Capybara
       private def sw_run(cmds)
         cmds.each do |kind, n, text, flag|
           case kind
-          when 'state'        then sw_state_told(n, text)
+          when 'state'        then sw_update_worker_state(n, text)
           when 'terminate'    then worker_terminate(n)
           when 'update_found' then broadcast_to_realms('__csim_swRegistrationUpdateFound', n)
           when 'activate'     then @workers[n]&.dig(:inbox)&.push({kind: 'sw_activate'})
@@ -5811,8 +5808,6 @@ module Capybara
         @sw_navs_deferred = false
         broadcast_to_realms('__csim_swRetryDeferredNavs')
       end
-
-
 
       # Call a host fn in EVERY live browsing context — the main realm and each frame/window realm.
       # Service-worker registration state is per-realm (each has its own registration objects), so
@@ -6333,7 +6328,9 @@ module Capybara
 
       # Try Activate again for every worker standing at it — cheap when none does, as on the ordinary client-churn
       # path (rule 3).
-      private def sw_try_activate = sw_resume_step(0, 'try_activate')
+      private def sw_try_activate
+        Native.sw_waiting(@sw_partition, 'try_activate').each {|h| sw_resume_step(h, 'try_activate') }
+      end
 
       # Handle Service Worker Client Unload for the outgoing document and its frames, as a navigation replaces them:
       # each no longer a client — which may let a waiting worker activate, or an unregistered registration clear.
@@ -7121,12 +7118,13 @@ module Capybara
         # registration must be installed before the shallower one runs, or a client the shallow claim
         # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
         # page would double-fire). A worker claims only once active (workers.js `claim()`), which the
-        # host's Activate step made it before telling it to fire activate (`sw_activating`), so its
-        # scope is the registry's here — a claim of one whose registration left the map since claims
-        # nothing. TRADEOFF: partition processing can't keep both claim<phase and message<claim, so a
-        # worker's same-turn `client.postMessage(x); clients.claim()` now delivers the claim's
-        # controllerchange BEFORE message x (these are separate task sources in a real browser;
-        # no ordering contract is broken, but it inverts the previous within-batch order).
+        # host's Activate step made it before telling it to fire activate (sw_registry.rs
+        # `continue_activating`), so its scope is the registry's here — a claim of one whose
+        # registration left the map since claims nothing. TRADEOFF: partition processing can't keep
+        # both claim<phase and message<claim, so a worker's same-turn `client.postMessage(x);
+        # clients.claim()` now delivers the claim's controllerchange BEFORE message x (these are
+        # separate task sources in a real browser; no ordering contract is broken, but it inverts the
+        # previous within-batch order).
         # An ACTIVATING worker's claim applies immediately too (claim is valid from state
         # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
         # controlled — its fetches then park on the activation, not the claim).
