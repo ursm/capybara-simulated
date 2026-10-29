@@ -1339,11 +1339,11 @@ module Capybara
         when 'navigate'
           url = action['url'].to_s
           # What the page planned is the page's navigation or a new window's — a frame's own link navigates within it,
-          # its realm routing it as it is followed (dom-nodes.js `routeChildRealmLinkNav`). A link whose target chose a
-          # new top-level navigable as it was followed (navigation_plan.rs `planNavigation`) opens in a new browsing
-          # context (its own Browser/VM); the primary stays put (per HTML spec — original window is unaffected), with the
-          # opener the link's noopener leaves it (`action['opener']`), as the scripted click / dispatchEvent activation
-          # paths do.
+          # its realm routing it as it is followed (dom-nodes.js `anchorActivateNavigate`, navigables.rs `linkRoute`).
+          # A link whose target chose a new top-level navigable as it was followed (navigation_plan.rs `planNavigation`)
+          # opens in a new browsing context (its own Browser/VM); the primary stays put (per HTML spec — original window
+          # is unaffected), with the opener the link's noopener leaves it (`action['opener']`), as the scripted click /
+          # dispatchEvent activation paths do.
           if action['opensWindow'] && @driver.respond_to?(:open_aux_window)
             open_hyperlink_window(
               resolve_against_current(url, use_base: true),

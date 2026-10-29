@@ -3,9 +3,9 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
-# A page link whose target names a frame chooses that frame's navigable (HTML "the rules for choosing a navigable",
-# navigation_plan.rs `planNavigation`) — never the page's own, even where the frame is one the driver builds no document
-# for (past its nesting limit): the page stays where it is, its plan untouched.
+# A link whose target names a frame chooses that frame's navigable (HTML "the rules for choosing a navigable",
+# navigables.rs `linkRoute`) — never the page's own, nor a new window, even where the frame is one the driver builds no
+# document for (past its nesting limit): the page stays where it is, its plan untouched.
 RSpec.describe 'a link naming a frame the driver does not build' do
   let(:app) {
     lambda {|env|
@@ -32,6 +32,19 @@ RSpec.describe 'a link naming a frame the driver does not build' do
     unbuilt = "n#{Capybara::Simulated::V8Runtime::MAX_FRAME_DEPTH + 1}"
     session.execute_script("document.getElementById('deep').target = #{unbuilt.to_json}")
     session.find(:css, '#deep').click
+    expect([session.title, session.windows.size]).to eq(['main', 1])
+  end
+
+  it "goes nowhere from a frame's link either" do
+    session = simulated_session(app)
+    session.visit '/'
+    session.within_frame(0) do
+      session.execute_script(<<~JS)
+        const link = document.body.appendChild(Object.assign(document.createElement('a'), { id: 'deep', href: '/hit' }));
+        link.target = #{"n#{Capybara::Simulated::V8Runtime::MAX_FRAME_DEPTH + 1}".to_json};
+      JS
+      session.find(:css, '#deep').click
+    end
     expect([session.title, session.windows.size]).to eq(['main', 1])
   end
 

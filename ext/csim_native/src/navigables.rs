@@ -216,6 +216,30 @@ pub(crate) enum Choice {
     Blocked,
 }
 
+// Where a hyperlink followed goes (`RealmArena::link_route`), as the navigable its target chooses has it:
+// - `None`: nowhere — a navigable its sandbox does not let it navigate;
+// - `Refused`: a new window its document may not open (no `allow-popups`, of the realm the link is in), which its
+//   caller says so;
+// - `Frame`: a frame a name chose, the realm's navigable — or `Unbuilt`, its container in the realm's document, which
+//   has no document yet (its caller makes one, and navigates nothing where it cannot: past the nesting limit, deferred
+//   by an activating service worker) — which the document navigates as the host navigates a frame;
+// - `Auxiliary`: a new window the host opens, so named ('' for `_blank`), for a name or `_blank` followed in a frame or
+//   a window `window.open` made, where the host opens one (the frame's VM not rebuilt, a fresh window);
+// - `Navigate`: the realm's navigable — `_self` from a frame or such a window, `_top` or `_parent` from a frame, a name
+//   the top-level traversable of a frame's has — which the document navigates as its location navigates it;
+// - `Plan`: the top-level page's link (or such a window's not routed above), whose navigation its caller plans
+//   (navigation_plan.rs `planNavigation`) with this target — `_top` for a name the page has.
+#[derive(Debug, PartialEq)]
+pub(crate) enum LinkRoute {
+    None,
+    Refused,
+    Frame(i32),
+    Unbuilt(i32, NodeId),
+    Auxiliary(Vec<u16>),
+    Navigate(i32),
+    Plan(Vec<u16>),
+}
+
 impl RealmArena {
     // The target name of the navigable realm `cid`'s document is the active document of.
     // A frame's window whose document is no longer its navigable's active one — the frame removed, or navigated since —
@@ -747,6 +771,38 @@ impl RealmArena {
             Choice::New | Choice::Blocked => None,
         }
     }
+    // Where a hyperlink followed in realm `current`'s document — the link in realm `link_realm`'s — with the target
+    // `target` goes (`LinkRoute`), where the host opens new windows for a frame's or a window's (`auxiliary_opens`): a
+    // name's frame first (the page's own name as `_top`), then the sandbox's popup refusal, then the keyword's
+    // navigable.
+    pub(crate) fn link_route(&self, current: i32, link_realm: i32, mut target: Vec<u16>, auxiliary_opens: bool) -> LinkRoute {
+        let nested = self.live_container(current).is_some();
+        let window = self.realm_state(current).is_some_and(|s| s.identity.is_window());
+        let mut keyword = target_keyword(&String::from_utf16_lossy(&target));
+        if keyword == TARGET_NAME {
+            match self.find_navigable(current, &target) {
+                Chosen::Blocked => return LinkRoute::None,
+                Chosen::Frame(Some(realm), _) => return LinkRoute::Frame(realm),
+                Chosen::Frame(None, (parent, container)) => return LinkRoute::Unbuilt(parent, container),
+                Chosen::TopLevel(_) => {
+                    target = "_top".encode_utf16().collect();
+                    keyword = TARGET_TOP;
+                }
+                Chosen::Window(_) | Chosen::None => {}
+            }
+        }
+        if self.auxiliary_refused(link_realm, &target) {
+            return LinkRoute::Refused;
+        }
+        match keyword {
+            TARGET_NAME | TARGET_BLANK if (nested || window) && auxiliary_opens => {
+                LinkRoute::Auxiliary(if keyword == TARGET_BLANK { Vec::new() } else { target })
+            }
+            TARGET_SELF if nested || window => LinkRoute::Navigate(current),
+            TARGET_TOP | TARGET_PARENT if nested => self.keyword_navigable(current, keyword).map_or(LinkRoute::None, LinkRoute::Navigate),
+            _ => LinkRoute::Plan(target),
+        }
+    }
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
     fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
         if self.window_name(realm) == name {
@@ -1098,61 +1154,17 @@ fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
 }
-// __dom.linkRoute(target, nid, auxiliaryOpens) -> `[route, at, container]`: where a hyperlink — the element `nid` —
-// followed in the calling realm with the target `target` goes, as the navigable that target chooses (`choose_navigable`)
-// has it:
-// - "none": nowhere — a navigable its sandbox does not let it navigate; a frame named, past the nesting limit, its
-//   caller could not make a document for;
-// - "refused": a new window its document may not open (no `allow-popups`: `auxiliary_refused` of the realm the link is
-//   in), which its caller says so;
-// - "frame": a frame a name chose, realm `at`'s navigable — or "unbuilt", its container `container` in realm `at`'s
-//   document, which has no document yet — which this document navigates as the host navigates a frame;
-// - "auxiliary": a new window the host opens, named `at` ('' for `_blank`), for a name or `_blank` followed in a frame
-//   or a window `window.open` made where the host opens one (`auxiliaryOpens`; the frame's VM not rebuilt, a fresh
-//   window);
-// - "navigate": realm `at`'s navigable — `_self` from a frame or such a window, `_top` or `_parent` from a frame, a
-//   name the top-level traversable of a frame's has — which this document navigates as its location navigates it;
-// - "plan": the top-level page's link (or such a window's not routed above), whose navigation its caller plans
-//   (navigation_plan.rs `planNavigation`) with the target `at` — `_top` for a name the page has.
+// __dom.linkRoute(target, nid, auxiliaryOpens) -> `[route, at, container]`: `RealmArena::link_route` of a hyperlink — the
+// element `nid` — followed in the calling realm: "none", "refused", "frame" (`at` its realm), "unbuilt" (`at` the realm
+// its container `container` is in), "auxiliary" (`at` the name), "navigate" (`at` the realm), "plan" (`at` the target).
 fn link_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let mut target = utf16_arg(scope, args.get(0));
+    let target = utf16_arg(scope, args.get(0));
     let auxiliary_opens = args.get(2).is_true();
     let cid = realm_id(scope, &args);
     let id = crate::dom::nid_arg(scope, &args, 1);
     let arena = crate::dom::realm(scope, cid);
     let link_realm = id.and_then(|id| arena.get(id)).map_or(cid, |n| n.realm);
-    let nested = arena.live_container(cid).is_some();
-    let window = arena.realm_state(cid).is_some_and(|s| s.identity.is_window());
-    let mut keyword = target_keyword(&String::from_utf16_lossy(&target));
-    // (…a name first chooses a frame anywhere in the page, which this document navigates as the host navigates one, or
-    // the page itself — as `_top` then)
-    let named = match keyword {
-        TARGET_NAME => match arena.find_navigable(cid, &target) {
-            Chosen::Blocked => Some(LinkRoute::None),
-            Chosen::Frame(Some(realm), _) => Some(LinkRoute::Frame(realm)),
-            Chosen::Frame(None, (parent, container)) => Some(LinkRoute::Unbuilt(parent, container)),
-            Chosen::TopLevel(_) => {
-                target = "_top".encode_utf16().collect();
-                keyword = TARGET_TOP;
-                None
-            }
-            Chosen::Window(_) | Chosen::None => None,
-        },
-        _ => None,
-    };
-    let route = match named {
-        Some(route) => route,
-        None if arena.auxiliary_refused(link_realm, &target) => LinkRoute::Refused,
-        None => match keyword {
-            TARGET_NAME | TARGET_BLANK if (nested || window) && auxiliary_opens => {
-                LinkRoute::Auxiliary(if keyword == TARGET_BLANK { Vec::new() } else { target })
-            }
-            TARGET_SELF if nested || window => LinkRoute::Navigate(cid),
-            TARGET_TOP | TARGET_PARENT if nested => arena.keyword_navigable(cid, keyword).map_or(LinkRoute::None, LinkRoute::Navigate),
-            _ => LinkRoute::Plan(target),
-        },
-    };
-    let (kind, at, container) = match route {
+    let (kind, at, container) = match arena.link_route(cid, link_realm, target, auxiliary_opens) {
         LinkRoute::None => ("none", None, None),
         LinkRoute::Refused => ("refused", None, None),
         LinkRoute::Frame(realm) => ("frame", Some(v8::Integer::new(scope, realm).into()), None),
@@ -1168,16 +1180,6 @@ fn link_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let at = at.unwrap_or_else(|| v8::null(scope).into());
     let items = [v8::String::new(scope, kind).unwrap().into(), at, container];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// (…`linkRoute`'s answer, as it is made)
-enum LinkRoute {
-    None,
-    Refused,
-    Frame(i32),
-    Unbuilt(i32, NodeId),
-    Auxiliary(Vec<u16>),
-    Navigate(i32),
-    Plan(Vec<u16>),
 }
 // __dom.navigationAllowed(target) -> whether this realm's document may navigate realm `target`'s navigable
 // (`RealmArena::navigation_allowed`) — none it may that names no realm.
@@ -1436,6 +1438,27 @@ mod tests {
         assert_eq!(choose(&arena, 1, "none"), Choice::New);
         arena.location.sandbox = crate::sandbox::sandboxing(None, Some("allow-top-navigation"));
         assert_eq!(choose(&arena, 1, "_top"), Choice::TopLevel(0));
+        // (…and where a link followed in either goes: a name's frame — one with no document yet its container — the
+        // keyword's navigable from a frame, a new window the host opens for one, the page's own plan)
+        arena.location.sandbox = 0;
+        let route = |arena: &RealmArena, from: i32, target: &str, opens: bool| arena.link_route(from, from, units(target), opens);
+        assert_eq!(route(&arena, 0, "a", true), LinkRoute::Frame(1));
+        assert_eq!(route(&arena, 0, "b", true), LinkRoute::Unbuilt(1, b));
+        assert_eq!(route(&arena, 1, "_parent", true), LinkRoute::Navigate(0));
+        assert_eq!(route(&arena, 1, "", true), LinkRoute::Navigate(1));
+        assert_eq!(route(&arena, 1, "w", true), LinkRoute::Auxiliary(units("w")));
+        assert_eq!(route(&arena, 1, "_BLANK", true), LinkRoute::Auxiliary(Vec::new()));
+        assert_eq!(route(&arena, 1, "w", false), LinkRoute::Plan(units("w")));
+        assert_eq!(route(&arena, 0, "_self", true), LinkRoute::Plan(units("_self")));
+        // (…the page's own name `_top`: the page navigated from a frame, planned from the page)
+        arena.set_window_name(0, units("p"));
+        assert_eq!(route(&arena, 1, "p", true), LinkRoute::Navigate(0));
+        assert_eq!(route(&arena, 0, "p", true), LinkRoute::Plan(units("_top")));
+        // (…a frame's link refused a new window without `allow-popups`, and none past its sandbox)
+        arena.location.sandbox = crate::sandbox::sandboxing(None, Some(""));
+        assert_eq!(route(&arena, 1, "w", true), LinkRoute::Refused);
+        assert_eq!(route(&arena, 1, "s", true), LinkRoute::None);
+        assert_eq!(route(&arena, 1, "_top", true), LinkRoute::None);
     }
 
     #[test]
