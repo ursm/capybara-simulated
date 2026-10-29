@@ -100,9 +100,12 @@ RSpec.describe 'a crossorigin classic script or style sheet', :https do
       style.textContent = '@import url(https://other.example.com/c.css); @import url(/c.css);';
       window.imported = (i) => style.sheet.cssRules[i].styleSheet;
     JS
-    read = ->(sheet) { session.evaluate_script("(() => { try { return String(#{sheet}.cssRules.length); } catch (e) { return e.name; } })()") }
+    read = lambda {|sheet|
+      session.evaluate_script("(() => { const s = #{sheet}; if (s === null) return 'null'; try { return String(s.cssRules.length); } catch (e) { return e.name; } })()")
+    }
     links = %w[plain cors data missing].map { read.("document.getElementById('#{_1}').sheet") }
-    expect(links).to eq(%w[SecurityError 1 1 0])
+    # (…and a missing one none: HTML creates a CSS style sheet only where its fetch succeeded)
+    expect(links).to eq(%w[SecurityError 1 1 null])
     expect([read.('imported(0)'), read.('imported(1)')]).to eq(%w[SecurityError 1])
   end
 

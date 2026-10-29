@@ -127,7 +127,7 @@ impl RealmArena {
 // The sheet a realm made an owner (sheet_feed.rs `make`), in the store of the realm that made it (`realm`): its `id`,
 // `rev`, which moves each time it is made again, whether a CSSStyleSheet shows it (`shown`, which makes the next one
 // anew under another id: the object a script holds keeps the rules it had), and what it was made of — the text its
-// fetch gave (none for a `<style>`'s block, whose every change is a new count; an empty one where the fetch `failed`),
+// fetch gave (none for a `<style>`'s block, whose every change is a new count; none is made where the fetch failed),
 // its base URL, media list and the document's mode, at the owner's count of sheets (`NodeData::sheet_gen`). One per
 // owner, whichever realm last made it; let go of with the owner, or as another realm makes its own.
 #[derive(Clone)]
@@ -137,7 +137,6 @@ pub(crate) struct MadeSheet {
     pub(crate) rev: u32,
     pub(crate) shown: bool,
     pub(crate) text: Option<std::rc::Rc<str>>,
-    pub(crate) failed: bool,
     pub(crate) base: String,
     pub(crate) media: String,
     pub(crate) quirks: bool,

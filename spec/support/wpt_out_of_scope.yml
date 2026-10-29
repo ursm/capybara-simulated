@@ -32238,6 +32238,109 @@ css/cssom/caretRangeFromPoint.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+css/cssom/link-element-stylesheet-title.html:
+- name: Executing setAttribute('title', '') results in the title being set to null
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: StyleSheet.title
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+css/cssom/stylesheet-same-origin.sub.html:
+- name: Origin-clean check in loading error CSSOM Stylesheets
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+css/cssom/ttwf-cssom-doc-ext-load-count.html:
+- name: stylesheet-1.css should be loaded and styleSheets.length === 1
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: stylesheet.css should be loaded and styleSheets.length === 1
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: stylesheet.css should be unloaded and styleSheets.length === 0
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+css/cssom/ttwf-cssom-doc-ext-load-tree-order.html:
+- name: styleSheets item 0 title must be alpha
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: styleSheets item 0 title must be kilo
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: styleSheets item 0 title must be zebra
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: styleSheets item 1 title must be zebra
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
+- name: styleSheets.length must be 5
+  reason: 'Assumes a <link rel=stylesheet> whose fetch fails (the 404s it links to:
+    no such file in WPT) still makes a sheet, as Chrome and Firefox do (an empty one,
+    in document.styleSheets). HTML "process the linked resource" for a stylesheet:
+    ''If el has an associated CSS style sheet, remove the CSS style sheet.'' ... ''If
+    success is true: Create a CSS style sheet ...'' ''Otherwise, fire an event named
+    error at el.'' (success false for a status not ok or a type not text/css) — no
+    sheet, `.sheet` null. Spec over browsers (ursm 2026-10-29, reversing the 10-28
+    status quo); re-check if HTML adopts the browsers'' empty sheet.'
 custom-elements/element-internals-behaviors.tentative.html:
 - name: Behavior state is preserved across disconnect and reconnect
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

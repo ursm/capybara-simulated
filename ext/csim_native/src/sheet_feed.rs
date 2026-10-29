@@ -127,8 +127,7 @@ fn make(scope: &mut v8::PinScope<'_, '_>, cid: i32, owner: NodeId, css: Option<R
             }
         }
     };
-    let failed = same.as_ref().is_some_and(|m| m.failed);
-    let record = MadeSheet { realm: cid, id, rev, shown, text: css, failed, base: base.to_owned(), media: media.to_owned(), quirks, count };
+    let record = MadeSheet { realm: cid, id, rev, shown, text: css, base: base.to_owned(), media: media.to_owned(), quirks, count };
     arena.made_sheets.insert(owner, record);
     if same.is_none() {
         // (…a new sheet, made in place or anew, the owner's: its flags its own, as "add a CSS style sheet" begins them)
@@ -174,10 +173,11 @@ fn style_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v
 // an `<?xml-stylesheet?>`'s as no element's, with no `charset` of its own) under its `media` — fetched once for the
 // sheet it obtains (its count, `NodeData::sheet_gen`), whose text makes it again in another mode or under another media
 // list — at the URL its response came from, origin-clean where that was CORS-same-origin, its `@import`s decoded in the
-// encoding it decoded in. Where it was not fetched — its `href` no URL, or no response to use — none, tried again the
-// next time; or with `empty`, an empty sheet at its URL, origin-clean only where the response it failed with was
-// CORS-same-origin: what `.sheet` exposes for one (Chrome, Firefox).
-fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: NodeId, empty: bool) -> Result<Option<(u32, u32)>, Terminated> {
+// encoding it decoded in. Where it was not fetched — its `href` no URL, or no response to use: a network error, a
+// status not ok, a type not text/css — none (HTML "process the linked resource": a CSS style sheet is created only
+// where it succeeded, and an associated one removed first), its `.sheet` null; asked again the next time, of the
+// response its request kept (sheet_fetch.rs).
+fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_, v8::Function>, owner: NodeId) -> Result<Option<(u32, u32)>, Terminated> {
     let arena = realm(scope, cid);
     let Some(n) = arena.get(owner) else { return Ok(None) };
     let pi = n.kind == NodeKind::ProcessingInstruction;
@@ -194,11 +194,11 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
     let doc = document_of(arena, owner);
     let quirks = arena.document_mode(doc).0;
     // (…its origin-clean flag the kept sheet's, which a sheet made anew of its text takes too)
-    let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count && !m.failed).and_then(|m| Some((m.text.clone()?, m.base.clone(), m.id)));
+    let kept = arena.made_sheets.get(&owner).filter(|m| m.realm == cid && m.count == count).and_then(|m| Some((m.text.clone()?, m.base.clone(), m.id)));
     let (text, location, clean) = match kept {
         Some((text, location, id)) => {
             let clean = arena.sheets.stored_mut(id).is_some_and(|s| !s.origin_dirty);
-            (text, location, Some((clean, false)))
+            (text, location, clean)
         }
         None => {
             let url = doc.and_then(|d| arena.parse_document_url(d, &href)).map(|u| u.href().to_owned());
@@ -207,24 +207,15 @@ fn fetched_sheet(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'_,
                 None => None,
             };
             match sheet {
-                Some(crate::sheet_fetch::Sheet { text: Some(text), clean, location, .. }) => (Rc::from(text), location, Some((clean, false))),
-                // (…origin-clean as the response it failed with was — a same-origin HTTP error's: its rules, none, readable —
-                // at that response's URL)
-                Some(crate::sheet_fetch::Sheet { clean, location, .. }) if empty => (Rc::from(""), location, Some((clean, true))),
-                _ if empty => (Rc::from(""), url.unwrap_or(href), Some((false, true))),
+                Some(crate::sheet_fetch::Sheet { text: Some(text), clean, location, .. }) => (Rc::from(text), location, clean),
                 _ => return Ok(None),
             }
         }
     };
     let Some((id, rev, waiting)) = make(scope, cid, owner, Some(text), &location, &media, quirks) else { return Ok(None) };
     let arena = realm(scope, cid);
-    if let Some((clean, failed)) = clean {
-        if let Some(stored) = arena.sheets.stored_mut(id) {
-            stored.origin_dirty = !clean;
-        }
-        if let Some(made) = arena.made_sheets.get_mut(&owner) {
-            made.failed = failed;
-        }
+    if let Some(stored) = arena.sheets.stored_mut(id) {
+        stored.origin_dirty = !clean;
     }
     let environment = crate::sheet_fetch::encoding_of(arena, cid, &location).map(str::to_owned);
     crate::sheet_fetch::resolve_imports(scope, cid, host, waiting, doc, environment)?;
@@ -237,7 +228,7 @@ fn owner_sheet_ids(scope: &mut v8::PinScope<'_, '_>, cid: i32, host: v8::Local<'
     let mut ids = Vec::with_capacity(owners.len());
     for &owner in owners {
         let style = realm(scope, cid).get(owner).is_some_and(|n| n.kind == NodeKind::Element && &*n.local_name == "style");
-        let sheet = if style { style_sheet(scope, cid, host, owner)? } else { fetched_sheet(scope, cid, host, owner, false)? };
+        let sheet = if style { style_sheet(scope, cid, host, owner)? } else { fetched_sheet(scope, cid, host, owner)? };
         ids.extend(sheet.map(|(id, _)| id));
     }
     Ok(ids)
@@ -295,12 +286,12 @@ fn owner_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
 }
 
-// __dom.fetchedSheet(ownerNid, host) -> [sheetId, rev] of a connected `<link>`'s or `<?xml-stylesheet?>`'s sheet — an
-// empty one where it was not fetched (`fetched_sheet`) — undefined for one with no `href`.
+// __dom.fetchedSheet(ownerNid, host) -> [sheetId, rev] of a connected `<link>`'s or `<?xml-stylesheet?>`'s sheet —
+// undefined for one with no `href`, or whose fetch failed (`fetched_sheet`).
 fn fetched_sheet_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let (Some(owner), Some(host)) = (nid_arg(scope, &args, 0), host_arg(&args, 1)) else { return };
     let cid = realm_id(scope, &args);
-    if let Ok(sheet) = fetched_sheet(scope, cid, host, owner, true) {
+    if let Ok(sheet) = fetched_sheet(scope, cid, host, owner) {
         sheet_value(scope, &mut rv, sheet);
     }
 }

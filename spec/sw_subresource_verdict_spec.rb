@@ -281,8 +281,9 @@ RSpec.describe 'Service Worker subresource verdict' do
     expect(hits).to include('/scope/gone-poster.png')
   end
 
-  # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` none of the network's
-  # rules, and the network never asked for it — the cascade's and the getter's one answer. And a response is judged by
+  # A style sheet a worker refuses (an answer of a status no sheet loads with) is no sheet: `.sheet` null (HTML creates a
+  # CSS style sheet only where its fetch succeeded), and the network never asked for it — the cascade's and the getter's
+  # one answer. And a response is judged by
   # the mode its request was made in: an audio whose `crossorigin` is set while its no-cors request is in flight takes
   # the opaque answer a no-cors request may.
   it "takes a worker's answer as its request was made" do
@@ -313,7 +314,7 @@ RSpec.describe 'Service Worker subresource verdict' do
         document.body.appendChild(f);
       });
     JS
-    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('sheet' => 0, 'audio' => 'canplaythrough')
+    expect(poll_until { session.evaluate_script('globalThis.__seen') }).to eq('sheet' => nil, 'audio' => 'canplaythrough')
     expect(hits).not_to include('/scope/refused.css')
   end
   # A classic script a worker answers with an opaque response runs where the response it hides is an ok one — HTML
