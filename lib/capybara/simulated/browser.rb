@@ -841,8 +841,8 @@ module Capybara
       # `navigate_frame`; the engine chooses the navigable a target names). A
       # `_parent`-targeted link or form from a frame nested ≥2 levels rebuilds
       # the intermediate parent frame; `_top` (and a one-level `_parent`, whose
-      # parent is the top context) navigate the main page. Cross-origin frame locality is resolved
-      # against the main page's origin.
+      # parent is the top context) navigate the main page. Cross-origin frame
+      # locality is resolved against the main page's origin.
       def switch_to_frame(target)
         invalidate_find_cache
         case target

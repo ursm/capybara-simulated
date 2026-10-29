@@ -952,6 +952,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "unparkNavigable", unpark_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
+    crate::dom::register(scope, ns, "targetsOwnNavigable", targets_own_navigable, context_id);
+    crate::dom::register(scope, ns, "chosenChildFrame", chosen_child_frame, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
     crate::dom::register(scope, ns, "keywordNavigable", keyword_navigable, context_id);
     crate::dom::register(scope, ns, "linkRoute", link_route, context_id);
@@ -1186,6 +1188,31 @@ fn navigation_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let target = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).navigation_allowed(cid, target));
+}
+// __dom.targetsOwnNavigable(target) -> whether the navigable target `target` chooses from the calling realm's
+// (`RealmArena::choose_navigable`) is its own: `_self`, a top-level one's `_top` or `_parent`, its own name.
+fn targets_own_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = utf16_arg(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    rv.set_bool(match arena.choose_navigable(cid, &target) {
+        Choice::Current => true,
+        Choice::TopLevel(r) => r == cid,
+        Choice::Frame(container) => arena.frame_realm(container) == Some(cid),
+        Choice::Window(_) | Choice::New | Choice::Blocked => false,
+    });
+}
+// __dom.chosenChildFrame(target) -> the container of the frame's navigable target `target` chooses from the calling
+// realm's (`RealmArena::choose_navigable`) where that container is in this realm's document — null for any other.
+fn chosen_child_frame(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = utf16_arg(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let container = match arena.choose_navigable(cid, &target) {
+        Choice::Frame(c) if arena.get(c).is_some_and(|n| n.realm == cid) => Some(c),
+        _ => None,
+    };
+    rv.set(crate::dom::node_value(scope, container));
 }
 // __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm, window]: the navigable the target name
 // chooses from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the

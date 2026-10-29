@@ -301,11 +301,17 @@ fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan(scope, &args).download = Some((url, filename));
 }
 
-// __dom.supersedePlanned(): a navigation of the top-level document planned elsewhere (a traversal making its document
-// again, a location's) — the navigation, the submission, the location navigation, the reload and a frame's submission
-// planned before it taken by none.
+// __dom.supersedePlanned(pageOnly): a navigation of the top-level document planned elsewhere (a traversal making its
+// document again, a location's, a click's) — the navigation, the submission, the location navigation, the reload and a
+// frame's submission planned before it taken by none; with `pageOnly` (a form's submitted), nothing where the calling
+// realm is no page's (a frame's are its container's to plan, a window's its own).
 fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    plan(scope, &args).supersede();
+    let page_only = args.get(0).is_true();
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    if !page_only || (arena.top_level_realm(cid) == cid && !arena.realm_state(cid).is_some_and(|s| s.identity.is_window())) {
+        arena.navigation_plan.supersede();
+    }
 }
 
 // __dom.navigationPlanned() -> whether a navigation or a submission of its navigable is planned, which the host is yet
