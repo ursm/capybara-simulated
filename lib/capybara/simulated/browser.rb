@@ -454,9 +454,6 @@ module Capybara
         # run EXACTLY those bytes, not a re-fetch that could hit the HTTP cache or a newer server
         # response).
         @sw_scope_meta    = {}
-        # clients.claim() events that arrived before their scope's worker was active in the registry
-        # (activate→claim() races the lifecycle step that makes the worker active) — buffered here, flushed by sw_register_scope.
-        @sw_pending_claims = []
         # Unregistered registrations (their numbers) whose Clear Registration is deferred:
         # unregister only unmaps the scope, and the workers live on until no client is using the
         # registration and no extended work is pending (see sw_unregister / try_clear_uninstalls).
@@ -5865,7 +5862,8 @@ module Capybara
         sw_set_version(id, 'active', handle)
         sw_set_version(id, 'waiting', nil) if waiting == handle
         # (…its activate event dispatched now, on its own thread — not as its install settled — ahead of anything a client
-        # sends it once told it is activating: a `clients.claim()` that asks it then is an active worker's)
+        # sends it once told it is activating: a `clients.claim()` that asks it then is an active worker's — a task of
+        # its own from there, so its activation completes a frame after it began)
         @workers[handle]&.dig(:inbox)&.push({kind: 'sw_activate'})
         sw_update_worker_state(handle, 'activating')
         scope = sw_mapped_scope(id)
@@ -5976,13 +5974,6 @@ module Capybara
         # (…registered too: registered ⊇ activated — covers registration objects that reached activation without the
         # register()-time note, synthesized cross-realm ones)
         Native.sw_activated(@sw_partition, scope.to_s, handle.to_i)
-        # Flush any clients.claim() that arrived before this worker was its scope's active one (a worker's
-        # `activate → clients.claim()` fires decoupled from the lifecycle step that makes it the
-        # registry's active worker, so the claim can be drained first — see the claim handler above).
-        if @sw_pending_claims.any? {|e| e[:handle].to_i == handle.to_i }
-          flush, @sw_pending_claims = @sw_pending_claims.partition {|e| e[:handle].to_i == handle.to_i }
-          flush.each {|e| broadcast_claim(e[:handle], e[:has_fetch], scope.to_s) }
-        end
         nil
       end
 
@@ -7240,7 +7231,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @port_ends = {}; @sw_pending_claims = []; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @port_ends = {}; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
         # A dead SERVICE worker's holds are cleared with its record (extended / sw_msgs read
@@ -7310,16 +7301,14 @@ module Capybara
         # Processed BEFORE the phase markers below: the worker emits its activate-handler claim
         # ahead of its 'sw_phase', and the phase marker is what resumes the client-side
         # 'activated' step — a claim handled after it would let `wait_for_state(..., 'activated')`
-        # resolve with the claimed frame's controller still unset (the activation.https flake;
-        # a first activation buffers the claim, and only the phase-resumed step's
-        # sw_register_scope flush applies it in time).
+        # resolve with the claimed frame's controller still unset (the activation.https flake).
         # Process LONGEST scope first: when nested-scope workers claim in the same drain, the deeper
         # registration must be installed before the shallower one runs, or a client the shallow claim
         # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
-        # page would double-fire). A claim whose worker isn't its scope's active one yet — the
-        # worker fires activate→claim() decoupled from the lifecycle step that populates it — is
-        # BUFFERED and flushed by sw_register_scope, so an `activate → clients.claim()` isn't lost.
-        # TRADEOFF: partition processing can't keep both claim<phase and message<claim, so a
+        # page would double-fire). A worker claims only once active (workers.js `claim()`), which the
+        # host's Activate step made it before telling it to fire activate (`sw_activating`), so its
+        # scope is the registry's here — a claim of one whose registration left the map since claims
+        # nothing. TRADEOFF: partition processing can't keep both claim<phase and message<claim, so a
         # worker's same-turn `client.postMessage(x); clients.claim()` now delivers the claim's
         # controllerchange BEFORE message x (these are separate task sources in a real browser;
         # no ordering contract is broken, but it inverts the previous within-batch order).
@@ -7330,11 +7319,7 @@ module Capybara
         claims.map {|e| [e, actives.key(e[:handle].to_i) || activatings.key(e[:handle].to_i)] }
               .sort_by {|_e, scope| -(scope ? scope.length : -1) }
               .each do |e, scope|
-          if scope
-            broadcast_claim(e[:handle], e[:has_fetch], scope)
-          else
-            @sw_pending_claims << e
-          end
+          broadcast_claim(e[:handle], e[:has_fetch], scope) if scope
         end
         # A worker finished a lifecycle phase — its lifecycle parks its observable states on
         # these: 'installed' on the install marker (whose `ok:false` — a rejected install
@@ -8464,7 +8449,6 @@ module Capybara
         Native.keepalive_clear(@keepalive_session)
         @sw_navs_deferred    = false
         @sw_scope_meta       = {}
-        @sw_pending_claims   = []
         Native.sw_forget_clients(@sw_partition)
         @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
@@ -9076,7 +9060,7 @@ module Capybara
           # failed — a failed version fires no activate; the client terminates this worker).
           sw_phase_pending = 'install'
           sw_check_phase = lambda do
-            while sw_phase_pending && (t = rt.call('__csim_swPhaseTake'))
+            while sw_phase_pending && sw_phase_pending != 'activation' && (t = rt.call('__csim_swPhaseTake'))
               if t['phase'] == 'install'
                 ok = t['ok'] != false
                 outbox << {handle: handle, kind: 'sw_phase', phase: 'install', ok: ok}
@@ -9091,8 +9075,8 @@ module Capybara
             sw_check_phase = nil unless sw_phase_pending
           end
           sw_fire_phase.call('install')
-          # The common no-waitUntil path settles both phases right here at boot, inside the
-          # @worker_initializing hold — both markers reach the outbox before release_init.
+          # The common no-waitUntil path settles install right here at boot, inside the
+          # @worker_initializing hold — its marker reaches the outbox before release_init.
           sw_check_phase.call
         end
         # Fire any timer the initial script parked BEFORE releasing the init hold — the
