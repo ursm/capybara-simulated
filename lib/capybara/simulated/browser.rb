@@ -838,9 +838,9 @@ module Capybara
       # and navigation (a link / form submit whose default action loads a new
       # document) all route into the frame — the target frame's realm is rebuilt
       # from the fetched document, leaving the top page untouched (see
-      # `navigate_frame`, the engine choosing the navigable a target names). A `_parent`-targeted link
-      # or form from a frame nested ≥2 levels rebuilds the intermediate parent
-      # frame; `_top` (and a one-level `_parent`, whose parent is the top
+      # `navigate_frame`; the engine chooses the navigable a target names). A
+      # `_parent`-targeted link or form from a frame nested ≥2 levels rebuilds
+      # the intermediate parent frame; `_top` (and a one-level `_parent`, whose parent is the top
       # context) navigate the main page. Cross-origin frame locality is resolved
       # against the main page's origin.
       def switch_to_frame(target)
@@ -3294,10 +3294,14 @@ module Capybara
 
       attr_reader :context_gen
 
-      # A form's submission, its request as it was submitted (`__csimFormSerialize`): the navigation it makes — `navigate`
-      # for a GET, a POST else — the current document's, for what its response would download (`from_document`).
+      # A form's submission in the current document (the page's, an entered frame's), its request as it was submitted
+      # (`__csimFormSerialize`): routed, then navigated (`submit_form_in_realm`) — the current document's, for what its
+      # response would download (`from_document`).
       def submit_form_spec(spec)
-        from_document(@current_realm_id.to_i) { submit_form_spec_in_document(spec) }
+        return unless spec.is_a?(Hash)
+
+        invalidate_find_cache
+        from_document(@current_realm_id.to_i) { submit_form_in_realm(@current_realm_id.to_i, spec) }
       end
       # A navigation the document of realm `realm` makes, run with it its source (`@download_source`): what a download its
       # response is may be saved by (`save_downloaded_response`).
@@ -3307,13 +3311,6 @@ module Capybara
       ensure
         @download_source = saved
       end
-      def submit_form_spec_in_document(spec)
-        invalidate_find_cache
-        return unless spec.is_a?(Hash)
-
-        submit_form_in_realm(@current_realm_id.to_i, spec)
-      end
-
       # A form's submission as its request — [method, url, body, content_type], the body and its type nil for a GET — or
       # nil where it submits nothing (its action no URL), the engine's (text_codec.rs `form_request`): `spec` the form's
       # (`__csimFormSerialize`), its action resolved as `action_url`. Each entry string {'name','value'} or file
@@ -10174,7 +10171,13 @@ module Capybara
       # same-isolate window's (its navigation not modeled), `:new_window` a new one, named `name` ('' for `_blank`),
       # `:blocked` / `:none` none (its sandbox refuses it; the frame is gone) — and its Referer: the form document's, under
       # its policy or `noreferrer`'s.
-      def submission_route(kind, at, source, policy) = {to: kind == 'frame' ? at : kind.to_sym, name: (at.to_s if kind == 'new_window'), referrer: [source, policy]}
+      def submission_route(kind, at, source, policy)
+        {
+          to:       kind == 'frame' ? at : kind.to_sym,
+          name:     (at.to_s if kind == 'new_window'),
+          referrer: [source, policy]
+        }
+      end
       def submit_routed_form(realm_id, spec, route)
         request = form_request(spec, spec['action'].to_s)
         return unless request
@@ -10185,9 +10188,8 @@ module Capybara
         # (…whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
         activated = spec['userActivated'] == true
         to = route[:to]
-        # (…the page's own navigable its top-level traversable; and a new window, where the driver opens none, the page)
+        # (…the page's own navigable its top-level traversable)
         to = :top if to == :self && realm_id.zero?
-        to = :top if to == :new_window && realm_id.zero? && !@driver.respond_to?(:open_aux_window)
         case to
         when :self, Integer
           frame = to == :self ? realm_id : to

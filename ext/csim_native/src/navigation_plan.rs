@@ -116,7 +116,7 @@ impl RoutedSubmissions {
     }
 }
 
-// Where a frame's form submission goes (`route`): its own navigable, the top-level traversable, another frame's — by its
+// Where a form's submission goes (`route`) — the page's, a frame's: its own navigable, the top-level traversable, another frame's — by its
 // container, whatever document it has by the time the host navigates it (none made yet: the host makes it one) — a
 // window's of this isolate (not modeled) or a new one — named by its target, '' for `_blank` — or none its sandbox lets
 // it navigate.
@@ -129,7 +129,7 @@ pub(crate) enum Route {
     Blocked,
 }
 
-// The navigable target `target` chooses from frame realm `realm`'s document (HTML "the rules for choosing a navigable":
+// The navigable target `target` chooses from realm `realm`'s document (HTML "the rules for choosing a navigable":
 // navigables.rs `choose_navigable`) — the top-level traversable of a frame of a window that window's.
 fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
     use crate::navigables::Choice;
@@ -139,8 +139,9 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
         Choice::TopLevel(0) => Route::Top,
         // (…a window's of this isolate, its own tree's — or a discarded frame's own)
         Choice::TopLevel(_) => Route::Window,
-        // (…another top-level traversable a name found, which a form's submission does not navigate: a new one)
-        Choice::Window(_) | Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
+        // (…`_blank`'s, named none; another top-level traversable a name found, which a form's submission does not
+        // navigate: a new one of its name)
+        Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
             Route::NewWindow(Vec::new())
         }
         Choice::Window(_) | Choice::New => Route::NewWindow(target.to_vec()),
@@ -525,7 +526,8 @@ fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local
 }
 // __dom.submissionRoute(realm, target, rel) -> [kind, realm, container, referrerSource, referrerPolicy]: where a form's
 // submission of realm `realm`'s document with target `target` and link types `rel` goes (`route`, `route_items`) and
-// the Referer it sends — what the host asks of a submission it makes for the user (an entered frame's form submitted).
+// the Referer it sends — what the host asks of a submission it makes for the user (the page's or an entered frame's
+// form submitted).
 fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let target = crate::dom::utf16_arg(scope, args.get(1));
