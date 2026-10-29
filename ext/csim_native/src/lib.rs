@@ -359,7 +359,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_note_client", magnus::function!(sw_registry::note_client_for_ruby, 7))?;
     native.define_module_function("sw_set_client_controller", magnus::function!(sw_registry::set_client_controller_for_ruby, 3))?;
     native.define_module_function("sw_forget_client", magnus::function!(sw_registry::forget_client_for_ruby, 2))?;
-    native.define_module_function("sw_forget_clients", magnus::function!(sw_registry::forget_clients_for_ruby, 1))?;
     native.define_module_function("sw_clients", magnus::function!(sw_registry::clients_for_ruby, 1))?;
     native.define_module_function("sw_client_entry", magnus::function!(sw_registry::client_entry_for_ruby, 2))?;
     native.define_module_function("sw_set_focused", magnus::function!(sw_registry::set_focused_for_ruby, 2))?;

@@ -5883,9 +5883,9 @@ module Capybara
         scope ? Native.sw_navigation_preload(@sw_partition, scope.to_s).first : false
       end
 
-      # The Unregister job at `scope` — a client's `registration.unregister()`, the service worker's own, or a Register
-      # job whose only version failed to install: the registration out of the map, its Clear Registration waiting until
-      # no client is using it and no version has an event pending (sw_registry.rs `unregister`). Whether the map held one.
+      # The Unregister job at `scope` — a client's `registration.unregister()` or the service worker's own: the
+      # registration out of the map, its Clear Registration waiting until no client is using it and no version has an
+      # event pending (sw_registry.rs `unregister`). Whether the map held one.
       private def sw_unregister(scope)
         had, cmds = Native.sw_unregister(@sw_partition, scope.to_s)
         sw_run(cmds)
@@ -8222,7 +8222,6 @@ module Capybara
         # (keepalive.rs).
         @keepalive_lock.synchronize { @keepalive_results.clear }
         Native.keepalive_clear(@keepalive_session)
-        Native.sw_forget_clients(@sw_partition)
         @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:
         # id uniqueness across the whole process is the invariant the aliases rely on.

@@ -361,13 +361,6 @@ pub(crate) fn set_client_controller_for_ruby(partition: u64, id: String, control
     c.controller = controller;
     true
 }
-// Every client gone (no worker left to see one: the realms report themselves again to the next) — the focus, the
-// browser's, stays.
-pub(crate) fn forget_clients_for_ruby(partition: u64) {
-    if let Some(p) = lock().existing(partition) {
-        p.clients.clear();
-    }
-}
 // …and gone (its context discarded): whether it was a client.
 pub(crate) fn forget_client_for_ruby(partition: u64, id: String) -> bool {
     let mut reg = lock();
@@ -555,10 +548,10 @@ fn may_activate(p: &Partition, candidate: u32) -> bool {
     }
     !p.workers.get(&outgoing).is_some_and(Worker::extended) && (w.skip_waiting || !controls_clients(p, outgoing))
 }
-// Try Clear Registration's verdict for the registration `id`: no client controlled by its active worker, and no version
-// with an event pending ("Service Worker Has No Pending Events") — a message's, an extendable message event's, its
-// install or activate event's.
 impl Partition {
+    // Try Clear Registration's verdict for the registration `id`: no client controlled by its active worker, and no
+    // version with an event pending ("Service Worker Has No Pending Events") — a message's, an extendable message event's,
+    // its install or activate event's.
     fn clearable(&self, id: u32) -> bool {
         let Some(r) = self.registrations.iter().find(|r| r.id == id) else { return true };
         if r.active.is_some_and(|a| self.clients.iter().any(|c| c.controller == Some(a))) {
@@ -567,23 +560,16 @@ impl Partition {
         r.workers().iter().filter_map(|h| self.workers.get(h)).all(|w| !w.extended() && !w.lifecycle_pending())
     }
     // Try Clear Registration for each registration unregistered: one no client is using and none of whose versions has
-    // an event pending cleared — its versions emptied (and it gone, the map no longer holding it), then each worker
-    // redundant in every realm (a `statechange` listener already finding the registration empty, as in Chrome), then
-    // the isolates ended. The verdict is the registry's, so the clear rides the same wakeups as Try Activate: every
-    // hold-clearing transition (a client gone, an extension drained, a message dispatched, a worker reaped, a step
-    // taken) tries it again.
+    // an event pending cleared — it gone, its versions with it, then each worker redundant in every realm (a
+    // `statechange` listener already finding the registration empty, as in Chrome), then the isolates ended. The verdict
+    // is the registry's, so the clear rides the same wakeups as Try Activate: every hold-clearing transition (a client
+    // gone, an extension drained, a message dispatched, a worker reaped, a step taken) tries it again.
     fn try_clear(&mut self, out: &mut Vec<Cmd>) {
         let (ready, waiting): (Vec<u32>, Vec<u32>) = std::mem::take(&mut self.uninstalling).into_iter().partition(|&id| self.clearable(id));
         self.uninstalling = waiting;
         for id in ready {
-            let Some(r) = self.by_id(id) else { continue };
-            let handles = r.workers();
-            r.installing = None;
-            r.waiting = None;
-            r.active = None;
-            if !r.mapped {
-                self.registrations.retain(|r| r.id != id);
-            }
+            let Some(i) = self.registrations.iter().position(|r| r.id == id) else { continue };
+            let handles = self.registrations.remove(i).workers();
             for &h in &handles {
                 Self::tell_state(h, "redundant", out);
             }
@@ -630,13 +616,13 @@ pub(crate) fn unregister_for_ruby(partition: u64, scope: String) -> (bool, Vec<C
     let had = lock().existing(partition).is_some_and(|p| p.unregister(&scope, &mut out));
     (had, out)
 }
-// A frame's navigation parked on an activating registration (`navs_deferred`) — and the ones parked replayed
-// (`retry_navs`), what the host does.
+// A frame's navigation parked on an activating registration (`navs_deferred`).
 pub(crate) fn defer_navigation_for_ruby(partition: u64) {
     if let Some(p) = lock().existing(partition) {
         p.navs_deferred = true;
     }
 }
+// …and the ones parked replayed (`retry_navs`): what the host does.
 pub(crate) fn retry_navs_for_ruby(partition: u64) -> Vec<Cmd> {
     let mut out = Vec::new();
     if let Some(p) = lock().existing(partition) {
@@ -808,8 +794,10 @@ impl Partition {
         Self::retire(handle, out);
         if let Some(scope) = self.mapped_scope(id).filter(|_| self.by_id(id).is_some_and(|r| r.workers().is_empty())) {
             self.unregister(&scope, out);
+        } else {
+            // (…one unregistered already, which only its install's event held, cleared now)
+            out.push(cmd("try_clear", 0));
         }
-        out.push(cmd("try_clear", 0));
     }
     // installed → activating, once Try Activate allows it: the one it replaces retired first (Activate's order — its
     // `statechange` seeing the registration as it was), then the rest (`continue_activating`).
