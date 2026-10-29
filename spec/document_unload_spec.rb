@@ -36,4 +36,61 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
 
     expect(beacons.sort).to eq(%w[/frame-unload /page-unload])
   end
+
+  # …its unload counter raised as it unloads (HTML): a navigation, a document.write, a dialog of a handler ignored, and
+  # what one does to the session history too — its entry, and the URL, the next document's by now — its document hidden
+  # after its pagehide (Chrome: pagehide visible, visibilitychange hidden, unload hidden).
+  it "ignores what a teardown handler would do to the next document, and hides its own" do
+    app = lambda do |env|
+      body = case env['PATH_INFO']
+             when '/a' then <<~HTML
+               <script>
+                 const log = [];
+                 addEventListener('pagehide', () => { log.push('pagehide ' + document.visibilityState); document.open(); document.write('written'); document.close() });
+                 document.addEventListener('visibilitychange', () => log.push('visibilitychange ' + document.visibilityState));
+                 addEventListener('unload', () => {
+                   log.push('unload ' + document.visibilityState, 'confirm ' + confirm('c'), 'body ' + document.getElementById('t')?.textContent);
+                   history.pushState(null, '', '/pushed');
+                   location.hash = 'h';
+                   location.href = '/evil';
+                   localStorage.setItem('log', JSON.stringify(log));
+                 });
+               </script><p id="t">a</p>
+             HTML
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/a'
+    s.visit '/b'
+
+    expect(s.evaluate_script('[location.href, document.body.textContent, history.length]')).to eq(['http://www.example.com/b', '/b', 2])
+    expect(JSON.parse(s.evaluate_script("localStorage.getItem('log')"))).to eq(
+      ['pagehide visible', 'visibilitychange hidden', 'unload hidden', 'confirm false', 'body a']
+    )
+    s.go_back
+    expect(s).to have_current_path('/a')
+  end
+
+  # …as a frame's document is: its own handler re-navigating it is ignored, the navigation unloading it the one that wins
+  # (Chrome).
+  it "ignores a frame's teardown handler navigating the frame" do
+    app = lambda do |env|
+      body = case env['PATH_INFO']
+             when '/top' then '<iframe src="/f1"></iframe>'
+             when '/f1' then "<script>addEventListener('unload', () => { location.href = '/evil' })</script>f1"
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/top'
+    s.execute_script("document.querySelector('iframe').src = '/f2'")
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/f2' }
+    s.execute_script('setTimeout(() => window.settled = true, 50)')
+    poll_until { s.evaluate_script('window.settled === true') }
+
+    expect(s.evaluate_script('frames[0].location.pathname')).to eq('/f2')
+  end
 end

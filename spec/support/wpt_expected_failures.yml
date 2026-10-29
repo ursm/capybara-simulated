@@ -5271,7 +5271,9 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/event-listener
   that is the associated Document of a Window (frame is removed)
 - Standard event listeners are to be removed from Window for an active but not fully
   active document
-html/webappapis/dynamic-markup-insertion/opening-the-input-stream/ignore-opens-during-unload.window.js: HARNESS_ERROR
+html/webappapis/dynamic-markup-insertion/opening-the-input-stream/ignore-opens-during-unload.window.js:
+- document.open should bail out when ignore-opens-during-unload is greater than 0 during beforeunload event (open(parent)
+  while unloading parent and child)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/origin-check-in-document-open-same-origin-domain.sub.html:
 - It should not be possible to implicitly open same origin-domain (but not same origin)
   documents.

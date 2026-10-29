@@ -11292,7 +11292,9 @@ module Capybara
       # in place rather than appending. Both the state and (when given)
       # the URL are mirrored on Ruby's slot so a subsequent back to
       # this entry restores the same state.
+      # (…none while the page's document is unloaded, the session history its next document's: `boot_response_into_ctx`)
       def history_state(url, state = nil, realm_id = 0)
+        return if @unloading_page
         return frame_history_state(realm_id.to_i, url, state, push: false) unless realm_id.to_i.zero?
 
         if url
@@ -11311,6 +11313,7 @@ module Capybara
       # within the pushState chain (fires `popstate`) and only crosses
       # to a real reload when the back hits a `:visit` boundary.
       def history_push(url, state = nil, realm_id = 0)
+        return if @unloading_page
         return frame_history_state(realm_id.to_i, url, state, push: true) unless realm_id.to_i.zero?
 
         resolved = resolve_against_current(url.to_s)
@@ -11948,8 +11951,15 @@ module Capybara
         # This IS the commit, so whatever that page stashed dies with it.
         # …and the document it replaces unloaded first (HTML "unload a document and its descendants"): its pagehide and
         # unload, and its frames', while its realms still live — what their handlers send (a beacon, a keepalive fetch)
-        # is the old document's, its fetch group's quota with it (`keepalive_retire` below).
-        fire_document_teardown
+        # is the old document's, its fetch group's quota with it (`keepalive_retire` below). (…what they do to the session
+        # history ignored: its entry, and the URL, are the next document's by now — a gap, Chrome's pushState of one
+        # adding the old document a step)
+        @unloading_page = true
+        begin
+          fire_document_teardown
+        ensure
+          @unloading_page = false
+        end
         @flushed_nav_intents = nil
         # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
         @session_history.clear_queued
