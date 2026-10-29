@@ -446,10 +446,11 @@ module Capybara
         # the general outbox) keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with
         # client-fetch replies.
         @sw_partition = Native.sw_partition_new
-        # (The jobs — whose run is queued, what one running waits for — each version's lifecycle — whose next step is
-        # queued, what a step it took waits for — the registrations unregistered whose Clear Registration waits, and
-        # whether a frame navigation waits on an activating one, are the registry's: sw_registry.rs `run_job`, `step`,
-        # `unregister`, `retry_navs`.)
+        # (The registry also holds, sw_registry.rs:
+        # - the jobs: whose run is queued, what one running waits for (`run_job`);
+        # - each version's lifecycle: whose next step is queued, what a step it took waits for (`step`);
+        # - the registrations unregistered whose Clear Registration waits (`unregister`);
+        # - whether a frame navigation waits on an activating registration (`retry_navs`).)
         @sw_nav_outbox    = Thread::Queue.new
         # Race-network-and-fetch-handler bookkeeping: [realm, fetch_id] →
         # {resp:, server_ms:, t0:} — the network leg's PRE-FETCHED response (run
@@ -3787,7 +3788,6 @@ module Capybara
         }
       end
 
-
       # Fetch a source body and report how long it stays safely reusable per its
       # OWN response headers — an absolute freshness deadline (Time), or nil when
       # the response is not durably cacheable (no-store / no-cache / max-age=0 /
@@ -5650,8 +5650,8 @@ module Capybara
       # …and its queued step taken.
       def sw_step(handle) = sw_run(Native.sw_step(@sw_partition, handle.to_i))
 
-      # What a lifecycle step has the host do (sw_registry.rs `Cmd`), in order — each a task's effect the registry's
-      # state is committed for already, so a page a broadcast runs may take another step in between.
+      # What a job's or a lifecycle's step has the host do (sw_registry.rs `Cmd`), in order — each a task's effect the
+      # registry's state is committed for already, so a page a broadcast runs may take another step in between.
       private def sw_run(cmds)
         cmds.each do |kind, n, *args|
           case kind
@@ -5674,7 +5674,6 @@ module Capybara
         end
         nil
       end
-
 
       # The still-activating worker whose registration — the one matched: a longer, already-active scope covering `url`
       # dispatches at once — covers `url`, which it handles fetches for, so a request to it waits for its activation; nil
@@ -5792,15 +5791,6 @@ module Capybara
       # request during a navigation.
       def nav_preload_enabled?(scope)
         scope ? Native.sw_navigation_preload(@sw_partition, scope.to_s).first : false
-      end
-
-      # The Unregister job at `scope` — a client's `registration.unregister()` or the service worker's own: the
-      # registration out of the map, its Clear Registration waiting until no client is using it and no version has an
-      # event pending (sw_registry.rs `unregister`). Whether the map held one.
-      private def sw_unregister(scope)
-        had, cmds = Native.sw_unregister(@sw_partition, scope.to_s)
-        sw_run(cmds)
-        had
       end
 
       # A service worker's own `registration.unregister()` (rode the outbox as
@@ -7025,10 +7015,8 @@ module Capybara
           retry_deferred_navigations
         end
         # A reaped SERVICE worker (posted by reap_worker, possibly from a worker thread):
-        # main-thread cleanup of the activation-parking state it can no longer satisfy.
-        # A job its worker owed an evaluation outcome fails with it (its worker thread posts the
-        # outcome before it exits, so one still owed never comes), and a job waiting for its
-        # install runs — neither may hold its scope's queue for good.
+        # main-thread cleanup of the activation-parking state it can no longer satisfy, and of
+        # the jobs waiting on it (sw_registry.rs `job_worker_gone_for_ruby`).
         sw_reaps.each do |e|
           h = e[:handle].to_i
           Native.sw_forget_activating(@sw_partition, h)
@@ -9239,7 +9227,6 @@ module Capybara
       MAX_FETCH_REDIRECTS = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
-
 
       # A request a realm's script makes the host fetch (`__rackFetch(request, body)`: fetch(), an XMLHttpRequest, a
       # worker's imported script), described by name (document-origin.js `hostRequest`) — its client the realm's own
