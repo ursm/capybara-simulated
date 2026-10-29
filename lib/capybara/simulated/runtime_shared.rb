@@ -51,7 +51,7 @@ module Capybara
         # A frame `src=` re-navigation records a session-history entry (snapshotting the OUTGOING
         # document) so history.go(-1) can traverse back — and a controlling SW sees
         # isHistoryNavigation. Must run while the outgoing realm (a[0]) is still alive.
-        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1], post: a[2] && {body: a[2], content_type: a[3].to_s}); nil },
+        '__csim_recordFrameNav'      => ->(b, *a) { b.record_frame_nav(a[0].to_i, a[1], post: a[2] && {body: a[2], content_type: a[3].to_s, origin: a[4]}); nil },
         # …and the outgoing document unloaded (a[0] its realm, alive still): the entry takes its form state as its
         # pagehide / unload handlers left it.
         '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },

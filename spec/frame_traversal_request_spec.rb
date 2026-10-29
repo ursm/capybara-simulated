@@ -96,6 +96,51 @@ RSpec.describe 'a frame traversal request' do
       expect(posts).to eq(%w[http://www.example.com] * 2)
     end
 
+    # …a named frame's form's as well, which the container's document submitted
+    it "re-posts a named frame's form with the origin it was first sent with" do
+      posts = []
+      hits  = []
+      s = simulated_session(lambda {|env|
+        hits << env['PATH_INFO']
+        posts << env['HTTP_ORIGIN'] if env['REQUEST_METHOD'] == 'POST'
+        body = env['PATH_INFO'] == '/top' ? '<form id=p method=post target=frm action="/p"><input name=q value=v></form><iframe name=frm src="/f1"></iframe>' : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      s.visit '/top'
+      s.execute_script('p.submit()')
+      poll_until { s.evaluate_script('frames[0].location.pathname') == '/p' }
+      s.execute_script('frames[0].location = "http://other.example.com/f2"')
+      poll_until { hits.include?('/f2') && s.evaluate_script('1') }
+      s.go_back
+      poll_until { posts.size == 2 }
+
+      expect(posts).to eq(%w[http://www.example.com] * 2)
+    end
+
+    # …and a document's the container loaded, its referrer sent again as it was determined
+    it "refers as a document the container loaded was referred" do
+      referers = []
+      hits     = []
+      s = simulated_session(lambda {|env|
+        hits << env['PATH_INFO']
+        referers << env['HTTP_REFERER'] if env['PATH_INFO'] == '/f1'
+        body = if env['PATH_INFO'] == '/top'
+                 '<meta name=referrer content=unsafe-url><iframe src="http://other.example.com/f1"></iframe>'
+               else
+                 env['PATH_INFO']
+               end
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      s.visit '/top'
+      poll_until { referers.size == 1 }
+      s.execute_script('frames[0].location = "http://other.example.com/f2"')
+      poll_until { hits.include?('/f2') && s.evaluate_script('1') }
+      s.go_back
+      poll_until { referers.size == 2 }
+
+      expect(referers).to eq(%w[http://www.example.com/top] * 2)
+    end
+
     it 'makes a blob: entry\'s document of its blob after another origin\'s document' do
       hits = []
       s = simulated_session(lambda {|env|
@@ -130,6 +175,7 @@ RSpec.describe 'a frame traversal request' do
         frames[0].location = u;
       JS
       poll_until { s.evaluate_script('frames[0].location.protocol') == 'blob:' }
+      expect(s.evaluate_script('history.length')).to eq(2)
       s.execute_script('frames[0].location = "/a"')
       poll_until { s.evaluate_script('frames[0].location.pathname') == '/a' }
       s.execute_script('URL.revokeObjectURL(u)') if revoked

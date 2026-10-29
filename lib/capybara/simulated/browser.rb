@@ -10522,10 +10522,10 @@ module Capybara
       # into the current entry, then add the new one — every frame navigation's, a form's, a link's, a location's
       # (`location.replace`'s replacing the current one instead: `replace_frame_entry`) — the page's history's forward
       # steps dropped.
-      # `post` (a {body, content_type}) records that this entry was reached by a POST submission,
-      # so a later reload / history traversal re-POSTs it (with the body) rather than GET-ing the URL.
+      # `post` (a {body, content_type, origin}) records that this entry was reached by a POST submission,
+      # so a later reload / history traversal re-POSTs it (with the body, from its origin) rather than GET-ing the URL.
       # (…whatever its URL, so the entry a reload reads is the document's the frame is at: one a traversal cannot make
-      # again alone — a blob's, a data: one's, whose bytes are its document's — passed over by a traversal,
+      # again alone — a data: one's, a srcdoc one's, whose bytes are its document's — passed over by a traversal,
       # session_history.rs `traversal`)
       def record_frame_nav(realm_id, new_url, post: nil)
         return if realm_id.nil? || realm_id.zero?
@@ -10540,7 +10540,7 @@ module Capybara
         initial = frame_history_id(realm_id).nil? && @runtime.first_frame_realm?(realm_id) && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
         frame_history_id(realm_id, create: true)
         leave_frame_entry(realm_id) unless initial
-        data = post ? {body: post[:body].to_s, content_type: post[:content_type]} : {}
+        data = post ? {body: post[:body].to_s, content_type: post[:content_type], origin: post[:origin]}.compact : {}
         initial ? @session_history.replace(nav, parent_nav, new_url.to_s, false, data) : @session_history.push(nav, parent_nav, new_url.to_s, false, data)
       end
       # …and a navigation of it its session history records no entry for — a location's: the current entry made its, so
@@ -10699,7 +10699,12 @@ module Capybara
         # (possibly stale) snapshot the entry was left with, its referrer the document reloading (Chrome). A re-post's
         # origin either's the one it was first sent with.
         commit   = is_reload ? {} : {restore_state: entry[:form_state], history_state: [entry[:state]]}
-        referrer = !is_reload && entry.key?(:referrer) ? [entry[:referrer], entry[:referrer_policy].to_s] : realm_referrer_initiator(realm_id)
+        referrer = if is_reload then realm_referrer_initiator(realm_id)
+                   elsif entry.key?(:request_referrer) then [entry[:request_referrer], entry[:referrer_policy].to_s]
+                   # (…an entry of a document the container loaded, its referrer as it was determined, sent as it is)
+                   elsif entry.key?(:referrer) then [entry[:referrer], 'unsafe-url']
+                   else realm_referrer_initiator(realm_id)
+                   end
         origin   = entry[:origin]
         return unless prompt_to_unload_frame(realm_id)
 
@@ -10954,10 +10959,13 @@ module Capybara
           end
           return save_downloaded_response(target, headers, resp_body || [document.to_s], realm: realm_id) if download_response?(headers)
 
-          # (…its entry's document state the request's — its referrer and referrer policy, a POST's body and origin — which
-          # a reload or a traversal to it refers by and re-posts: HTML's document state)
-          (id = frame_history_id(realm_id)) && @session_history.update(id, {referrer: fetch.referrer.to_s, referrer_policy: ref_policy.to_s})
-          tag_frame_entry_post(realm_id, req_body, content_type, tainted ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
+          # (…its entry's document state the request's — its referrer before its policy applied and that policy, a POST's
+          # body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts: HTML's
+          # document state; the document's referrer beside them)
+          if (id = frame_history_id(realm_id))
+            @session_history.update(id, {referrer: fetch.referrer.to_s, request_referrer: ref_source.to_s, referrer_policy: ref_policy.to_s})
+          end
+          tag_frame_entry_post(realm_id, req_body, content_type, origin_null ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
           document ||= read_rack_body(resp_body)
           # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
           # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
