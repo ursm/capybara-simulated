@@ -198,6 +198,13 @@ RSpec.describe 'the joint session history' do
 
     read = '(h => { try { return h.length } catch (e) { return e.name } })'
     expect(s.evaluate_script("[#{read}(inner), #{read}(mid), history.length]")).to eq(%w[SecurityError SecurityError] + [2])
+    # (…every member of it: HTML)
+    expect(s.evaluate_script(<<~JS)).to eq(Array.new(8, 'SecurityError'))
+      [h => h.state, h => h.scrollRestoration, h => { h.scrollRestoration = 'manual' }, h => h.go(-1), h => h.back(),
+       h => h.forward(), h => h.pushState(1, ''), h => h.replaceState(1, '')]
+        .map((f) => { try { f(mid); return 'ran' } catch (e) { return e.name } })
+    JS
+    expect(s.evaluate_script('[history.length, location.pathname]')).to eq([2, '/top'])
   end
 
   # A traversal is a task of its own (the session history traversal queue, which answers in parallel): a same-document
