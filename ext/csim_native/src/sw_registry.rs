@@ -18,6 +18,8 @@
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
+use magnus::{IntoValue, IntoValueFromNative, Ruby, Value};
+
 #[derive(Default)]
 pub(crate) struct Registration {
     id: u32,
@@ -125,7 +127,8 @@ enum Step {
 // A Register, Update or Unregister job (Service Workers §8 "Create Job"), queued at its scope until the jobs before it
 // there have finished: what it asks — the script, the updateViaCache mode (an Update job's: a re-register's changed one,
 // or none) and the worker type; an Update job's registration — and, for the host running it, who asked (a client realm,
-// or a service worker: the negative of its handle) and its origin key.
+// or a service worker: the negative of its handle) and its origin key. As it runs: whether its run is queued as a task,
+// what it waits for, the worker an update fetches against, and how it settled, once it did.
 pub(crate) struct Job {
     id: u32,
     kind: String,
@@ -136,6 +139,27 @@ pub(crate) struct Job {
     registration: u32,
     realm: i64,
     creator_key: String,
+    queued: bool,
+    waits: Option<JobWait>,
+    against: u32,
+    outcome: Outcome,
+}
+
+// What a running job waits for: a worker still installing at its registration to be installed (or fail), or its own
+// worker's script to evaluate.
+#[derive(Clone, Copy, PartialEq)]
+enum JobWait {
+    Install(u32),
+    Evaluation(u32),
+}
+
+// How a job settled: the registration a Register or Update job resolves with, the error it rejects with (its name and
+// message), whether an Unregister job unregistered one.
+#[derive(Default)]
+struct Outcome {
+    registration: u32,
+    error: Option<(&'static str, String)>,
+    unregistered: bool,
 }
 
 // A service worker client (Service Workers §2.3): a window, frame or worker of the session — its id, URL, type
@@ -261,10 +285,6 @@ pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Optio
     let Some(p) = reg.existing(partition) else { return Vec::new() };
     p.registrations.iter().filter(|r| r.mapped).map(|r| (r.scope.clone(), r.registered, r.activating, r.serving, r.id)).collect()
 }
-// A Register job made the registration at `scope`: its number.
-pub(crate) fn note_registered_for_ruby(partition: u64, scope: String) -> u32 {
-    lock().registered(partition, &scope).id
-}
 // The registration `id`'s versions, `[installing, waiting, active]` — none for a registration gone.
 pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option<u32>, Option<u32>) {
     let [installing, waiting, active] = lock().existing(partition).and_then(|p| p.by_id(id)).map_or([None; 3], |r| r.versions());
@@ -331,9 +351,19 @@ pub(crate) fn hold_for_ruby(partition: u64, handle: u32, what: String, on: bool)
 pub(crate) fn worker_activated_for_ruby(partition: u64, handle: u32) -> bool {
     lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.activated)
 }
-// …its state moved to `state`: whether that is a change. A redundant one waits for no step any more.
-pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: String) -> bool {
-    lock().existing(partition).is_some_and(|p| p.set_state(handle, &state))
+// …its state moved to `state` — what the host does where that is a change, none where it is not. A redundant one waits
+// for no step any more, and one no longer installing lets the job waiting for its install run.
+pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: String) -> Option<Vec<Cmd>> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    if !p.set_state(handle, &state) {
+        return None;
+    }
+    let mut out = Vec::new();
+    if state != "installing" {
+        p.installing_left(handle, &mut out);
+    }
+    Some(out)
 }
 // ── The clients ──
 // A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order).
@@ -418,10 +448,190 @@ fn client_seen(p: &Partition, c: &Client, handle: u32) -> (String, String, Strin
     (c.id.clone(), c.url.clone(), c.kind.clone(), c.frame_type.clone(), c.controller == Some(handle), p.focused.contains(&c.id))
 }
 
-// ── The job queues ──
+// ── The job queues (Service Workers §8 Schedule Job, Run Job, Finish Job; the Register, Update and Unregister jobs) ──
+// The jobs at a scope run one at a time, in order (the scope's job queue), each as a task of the platform's on the
+// window's event loop (sw-client.js __csim_swQueueJob, which runs it back), and settle the promises waiting on it in
+// every realm (__csim_swJobSettled). What runs on the network or in an isolate is the host's: the script's fetch and
+// byte check, and its worker's spawn — each answered back here.
+impl Partition {
+    fn job(&mut self, id: u32) -> Option<&mut Job> {
+        self.jobs.iter_mut().find(|j| j.id == id)
+    }
+    // The job `id`'s run queued, where it is not already.
+    fn queue_job(&mut self, id: u32, out: &mut Vec<Cmd>) {
+        if let Some(j) = self.job(id).filter(|j| !j.queued) {
+            j.queued = true;
+            out.push(Cmd::QueueJob(id));
+        }
+    }
+    // The job settled as `outcome`, and finished at its turn (`finish`).
+    fn settle(&mut self, id: u32, outcome: Outcome, out: &mut Vec<Cmd>) {
+        if let Some(j) = self.job(id) {
+            j.waits = None;
+            j.outcome = outcome;
+            out.push(Cmd::Finish(id));
+        }
+    }
+    // …rejected with an error `name`: "Failed to register a ServiceWorker: `what`" (or update, or unregister).
+    fn fail(&mut self, id: u32, name: &'static str, what: &str, out: &mut Vec<Cmd>) {
+        let Some(j) = self.job(id) else { return };
+        let message = format!("Failed to {} a ServiceWorker: {what}", j.kind);
+        self.settle(id, Outcome { error: Some((name, message)), ..Outcome::default() }, out);
+    }
+    // Run Job. The Unregister job: the registration the map holds at the scope out of it — its clear waiting until no
+    // client is using it — whether there was one. A Register job at a scope whose newest worker already runs ITS script,
+    // under the same type, finishes at once when the updateViaCache mode is unchanged too (register() resolves with the
+    // same registration, its workers untouched — multiple-register); a changed mode makes it an Update with that mode,
+    // whose cache decisions just changed (registration-updateviacache's X-then-Y cases). Any other waits while a worker is
+    // still INSTALLING at the registration (update-not-allowed "from client succeeds while installing";
+    // register-wait-forever-in-install-worker) — a WAITING one is a finished job, which may be the very skipWaiting()
+    // version that releases the queue (skip-waiting.https) — then has the host fetch and byte-check the script
+    // (`fetched`).
+    fn run_job(&mut self, id: u32, out: &mut Vec<Cmd>) {
+        let Some(j) = self.job(id) else { return };
+        j.queued = false;
+        let (kind, scope, script_url, script_type, mode) =
+            (j.kind.clone(), j.scope.clone(), j.script_url.clone(), j.script_type.clone(), j.update_via_cache.clone());
+        if kind == "unregister" {
+            let unregistered = self.unregister(&scope, out);
+            return self.settle(id, Outcome { unregistered, ..Outcome::default() }, out);
+        }
+        let registration = if kind == "update" {
+            let registration = self.job(id).map_or(0, |j| j.registration);
+            if self.mapped_scope(registration).as_deref() != Some(scope.as_str()) {
+                return self.fail(id, "TypeError", "the registration has been unregistered.", out);
+            }
+            registration
+        } else {
+            self.mapped(&scope).filter(|r| r.registered).map_or(0, |r| r.id)
+        };
+        let [installing, waiting, active] = self.by_id(registration).map_or([None; 3], |r| r.versions());
+        let newest = installing.or(waiting).or(active);
+        let script = newest.and_then(|h| self.workers.get(&h)).map(|w| (w.script_url.clone(), w.script_type.clone()));
+        let mut update = kind == "update";
+        if kind == "register" && script.as_ref().is_some_and(|(url, ty)| *url == script_url && *ty == script_type) {
+            let current = self.mapped(&scope).and_then(|r| r.update_via_cache.clone());
+            if mode.is_some() && current.or_else(|| Some("imports".to_owned())) == mode {
+                return self.settle(id, Outcome { registration, ..Outcome::default() }, out);
+            }
+            update = true;
+        }
+        if let Some(h) = installing.filter(|h| self.workers.get(h).is_some_and(|w| w.state == "installing")) {
+            if let Some(j) = self.job(id) {
+                j.waits = Some(JobWait::Install(h));
+            }
+            return;
+        }
+        let Some(j) = self.job(id) else { return };
+        j.registration = registration;
+        if update {
+            let (Some(h), Some((url, ty))) = (newest, script) else {
+                return self.fail(id, "TypeError", "no service worker.", out);
+            };
+            j.script_url = url;
+            j.script_type = ty;
+            j.against = h;
+        }
+        out.push(Cmd::Fetch(id));
+    }
+    // The job `id`'s worker could not be spawned (`handle` none), or was: the job waits for its script to evaluate.
+    fn job_spawned(&mut self, id: u32, handle: Option<u32>, out: &mut Vec<Cmd>) {
+        match handle {
+            Some(h) => {
+                if let Some(j) = self.job(id) {
+                    j.waits = Some(JobWait::Evaluation(h));
+                }
+            }
+            None => self.fail(id, "TypeError", "the worker could not be started.", out),
+        }
+    }
+    // The job waiting for `wait`, where one does.
+    fn job_waiting(&self, wait: JobWait) -> Option<u32> {
+        self.jobs.iter().find(|j| j.waits == Some(wait)).map(|j| j.id)
+    }
+    // The worker `handle` left its installing state: the job waiting for its install runs.
+    fn installing_left(&mut self, handle: u32, out: &mut Vec<Cmd>) {
+        if let Some(id) = self.job_waiting(JobWait::Install(handle)) {
+            if let Some(j) = self.job(id) {
+                j.waits = None;
+            }
+            self.queue_job(id, out);
+        }
+    }
+    // Finish Job: the job `id` out of its queue — the next one there queued to run — and settled: every realm's promises
+    // waiting on it (or a service worker's own unregister()) answered. Finished FIRST: each realm runs its microtasks after
+    // the broadcast, and a page's next register() there must find this job gone from the queue, not join it.
+    fn finish(&mut self, id: u32, out: &mut Vec<Cmd>) {
+        let Some(i) = self.jobs.iter().position(|j| j.id == id) else { return };
+        let job = self.jobs.remove(i);
+        if let Some(next) = self.jobs.iter().find(|j| j.scope == job.scope).map(|j| j.id) {
+            self.queue_job(next, out);
+        }
+        let Outcome { registration, error, unregistered } = job.outcome;
+        if job.realm < 0 {
+            // (…the answer may never be read: an uncontrolled registration's uninstall clears at once, terminating this
+            // very worker — the promise dies with the isolate, like a real terminated worker's)
+            out.push(Cmd::Answer(job.realm.unsigned_abs() as u32, unregistered));
+        } else {
+            let (name, message) = error.unzip();
+            out.push(Cmd::Settled(id, registration, job.scope, name, message, unregistered));
+        }
+    }
+}
+
+impl Registry {
+    // The job `id`'s script fetched (`error`: "mime", "scope", or another failure; `changed`: its bytes differ from the
+    // newest worker's): a redirect, a non-JS MIME type or a scope past the script's max scope rejects, an unchanged one
+    // settles — committing the job's mode — and a changed one runs: the client announced first (a worker may enumerate
+    // its clients while its script evaluates), then its worker spawned by the host. Whether to spawn it.
+    fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, out: &mut Vec<Cmd>) -> bool {
+        let Some(p) = self.existing(partition) else { return false };
+        let Some(j) = p.job(id) else { return false };
+        let (scope, mode, registration, realm) = (j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
+        match error {
+            Some("mime") => p.fail(id, "SecurityError", "the script has an unsupported MIME type.", out),
+            Some("scope") => p.fail(id, "SecurityError", "the scope is outside the script's max scope.", out),
+            Some(_) => p.fail(id, "TypeError", "the script fetch failed.", out),
+            None if !changed => {
+                if let Some(mode) = mode {
+                    self.at(partition, &scope).update_via_cache = Some(mode);
+                }
+                self.partition(partition).settle(id, Outcome { registration, ..Outcome::default() }, out);
+            }
+            None => {
+                out.push(Cmd::ReportClient(realm));
+                return true;
+            }
+        }
+        false
+    }
+    // The job's worker `handle` evaluated its script ("Run Service Worker" gates the job): one whose evaluation failed
+    // (an importScripts that 404s, a top-level throw, a script that does not parse) ended and the job rejected, with no
+    // version ever visible and the registration's mode untouched (registration-updateviacache "not updated if register()
+    // rejects"); one that ran the registration's installing worker — a Register job's registration made now, as the map
+    // holds it NOW (another job may have made it meanwhile), the job's mode committed — and the job resolved.
+    fn job_evaluated(&mut self, partition: u64, handle: u32, ok: bool, message: &str, out: &mut Vec<Cmd>) {
+        let Some(p) = self.existing(partition) else { return };
+        let Some(id) = p.job_waiting(JobWait::Evaluation(handle)) else { return };
+        if !ok {
+            out.push(Cmd::Terminate(handle));
+            return p.fail(id, "TypeError", &format!("the script evaluation failed. {message}"), out);
+        }
+        let Some(j) = p.job(id) else { return };
+        let (kind, scope, mode, registration) = (j.kind.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration);
+        let registration = if kind == "register" { self.registered(partition, &scope).id } else { registration };
+        if let Some(mode) = mode {
+            self.at(partition, &scope).update_via_cache = Some(mode);
+        }
+        let p = self.partition(partition);
+        p.install(registration, handle, out);
+        p.settle(id, Outcome { registration, ..Outcome::default() }, out);
+    }
+}
+
 // Schedule Job: a job of `kind` ("register", "update" — of the registration `registration` — or "unregister") at `scope`
-// — its number, and whether it runs now (no job before it at the scope). A Register job equivalent to the last one queued
-// there (the same script, mode and type) is that job: its number, not to run again.
+// — its number, and what the host does: its run queued where no job is before it at the scope. A Register job equivalent
+// to the last one queued there (the same script, mode and type) is that job: its number, not to run again.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn schedule_job_for_ruby(
     partition: u64,
@@ -433,35 +643,99 @@ pub(crate) fn schedule_job_for_ruby(
     registration: u32,
     realm: i64,
     creator_key: String,
-) -> (u32, bool) {
+) -> (u32, Vec<Cmd>) {
     let mut reg = lock();
     let queued = reg.partition(partition).jobs.iter().rev().find(|j| j.scope == scope);
     if let Some(last) = queued.filter(|j| {
         kind == "register" && j.kind == "register" && j.script_url == script_url && j.update_via_cache == update_via_cache && j.script_type == script_type
     }) {
-        return (last.id, false);
+        return (last.id, Vec::new());
     }
     let runs = queued.is_none();
     reg.next_job += 1;
     let id = reg.next_job;
-    let job = Job { id, kind, scope, script_url, update_via_cache, script_type, registration, realm, creator_key };
-    reg.partition(partition).jobs.push(job);
-    (id, runs)
+    let job = Job {
+        id,
+        kind,
+        scope,
+        script_url,
+        update_via_cache,
+        script_type,
+        registration,
+        realm,
+        creator_key,
+        queued: false,
+        waits: None,
+        against: 0,
+        outcome: Outcome::default(),
+    };
+    let p = reg.partition(partition);
+    p.jobs.push(job);
+    let mut out = Vec::new();
+    if runs {
+        p.queue_job(id, &mut out);
+    }
+    (id, out)
 }
-// The job `id`: `[kind, scope, script URL, mode, type, registration, who asked, creator key]`, nil for one finished.
-#[allow(clippy::type_complexity)]
-pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, String, Option<String>, String, u32, i64, String)> {
-    let mut reg = lock();
-    let j = reg.existing(partition)?.jobs.iter().find(|j| j.id == id)?;
-    Some((j.kind.clone(), j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.registration, j.realm, j.creator_key.clone()))
+// The job `id` run (`__csim_swRunJob`): what the host does.
+pub(crate) fn run_job_for_ruby(partition: u64, id: u32) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.run_job(id, &mut out);
+    }
+    out
 }
-// Finish Job: the job `id` out of its queue — the next one there, to run now.
-pub(crate) fn finish_job_for_ruby(partition: u64, id: u32) -> Option<u32> {
+// What the host fetches for it: `[scope, script URL, mode, type, creator key, the worker an update fetches against (0
+// for none)]`, nil for one finished.
+pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, Option<String>, String, String, u32)> {
     let mut reg = lock();
-    let jobs = &mut reg.existing(partition)?.jobs;
-    let i = jobs.iter().position(|j| j.id == id)?;
-    let scope = jobs.remove(i).scope;
-    jobs.iter().find(|j| j.scope == scope).map(|j| j.id)
+    let j = reg.existing(partition)?.job(id)?;
+    Some((j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.creator_key.clone(), j.against))
+}
+// …its script fetched (`job_fetched`): [whether the host spawns its worker, what the host does].
+pub(crate) fn job_fetched_for_ruby(partition: u64, id: u32, error: Option<String>, changed: bool) -> (bool, Vec<Cmd>) {
+    let mut out = Vec::new();
+    let spawn = lock().job_fetched(partition, id, error.as_deref(), changed, &mut out);
+    (spawn, out)
+}
+// …its worker spawned, as `handle` (none where the host could not start it): what the host does.
+pub(crate) fn job_spawned_for_ruby(partition: u64, id: u32, handle: Option<u32>) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.job_spawned(id, handle, &mut out);
+    }
+    out
+}
+// The worker `handle` evaluated its script (`job_evaluated`): what the host does.
+pub(crate) fn job_evaluated_for_ruby(partition: u64, handle: u32, ok: bool, message: String) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    lock().job_evaluated(partition, handle, ok, &message, &mut out);
+    out
+}
+// The worker `handle` reaped: a job its worker owed an evaluation outcome fails with it (its worker thread posts the
+// outcome before it exits, so one still owed never comes), and a job waiting for its install runs — neither may hold its
+// scope's queue for good. What the host does.
+pub(crate) fn job_worker_gone_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        if let Some(id) = p.job_waiting(JobWait::Evaluation(handle)) {
+            p.fail(id, "TypeError", "the worker ended before its script evaluated.", &mut out);
+        }
+        p.installing_left(handle, &mut out);
+    }
+    out
+}
+// Finish Job (`finish`), at its turn: what the host does.
+pub(crate) fn finish_job_for_ruby(partition: u64, id: u32) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.finish(id, &mut out);
+    }
+    out
+}
+// The jobs whose run is queued — the outgoing page's tasks, the new page's to run.
+pub(crate) fn queued_jobs_for_ruby(partition: u64) -> Vec<u32> {
+    lock().existing(partition).map_or_else(Vec::new, |p| p.jobs.iter().filter(|j| j.queued).map(|j| j.id).collect())
 }
 // The registrations a Register job made that the map holds for a client of `origin` (its storage key: an opaque one has
 // none) — `[id, scope]` each, in the order made — and Match Service Worker Registration: of those, the one whose scope is
@@ -574,7 +848,7 @@ impl Partition {
                 Self::tell_state(h, "redundant", out);
             }
             for &h in &handles {
-                out.push(cmd("terminate", h));
+                out.push(Cmd::Terminate(h));
             }
         }
     }
@@ -598,7 +872,7 @@ impl Partition {
     // The frame navigations parked on an activating registration replayed (`navs_deferred`).
     fn retry_navs(&mut self, out: &mut Vec<Cmd>) {
         if std::mem::take(&mut self.navs_deferred) {
-            out.push(cmd("retry_navs", 0));
+            out.push(Cmd::RetryNavs);
         }
     }
 }
@@ -688,20 +962,74 @@ pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Op
     let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
     Some((handle, w.intercepts(), w.script_url.clone(), scope))
 }
-// ── The lifecycle, as the host takes its steps (Service Workers §8 Install, Try Activate, Activate) ──
-// What a step makes the host do, in order — the registry's versions committed first: move a worker to a state, telling
-// every realm where that is a change ("state", handle, state — Update Worker State, at its turn: a realm that makes its
-// ServiceWorker of the worker in a listener of an earlier one makes it in the state before, and sees its `statechange`),
-// end a worker's isolate ("terminate"), fire a registration's `updatefound` ("update_found",
-// registration), have a worker fire its activate event ("activate"), tell every realm a worker is its registration's
-// active one ("activated", handle, script URL, whether it intercepts), queue a worker's next step as a task of the
-// window's ("queue_step"), take the rest of a step once what came before it was done ("continue"), try to clear the
-// registrations unregistered once that was ("try_clear"), and replay the frame navigations parked on an activating
-// registration ("retry_navs").
-pub(crate) type Cmd = (&'static str, u32, String, bool);
-fn cmd(kind: &'static str, n: u32) -> Cmd {
-    (kind, n, String::new(), false)
+// ── What the host does ──
+// What a job's or a lifecycle's step makes the host do, in order — the registry's state committed first, each a Ruby
+// array `[kind, *arguments]`.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Cmd {
+    // Update Worker State, at its turn: the worker in the state, every realm told where that is a change (a realm that
+    // makes its ServiceWorker of the worker in a listener of an earlier one makes it in the state before, and sees its
+    // `statechange`).
+    State(u32, &'static str),
+    // The worker's isolate ended.
+    Terminate(u32),
+    // The registration's `updatefound` fired.
+    UpdateFound(u32),
+    // The worker's activate event fired.
+    Activate(u32),
+    // Every realm told the worker is its registration's active one: its script URL, whether it intercepts.
+    Activated(u32, String, bool),
+    // The worker's next step queued as a task of the window's.
+    QueueStep(u32),
+    // The rest of the worker's step taken, once what came before it was done.
+    Continue(u32),
+    // The registrations unregistered tried to clear, once that was.
+    TryClear,
+    // The frame navigations parked on an activating registration replayed.
+    RetryNavs,
+    // The job's run queued as a task of the window's.
+    QueueJob(u32),
+    // The job's script fetched.
+    Fetch(u32),
+    // The realm that asked for the job (0: the window) announced as a client, before its worker evaluates.
+    ReportClient(i64),
+    // The job finished, at its turn — what came before it done.
+    Finish(u32),
+    // Every realm's promises waiting on the job settled: the registration, its scope, the error's name and message,
+    // whether an Unregister job unregistered one.
+    Settled(u32, u32, String, Option<&'static str>, Option<String>, bool),
+    // A service worker's own unregister() answered: whether it unregistered one.
+    Answer(u32, bool),
 }
+
+impl IntoValue for Cmd {
+    fn into_value_with(self, ruby: &Ruby) -> Value {
+        match self {
+            Cmd::State(handle, state) => ("state", handle, state).into_value_with(ruby),
+            Cmd::Terminate(handle) => ("terminate", handle).into_value_with(ruby),
+            Cmd::UpdateFound(id) => ("update_found", id).into_value_with(ruby),
+            Cmd::Activate(handle) => ("activate", handle).into_value_with(ruby),
+            Cmd::Activated(handle, script_url, intercepts) => ("activated", handle, script_url, intercepts).into_value_with(ruby),
+            Cmd::QueueStep(handle) => ("queue_step", handle).into_value_with(ruby),
+            Cmd::Continue(handle) => ("continue", handle).into_value_with(ruby),
+            Cmd::TryClear => ("try_clear",).into_value_with(ruby),
+            Cmd::RetryNavs => ("retry_navs",).into_value_with(ruby),
+            Cmd::QueueJob(id) => ("queue_job", id).into_value_with(ruby),
+            Cmd::Fetch(id) => ("fetch", id).into_value_with(ruby),
+            Cmd::ReportClient(realm) => ("report_client", realm).into_value_with(ruby),
+            Cmd::Finish(id) => ("finish", id).into_value_with(ruby),
+            Cmd::Settled(id, registration, scope, error, message, unregistered) => {
+                ("settled", id, registration, scope, error, message, unregistered).into_value_with(ruby)
+            }
+            Cmd::Answer(handle, unregistered) => ("answer", handle, unregistered).into_value_with(ruby),
+        }
+    }
+}
+
+// SAFETY: a Cmd holds no Ruby value.
+unsafe impl IntoValueFromNative for Cmd {}
+
+// ── The lifecycle, as the host takes its steps (Service Workers §8 Install, Try Activate, Activate) ──
 
 impl Partition {
     fn set_version(&mut self, id: u32, slot: &str, handle: Option<u32>) {
@@ -718,16 +1046,16 @@ impl Partition {
     // A version retired: redundant, and its isolate ended.
     fn retire(handle: u32, out: &mut Vec<Cmd>) {
         Self::tell_state(handle, "redundant", out);
-        out.push(cmd("terminate", handle));
+        out.push(Cmd::Terminate(handle));
     }
-    fn tell_state(handle: u32, state: &str, out: &mut Vec<Cmd>) {
-        out.push(("state", handle, state.to_owned(), false));
+    fn tell_state(handle: u32, state: &'static str, out: &mut Vec<Cmd>) {
+        out.push(Cmd::State(handle, state));
     }
     // The worker's next step queued, where it is not already.
     fn queue_step(&mut self, handle: u32, out: &mut Vec<Cmd>) {
         if let Some(w) = self.workers.get_mut(&handle).filter(|w| !w.step_queued) {
             w.step_queued = true;
-            out.push(cmd("queue_step", handle));
+            out.push(Cmd::QueueStep(handle));
         }
     }
     // Install: the job's worker `handle` evaluated, the registration `id`'s installing worker now — superseding one
@@ -756,7 +1084,7 @@ impl Partition {
         }
         match taken {
             "updatefound" => {
-                out.push(cmd("update_found", id));
+                out.push(Cmd::UpdateFound(id));
                 self.queue_step(handle, out);
             }
             "installed" => self.installed(id, handle, out),
@@ -780,7 +1108,7 @@ impl Partition {
             Self::retire(old, out);
         }
         Self::tell_state(handle, "installed", out);
-        out.push(cmd("try_clear", 0));
+        out.push(Cmd::TryClear);
         self.queue_step(handle, out);
     }
     // …or its install failed (a rejected install `waitUntil` — Install "installFailed"): redundant without ever occupying
@@ -796,7 +1124,7 @@ impl Partition {
             self.unregister(&scope, out);
         } else {
             // (…one unregistered already, which only its install's event held, cleared now)
-            out.push(cmd("try_clear", 0));
+            out.push(Cmd::TryClear);
         }
     }
     // installed → activating, once Try Activate allows it: the one it replaces retired first (Activate's order — its
@@ -809,7 +1137,7 @@ impl Partition {
                     w.retired_outgoing = true;
                 }
                 Self::retire(o, out);
-                out.push(cmd("continue", handle));
+                out.push(Cmd::Continue(handle));
             }
             None => self.continue_activating(id, handle, out),
         }
@@ -829,13 +1157,13 @@ impl Partition {
         if waiting == Some(handle) {
             self.set_version(id, "waiting", None);
         }
-        out.push(cmd("activate", handle));
+        out.push(Cmd::Activate(handle));
         Self::tell_state(handle, "activating", out);
         if let Some(r) = self.registrations.iter_mut().find(|r| r.id == id && r.mapped) {
             r.activating = Some(handle);
         }
         if let Some(w) = self.workers.get(&handle) {
-            out.push(("activated", handle, w.script_url.clone(), w.intercepts()));
+            out.push(Cmd::Activated(handle, w.script_url.clone(), w.intercepts()));
         }
         self.queue_step(handle, out);
     }
@@ -850,18 +1178,10 @@ impl Partition {
             r.activating = None;
         }
         Self::tell_state(handle, "activated", out);
-        out.push(cmd("try_clear", 0));
+        out.push(Cmd::TryClear);
     }
 }
 
-// The job's worker `handle` evaluated, the registration `id`'s installing worker (Install): what the host does.
-pub(crate) fn install_for_ruby(partition: u64, id: u32, handle: u32) -> Vec<Cmd> {
-    let mut out = Vec::new();
-    if let Some(p) = lock().existing(partition) {
-        p.install(id, handle, &mut out);
-    }
-    out
-}
 // The worker `handle`'s queued step taken (`__csim_swStep`): what the host does.
 pub(crate) fn step_for_ruby(partition: u64, handle: u32) -> Vec<Cmd> {
     let mut out = Vec::new();
@@ -930,9 +1250,6 @@ pub(crate) fn forget_activating_for_ruby(partition: u64, handle: u32) {
 pub(crate) fn update_via_cache_for_ruby(partition: u64, scope: String) -> Option<String> {
     lock().existing(partition).and_then(|p| p.mapped(&scope)).and_then(|r| r.update_via_cache.clone())
 }
-pub(crate) fn set_update_via_cache_for_ruby(partition: u64, scope: String, mode: String) {
-    lock().at(partition, &scope).update_via_cache = Some(mode);
-}
 // Its navigation preload state: `[enabled, header value]`, the spec's default (false, "true") where none was set — and
 // setting either (a nil one left as it is).
 pub(crate) fn navigation_preload_for_ruby(partition: u64, scope: String) -> (bool, String) {
@@ -960,6 +1277,19 @@ mod tests {
     fn part<R>(p: u64, f: impl FnOnce(&mut Partition) -> R) -> R {
         f(lock().existing(p).expect("a partition made"))
     }
+    // (…a Register job made the registration at `scope`: its number)
+    fn note_registered(p: u64, scope: String) -> u32 {
+        lock().registered(p, &scope).id
+    }
+    // (…the registration `id`'s installing worker, its job's worker evaluated)
+    fn install(p: u64, id: u32, handle: u32) -> Vec<Cmd> {
+        let mut out = Vec::new();
+        part(p, |q| q.install(id, handle, &mut out));
+        out
+    }
+    fn set_update_via_cache(p: u64, scope: String, mode: String) {
+        lock().at(p, &scope).update_via_cache = Some(mode);
+    }
     fn set_version(p: u64, id: u32, slot: String, handle: Option<u32>) {
         part(p, |q| q.set_version(id, &slot, handle));
     }
@@ -985,30 +1315,35 @@ mod tests {
     #[test]
     fn has_the_host_take_each_lifecycle_step_in_order() {
         let p = partition_new_for_ruby();
-        let id = note_registered_for_ruby(p, "https://a.test/".into());
-        let kinds = |cmds: Vec<Cmd>| cmds.into_iter().map(|(k, n, t, _)| format!("{k} {n} {t}").trim_end().to_owned()).collect::<Vec<_>>();
+        let id = note_registered(p, "https://a.test/".into());
         worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
-        assert_eq!(kinds(install_for_ruby(p, id, 1)), ["state 1 installing", "queue_step 1"]);
+        assert_eq!(install(p, id, 1), [Cmd::State(1, "installing"), Cmd::QueueStep(1)]);
         // (…one step a task: updatefound, then the install phase waited for, then installed and Try Activate)
-        assert_eq!(kinds(step_for_ruby(p, 1)), [format!("update_found {id}"), "queue_step 1".into()]);
-        assert!(kinds(step_for_ruby(p, 1)).is_empty());
-        assert!(kinds(resume_for_ruby(p, 1, "activation".into())).is_empty());
+        assert_eq!(step_for_ruby(p, 1), [Cmd::UpdateFound(id), Cmd::QueueStep(1)]);
+        assert!(step_for_ruby(p, 1).is_empty());
+        assert!(resume_for_ruby(p, 1, "activation".into()).is_empty());
         note_phase_for_ruby(p, 1, "install".into(), true);
-        assert_eq!(kinds(resume_for_ruby(p, 1, "install".into())), ["state 1 installed", "try_clear 0", "queue_step 1"]);
-        assert_eq!(kinds(step_for_ruby(p, 1)), ["activate 1", "state 1 activating", "activated 1 https://a.test/sw.js", "queue_step 1"]);
-        assert!(kinds(step_for_ruby(p, 1)).is_empty());
+        assert_eq!(resume_for_ruby(p, 1, "install".into()), [Cmd::State(1, "installed"), Cmd::TryClear, Cmd::QueueStep(1)]);
+        assert_eq!(
+            step_for_ruby(p, 1),
+            [Cmd::Activate(1), Cmd::State(1, "activating"), Cmd::Activated(1, "https://a.test/sw.js".into(), true), Cmd::QueueStep(1)]
+        );
+        assert!(step_for_ruby(p, 1).is_empty());
         note_phase_for_ruby(p, 1, "activated".into(), true);
-        assert_eq!(kinds(resume_for_ruby(p, 1, "activation".into())), ["state 1 activated", "try_clear 0"]);
+        assert_eq!(resume_for_ruby(p, 1, "activation".into()), [Cmd::State(1, "activated"), Cmd::TryClear]);
         assert_eq!(match_worker_for_ruby(p, "https://a.test/x".into(), "navigation".into()).map(|m| m.0), Some(1));
         // (…an update replacing it: the outgoing worker retired before the versions move, the rest continued after)
         worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
-        install_for_ruby(p, id, 2);
+        install(p, id, 2);
         step_for_ruby(p, 2);
         note_phase_for_ruby(p, 2, "install".into(), true);
         step_for_ruby(p, 2);
-        assert_eq!(kinds(step_for_ruby(p, 2)), ["state 1 redundant", "terminate 1", "continue 2"]);
+        assert_eq!(step_for_ruby(p, 2), [Cmd::State(1, "redundant"), Cmd::Terminate(1), Cmd::Continue(2)]);
         assert_eq!(versions_for_ruby(p, id), (None, Some(2), Some(1)));
-        assert_eq!(kinds(continue_for_ruby(p, 2)), ["activate 2", "state 2 activating", "activated 2 https://a.test/sw.js", "queue_step 2"]);
+        assert_eq!(
+            continue_for_ruby(p, 2),
+            [Cmd::Activate(2), Cmd::State(2, "activating"), Cmd::Activated(2, "https://a.test/sw.js".into(), true), Cmd::QueueStep(2)]
+        );
         assert_eq!(versions_for_ruby(p, id), (None, None, Some(2)));
         assert_eq!(queued_steps_for_ruby(p), [2]);
         clear_for_ruby(p);
@@ -1018,8 +1353,7 @@ mod tests {
     fn clears_an_unregistered_registration_once_no_client_uses_it() {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
-        let id = note_registered_for_ruby(p, scope());
-        let kinds = |cmds: Vec<Cmd>| cmds.into_iter().map(|(k, n, t, _)| format!("{k} {n} {t}").trim_end().to_owned()).collect::<Vec<_>>();
+        let id = note_registered(p, scope());
         worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(1));
         activated(p, scope(), 1);
@@ -1028,15 +1362,15 @@ mod tests {
         // (…out of the map at once, the parked navigation replayed, the clear waiting on the client)
         let (had, cmds) = unregister_for_ruby(p, scope());
         assert!(had);
-        assert_eq!(kinds(cmds), ["retry_navs 0"]);
+        assert_eq!(cmds, [Cmd::RetryNavs]);
         assert!(registrations_for_ruby(p).is_empty());
         assert_eq!(versions_for_ruby(p, id), (None, None, Some(1)));
-        assert!(kinds(try_clear_for_ruby(p)).is_empty());
+        assert!(try_clear_for_ruby(p).is_empty());
         // (…the client gone: the versions emptied, then the worker redundant, then ended)
         forget_client_for_ruby(p, "c".into());
-        assert_eq!(kinds(try_clear_for_ruby(p)), ["state 1 redundant", "terminate 1"]);
+        assert_eq!(try_clear_for_ruby(p), [Cmd::State(1, "redundant"), Cmd::Terminate(1)]);
         assert_eq!(versions_for_ruby(p, id), (None, None, None));
-        assert!(kinds(retry_navs_for_ruby(p)).is_empty());
+        assert!(retry_navs_for_ruby(p).is_empty());
         assert_eq!(unregister_for_ruby(p, scope()), (false, Vec::new()));
         clear_for_ruby(p);
     }
@@ -1045,7 +1379,7 @@ mod tests {
     fn lets_a_worker_activate_as_try_activate_has_it() {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
-        let id = note_registered_for_ruby(p, scope());
+        let id = note_registered(p, scope());
         worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
         worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(1));
@@ -1131,23 +1465,55 @@ mod tests {
     #[test]
     fn queues_jobs_by_scope_and_joins_an_equivalent_register() {
         let p = partition_new_for_ruby();
-        let (a, runs) = schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), 0, 0, String::new());
-        assert!(runs);
-        assert_eq!(schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), 0, 3, String::new()), (a, false));
-        let (b, runs) = schedule_job_for_ruby(p, "register".into(), "s/".into(), "s/b.js".into(), Some("imports".into()), "classic".into(), 0, 0, String::new());
-        assert!(!runs);
-        let (c, runs) = schedule_job_for_ruby(p, "update".into(), "t/".into(), "t/a.js".into(), None, "classic".into(), 9, 0, String::new());
-        assert!(runs);
-        assert_eq!(job_for_ruby(p, c).map(|j| j.0), Some("update".into()));
-        assert_eq!(finish_job_for_ruby(p, a), Some(b));
-        assert_eq!(finish_job_for_ruby(p, b), None);
-        assert!(job_for_ruby(p, b).is_none());
+        let schedule = |kind: &str, scope: &str, url: &str, registration: u32, realm: i64| {
+            schedule_job_for_ruby(p, kind.into(), scope.into(), url.into(), Some("imports".into()), "classic".into(), registration, realm, String::new())
+        };
+        let (a, cmds) = schedule("register", "s/", "s/a.js", 0, 0);
+        assert_eq!(cmds, [Cmd::QueueJob(a)]);
+        assert_eq!(schedule("register", "s/", "s/a.js", 0, 3), (a, Vec::new()));
+        let (b, cmds) = schedule("register", "s/", "s/b.js", 0, 0);
+        assert!(cmds.is_empty());
+        let (c, cmds) = schedule("update", "t/", "t/a.js", 9, 0);
+        assert_eq!(cmds, [Cmd::QueueJob(c)]);
+        assert_eq!(queued_jobs_for_ruby(p), [a, c]);
+        // (…an Update of a registration the map does not hold rejects; the next job at its scope, none, queued)
+        assert_eq!(run_job_for_ruby(p, c), [Cmd::Finish(c)]);
+        let message = "Failed to update a ServiceWorker: the registration has been unregistered.";
+        assert_eq!(finish_job_for_ruby(p, c), [Cmd::Settled(c, 0, "t/".into(), Some("TypeError"), Some(message.into()), false)]);
+        assert!(job_for_ruby(p, c).is_none());
+        // (…a Register job fetches its script, a changed one announcing its client and spawning its worker, which it waits on)
+        assert_eq!(run_job_for_ruby(p, a), [Cmd::Fetch(a)]);
+        assert_eq!(job_for_ruby(p, a), Some(("s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), String::new(), 0)));
+        assert_eq!(job_fetched_for_ruby(p, a, None, true), (true, vec![Cmd::ReportClient(0)]));
+        worker_new_for_ruby(p, 4, "s/a.js".into(), "classic".into());
+        assert!(job_spawned_for_ruby(p, a, Some(4)).is_empty());
         assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);
-        note_registered_for_ruby(p, "s/".into());
+        let cmds = job_evaluated_for_ruby(p, 4, true, String::new());
+        let id = registered_at_for_ruby(p, "s/".into());
+        assert_eq!(cmds, [Cmd::State(4, "installing"), Cmd::QueueStep(4), Cmd::Finish(a)]);
+        assert_eq!(finish_job_for_ruby(p, a), [Cmd::QueueJob(b), Cmd::Settled(a, id, "s/".into(), None, None, false)]);
+        // (…the next waits while that worker is installing, and runs once it is not)
+        assert_eq!(set_worker_state_for_ruby(p, 4, "installing".into()), Some(Vec::new()));
+        assert!(run_job_for_ruby(p, b).is_empty());
+        assert_eq!(set_worker_state_for_ruby(p, 4, "installed".into()), Some(vec![Cmd::QueueJob(b)]));
+        assert_eq!(run_job_for_ruby(p, b), [Cmd::Fetch(b)]);
+        // (…its worker gone before it evaluated: it rejects)
+        job_spawned_for_ruby(p, b, Some(5));
+        assert_eq!(job_worker_gone_for_ruby(p, 5), [Cmd::Finish(b)]);
+        let message = "Failed to register a ServiceWorker: the worker ended before its script evaluated.";
+        assert_eq!(finish_job_for_ruby(p, b), [Cmd::Settled(b, 0, "s/".into(), Some("TypeError"), Some(message.into()), false)]);
+        // (…a service worker's own unregister() is answered in its inbox)
+        let (u, _) = schedule("unregister", "s/", "", 0, -4);
+        assert_eq!(run_job_for_ruby(p, u), [Cmd::Finish(u)]);
+        assert_eq!(finish_job_for_ruby(p, u)[..], [Cmd::Answer(4, true)]);
+        clear_for_ruby(p);
+        let p = partition_new_for_ruby();
+        assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);
+        note_registered(p, "s/".into());
         assert_ne!(registered_at_for_ruby(p, "s/".into()), 0);
-        let short = note_registered_for_ruby(p, "https://a.test/".into());
-        let long = note_registered_for_ruby(p, "https://a.test/x/".into());
-        note_registered_for_ruby(p, "https://b.test/".into());
+        let short = note_registered(p, "https://a.test/".into());
+        let long = note_registered(p, "https://a.test/x/".into());
+        note_registered(p, "https://b.test/".into());
         let a = || "https://a.test".to_owned();
         assert_eq!(match_registration_for_ruby(p, a(), "https://a.test/x/y".into()), Some((long, "https://a.test/x/".into())));
         assert_eq!(match_registration_for_ruby(p, a(), "https://a.test/y".into()), Some((short, "https://a.test/".into())));
@@ -1169,7 +1535,7 @@ mod tests {
         assert_eq!(advance(p, 3), "installed");
         assert!(awaits_activation(p, 3));
         // (…held at Try Activate while the active worker it replaces controls a client, let go once that one goes)
-        let id = note_registered_for_ruby(p, "https://a.test/".into());
+        let id = note_registered(p, "https://a.test/".into());
         worker_new_for_ruby(p, 9, "a/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(9));
         set_version(p, id, "waiting".into(), Some(3));
@@ -1198,7 +1564,7 @@ mod tests {
     #[test]
     fn keeps_a_registration_from_its_job_to_its_clear() {
         let p = partition_new_for_ruby();
-        let id = note_registered_for_ruby(p, "a/".into());
+        let id = note_registered(p, "a/".into());
         worker_new_for_ruby(p, 7, "a/sw.js".into(), "classic".into());
         set_version(p, id, "installing".into(), Some(7));
         note_activating(p, "a/".into(), 7);
@@ -1214,21 +1580,21 @@ mod tests {
         forget_activating_for_ruby(p, 8);
         assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, None, None, id));
         // A scope its job only set a mode on is no registration yet, and takes its place when one is made there.
-        set_update_via_cache_for_ruby(p, "c/".into(), "all".into());
-        note_registered_for_ruby(p, "b/".into());
-        note_registered_for_ruby(p, "c/".into());
+        set_update_via_cache(p, "c/".into(), "all".into());
+        note_registered(p, "b/".into());
+        note_registered(p, "c/".into());
         let order: Vec<String> = registrations_for_ruby(p).into_iter().map(|r| r.0).collect();
         assert_eq!(order, ["a/", "b/", "c/"]);
         // Unregistered, it leaves the map — its version, which nothing holds, cleared with it.
         let (had, cmds) = unregister_for_ruby(p, "a/".into());
         assert!(had);
-        assert_eq!(cmds.into_iter().map(|c| c.0).collect::<Vec<_>>(), ["state", "terminate"]);
+        assert_eq!(cmds, [Cmd::State(7, "redundant"), Cmd::Terminate(7)]);
         assert_eq!(unregister_for_ruby(p, "a/".into()), (false, Vec::new()));
         assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (false, "true".into()));
         assert_eq!(versions_for_ruby(p, id), (None, None, None));
-        let again = note_registered_for_ruby(p, "a/".into());
+        let again = note_registered(p, "a/".into());
         assert_ne!(again, id);
-        assert!(set_worker_state_for_ruby(p, 7, "redundant".into()));
+        assert!(set_worker_state_for_ruby(p, 7, "redundant".into()).is_some());
         assert_eq!(worker_for_ruby(p, 7), Some(("a/sw.js".into(), "classic".into(), "redundant".into(), id)));
         clear_for_ruby(p);
         forget_worker_for_ruby(p, 7);

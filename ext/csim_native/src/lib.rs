@@ -346,7 +346,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_partition_new", magnus::function!(sw_registry::partition_new_for_ruby, 0))?;
     native.define_module_function("sw_clear", magnus::function!(sw_registry::clear_for_ruby, 1))?;
     native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
-    native.define_module_function("sw_note_registered", magnus::function!(sw_registry::note_registered_for_ruby, 2))?;
     native.define_module_function("sw_versions", magnus::function!(sw_registry::versions_for_ruby, 2))?;
     native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 4))?;
     native.define_module_function("sw_worker", magnus::function!(sw_registry::worker_for_ruby, 2))?;
@@ -365,14 +364,19 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_client", magnus::function!(sw_registry::client_for_ruby, 4))?;
     native.define_module_function("sw_match_clients", magnus::function!(sw_registry::match_clients_for_ruby, 5))?;
     native.define_module_function("sw_schedule_job", magnus::function!(sw_registry::schedule_job_for_ruby, 9))?;
+    native.define_module_function("sw_run_job", magnus::function!(sw_registry::run_job_for_ruby, 2))?;
     native.define_module_function("sw_job", magnus::function!(sw_registry::job_for_ruby, 2))?;
+    native.define_module_function("sw_job_fetched", magnus::function!(sw_registry::job_fetched_for_ruby, 4))?;
+    native.define_module_function("sw_job_spawned", magnus::function!(sw_registry::job_spawned_for_ruby, 3))?;
+    native.define_module_function("sw_job_evaluated", magnus::function!(sw_registry::job_evaluated_for_ruby, 4))?;
+    native.define_module_function("sw_job_worker_gone", magnus::function!(sw_registry::job_worker_gone_for_ruby, 2))?;
     native.define_module_function("sw_finish_job", magnus::function!(sw_registry::finish_job_for_ruby, 2))?;
+    native.define_module_function("sw_queued_jobs", magnus::function!(sw_registry::queued_jobs_for_ruby, 1))?;
     native.define_module_function("sw_registrations_of_origin", magnus::function!(sw_registry::registrations_of_origin_for_ruby, 2))?;
     native.define_module_function("sw_match_registration", magnus::function!(sw_registry::match_registration_for_ruby, 3))?;
     native.define_module_function("sw_registered_at", magnus::function!(sw_registry::registered_at_for_ruby, 2))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;
     native.define_module_function("sw_hold", magnus::function!(sw_registry::hold_for_ruby, 4))?;
-    native.define_module_function("sw_install", magnus::function!(sw_registry::install_for_ruby, 3))?;
     native.define_module_function("sw_step", magnus::function!(sw_registry::step_for_ruby, 2))?;
     native.define_module_function("sw_continue", magnus::function!(sw_registry::continue_for_ruby, 2))?;
     native.define_module_function("sw_resume", magnus::function!(sw_registry::resume_for_ruby, 3))?;
@@ -385,7 +389,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_forget_worker", magnus::function!(sw_registry::forget_worker_for_ruby, 2))?;
     native.define_module_function("sw_forget_activating", magnus::function!(sw_registry::forget_activating_for_ruby, 2))?;
     native.define_module_function("sw_update_via_cache", magnus::function!(sw_registry::update_via_cache_for_ruby, 2))?;
-    native.define_module_function("sw_set_update_via_cache", magnus::function!(sw_registry::set_update_via_cache_for_ruby, 3))?;
     native.define_module_function("sw_navigation_preload", magnus::function!(sw_registry::navigation_preload_for_ruby, 2))?;
     native.define_module_function("sw_set_navigation_preload", magnus::function!(sw_registry::set_navigation_preload_for_ruby, 4))?;
     native.define_module_function("cors_safelisted_request_header", magnus::function!(fetch_rules::cors_safelisted_request_header_for_ruby, 2))?;
