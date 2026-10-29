@@ -7897,7 +7897,7 @@ module Capybara
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
       end
       # The document-teardown pair (pagehide+unload), this window AND its nested
-      # frames, parent-first — fired as a navigation replaces the page's document
+      # frames, theirs first — fired as a navigation replaces the page's document
       # (`boot_response_into_ctx`), and by the Driver before an explicitly-closed aux
       # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
       def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)

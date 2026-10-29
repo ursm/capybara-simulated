@@ -268,7 +268,9 @@ RSpec.describe 'choosing a navigable by name' do
 
   # A frame the host navigates — its `location` set, which the host fetches and rebuilds the realm for — unloads its old
   # document as any navigation does: beforeunload, pagehide, unload, its frameElement the container; and every
-  # beforeunload of its frames' documents before any is unloaded — the same order a `src` change has (Chrome, both).
+  # beforeunload of its frames' documents before any is unloaded — the same order a `src` change has (Chrome, both) —
+  # and then its frames' documents unloaded before it: HTML "unload a document and its descendants" waits for every child
+  # navigable's, an explicit order (Chrome goes parent first: c:pagehide, c:unload, g:pagehide, g:unload).
   def unload_logger(name)
     %(<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => top.L.push("#{name}:" + t + ":" + (frameElement && frameElement.id)));</script>)
   end
@@ -288,10 +290,10 @@ RSpec.describe 'choosing a navigable by name' do
       expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 6 } }).to eq(%w[
         c:beforeunload:c
         g:beforeunload:g
-        c:pagehide:c
-        c:unload:c
         g:pagehide:g
         g:unload:g
+        c:pagehide:c
+        c:unload:c
       ])
     end
   end
@@ -309,10 +311,10 @@ RSpec.describe 'choosing a navigable by name' do
     expect(poll_until { s.evaluate_script('L').then {|l| l if l.size >= 6 } }).to eq(%w[
       c:beforeunload:c
       g:beforeunload:g
-      c:pagehide:c
-      c:unload:c
       g:pagehide:g
       g:unload:g
+      c:pagehide:c
+      c:unload:c
     ])
   end
 
