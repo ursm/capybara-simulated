@@ -270,7 +270,7 @@ RSpec.describe 'choosing a navigable by name' do
   # document as any navigation does: beforeunload, pagehide, unload, its frameElement the container; and every
   # beforeunload of its frames' documents before any is unloaded — the same order a `src` change has (Chrome, both) —
   # and then its frames' documents unloaded before it: HTML "unload a document and its descendants" waits for every child
-  # navigable's, an explicit order (Chrome goes parent first: c:pagehide, c:unload, g:pagehide, g:unload).
+  # navigable's, an explicit order (Chrome and Firefox go parent first: c:pagehide, c:unload, g:pagehide, g:unload).
   def unload_logger(name)
     %(<script>for (const t of ["beforeunload", "pagehide", "unload"]) addEventListener(t, () => top.L.push("#{name}:" + t + ":" + (frameElement && frameElement.id)));</script>)
   end

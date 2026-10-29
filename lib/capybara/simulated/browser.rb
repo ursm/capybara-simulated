@@ -2406,12 +2406,19 @@ module Capybara
       private def perform_history_traverse(delta)
         return unless (plan = history_plan(delta))
 
-        if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document } && @timers_active
-          # Before the step below moves (see `flush_outgoing_page_init`) — and the step planned after it, as the history
-          # stands once what the page's timers did to it (a pushState dropping the forward steps) is in.
-          flush_outgoing_page_init
-          flushed = true
-          plan = history_plan(delta)
+        if plan[1].any? {|nav, _, same_document| nav.zero? && !same_document }
+          if @timers_active
+            # Before the step below moves (see `flush_outgoing_page_init`) — and the step planned after it, as the history
+            # stands once what the page's timers did to it (a pushState dropping the forward steps) is in.
+            flush_outgoing_page_init
+            flushed = true
+          end
+          plan = history_plan(delta) if flushed
+          # (…and the page asked whether it may be unloaded before the step is applied — HTML "apply the history step"
+          # checks if unloading is canceled for the step it applies — what its handlers would do to the session history
+          # ignored, as an unloading page's is: the step stands; Chrome and Firefox both go to it, a pushState of a
+          # handler's dropping no forward step)
+          frozen_history { prompt_page_to_unload }
         end
         step, changes = plan
         if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
@@ -3460,7 +3467,8 @@ module Capybara
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
-        prompt_page_to_unload if depth.zero?
+        # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
+        prompt_page_to_unload if depth.zero? && (!from_history || is_reload)
         # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
         # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
@@ -7897,6 +7905,14 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
       end
+      # The session history out of a page's reach while `block` runs a handler of its whose document is on its way out
+      # (`history_state` / `history_push` ignore what it asks).
+      private def frozen_history
+        @history_frozen = true
+        yield
+      ensure
+        @history_frozen = false
+      end
       # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a traversal's, a reload's
       # too — "check if unloading is canceled"): `beforeunload` at its document, then at its frames' documents, its unload
       # counter raised while each runs (dom-nodes.js `promptDocumentToUnload`). The navigation goes on whatever a handler
@@ -11298,9 +11314,10 @@ module Capybara
       # in place rather than appending. Both the state and (when given)
       # the URL are mirrored on Ruby's slot so a subsequent back to
       # this entry restores the same state.
-      # (…none while the page's document is unloaded, the session history its next document's: `boot_response_into_ctx`)
+      # (…none while the page's document is on its way out — unloaded, the session history its next document's
+      # (`boot_response_into_ctx`), or asked as a traversal applies its step: `frozen_history`)
       def history_state(url, state = nil, realm_id = 0)
-        return if @unloading_page
+        return if @history_frozen
         return frame_history_state(realm_id.to_i, url, state, push: false) unless realm_id.to_i.zero?
 
         if url
@@ -11319,7 +11336,7 @@ module Capybara
       # within the pushState chain (fires `popstate`) and only crosses
       # to a real reload when the back hits a `:visit` boundary.
       def history_push(url, state = nil, realm_id = 0)
-        return if @unloading_page
+        return if @history_frozen
         return frame_history_state(realm_id.to_i, url, state, push: true) unless realm_id.to_i.zero?
 
         resolved = resolve_against_current(url.to_s)
@@ -11743,7 +11760,8 @@ module Capybara
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
-        prompt_page_to_unload if depth.zero?
+        # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
+        prompt_page_to_unload if depth.zero? && (!from_history || is_reload)
         # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
         # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
@@ -11961,12 +11979,7 @@ module Capybara
         # is the old document's, its fetch group's quota with it (`keepalive_retire` below). (…what they do to the session
         # history ignored: its entry, and the URL, are the next document's by now — a gap, Chrome's pushState of one
         # adding the old document a step)
-        @unloading_page = true
-        begin
-          fire_document_teardown
-        ensure
-          @unloading_page = false
-        end
+        frozen_history { fire_document_teardown }
         @flushed_nav_intents = nil
         # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
         @session_history.clear_queued

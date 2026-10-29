@@ -68,6 +68,46 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
     expect(s).to have_current_path('/b')
   end
 
+  # …as a traversal applies its step, what a handler does to the session history ignored: the step stands (Chrome and
+  # Firefox: back to /a, forward to /b again).
+  it "asks the page as a traversal applies its step, which its handlers do not move" do
+    app = lambda do |env|
+      body = env['PATH_INFO'] == '/b' ? "<script>addEventListener('beforeunload', () => history.pushState(null, '', '/pushed'))</script>b" : 'a'
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/a'
+    s.visit '/b'
+    s.go_back
+    expect(s).to have_current_path('/a')
+    s.go_forward
+    expect(s).to have_current_path('/b')
+  end
+
+  # …and a hyperlink or a form a handler navigates it with ignored, as a `location` navigation is — not taken once the
+  # navigation asking it ends in no document (a 204), whose page stays (Chrome and Firefox request neither).
+  it "ignores a hyperlink or a form a beforeunload handler navigates the page with" do
+    seen = []
+    app = lambda do |env|
+      seen << env['PATH_INFO']
+      next [204, {}, []] if env['PATH_INFO'] == '/nc'
+
+      body = <<~HTML
+        <a id="l" href="/evil-link">l</a><form id="f" action="/evil-form" method="post"></form>
+        <script>addEventListener('beforeunload', () => { l.click(); f.submit() })</script>
+      HTML
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/a'
+    s.execute_script("location.href = '/nc'")
+    s.execute_script('setTimeout(() => window.settled = true, 50)')
+    poll_until { s.evaluate_script('window.settled === true') }
+
+    expect(seen).to eq(%w[/a /nc])
+    expect(s).to have_current_path('/a')
+  end
+
   # …its unload counter raised as it unloads (HTML): a navigation, a document.write, a dialog of a handler ignored, and
   # what one does to the session history too — its entry, and the URL, the next document's by now — its document hidden
   # after its pagehide (Chrome: pagehide visible, visibilitychange hidden, unload hidden).

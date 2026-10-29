@@ -776,6 +776,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setPrompting", set_prompting, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
+    crate::dom::register(scope, ns, "targetUnloading", target_unloading, context_id);
     let linked = crate::dom::dom(scope).arena.navigables.linked.store();
     crate::dom::view_word(scope, ns, "childFrames", linked);
     let discarded = crate::dom::dom(scope).arena.navigables.discarded_count.store();
@@ -1083,6 +1084,28 @@ impl RealmArena {
         self.navigables.unloading.contains(&realm) || self.navigables.prompting.contains(&realm)
     }
 }
+// __dom.targetUnloading(target) -> whether the navigable target name `target` chooses from the calling realm — its own
+// for none or `_self`, its parent's or its top's, a named one's — has its active document being unloaded, or asked
+// whether it may be: a hyperlink or a form that would navigate it then ignored (HTML "navigate", the unload counter
+// above 0 — as `location`'s is, location.js `navigateTo`).
+fn target_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = utf16_arg(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let keyword = target_keyword(&String::from_utf16_lossy(&target));
+    let realm = match keyword {
+        TARGET_SELF => Some(cid),
+        TARGET_TOP | TARGET_PARENT => arena.keyword_navigable(cid, keyword),
+        TARGET_BLANK => None,
+        _ => match arena.find_navigable(cid, &target) {
+            Chosen::Navigable(realm, _) => realm,
+            Chosen::Window(realm) => Some(realm),
+            Chosen::None | Chosen::Blocked => None,
+        },
+    };
+    rv.set_bool(realm.is_some_and(|realm| arena.unloading(realm)));
+}
+
 // __dom.ancestorUnloading(realm) -> whether an ancestor navigable's document is being unloaded now
 // (`RealmArena::ancestor_unloading`).
 fn ancestor_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
