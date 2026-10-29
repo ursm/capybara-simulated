@@ -64,6 +64,19 @@ struct Worker {
     state: String,
     registration: u32,
     lifecycle: Lifecycle,
+    // What its isolate made known as it ran, from its own thread: whether it has a `fetch` listener (none known until
+    // its initial evaluation ran), whether it added Static Routing rules (which route a request with no fetch listener),
+    // and whether its thread is gone — reaped, or ended on its own (a raise, `self.close()`).
+    fetch: Option<bool>,
+    router: bool,
+    dead: bool,
+}
+
+impl Worker {
+    // Whether a request is worth routing to it: one with a `fetch` listener, or not known to have none, or with rules.
+    fn intercepts(&self) -> bool {
+        self.fetch != Some(false) || self.router
+    }
 }
 
 // A version's way from installing to activated (Service Workers §8 Install, Try Activate, Activate), one step at a
@@ -230,7 +243,16 @@ pub(crate) fn set_version_for_ruby(partition: u64, id: u32, slot: String, handle
 }
 // A service worker of the session, spawned: its script's URL and type, 'parsed' until a registration holds it.
 pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: String, script_type: String) {
-    let worker = Worker { script_url, script_type, state: "parsed".to_owned(), registration: 0, lifecycle: Lifecycle::default() };
+    let worker = Worker {
+        script_url,
+        script_type,
+        state: "parsed".to_owned(),
+        registration: 0,
+        lifecycle: Lifecycle::default(),
+        fetch: None,
+        router: false,
+        dead: false,
+    };
     lock().partition(partition).workers.insert(handle, worker);
 }
 // The worker `handle`: `[script URL, type, state, registration]` (0 for none yet), nil for none.
@@ -238,6 +260,22 @@ pub(crate) fn worker_for_ruby(partition: u64, handle: u32) -> Option<(String, St
     let mut reg = lock();
     let w = reg.existing(partition)?.workers.get(&handle)?;
     Some((w.script_url.clone(), w.script_type.clone(), w.state.clone(), w.registration))
+}
+// …what its isolate made known (`flag` "fetch": it has a `fetch` listener, `on` or not; "router": it added rules; "dead":
+// its thread is gone), from whichever thread.
+pub(crate) fn set_worker_flag_for_ruby(partition: u64, handle: u32, flag: String, on: bool) {
+    let mut reg = lock();
+    let Some(w) = reg.existing(partition).and_then(|p| p.workers.get_mut(&handle)) else { return };
+    match flag.as_str() {
+        "fetch" => w.fetch = Some(on),
+        "router" => w.router = on,
+        "dead" => w.dead = on,
+        _ => {}
+    }
+}
+// …whether its own activation finished (`note_phase` "activated").
+pub(crate) fn worker_activated_for_ruby(partition: u64, handle: u32) -> bool {
+    lock().existing(partition).and_then(|p| p.workers.get(&handle)).is_some_and(|w| w.lifecycle.activated)
 }
 // …its state moved to `state`: whether that is a change.
 pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: String) -> bool {
@@ -490,6 +528,64 @@ pub(crate) fn clear_registration_for_ruby(partition: u64, id: u32) {
         p.registrations.retain(|r| r.id != id);
     }
 }
+// ── Matching (Service Workers "Match Service Worker Registration") ──
+// The worker a request of `url` goes to and its registration's scope: of the registrations the map holds, the one whose
+// scope is the longest to cover it — its worker serving it (its active one, activated), or one activating at a scope
+// as long (Activate has made it the registration's active worker: an update wins the tie over the outgoing one) whose
+// thread is alive and, unless `activating`, whose activation finished.
+fn scope_match<'p>(p: &'p Partition, url: &str, activating: bool) -> Option<(u32, &'p str)> {
+    let mut best: Option<(u32, &str)> = None;
+    let longer = |best: &Option<(u32, &str)>, scope: &str, tie: bool| best.is_none_or(|(_, b)| scope.len() > b.len() || (tie && scope.len() == b.len()));
+    for r in p.registrations.iter().filter(|r| r.mapped) {
+        if let Some(h) = r.serving.filter(|_| url.starts_with(&r.scope) && longer(&best, &r.scope, false)) {
+            best = Some((h, &r.scope));
+        }
+    }
+    for r in p.registrations.iter().filter(|r| r.mapped) {
+        let Some(h) = r.activating.filter(|_| url.starts_with(&r.scope) && longer(&best, &r.scope, true)) else { continue };
+        if p.workers.get(&h).is_some_and(|w| !w.dead && (activating || w.lifecycle.activated)) {
+            best = Some((h, &r.scope));
+        }
+    }
+    best
+}
+// The worker that controls what `url` names, for the host: `mode` "served" — the registration matched, its worker as it
+// stands; "navigation" — the worker a navigation to it goes to
+// through its fetch event, one that intercepts and is alive; "client" — the controller of a client made at it, an
+// activating worker's too (Handle Fetch sets a reserved client's active service worker before it asks whether that
+// handles fetches at all, let alone waits for it); "activating" — the still-activating worker a request to it is to
+// wait for, where its registration is the one matched, it intercepts and is alive. `[handle, intercepts, script URL,
+// scope]`, nil for none.
+pub(crate) fn match_worker_for_ruby(partition: u64, url: String, mode: String) -> Option<(u32, bool, String, String)> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    let (handle, scope) = match mode.as_str() {
+        "served" => scope_match(p, &url, false)?,
+        "navigation" => scope_match(p, &url, false).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead && w.intercepts()))?,
+        "client" => scope_match(p, &url, true).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead))?,
+        "activating" => {
+            let r = p.registrations.iter().filter(|r| r.mapped && r.activating.is_some() && url.starts_with(&r.scope)).max_by_key(|r| r.scope.len())?;
+            if scope_match(p, &url, false).is_some_and(|(_, s)| s.len() > r.scope.len()) {
+                return None;
+            }
+            let h = r.activating?;
+            p.workers.get(&h).filter(|w| !w.dead && !w.lifecycle.activated && w.intercepts())?;
+            (h, r.scope.as_str())
+        }
+        _ => return None,
+    };
+    let (intercepts, script_url) = p.workers.get(&handle).map_or((true, String::new()), |w| (w.intercepts(), w.script_url.clone()));
+    Some((handle, intercepts, script_url, scope.to_owned()))
+}
+// …and worker `handle` as a controller a client takes: `[handle, intercepts, script URL, the scope it serves ('' for
+// none)]`, nil where it is gone.
+pub(crate) fn controller_for_ruby(partition: u64, handle: u32) -> Option<(u32, bool, String, String)> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    let w = p.workers.get(&handle).filter(|w| !w.dead)?;
+    let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map_or_else(String::new, |r| r.scope.clone());
+    Some((handle, w.intercepts(), w.script_url.clone(), scope))
+}
 // The registrations of a session made already (none for one gone).
 fn registrations_mut(reg: &mut Registry, partition: u64) -> &mut [Registration] {
     reg.existing(partition).map_or(&mut [], |p| p.registrations.as_mut_slice())
@@ -538,6 +634,37 @@ pub(crate) fn set_navigation_preload_for_ruby(partition: u64, scope: String, ena
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn matches_a_request_to_the_worker_its_longest_scope_routes_to() {
+        let p = partition_new_for_ruby();
+        let m = |url: &str, mode: &str| match_worker_for_ruby(p, url.into(), mode.into()).map(|r| (r.0, r.3));
+        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 2, "https://a.test/app/sw.js".into(), "classic".into());
+        activated_for_ruby(p, "https://a.test/".into(), 1);
+        note_activating_for_ruby(p, "https://a.test/app/".into(), 2);
+        // (…the longer scope's worker still activating: a client takes it, a navigation waits for it)
+        assert_eq!(m("https://a.test/app/x", "client"), Some((2, "https://a.test/app/".into())));
+        assert_eq!(m("https://a.test/app/x", "navigation"), Some((1, "https://a.test/".into())));
+        assert_eq!(m("https://a.test/app/x", "activating"), Some((2, "https://a.test/app/".into())));
+        // (…its activation finished: it serves, and none is waited for)
+        note_phase_for_ruby(p, 2, "activated".into(), true);
+        assert_eq!(m("https://a.test/app/x", "navigation"), Some((2, "https://a.test/app/".into())));
+        assert_eq!(m("https://a.test/app/x", "activating"), None);
+        // (…an update activating at the same scope wins the tie over the outgoing one; a dead one routes nothing)
+        worker_new_for_ruby(p, 3, "https://a.test/sw.js".into(), "classic".into());
+        note_activating_for_ruby(p, "https://a.test/".into(), 3);
+        assert_eq!(m("https://a.test/y", "client"), Some((3, "https://a.test/".into())));
+        set_worker_flag_for_ruby(p, 3, "dead".into(), true);
+        assert_eq!(m("https://a.test/y", "client"), Some((1, "https://a.test/".into())));
+        // (…one known to have no fetch listener and no rules takes no navigation; rules make it one that does)
+        set_worker_flag_for_ruby(p, 1, "fetch".into(), false);
+        assert_eq!(m("https://a.test/y", "navigation"), None);
+        set_worker_flag_for_ruby(p, 1, "router".into(), true);
+        assert_eq!(m("https://a.test/y", "navigation"), Some((1, "https://a.test/".into())));
+        assert_eq!(m("https://b.test/", "client"), None);
+        clear_for_ruby(p);
+    }
 
     #[test]
     fn keeps_the_clients_a_service_worker_sees() {
