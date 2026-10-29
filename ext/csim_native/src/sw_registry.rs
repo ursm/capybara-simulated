@@ -129,8 +129,8 @@ enum Step {
 // it), the updateViaCache mode (none for an Update job's) and the worker type — and, for the host running it, the client
 // realm that asked (0: the window; a service worker's: the negative of its handle), the service workers whose own
 // unregister() it answers (the equivalent jobs' included) and its origin key. As it runs: its run's place among the
-// tasks queued (none where it is not queued), what it waits for, the worker its script is byte-checked against, and
-// whether its promises settled.
+// tasks queued (none where it is not queued), the registration Update found (0 for none yet), what it waits for, the
+// worker its script is byte-checked against, and whether its promises settled.
 pub(crate) struct Job {
     id: u32,
     kind: String,
@@ -138,6 +138,7 @@ pub(crate) struct Job {
     script_url: String,
     update_via_cache: Option<String>,
     script_type: String,
+    registration: u32,
     realm: i64,
     asking_workers: Vec<u32>,
     creator_key: String,
@@ -490,7 +491,7 @@ impl Partition {
             self.queue_job(next, out);
         }
     }
-    // …settled as `outcome`, then finished.
+    // …settled as `outcome`, and finished: the finish committed first, the next job queued before the realms are told.
     fn conclude(&mut self, id: u32, outcome: Outcome, out: &mut Vec<Cmd>) {
         let mut answers = Vec::new();
         self.answer(id, outcome, &mut answers);
@@ -517,8 +518,12 @@ impl Partition {
         let (kind, scope, script_url, script_type, mode) =
             (j.kind.clone(), j.scope.clone(), j.script_url.clone(), j.script_type.clone(), j.update_via_cache.clone());
         if kind == "unregister" {
-            let unregistered = self.unregister(&scope, out);
-            return self.conclude(id, Outcome { unregistered, ..Outcome::default() }, out);
+            // (…Unregister's order: the promises resolved, then Try Clear Registration, then Finish Job)
+            let mut clear = Vec::new();
+            let unregistered = self.unregister(&scope, &mut clear);
+            self.answer(id, Outcome { unregistered, ..Outcome::default() }, out);
+            out.extend(clear);
+            return self.finish(id, out);
         }
         let registration = self.registered_at(&scope);
         if kind == "update" && registration == 0 {
@@ -537,6 +542,7 @@ impl Partition {
             }
         }
         if let Some(j) = self.job(id) {
+            j.registration = registration;
             j.against = newest.filter(|_| same_script).unwrap_or(0);
             out.push(Cmd::Fetch(id));
         }
@@ -577,13 +583,12 @@ impl Registry {
     fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, out: &mut Vec<Cmd>) -> bool {
         let Some(p) = self.existing(partition) else { return false };
         let Some(j) = p.job(id) else { return false };
-        let (scope, mode, realm) = (j.scope.clone(), j.update_via_cache.clone(), j.realm);
+        let (scope, mode, registration, realm) = (j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
         match error {
             Some("mime") => p.fail(id, "SecurityError", "the script has an unsupported MIME type.", out),
             Some("scope") => p.fail(id, "SecurityError", "the scope is outside the script's max scope.", out),
             Some(_) => p.fail(id, "TypeError", "the script fetch failed.", out),
             None if !changed => {
-                let registration = p.registered_at(&scope);
                 if let Some(mode) = mode {
                     self.at(partition, &scope).update_via_cache = Some(mode);
                 }
@@ -610,9 +615,9 @@ impl Registry {
             return p.fail(id, "TypeError", &format!("the script evaluation failed. {message}"), out);
         }
         let Some(j) = p.job(id) else { return };
-        let (kind, scope, mode) = (j.kind.clone(), j.scope.clone(), j.update_via_cache.clone());
+        let (kind, scope, mode, registration) = (j.kind.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration);
         j.waits = Some(JobWait::Install(handle));
-        let registration = if kind == "register" { self.registered(partition, &scope).id } else { p.registered_at(&scope) };
+        let registration = if kind == "register" { self.registered(partition, &scope).id } else { registration };
         if let Some(mode) = mode {
             self.at(partition, &scope).update_via_cache = Some(mode);
         }
@@ -667,6 +672,7 @@ pub(crate) fn schedule_job_for_ruby(
         script_url,
         update_via_cache,
         script_type,
+        registration: 0,
         realm,
         asking_workers,
         creator_key,
@@ -813,9 +819,9 @@ fn controls_clients(p: &Partition, handle: u32) -> bool {
     p.clients.iter().any(|c| c.controller == Some(handle) || scope.is_some_and(|s| scope_match(p, &c.url, false).is_some_and(|(_, m)| m == s)))
 }
 // Try Activate's verdict for the worker `candidate` of its registration: no outgoing active worker to displace, or one
-// not still activating (whose successor's activation is delayed) with no events pending — which holds an installed successor even past skipWaiting (activation.https "skipWaiting
-// bypasses no controllee requirement": it bypasses only the controllee half) — and either no client using the
-// registration or the candidate having skipped waiting.
+// not still activating (whose successor's activation is delayed) with no events pending — which holds an installed
+// successor even past skipWaiting (activation.https "skipWaiting bypasses no controllee requirement": it bypasses only
+// the controllee half) — and either no client using the registration or the candidate having skipped waiting.
 fn may_activate(p: &Partition, candidate: u32) -> bool {
     let Some(w) = p.workers.get(&candidate) else { return false };
     let Some(outgoing) = p.registrations.iter().find(|r| r.id == w.registration).and_then(|r| r.active) else { return true };
@@ -982,6 +988,8 @@ pub(crate) enum Cmd {
     Continue(u32),
     // The registrations unregistered tried to clear, once that was.
     TryClear,
+    // Try Activate taken again for every worker waiting at it, once that was.
+    TryActivate,
     // The frame navigations parked on an activating registration replayed.
     RetryNavs,
     // The job's run queued as a task of the window's.
@@ -1008,6 +1016,7 @@ impl IntoValue for Cmd {
             Cmd::QueueStep(handle) => ("queue_step", handle).into_value_with(ruby),
             Cmd::Continue(handle) => ("continue", handle).into_value_with(ruby),
             Cmd::TryClear => ("try_clear",).into_value_with(ruby),
+            Cmd::TryActivate => ("try_activate",).into_value_with(ruby),
             Cmd::RetryNavs => ("retry_navs",).into_value_with(ruby),
             Cmd::QueueJob(id) => ("queue_job", id).into_value_with(ruby),
             Cmd::Fetch(id) => ("fetch", id).into_value_with(ruby),
@@ -1175,6 +1184,9 @@ impl Partition {
         }
         Self::tell_state(handle, "activated", out);
         out.push(Cmd::TryClear);
+        // (…a successor Try Activate held while this one was still activating tried again: the extend lifetime promises
+        // of the active worker settled, as Install's note has it — the worker's state read as the command before set it)
+        out.push(Cmd::TryActivate);
     }
 }
 
@@ -1332,7 +1344,7 @@ mod tests {
         );
         assert!(step_for_ruby(p, 1).is_empty());
         note_phase_for_ruby(p, 1, "activated".into(), true);
-        assert_eq!(resume_for_ruby(p, 1, "activation".into()), [Cmd::State(1, "activated"), Cmd::TryClear]);
+        assert_eq!(resume_for_ruby(p, 1, "activation".into()), [Cmd::State(1, "activated"), Cmd::TryClear, Cmd::TryActivate]);
         assert_eq!(match_worker_for_ruby(p, "https://a.test/x".into(), "navigation".into()).map(|m| m.0), Some(1));
         // (…an update replacing it: the outgoing worker retired before the versions move, the rest continued after)
         worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
@@ -1401,6 +1413,11 @@ mod tests {
         assert!(!verdict());
         assert!(!hold_for_ruby(p, 1, "message".into(), false));
         assert!(hold_for_ruby(p, 1, "extended".into(), false));
+        assert!(verdict());
+        // (…nor while the outgoing worker is still activating, skipWaiting or not)
+        set_worker_state_for_ruby(p, 1, "activating".into());
+        assert!(!verdict());
+        set_worker_state_for_ruby(p, 1, "activated".into());
         assert!(verdict());
         // (…one whose thread is gone holds nothing)
         hold_for_ruby(p, 1, "extended".into(), true);
@@ -1496,7 +1513,8 @@ mod tests {
         let id = registered_at_for_ruby(p, "s/".into());
         assert_eq!(cmds, [Cmd::State(4, "installing"), Cmd::QueueStep(4), Cmd::Settled(a, id, "s/".into(), None, None, false)]);
         let (a2, cmds) = schedule("register", "s/", "s/a.js", 0, 0).expect("scheduled");
-        assert!(a2 != a && cmds.is_empty());
+        assert_ne!(a2, a);
+        assert!(cmds.is_empty());
         assert_eq!(step_for_ruby(p, 4), [Cmd::UpdateFound(id), Cmd::QueueStep(4)]);
         assert!(step_for_ruby(p, 4).is_empty());
         note_phase_for_ruby(p, 4, "install".into(), true);
@@ -1520,8 +1538,9 @@ mod tests {
         // (…a service worker's own unregister() is answered in its inbox, a client's joining it in its realm)
         let (r, _) = schedule("unregister", "s/", "", 0, -4).expect("scheduled");
         assert_eq!(schedule("unregister", "s/", "", 0, 0), Some((r, Vec::new())));
+        // (…answered before its registration clears, as Unregister has it)
         let cmds = run_job_for_ruby(p, r);
-        assert_eq!(cmds[cmds.len() - 2..], [Cmd::Settled(r, 0, "s/".into(), None, None, true), Cmd::Answer(4, true)]);
+        assert_eq!(cmds[..2], [Cmd::Settled(r, 0, "s/".into(), None, None, true), Cmd::Answer(4, true)]);
         clear_for_ruby(p);
         let p = partition_new_for_ruby();
         assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);

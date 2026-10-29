@@ -5665,6 +5665,7 @@ module Capybara
           when 'queue_step'    then @runtime.call('__csim_swQueueStep', n)
           when 'continue'      then sw_run(Native.sw_continue(@sw_partition, n))
           when 'try_clear'     then try_clear_uninstalls
+          when 'try_activate'  then sw_try_activate
           when 'retry_navs'    then broadcast_to_realms('__csim_swRetryDeferredNavs')
           when 'queue_job'     then @runtime.call('__csim_swQueueJob', n)
           when 'fetch'         then sw_fetch_job(n)
@@ -5796,7 +5797,7 @@ module Capybara
 
       # A service worker's own `registration.unregister()` (rode the outbox as
       # 'sw_unregister'): an Unregister job at its scope, the promise parked in the worker
-      # answered with the had-status when the job settles (sw_registry.rs `finish`).
+      # answered with the had-status when the job settles (sw_registry.rs `answer`).
       private def process_worker_unregister(handle)
         w = @workers[handle]
         return unless w && w[:service]
