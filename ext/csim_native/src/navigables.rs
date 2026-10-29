@@ -39,6 +39,11 @@ pub(crate) struct Navigables {
     // …and the realm its container's document was in then: its parent's, whatever is made of the container or of the
     // navigable after — a navigation the frame begins unlinks it while its document still unloads.
     parents: HashMap<i32, i32>,
+    // …the navigable it was the active document of (`Child::id`), kept likewise — its session history the one its
+    // navigations record in — and those whose document was the first their navigable had (its initial about:blank, where
+    // it is about:blank: HTML "navigate" replaces the entry of one).
+    navigable_ids: HashMap<i32, u32>,
+    firsts: HashSet<i32>,
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
@@ -227,9 +232,15 @@ impl RealmArena {
             nav.containers.remove(&old);
         }
         child.realm = realm;
+        let first = child.last.is_none();
+        let navigable = child.id;
         let previous = realm.and_then(|r| child.last.replace(r).filter(|&last| last != r));
         if let Some(realm) = realm {
             nav.containers.insert(realm, container);
+            nav.navigable_ids.insert(realm, navigable);
+            if first {
+                nav.firsts.insert(realm);
+            }
             let activation = self.take_unbuilt_activation(container);
             let parent = self.get(container).map(|n| n.realm).filter(|&p| p != realm);
             let top = parent.map(|p| self.top_level_realm(p));
@@ -434,6 +445,32 @@ impl RealmArena {
     pub(crate) fn parent_realm(&self, realm: i32) -> Option<i32> {
         self.navigables.parents.get(&realm).copied()
     }
+    // Where nested realm `realm` sits in the navigable tree as it was made: [the realm of the document its container was in
+    // (`parent_realm`, 0 for a top-level one's), how deep that puts it — a top-level one's 0, its frames' 1, … (HTML
+    // caps nesting: `MAX_FRAME_DEPTH`) — the navigable it was the active document of (0 for none), whether its document
+    // was that navigable's first].
+    pub(crate) fn realm_tree(&self, realm: i32) -> (i32, u32, u32, bool) {
+        let nav = &self.navigables;
+        let mut depth = 0;
+        let mut at = realm;
+        while let Some(&parent) = nav.parents.get(&at) {
+            depth += 1;
+            at = parent;
+        }
+        (nav.parents.get(&realm).copied().unwrap_or(0), depth, nav.navigable_ids.get(&realm).copied().unwrap_or(0), nav.firsts.contains(&realm))
+    }
+    // …the realms whose documents navigable `id` had, in the order they were made — those not dropped yet.
+    pub(crate) fn navigable_realms(&self, id: u32) -> Vec<i32> {
+        let mut realms: Vec<i32> = self.navigables.navigable_ids.iter().filter(|&(_, &n)| n == id).map(|(&r, _)| r).collect();
+        realms.sort_unstable();
+        realms
+    }
+    // …and those made in realm `realm`'s document's containers (`parents`), whatever became of them since.
+    pub(crate) fn realms_made_in(&self, realm: i32) -> Vec<i32> {
+        let mut realms: Vec<i32> = self.navigables.parents.iter().filter(|&(_, &p)| p == realm).map(|(&r, _)| r).collect();
+        realms.sort_unstable();
+        realms
+    }
     // …realm `cid`'s document, where it has one (a worker's none).
     pub(crate) fn realm_document(&self, cid: i32) -> Option<NodeId> {
         self.navigables.documents.get(&cid).copied()
@@ -466,6 +503,8 @@ impl RealmArena {
             nav.top_names.remove(&cid);
             nav.tops.remove(&cid);
             nav.parents.remove(&cid);
+            nav.navigable_ids.remove(&cid);
+            nav.firsts.remove(&cid);
             self.note_discarded();
             let dead: Vec<NodeId> = self.navigables.children.keys().copied().filter(|&c| self.get(c).is_none()).collect();
             for container in dead {
@@ -749,6 +788,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setFrameRealm", set_frame_realm, context_id);
     crate::dom::register(scope, ns, "frameRealm", frame_realm, context_id);
     crate::dom::register(scope, ns, "realmNavigable", realm_navigable, context_id);
+    crate::dom::register(scope, ns, "realmTree", realm_tree, context_id);
+    crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
+    crate::dom::register(scope, ns, "realmsMadeIn", realms_made_in, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
@@ -847,6 +889,37 @@ fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::dom::realm(scope, cid).realm_navigable(realm));
+}
+
+// __dom.realmTree(realm) -> [parent realm, depth, navigable, first] (`Navigables::realm_tree`).
+fn realm_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let (parent, depth, navigable, first) = crate::dom::realm(scope, cid).realm_tree(realm);
+    let items = [
+        v8::Integer::new(scope, parent).into(),
+        v8::Integer::new_from_unsigned(scope, depth).into(),
+        v8::Integer::new_from_unsigned(scope, navigable).into(),
+        v8::Boolean::new(scope, first).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.navigableRealms(id) / __dom.realmsMadeIn(realm) -> realm ids (`Navigables::navigable_realms` / `realms_made_in`).
+fn navigable_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let realms = crate::dom::realm(scope, cid).navigable_realms(id);
+    rv.set(realm_array(scope, &realms));
+}
+fn realms_made_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let realms = crate::dom::realm(scope, cid).realms_made_in(realm);
+    rv.set(realm_array(scope, &realms));
+}
+fn realm_array<'s>(scope: &mut v8::PinScope<'s, '_>, realms: &[i32]) -> v8::Local<'s, v8::Value> {
+    let items: Vec<v8::Local<'_, v8::Value>> = realms.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
+    v8::Array::new_with_elements(scope, &items).into()
 }
 
 // __dom.discardNavigable(containerNid) -> whether that lost a navigable between two documents — the container's
@@ -985,8 +1058,7 @@ fn child_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 fn child_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let realms = crate::dom::realm(scope, cid).child_realms(cid);
-    let values: Vec<v8::Local<'_, v8::Value>> = realms.into_iter().map(|r| v8::Integer::new(scope, r).into()).collect();
-    rv.set(v8::Array::new_with_elements(scope, &values).into());
+    rv.set(realm_array(scope, &realms));
 }
 
 // __dom.realmInTree(realm) -> whether the realm's document is in the page's browsing-context tree (`realm_in_tree`).

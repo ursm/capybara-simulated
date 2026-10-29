@@ -10499,7 +10499,7 @@ module Capybara
       end
       # …the live frame realm of navigable `nav`, or nil.
       def navigable_realm(nav)
-        @runtime.frame_realm_navigables.select {|realm, n| n == nav && @runtime.frame_realm_alive?(realm) }.keys.max
+        @runtime.navigable_realms(nav).select {|realm| @runtime.frame_realm_alive?(realm) }.max
       end
       # The id of the active entry of frame realm `realm_id`'s navigable — `create`, made where it has none (its
       # parent's first), its URL the document's the frame is at; nil for none.
