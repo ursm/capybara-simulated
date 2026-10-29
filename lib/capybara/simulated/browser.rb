@@ -3460,6 +3460,7 @@ module Capybara
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
+        prompt_page_to_unload if depth.zero?
         # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
         # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
@@ -7896,6 +7897,11 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
       end
+      # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a traversal's, a reload's
+      # too — "check if unloading is canceled"): `beforeunload` at its document, then at its frames' documents, its unload
+      # counter raised while each runs (dom-nodes.js `promptDocumentToUnload`). The navigation goes on whatever a handler
+      # says — no user here to ask — as one who confirmed the prompt would have it.
+      def prompt_page_to_unload         = (@runtime.call('__csimPromptToUnload') rescue nil)
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, theirs first — fired as a navigation replaces the page's document
       # (`boot_response_into_ctx`), and by the Driver before an explicitly-closed aux
@@ -11737,6 +11743,7 @@ module Capybara
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
         flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
+        prompt_page_to_unload if depth.zero?
         # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
         # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
         # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)

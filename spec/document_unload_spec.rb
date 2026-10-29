@@ -37,6 +37,37 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
     expect(beacons.sort).to eq(%w[/frame-unload /page-unload])
   end
 
+  # …asked first whether it may be (HTML "navigate": "check if unloading is canceled"), before its next document is
+  # fetched — `beforeunload` at it, then at its frames' — a handler's navigation ignored meanwhile; and the navigation
+  # goes on whatever a handler says, as one who confirmed the prompt would have it.
+  it "asks the page and its frames whether they may be unloaded before the navigation's fetch" do
+    events = []
+    app = lambda do |env|
+      events << "fetch #{env['PATH_INFO']}" unless env['PATH_INFO'] == '/frame'
+      body = case env['PATH_INFO']
+             when '/a' then <<~HTML
+               <iframe src="/frame"></iframe><script>
+                 addEventListener('beforeunload', (e) => {
+                   navigator.sendBeacon('/beacon-page-beforeunload');
+                   location.href = '/evil';
+                   e.preventDefault();
+                 });
+               </script>
+             HTML
+             when '/frame' then "<script>addEventListener('beforeunload', () => navigator.sendBeacon('/beacon-frame-beforeunload'))</script>"
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/a'
+    events.clear
+    s.visit '/b'
+
+    expect(events).to eq(['fetch /beacon-page-beforeunload', 'fetch /beacon-frame-beforeunload', 'fetch /b'])
+    expect(s).to have_current_path('/b')
+  end
+
   # …its unload counter raised as it unloads (HTML): a navigation, a document.write, a dialog of a handler ignored, and
   # what one does to the session history too — its entry, and the URL, the next document's by now — its document hidden
   # after its pagehide (Chrome: pagehide visible, visibilitychange hidden, unload hidden).
