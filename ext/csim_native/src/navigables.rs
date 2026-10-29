@@ -229,6 +229,20 @@ pub(crate) enum Choice {
 //   the top-level traversable of a frame's has — which the document navigates as its location navigates it;
 // - `Plan`: the top-level page's link (or such a window's not routed above), whose navigation its caller plans
 //   (navigation_plan.rs `planNavigation`) with this target — `_top` for a name the page has.
+// Where `window.open` goes (`RealmArena::open_route`), as the navigable its target chooses has it: its own window
+// (navigated as its location is), another navigable — the realm its active document is in (none yet: a frame no
+// script has looked into), its container (a frame's), whether it is another top-level traversable a name found — it
+// navigates and returns the window of, none (one its sandbox does not let it navigate), a new window its document may
+// not open (no `allow-popups`), or a new one, so named ('' for `_blank`).
+#[derive(Debug, PartialEq)]
+pub(crate) enum OpenRoute {
+    Own,
+    Navigable(Option<i32>, Option<NodeId>, bool),
+    None,
+    Refused,
+    New(Vec<u16>),
+}
+
 #[derive(Debug, PartialEq)]
 pub(crate) enum LinkRoute {
     None,
@@ -803,6 +817,23 @@ impl RealmArena {
             _ => LinkRoute::Plan(target),
         }
     }
+    // Where `window.open(url, target)` called in realm `current` goes (`OpenRoute`; HTML "window open steps": an empty
+    // target `_blank`, where a link's is its own navigable).
+    pub(crate) fn open_route(&self, current: i32, target: &[u16]) -> OpenRoute {
+        let blank: Vec<u16> = "_blank".encode_utf16().collect();
+        let target = if target.is_empty() { &blank } else { target };
+        match self.choose_navigable(current, target) {
+            Choice::Current => OpenRoute::Own,
+            Choice::TopLevel(r) if r == current => OpenRoute::Own,
+            Choice::TopLevel(r) => OpenRoute::Navigable(Some(r), None, false),
+            Choice::Frame(c) => OpenRoute::Navigable(self.frame_realm(c), Some(c), false),
+            Choice::Window(w) => OpenRoute::Navigable(Some(w), None, true),
+            Choice::Blocked => OpenRoute::None,
+            Choice::New if self.auxiliary_refused(current, target) => OpenRoute::Refused,
+            Choice::New if target_keyword(&String::from_utf16_lossy(target)) == TARGET_BLANK => OpenRoute::New(Vec::new()),
+            Choice::New => OpenRoute::New(target.to_vec()),
+        }
+    }
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
     fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
         if self.window_name(realm) == name {
@@ -921,14 +952,8 @@ fn open_features_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let features = args.get(0).to_rust_string_lossy(scope);
     rv.set_uint32(open_features(&features));
 }
-// __dom.targetKeyword(target) -> `target_keyword`.
-fn target_keyword_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let target = args.get(0).to_rust_string_lossy(scope);
-    rv.set_uint32(target_keyword(&target));
-}
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
-    crate::dom::register(scope, ns, "targetKeyword", target_keyword_op, context_id);
     crate::dom::register(scope, ns, "browsingContextDiscarded", browsing_context_discarded, context_id);
     crate::dom::register(scope, ns, "documentFullyActive", document_fully_active, context_id);
     crate::dom::register(scope, ns, "neuterRealm", neuter_realm, context_id);
@@ -951,11 +976,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "takeLostNavigables", take_lost_navigables, context_id);
     crate::dom::register(scope, ns, "unparkNavigable", unpark_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
-    crate::dom::register(scope, ns, "findNavigable", find_navigable, context_id);
     crate::dom::register(scope, ns, "targetsOwnNavigable", targets_own_navigable, context_id);
+    crate::dom::register(scope, ns, "openRoute", open_route, context_id);
     crate::dom::register(scope, ns, "chosenChildFrame", chosen_child_frame, context_id);
     crate::dom::register(scope, ns, "auxiliaryRefused", auxiliary_refused, context_id);
-    crate::dom::register(scope, ns, "keywordNavigable", keyword_navigable, context_id);
     crate::dom::register(scope, ns, "linkRoute", link_route, context_id);
     crate::dom::register(scope, ns, "navigationAllowed", navigation_allowed, context_id);
     crate::dom::register(scope, ns, "downloadAllowed", download_allowed, context_id);
@@ -1145,13 +1169,6 @@ fn download_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     });
     rv.set_bool(crate::dom::dom(scope).arena.download_allowed(source, target, begun.as_ref().map(Option::as_deref)));
 }
-// __dom.keywordNavigable(keyword) -> `RealmArena::keyword_navigable` of the calling realm's (`TARGET_TOP` /
-// `TARGET_PARENT`), -1 where its document may not navigate it.
-fn keyword_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let keyword = args.get(0).uint32_value(scope).unwrap_or(TARGET_TOP);
-    let cid = realm_id(scope, &args);
-    rv.set_int32(crate::dom::realm(scope, cid).keyword_navigable(cid, keyword).unwrap_or(-1));
-}
 // __dom.linkRoute(target, nid, auxiliaryOpens) -> `[route, at, container]`: `RealmArena::link_route` of a hyperlink — the
 // element `nid` — followed in the calling realm: "none", "refused", "frame" (`at` its realm), "unbuilt" (`at` the realm
 // its container `container` is in), "auxiliary" (`at` the name), "navigate" (`at` the realm), "plan" (`at` the target).
@@ -1189,6 +1206,28 @@ fn navigation_allowed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).navigation_allowed(cid, target));
 }
+// __dom.openRoute(target) -> `[route, realm, container, window]`: `RealmArena::open_route` of `window.open` in the calling
+// realm — "own"; "navigable" (`realm` -1 for none yet, `container` null for a top-level one, `window` whether it is
+// another top-level traversable a name found); "none"; "refused"; "new" (`realm` the name).
+fn open_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = utf16_arg(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let route = crate::dom::realm(scope, cid).open_route(cid, &target);
+    let (kind, at, container, window) = match route {
+        OpenRoute::Own => ("own", None, None, false),
+        OpenRoute::Navigable(realm, container, window) => ("navigable", Some(v8::Integer::new(scope, realm.unwrap_or(-1)).into()), container, window),
+        OpenRoute::None => ("none", None, None, false),
+        OpenRoute::Refused => ("refused", None, None, false),
+        OpenRoute::New(name) => ("new", Some(crate::dom::utf16_value(scope, &name)), None, false),
+    };
+    let container = crate::dom::node_value(scope, container);
+    if crate::dom::factory_threw(scope) {
+        return;
+    }
+    let at = at.unwrap_or_else(|| v8::null(scope).into());
+    let items = [v8::String::new(scope, kind).unwrap().into(), at, container, v8::Boolean::new(scope, window).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
 // __dom.targetsOwnNavigable(target) -> whether the navigable target `target` chooses from the calling realm's
 // (`RealmArena::choose_navigable`) is its own: `_self`, a top-level one's `_top` or `_parent`, its own name.
 fn targets_own_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -1214,30 +1253,6 @@ fn chosen_child_frame(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     };
     rv.set(crate::dom::node_value(scope, container));
 }
-// __dom.findNavigable(name) -> null, false, or [realm, container, containerRealm, window]: the navigable the target name
-// chooses from this realm's (`RealmArena::find_navigable`) — none; one this realm's document may not navigate; or the
-// realm its active document is in (-1: none yet), its container (null: a top-level one), the realm the container's node
-// document is in (-1: none), and whether it is another window of this isolate's than this realm's own top-level one.
-fn find_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let name = utf16_arg(scope, args.get(0));
-    let cid = realm_id(scope, &args);
-    let (realm, container, window) = match crate::dom::realm(scope, cid).find_navigable(cid, &name) {
-        Chosen::None => return rv.set_null(),
-        Chosen::Blocked => return rv.set_bool(false),
-        Chosen::Frame(realm, container) => (realm, Some(container), false),
-        Chosen::TopLevel(realm) => (Some(realm), None, false),
-        Chosen::Window(realm) => (Some(realm), None, true),
-    };
-    let parent = v8::Integer::new(scope, container.map_or(-1, |(parent, _)| parent)).into();
-    let container = crate::dom::node_value(scope, container.map(|(_, c)| c));
-    if crate::dom::factory_threw(scope) {
-        return;
-    }
-    let realm = v8::Integer::new(scope, realm.unwrap_or(-1)).into();
-    let window = v8::Boolean::new(scope, window).into();
-    rv.set(v8::Array::new_with_elements(scope, &[realm, container, parent, window]).into());
-}
-
 // __dom.childNavigables(docNid, limit) -> the containers of the document's document-tree child navigables, in tree order —
 // the first `limit` of them, where it is given (`window[n]` asks for n + 1) — as `nodes_value` answers.
 fn child_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
