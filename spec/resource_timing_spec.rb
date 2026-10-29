@@ -383,7 +383,7 @@ RSpec.describe 'resource timing' do
       s = simulated_session(lambda {|env|
         env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
       }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.evaluate_async_script(<<~'JS')
         const done = arguments[0];
         const xhr = new Promise((resolve) => { const x = new XMLHttpRequest(); x.open('GET', '/answered?xhr'); x.onload = resolve; x.send(); });
@@ -421,7 +421,7 @@ RSpec.describe 'resource timing' do
 
         [200, {'content-type' => 'text/html'}, [page]]
       }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.evaluate_async_script("const d = arguments[0]; Promise.all([fetch('/hop').then((r) => r.text()), fetch('/xhop').then((r) => r.text())]).then(() => d())")
       entries = s.evaluate_script("performance.getEntriesByType('resource').filter((e) => /hop$/.test(e.name)).map((e) => [e.name.split('/').pop(), e.redirectStart > 0, e.encodedBodySize])")
       expect(entries.sort).to eq([['hop', true, 5], ['xhop', false, 0]])
@@ -698,7 +698,7 @@ RSpec.describe 'resource timing' do
     begin
       s = simulated_session(a)
       s.visit '/'
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script(<<~JS)
         document.head.appendChild(document.createElement('style')).textContent =
           '.t { background-image: url("/css.png?late") } .u { background-image: url("/css.png?answered") }';
@@ -806,7 +806,7 @@ RSpec.describe 'resource timing' do
       s.execute_script(<<~JS)
         document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?before' }));
       JS
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script(<<~JS)
         document.body.append(Object.assign(document.createElement('video'), { src: '/m.webm?through' }));
         document.body.append(Object.assign(document.createElement('audio'), { src: '/m.webm?answered' }));

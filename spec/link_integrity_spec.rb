@@ -108,7 +108,7 @@ RSpec.describe 'link integrity' do
       s = simulated_session(lambda {|env|
         env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
       }).tap {|session| session.visit '/' }
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script(<<~JS)
         const link = Object.assign(document.createElement('link'), { rel: 'stylesheet', href: '/latin.css', integrity: '#{digest}' });
         link.onload = () => { window.result = 'load'; };

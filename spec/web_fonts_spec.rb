@@ -681,7 +681,7 @@ RSpec.describe 'web fonts' do
     begin
       s = simulated_session(a)
       s.visit '/'
-      expect(poll_until { s.evaluate_script('!!navigator.serviceWorker.controller') }).to be true
+      expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script(<<~JS)
         document.head.appendChild(document.createElement('style')).textContent = 'p { color: red }';
         document.querySelector('p').style.fontFamily = 'Late';
