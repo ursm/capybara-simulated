@@ -3469,112 +3469,14 @@ module Capybara
         picks && picks[entry['index'].to_i]
       end
 
-      def navigate_post(url, body, content_type, depth: 0, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil, replace: false, origin_null: false, origin: nil,
-                        user_activated: false)
-        invalidate_find_cache
-        # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
-        # `from_history` already flushed at its own entry point, which commits the
-        # history index before it gets here.
-        flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
-        # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
-        prompt_page_to_unload if depth.zero? && (!from_history || is_reload)
-        # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
-        # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
-        # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
-        referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
-        hop_referer = referer && Native.request_referrer(referrer_policy.to_s, referer, url)
-        # The document's referrer is the request's, the last hop's, as a GET navigation's is (`navigate`).
-        @current_referer = hop_referer.to_s
-        # (…its origin the initiating document's — 'null' where that is opaque or a redirect has tainted it, none where the
-        # initiator is unknown — or, re-posted from its session history entry, the one it was first sent with: the
-        # document state's initiator origin)
+      # A top-level navigation's POST of `body` (`navigate`'s: `navigate_top_level`): its origin the initiating
+      # document's — 'null' where that is opaque (`origin_null`), none where the initiator is unknown — or, re-posted from
+      # its session history entry, the one it was first sent with (`origin`: the document state's initiator origin).
+      def navigate_post(url, body, content_type, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil,
+                        replace: false, origin_null: false, origin: nil, user_activated: false)
         origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
-        # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
-        # redirect rewrites: `redirect_history_entry`)
-        save_navigation_history if depth.zero? && !from_history
-        unless from_history || depth > 0
-          capture_outgoing_form_state
-          # (…the request as it was sent — its origin, its referrer and referrer policy — what a reload or a traversal
-          # re-posts: HTML's document state)
-          record_history({url: url, body: body, content_type: content_type, origin: origin, referer: referer, referrer_policy: referrer_policy}, replace: replace)
-        end
-        # A controlled top-level POST navigation (form submission) goes to the SW's fetch
-        # event first — same model as `navigate` (the SW reads the body via
-        # `event.request.text()`); respondWith serves the document, nil falls through to
-        # the network POST below. The wire Content-Type carries the same urlencoded
-        # default the network path applies, so `event.request.headers` matches Chrome.
-        nav_site = Native.fetch_site(site_seed, initiator, url)
-        if (sw = any_window_sw_navigation_fetch(url, method: 'POST', body: body,
-                                                     content_type: content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type,
-                                                     is_reload: is_reload, is_history: from_history && !is_reload,
-                                                     dest: 'document', referrer_source: initiator, referrer_policy: referrer_policy, site_seed: site_seed, origin_null: origin == 'null'))
-          # Same post-response pipeline as the network POST below: a network error commits
-          # an error document at the target URL; 307/308 re-POST, other redirects GET;
-          # an attachment downloads.
-          return commit_error_document(url) if sw['networkError']
-          sw_headers = sw['headers'] || {}
-          if (loc = redirect_location(sw['status'].to_i, sw_headers))
-            next_url = carry_fragment(url, resolve_location(loc, url))
-            if [307, 308].include?(sw['status'].to_i)
-              return unless redirect_followed?(url, next_url, depth)
-              redirect_history_entry(next_url, get: false)
-              return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site, user_activated: user_activated,
-                                   origin: redirected_origin(origin, url, next_url))
-            end
-
-            return unless redirect_followed?(url, next_url, depth)
-            redirect_history_entry(next_url, get: true)
-            return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site, user_activated: user_activated)
-          end
-          return navigation_made_no_content(url) if no_content_response?(sw['status'])
-          return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
-          @current_url = url
-          record_response(sw['status'] || 200, sw_headers)
-          boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
-          return
-        end
-        env = rack_env_for(url, method: 'POST', input: body)
-        # Top-level form-submission Fetch metadata — same model as `navigate` (the
-        # SameSite gate reads it; a POST never qualifies for the Lax exception;
-        # `nav_site` precomputed above).
-        env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
-        env['HTTP_SEC_FETCH_DEST'] ||= 'document'
-        env['HTTP_SEC_FETCH_SITE'] ||= nav_site
-        env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
-        env['CONTENT_TYPE']   = content_type.empty? ? 'application/x-www-form-urlencoded' : content_type
-        env['CONTENT_LENGTH'] = body.bytesize.to_s
-        apply_default_request_env(env, referer: hop_referer)
-        # (…and its origin, as every POST navigation carries it: `navigation_request_headers`)
-        env['HTTP_ORIGIN'] = Native.origin_header(origin, referrer_policy, url, false) if origin
-        response = dispatch_rack_or_http(url, env, method: 'POST', body: body) or return commit_error_document(url)
-        status, headers, resp_body = response
-        merge_set_cookie(headers, url, env)
-        if (loc = redirect_location(status, headers))
-          next_url = resolve_location(loc, url)
-          resp_body.close if resp_body.respond_to?(:close)
-          # Fetch "HTTP-redirect fetch": a 301 / 302 / 303 of a POST makes it a GET; a 307 / 308 keeps the method and
-          # the body.
-          to_get = Native.redirect_to_get(status.to_i, 'POST')
-          return unless redirect_followed?(url, next_url, depth)
-          redirect_history_entry(next_url, get: to_get)
-          if to_get
-            return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site, user_activated: user_activated)
-          else
-            return navigate_post(next_url, body, content_type, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site, user_activated: user_activated,
-                                 origin: redirected_origin(origin, url, next_url))
-          end
-        end
-        return navigation_made_no_content(url) if no_content_response?(status)
-        return download_in_place(url, headers, resp_body) if download_response?(headers)
-        @current_url = url
-        record_response(status, headers)
-        html         = read_rack_body(resp_body)
-        # Same rebuild-on-full-load contract as `navigate`. POST
-        # responses (form submissions that don't redirect, AJAX-less
-        # data-remote replies) replace the page; we follow real-browser
-        # semantics and bring up a fresh VM rather than papering over
-        # the previous one's state.
-        boot_response_into_ctx(html)
+        navigate_top_level(url, body, content_type, referer: referer, referrer_policy: referrer_policy, from_history: from_history, is_reload: is_reload, initiator: initiator,
+                                                    site_seed: site_seed, replace: replace, origin: origin, user_activated: user_activated)
       end
 
       # Spawn a background thread that will call into the host Rack app, registered
@@ -9777,8 +9679,6 @@ module Capybara
       # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count) — a navigation's and a service
       # worker's chain counted here (a fetch's by its plan, fetch_plan.rs), each dispatching 20 hops and the response.
       MAX_FETCH_REDIRECTS = 20
-      # The redirects a navigation follows before it fails (Fetch "HTTP-redirect fetch": a redirect count of 20).
-      NAVIGATION_REDIRECT_LIMIT = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
@@ -11650,33 +11550,65 @@ module Capybara
       # it began does not take back: HTML resolves the URL's blob URL entry as it parses it)
       # (…`user_activated` its source snapshot's transient activation — the address bar's always: `visit` — which its
       # request carries across its redirects: Fetch's `Sec-Fetch-User`)
-      def navigate(url, depth: 0, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false, blob: nil,
+      def navigate(url, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false, blob: nil,
                    user_activated: false)
+        navigate_top_level(url, nil, nil, referer: referer, referrer_policy: referrer_policy, from_history: from_history, is_reload: is_reload, initiator: initiator,
+                                          site_seed: site_seed, replace: replace, blob: blob, user_activated: user_activated)
+      end
+      # …the navigation itself, hop by hop (navigation_fetch.rs): its Referer the initiating document's URL — `referer` —
+      # under that document's referrer policy, the policy its `<meta name="referrer">` sets (the default where none does)
+      # read before the page goes, determined anew at each redirect hop as Fetch's main fetch does, a redirect's
+      # `Referrer-Policy` the next hop's; a driver's visit sends none on any hop. Sec-Fetch-Site is the initiator's
+      # relation to each hop, widened across the chain (`site_seed` carried in) — the SameSite cookie gate reads it; no
+      # initiator (a visit, the address bar) is 'none'. A controlled hop goes to the controlling SW's fetch event first
+      # (mode 'navigate', dest 'document') — the registration in ANY window's Browser (they're profile-wide:
+      # Driver#sw_navigation_fetch) — respondWith serving the document, a network error failing it, none falling through
+      # to the network. Its redirects followed, an SW's as the network's: a POST's 307 / 308 re-POSTing, the others
+      # GETting, a fragment the redirect names none of carried over, its session history entry the redirect's
+      # (`redirect_history_entry`).
+      private def navigate_top_level(
+        url,
+        body,
+        content_type,
+        referer:,
+        referrer_policy:,
+        from_history:,
+        is_reload:,
+        initiator:,
+        site_seed:,
+        replace:,
+        user_activated:,
+        blob: nil,
+        origin: nil
+      )
         invalidate_find_cache
         # Before ANY of this navigation lands (see `flush_outgoing_page_init`).
         # `from_history` already flushed at its own entry point, which commits the
         # history index before it gets here.
-        flush_outgoing_page_init if depth.zero? && !from_history && @timers_active
+        flush_outgoing_page_init if !from_history && @timers_active
         # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
-        prompt_page_to_unload if depth.zero? && (!from_history || is_reload)
-        # (…its Referer the initiating document's URL — `referer` — under that document's referrer policy, the policy its
-        # `<meta name="referrer">` sets (the default where none does) read before the page goes, determined anew at each
-        # redirect hop as Fetch's main fetch does; a driver's visit sends none on any hop)
-        referrer_policy ||= main_document_referrer_policy if referer && depth.zero?
-        hop_referer = referer && Native.request_referrer(referrer_policy.to_s, referer, url)
-        # The document's referrer is the request's, the last hop's (a redirect determines it anew).
-        @current_referer = hop_referer.to_s
+        prompt_page_to_unload if !from_history || is_reload
+        referrer_policy ||= main_document_referrer_policy if referer
+        req_body = body&.b
+        fetch = Native::NavigationFetch.new({
+          method:          body ? 'POST' : 'GET',
+          url:             url.to_s,
+          body_empty:      req_body.to_s.empty?,
+          referrer:        referer,
+          referrer_policy: referrer_policy.to_s,
+          initiator:       initiator,
+          origin:          origin,
+          site_seed:       site_seed
+        })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
         # are stale once we cross a real document boundary. The pinned
         # user-action baseline is likewise scoped to the prior document —
         # drop it so it can't match (and wrongly suppress) a transition on
         # the new page.
-        if depth == 0
-          @recent_urls.clear if @recent_urls
-          @recent_urls_last_push_at = nil
-          @action_url_baseline = nil
-        end
+        @recent_urls.clear if @recent_urls
+        @recent_urls_last_push_at = nil
+        @action_url_baseline = nil
         # While navigate is in progress (and the loaded page's bootstrap
         # JS is running synchronously inside __csimLoadDocument), any
         # `history.pushState`/`replaceState` chain belongs to that load
@@ -11684,6 +11616,8 @@ module Capybara
         prior_navigating = @navigating
         @navigating = true unless from_history
         begin
+          # The document's referrer is the request's, the last hop's (a redirect determines it anew).
+          @current_referer = fetch.referrer.to_s
           # `about:blank` names an empty, network-less document — there's
           # nothing to fetch. Rack::MockRequest.env_for can't parse the `about:`
           # scheme (no host/path → nil[]); route straight to an empty document.
@@ -11696,96 +11630,93 @@ module Capybara
             boot_response_into_ctx('')
             return
           end
-          # (…the session history as it stands, which a download it ends in restores: `navigate_post`'s)
-          save_navigation_history if depth.zero? && !from_history
-          unless from_history || depth > 0
+          # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
+          # redirect rewrites: `redirect_history_entry`)
+          save_navigation_history unless from_history
+          unless from_history
             capture_outgoing_form_state
-            # (…the request's referrer and referrer policy, which a reload or a traversal refers by again: HTML's
-            # document state)
-            record_history({url: url, referer: referer, referrer_policy: referrer_policy}, replace: replace)
+            # (…the request as it was sent — a POST's body and origin, its referrer and referrer policy — what a reload or
+            # a traversal refers by again, a POST's re-posts: HTML's document state)
+            entry = {url: url, referer: referer, referrer_policy: referrer_policy}
+            entry.update(body: body, content_type: content_type, origin: origin) if body
+            record_history(entry, replace: replace)
           end
           # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
           # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
-          # `redirect_followed?`.)
-          if url.to_s.match?(/\Ablob:/i)
+          # navigation_fetch.rs `redirect`.)
+          if !body && url.to_s.match?(/\Ablob:/i)
             blob ||= blob_snapshot(url)
             return blob ? boot_blob_document(url, blob[:bytes], blob[:type], flushed: true) : fail_blob_document(url)
           end
-          # A controlled top-level navigation goes to the controlling SW's fetch event
-          # first (mode 'navigate', dest 'document') — the registration may live in ANY
-          # window's Browser (they're profile-wide; see Driver#sw_navigation_fetch).
-          # respondWith serves the document; nil falls through to the network GET below.
-          # Mirrors the frame-navigation model (navigate_realm_self_get).
-          nav_site = Native.fetch_site(site_seed, initiator, url)
-          if (sw = any_window_sw_navigation_fetch(url, is_reload: is_reload, is_history: from_history && !is_reload, dest: 'document',
-                                                       referrer_source: initiator, site_seed: site_seed))
-            # A network-error respondWith FAILS the navigation (the history entry above stands).
-            return commit_error_document(url) if sw['networkError']
-            # An SW-served response joins the same post-response pipeline as a network
-            # one: a redirect is followed (re-entering SW interception at the new URL),
-            # an attachment downloads — never booted as the document.
-            sw_headers = sw['headers'] || {}
-            if (loc = redirect_location(sw['status'].to_i, sw_headers))
-              next_url = carry_fragment(url, resolve_location(loc, url))
-              return unless redirect_followed?(url, next_url, depth)
-              redirect_history_entry(next_url, get: true)
-              return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site, user_activated: user_activated)
+          # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
+          # `event.request.headers` alike)
+          content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
+          loop do
+            command, hop = fetch.begin_hop
+            # (…the 21st hop's a network error, its error document at the last URL requested)
+            return commit_error_document(fetch.target) if command == 'error'
+
+            meth, target, _, ref_source, ref_policy, seed, site, tainted, = hop
+            @current_referer = fetch.referrer.to_s
+            hop_body = req_body.to_s.empty? ? nil : req_body
+            resp_body = nil
+            if (sw = any_window_sw_navigation_fetch(target, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
+                                                            dest: 'document', referrer_source: ref_source, origin_url: origin || initiator, referrer_policy: ref_policy,
+                                                            site_seed: seed, origin_null: tainted))
+              return commit_error_document(target) if sw['networkError']
+
+              status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
+            else
+              response = dispatch_navigation_request(
+                target,
+                method:          meth,
+                referrer_source: ref_source,
+                origin_url:      origin || initiator,
+                referrer_policy: ref_policy,
+                site:            site,
+                origin_null:     tainted,
+                body:            hop_body,
+                content_type:    content_type,
+                dest:            'document',
+                user_activated:  user_activated
+              ) or return commit_error_document(target)
+              status, headers, resp_body, = response
             end
-            return navigation_made_no_content(url) if no_content_response?(sw['status'])
-            return download_in_place(url, sw_headers, [Base64.decode64(sw['body_b64'].to_s)]) if download_response?(sw_headers)
-            @current_url = url
-            record_response(sw['status'] || 200, sw_headers)
-            boot_response_into_ctx(Base64.decode64(sw['body_b64'].to_s))
-            return
+            if (loc = redirect_location(status, headers))
+              resp_body.close if resp_body.respond_to?(:close)
+              command, to_get = fetch.redirect(status, loc.to_s, referrer_policy_header(headers))
+              return commit_error_document(target) if command == 'fail'
+              return navigation_made_no_document(target) if command == 'hand_off'
+
+              redirect_history_entry(fetch.target, get: fetch.request_method == 'GET')
+              req_body, content_type = nil, nil if to_get
+              next
+            end
+            # A response that downloads makes no document: a window that has one stays at it, its URL its document's
+            # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
+            # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
+            # which within_window assertions read.
+            if no_content_response?(status)
+              resp_body.close if resp_body.respond_to?(:close)
+              return navigation_made_no_content(target)
+            end
+            return download_in_place(target, headers, resp_body || [document]) if download_response?(headers)
+
+            @current_url = target
+            record_response(status, headers)
+            # Full-reload navigation rebuilds the JS Context from the warm
+            # snapshot. Per-visit fresh VM avoids partial-reset drift
+            # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
+            # `$(document).on(...)` delegates) — snapshot warmup keeps the
+            # rebuild itself cheap; app-bundle re-eval dominates.
+            return boot_response_into_ctx(document || read_rack_body(resp_body))
           end
-          env = rack_env_for(url, method: 'GET')
-          # Top-level navigation Fetch metadata: Sec-Fetch-Site is the initiator↔target
-          # relationship, widened across the redirect chain (site_seed, precomputed as
-          # `nav_site` above) exactly like the frame-navigation model — the SameSite
-          # cookie gate in apply_default_request_env reads it. No initiator (driver
-          # visit / address bar) → 'none' (not cross-site).
-          env['HTTP_SEC_FETCH_MODE'] ||= 'navigate'
-          env['HTTP_SEC_FETCH_DEST'] ||= 'document'
-          env['HTTP_SEC_FETCH_SITE'] ||= nav_site
-          env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
-          apply_default_request_env(env, referer: hop_referer)
-          response = dispatch_rack_or_http(url, env, method: 'GET') or return commit_error_document(url)
-          status, headers, body = response
-          merge_set_cookie(headers, url, env)
-          if (loc = redirect_location(status, headers))
-            next_url = resolve_location(loc, url)
-            # Per RFC 7231: if the original request URL had a fragment
-            # and the redirect target doesn't specify one, preserve
-            # the original fragment in the final URL.
-            next_url = carry_fragment(url, next_url)
-            body.close if body.respond_to?(:close)
-            return unless redirect_followed?(url, next_url, depth)
-            redirect_history_entry(next_url, get: true)
-            # Thread the initiator + widened site so the chain's SameSite verdict
-            # latches (a same-origin nav THROUGH a cross-site hop stays cross-site).
-            return navigate(next_url, depth: depth + 1, referer: referer, referrer_policy: referrer_policy, initiator: initiator, site_seed: nav_site, user_activated: user_activated)
-          end
-          # A response that downloads makes no document: a window that has one stays at it, its URL its document's
-          # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
-          # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
-          # which within_window assertions read.
-          return navigation_made_no_content(url) if no_content_response?(status)
-          return download_in_place(url, headers, body) if download_response?(headers)
-          @current_url = url
-          record_response(status, headers)
-          html         = read_rack_body(body)
-          # Full-reload navigation rebuilds the JS Context from the warm
-          # snapshot. Per-visit fresh VM avoids partial-reset drift
-          # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
-          # `$(document).on(...)` delegates) — snapshot warmup keeps the
-          # rebuild itself cheap; app-bundle re-eval dominates.
-          boot_response_into_ctx(html)
         ensure
           @navigating = prior_navigating
           # No document committed (a download, a raise mid-fetch) → the page that
           # flushed is still live and still means what its timers asked for.
-          restore_flushed_nav_intents if depth.zero?
+          restore_flushed_nav_intents
         end
       end
       # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
@@ -11816,7 +11747,7 @@ module Capybara
         save_downloaded_response(url, headers, body)
         navigation_made_no_document(url)
       end
-      # …as a navigation handed off to external software makes none (`redirect_followed?`).
+      # …as a navigation handed off to external software makes none (navigation_fetch.rs `redirect`).
       private def navigation_made_no_document(url)
         if window_has_document?
           @session_history.restore(0)
@@ -12485,11 +12416,6 @@ module Capybara
       # A preload that failed: `event.preloadResponse` rejects (Service Workers "Handle Fetch").
       PRELOAD_NETWORK_ERROR = {'networkError' => true}.freeze
 
-      # …a request's origin `origin` (serialized, nil for none) after a redirect from `current_url` to `location_url`.
-      def redirected_origin(origin, current_url, location_url)
-        origin && (Native.redirect_taints_origin(origin == 'null', origin, current_url, location_url) ? 'null' : origin)
-      end
-
       # The site of a URL — scheme and registrable domain — that a Sec-Fetch-Site / same-site comparison and a blob
       # URL's partition use, as storage's areas do: the engine's (realm_location.rs `site`). nil for a hostless or
       # non-http(s) URL.
@@ -12517,30 +12443,6 @@ module Capybara
       end
       # Whether `url` is an HTTP(S) URL — one a fetch goes over the network for, and the only kind a redirect is followed to.
       def http_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
-      # …or one of a fetch scheme (Fetch §4.4): `about`, `blob`, `data`, `file` or HTTP(S).
-      def fetch_scheme_url?(url) = url.to_s.match?(%r{\A(?:about|blob|data|file|https?):}i)
-      # Whether a top-level navigation's redirect from `url` to `next_url`, its `depth`th, is followed (HTML "create
-      # navigation params by fetching", Fetch "HTTP-redirect fetch"): an HTTP(S) URL within the redirect limit is. Any
-      # other ends it — one of no fetch scheme (`mailto:`, an app's own) handed off, the window keeping its document and its
-      # history as a download does (Chrome: ERR_ABORTED); any other, and a `Location` that parses to no URL, a network
-      # error, its error document committed at `url`, the last URL requested (Chrome: ERR_UNSAFE_REDIRECT,
-      # ERR_TOO_MANY_REDIRECTS).
-      private def redirect_followed?(url, next_url, depth)
-        case redirect_outcome(next_url, depth)
-        when :follow then return true
-        when :fail then commit_error_document(url)
-        else navigation_made_no_document(url)
-        end
-        false
-      end
-      # …the end itself: `:follow`, `:fail` (a network error) or `:hand_off`.
-      private def redirect_outcome(next_url, depth)
-        return :fail unless parse_url(next_url)
-        return :follow if http_url?(next_url) && depth < NAVIGATION_REDIRECT_LIMIT
-
-        fetch_scheme_url?(next_url) || http_url?(next_url) ? :fail : :hand_off
-      end
-
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
       # redirecting to a real WEBrick on `localhost:9100`) must cross
       # the wire — Rails' router doesn't have routes for the external

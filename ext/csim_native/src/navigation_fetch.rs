@@ -46,15 +46,16 @@ fn static_site(site: &str) -> &'static str {
 impl NavigationFetch {
     // NavigationFetch.new(request) -> the fetch `request` describes, by name: `method`, `url`, `body_empty`, `referrer`
     // (the referrer source, nil none), `referrer_policy`, `initiator` (the URL Sec-Fetch-Site and the request's origin are
-    // of, nil none), `origin_null` (an opaque initiator's: its origin `null`, its site cross-site), `site_seed` (a latch
-    // carried in, nil none), `ancestors` (the document URLs its cookies are judged by — nil none, each nil for one not
-    // known).
+    // of, nil none), `origin` (the request's origin serialized, where it is not its initiator's — a re-post's, the one it
+    // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
+    // origin `null`, its site cross-site), `site_seed` (a latch carried in, nil none), `ancestors` (the document URLs its
+    // cookies are judged by — nil none, each nil for one not known).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
         let initiator = text("initiator")?.filter(|u| !u.is_empty());
-        let origin = initiator.as_deref().and_then(http_origin);
-        let opaque = get("origin_null")?.to_bool();
+        let origin = text("origin")?.filter(|o| !o.is_empty()).or_else(|| initiator.as_deref().and_then(http_origin));
+        let opaque = get("origin_null")?.to_bool() || origin.as_deref() == Some("null");
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
         Ok(NavigationFetch {

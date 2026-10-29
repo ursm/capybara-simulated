@@ -49,6 +49,27 @@ RSpec.describe 'document.referrer' do
     expect(s.evaluate_script('frames[0].document.referrer')).to eq('http://www.example.com/')
   end
 
+  # …the page's as a frame's, its GET and its POST alike — a fragment the redirect names none of carried over to the
+  # URL it lands at (Fetch "HTTP-redirect fetch").
+  %w[get post].each do |method|
+    it "is a redirected page #{method.upcase} navigation's, narrowed by the redirect's referrer policy" do
+      referers = {}
+      s = simulated_session(lambda {|env|
+        referers[env['PATH_INFO']] = env['HTTP_REFERER']
+        next [302, {'location' => '/final', 'referrer-policy' => 'origin'}, []] if env['PATH_INFO'] == '/redir'
+
+        body = env['PATH_INFO'] == '/top' ? "<form id=p method=#{method} action='/redir#f'></form>" : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+      })
+      s.visit '/top'
+      s.execute_script('p.submit()')
+
+      expect(s).to have_current_path('/final')
+      expect(referers.values_at('/redir', '/final')).to eq(%w[http://www.example.com/top http://www.example.com/])
+      expect(s.evaluate_script('[document.referrer, location.hash]')).to eq(%w[http://www.example.com/ #f])
+    end
+  end
+
   it "is a POST navigation's" do
     session.visit '/top'
     session.execute_script('p.submit()')
