@@ -98,9 +98,6 @@ pub(crate) enum HostNavigation {
     Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool },
     Reload,
 }
-// The kinds `takeFrameNavigations` answers, which its mask names.
-const HOST_NAVIGATE: u32 = 1;
-const HOST_RELOAD: u32 = 2;
 
 // What `planFrameLocation` made of a navigation: none (the frame has no navigable), one planned, or one to a fragment of
 // the frame's document, which navigates within it at once (HTML "navigate to a fragment"), the bindings' to make.
@@ -663,19 +660,16 @@ fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     crate::navigation_plan::supersede_routed(scope, realm);
 }
-// __dom.takeFrameNavigations(kinds) -> the navigations the host planned of frames, of the kinds `kinds` names
-// (HOST_NAVIGATE, HOST_RELOAD), in the order they were planned, which none plans any more: `[HOST_NAVIGATE, realm, url,
-// replace, initiatorRealm, referrerSource, referrerPolicy, [sandbox], activated]`, `[HOST_RELOAD, realm]` — realm the
-// frame's now, sandbox null where the container had no attribute.
+// __dom.takeFrameNavigations(kind) -> the navigations of the kind `kind` ("navigate", "reload") the host planned of
+// frames, in the order they were planned, which none plans any more: `[realm, url, replace, initiatorRealm,
+// referrerSource, referrerPolicy, [sandbox], activated]` each, a reload's its realm alone — realm the frame's now, sandbox
+// null where the container had no attribute.
 fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let kinds = args.get(0).uint32_value(scope).unwrap_or(HOST_NAVIGATE | HOST_RELOAD);
+    let reloads = args.get(0).to_rust_string_lossy(scope) == "reload";
     let arena = &mut crate::dom::dom(scope).arena;
-    let kind = |h: &HostNavigation| match h {
-        HostNavigation::Navigate { .. } => HOST_NAVIGATE,
-        HostNavigation::Reload => HOST_RELOAD,
-    };
+    let wanted = |h: &HostNavigation| matches!(h, HostNavigation::Reload) == reloads;
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
-    let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| kind(h) & kinds != 0)).map(|(&c, _)| c).collect();
+    let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| wanted(h))).map(|(&c, _)| c).collect();
     for c in containers {
         let realm = arena.frame_realm(c);
         let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
@@ -698,11 +692,10 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let mut items = Vec::with_capacity(taken.len());
     for (_, realm, host) in taken {
         let realm = v8::Integer::new(scope, realm).into();
-        let item: Vec<v8::Local<v8::Value>> = match host {
+        let item = match host {
             HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated } => {
                 let sandbox = sandbox.map_or_else(|| v8::null(scope).into(), |s| v8::String::new(scope, &s).unwrap().into());
-                vec![
-                    v8::Integer::new_from_unsigned(scope, HOST_NAVIGATE).into(),
+                let item = [
                     realm,
                     v8::String::new(scope, &url).unwrap().into(),
                     v8::Boolean::new(scope, replace).into(),
@@ -711,11 +704,12 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
                     v8::String::new(scope, &referrer.1).unwrap().into(),
                     v8::Array::new_with_elements(scope, &[sandbox]).into(),
                     v8::Boolean::new(scope, activated).into(),
-                ]
+                ];
+                v8::Array::new_with_elements(scope, &item).into()
             }
-            HostNavigation::Reload => vec![v8::Integer::new_from_unsigned(scope, HOST_RELOAD).into(), realm],
+            HostNavigation::Reload => realm,
         };
-        items.push(v8::Array::new_with_elements(scope, &item).into());
+        items.push(item);
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

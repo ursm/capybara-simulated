@@ -3369,7 +3369,7 @@ module Capybara
         chosen = named ? choose_named_navigable(@current_realm_id.to_i, target) : nil
         return if chosen == :blocked
         named_frame = chosen if chosen.is_a?(Integer)
-        new_window  = frame_entry.nil? && chosen.nil? && new_window_target?(target)
+        new_window  = frame_entry.nil? && [nil, :new_window].include?(chosen) && new_window_target?(target)
         window_name = keyword == TARGET_BLANK ? '' : target
         # Opener exposure for a `<form target>` new context: HTML "get an element's noopener", the engine's
         # (token_list.rs `noopener`) — `noopener` / `noreferrer` drop it, `_blank` without `opener` too, a named target
@@ -9830,12 +9830,10 @@ module Capybara
       # began — begun with it, what its document's seed and a download its response is take: frame_navigation.rs
       # `frame_sandbox` — its source's activation. (Applying one re-navigates the owning iframe, which disposes the frame's
       # realm — illegal while its location setter is still on the V8 stack.)
-      FRAME_NAVIGATE = 1
-      FRAME_RELOAD   = 2
       def consume_pending_frame_nav
         # Window-realm self-navs are realm navs too — drain them at every frame-nav drain point.
         consume_pending_window_nav
-        @runtime.call('__csimTakeFrameNavigations', FRAME_NAVIGATE).each do |_, realm_id, url, replace, initiator, source, policy, sandbox, activated|
+        @runtime.call('__csimTakeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
           referrer = [source, policy]
           invalidate_find_cache
           # If this frame is on the entered `within_frame` stack, navigate it
@@ -9872,17 +9870,15 @@ module Capybara
       # navigate") — taken in the order they were planned, each window's document made again in place: a location's to
       # its URL, by the document that began it (its own where no other did), a `blob:` one's of the blob it began with; a
       # reload's to the URL its document is at, a `blob:` one's of its blob. (None asked for where no window was opened.)
-      WINDOW_LOCATION = 1
-      WINDOW_RELOAD   = 2
       def consume_pending_window_nav
         return if @runtime.window_realm_meta.empty?
 
         @runtime.call('__csimTakeWindowNavigations').each do |realm_id, kind, *plan|
           invalidate_find_cache
           case kind
-          when WINDOW_LOCATION
+          when 'location'
             url, _replace, initiator, _source, _policy, activated, blob = plan
-          when WINDOW_RELOAD
+          when 'reload'
             activated, blob = plan
             url = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
           end
@@ -9920,7 +9916,7 @@ module Capybara
           if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
             body, ctype = '', 'text/html'
             doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
-            if kind == WINDOW_RELOAD
+            if kind == 'reload'
               referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
               policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
             else
@@ -9954,7 +9950,7 @@ module Capybara
       end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends.
       def consume_pending_frame_reload
-        @runtime.call('__csimTakeFrameNavigations', FRAME_RELOAD).each do |_, realm_id|
+        @runtime.call('__csimTakeFrameNavigations', 'reload').each do |realm_id|
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps
           # the frame stack in sync) — re-fetching its current document URL, which
@@ -10273,14 +10269,12 @@ module Capybara
       def submit_form_in_realm(realm_id, spec)
         submit_frame_route(realm_id, spec, frame_submission_route(realm_id, spec))
       end
-      # The navigable a route the engine answers (navigation_plan.rs `ROUTE_*`) chooses: `:self` its own frame (a
+      # The navigable a route the engine answers (navigation_plan.rs `route_items`) chooses: `:self` its own frame (a
       # self-targeted link's navigation: within_frame's `navigate_frame`, else its iframe re-navigated by realm id), `:top`
       # the page (`_top`, a `_parent` that is the page, or a name the page has), a frame's realm (a name's, `_parent`'s:
       # made now, where its navigable has no document yet), `:window` a same-isolate window's (its navigation not
-      # modeled), nil a new window (not modeled), `:blocked` none its sandbox lets it navigate.
-      SUBMISSION_ROUTES = {1 => :self, 2 => :top, 5 => :window, 6 => nil, 7 => :blocked}.freeze
-      ROUTE_FRAME = 3
-      def route_chosen(kind, realm) = kind == ROUTE_FRAME ? realm : SUBMISSION_ROUTES[kind]
+      # modeled), `:new_window` a new window (not modeled), `:blocked` none its sandbox lets it navigate.
+      def route_chosen(kind, realm) = kind == 'frame' ? realm : kind.to_sym
       # …where a form of frame realm `realm_id` goes, as the engine routes it (`submissionRoute`): [chosen, initiator] —
       # and its Referer: the frame's document's, under its policy or `noreferrer`'s.
       def frame_submission_route(realm_id, spec)
@@ -10314,12 +10308,12 @@ module Capybara
           end
         when :window
           log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
-        when nil
+        when :new_window
           log_console('warn', "nested-context form submit (target=#{spec['target'].to_s.inspect}) into a new window is not modeled")
         end
       end
       # The navigable a target name chooses from realm `realm_id`'s browsing context (`frame_submission_route`): a frame's
-      # realm, `:top`, `:window`, `:blocked`, or nil (none has the name).
+      # realm, `:top`, `:window`, `:blocked`, or `:new_window` (none has the name).
       def choose_named_navigable(realm_id, target) = frame_submission_route(realm_id, {'target' => target})[0]
       # Whether a link's or a form's target opens a new browsing context — `_blank`, or a name no navigable has (the page
       # chose the one that has it first: `choose_named_navigable`).

@@ -68,9 +68,6 @@ pub(crate) struct Reload {
     blob: Option<v8::Global<v8::Value>>,
 }
 
-// The kinds of a window's navigation `takeWindowNavigations` answers.
-const WINDOW_LOCATION: i32 = 1;
-const WINDOW_RELOAD: i32 = 2;
 static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub(crate) fn next_planned() -> u64 {
     PLANNED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
@@ -127,13 +124,6 @@ pub(crate) enum Route {
     NewWindow,
     Blocked,
 }
-const ROUTE_SELF: i32 = 1;
-const ROUTE_TOP: i32 = 2;
-const ROUTE_FRAME: i32 = 3;
-const ROUTE_UNBUILT: i32 = 4;
-const ROUTE_WINDOW: i32 = 5;
-const ROUTE_NEW_WINDOW: i32 = 6;
-const ROUTE_BLOCKED: i32 = 7;
 
 // The navigable target `target` chooses from frame realm `realm`'s document (HTML "the rules for choosing a navigable":
 // navigables.rs `keyword_navigable`, `find_navigable`) — the top-level traversable of a frame of a window that window's.
@@ -417,8 +407,8 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
     ]
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
-// in the order they were planned, which they plan no more: `[realm, WINDOW_LOCATION, …takeLocation's]` and `[realm,
-// WINDOW_RELOAD, activated, blob]`. A window closed is stepped no more, and plans none the host takes.
+// in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]` and `[realm,
+// "reload", activated, blob]`. A window closed is stepped no more, and plans none the host takes.
 fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
@@ -433,10 +423,10 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     for (_, w, own) in taken {
         let realm = v8::Integer::new(scope, w).into();
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload) {
-            (Some(l), _) => [vec![realm, v8::Integer::new(scope, WINDOW_LOCATION).into()], location_items(scope, l)].concat(),
+            (Some(l), _) => [vec![realm, v8::String::new(scope, "location").unwrap().into()], location_items(scope, l)].concat(),
             (None, Some(r)) => vec![
                 realm,
-                v8::Integer::new(scope, WINDOW_RELOAD).into(),
+                v8::String::new(scope, "reload").unwrap().into(),
                 v8::Boolean::new(scope, r.activated).into(),
                 r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
             ],
@@ -492,22 +482,23 @@ fn hold_routed_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     supersede_routed(scope, cid);
 }
-// A route as the host takes it: [ROUTE_*, realm, container] — for another frame's (ROUTE_FRAME) the realm of the
-// document its container's navigable has now, or (ROUTE_UNBUILT) the realm of the container's own document and the
-// container, its navigable with none made yet; else null.
+// A route as the host takes it: [kind, realm, container] — "self", "top", "window" (a window's of this isolate),
+// "new_window", "blocked", or for another frame's "frame" and the realm of the document its container's navigable has
+// now, or "unbuilt" and the realm of the container's own document and the container, its navigable with none made yet;
+// else null.
 fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local<'s, v8::Value>; 3] {
     let arena = &crate::dom::dom(scope).arena;
     let (kind, at, container) = match route {
-        Route::SelfTarget => (ROUTE_SELF, None, None),
-        Route::Top => (ROUTE_TOP, None, None),
+        Route::SelfTarget => ("self", None, None),
+        Route::Top => ("top", None, None),
         Route::Frame(c) => match (arena.frame_realm(c), arena.get(c).map(|n| n.realm)) {
-            (Some(r), _) => (ROUTE_FRAME, Some(r), None),
-            (None, Some(parent)) => (ROUTE_UNBUILT, Some(parent), Some(c)),
-            (None, None) => (ROUTE_NEW_WINDOW, None, None),
+            (Some(r), _) => ("frame", Some(r), None),
+            (None, Some(parent)) => ("unbuilt", Some(parent), Some(c)),
+            (None, None) => ("new_window", None, None),
         },
-        Route::Window => (ROUTE_WINDOW, None, None),
-        Route::NewWindow => (ROUTE_NEW_WINDOW, None, None),
-        Route::Blocked => (ROUTE_BLOCKED, None, None),
+        Route::Window => ("window", None, None),
+        Route::NewWindow => ("new_window", None, None),
+        Route::Blocked => ("blocked", None, None),
     };
     let at: v8::Local<v8::Value> = match at {
         Some(r) => v8::Integer::new(scope, r).into(),
@@ -517,9 +508,9 @@ fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local
         (Some(c), Some(parent)) => crate::dom::nodes_value(scope, parent, &[c]),
         _ => v8::null(scope).into(),
     };
-    [v8::Integer::new(scope, kind).into(), at, container]
+    [v8::String::new(scope, kind).unwrap().into(), at, container]
 }
-// __dom.submissionRoute(realm, target, rel) -> [ROUTE_*, realm, container, referrerSource, referrerPolicy]: where a form's
+// __dom.submissionRoute(realm, target, rel) -> [kind, realm, container, referrerSource, referrerPolicy]: where a form's
 // submission of realm `realm`'s document with target `target` and link types `rel` goes (`route`, `route_items`) and
 // the Referer it sends — what the host asks of a submission it makes for the user (an entered frame's form submitted).
 fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -533,7 +524,7 @@ fn submission_route(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.takeRoutedSubmission() -> the first of the submissions frames' documents made that the host routes, in the order
-// they were made, which none plans any more: `[realm, request, ROUTE_*, realm, container, referrerSource,
+// they were made, which none plans any more: `[realm, request, kind, realm, container, referrerSource,
 // referrerPolicy]` (`route_items`). None whose frame is gone (no container: its navigable discarded with its document,
 // HTML "plan to navigate" queueing on a document no longer fully active), nor whose request no realm holds any more (a
 // click that took it); null where none is left. One at a time: the one before may have given the frame chosen a new
