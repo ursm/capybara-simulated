@@ -373,7 +373,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_registered_at", magnus::function!(sw_registry::registered_at_for_ruby, 2))?;
     native.define_module_function("sw_note_phase", magnus::function!(sw_registry::note_phase_for_ruby, 4))?;
     native.define_module_function("sw_hold", magnus::function!(sw_registry::hold_for_ruby, 4))?;
-    native.define_module_function("sw_registration_clearable", magnus::function!(sw_registry::registration_clearable_for_ruby, 2))?;
     native.define_module_function("sw_install", magnus::function!(sw_registry::install_for_ruby, 3))?;
     native.define_module_function("sw_step", magnus::function!(sw_registry::step_for_ruby, 2))?;
     native.define_module_function("sw_continue", magnus::function!(sw_registry::continue_for_ruby, 2))?;
@@ -381,7 +380,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_waiting", magnus::function!(sw_registry::waiting_for_ruby, 2))?;
     native.define_module_function("sw_queued_steps", magnus::function!(sw_registry::queued_steps_for_ruby, 1))?;
     native.define_module_function("sw_unregister", magnus::function!(sw_registry::unregister_for_ruby, 2))?;
-    native.define_module_function("sw_clear_registration", magnus::function!(sw_registry::clear_registration_for_ruby, 2))?;
+    native.define_module_function("sw_try_clear", magnus::function!(sw_registry::try_clear_for_ruby, 1))?;
+    native.define_module_function("sw_defer_navigation", magnus::function!(sw_registry::defer_navigation_for_ruby, 1))?;
+    native.define_module_function("sw_retry_navs", magnus::function!(sw_registry::retry_navs_for_ruby, 1))?;
     native.define_module_function("sw_forget_worker", magnus::function!(sw_registry::forget_worker_for_ruby, 2))?;
     native.define_module_function("sw_forget_activating", magnus::function!(sw_registry::forget_activating_for_ruby, 2))?;
     native.define_module_function("sw_update_via_cache", magnus::function!(sw_registry::update_via_cache_for_ruby, 2))?;

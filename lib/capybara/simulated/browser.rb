@@ -446,21 +446,15 @@ module Capybara
         # the general outbox) keyed by a NEGATIVE `@sw_nav_seq` id so it never mixes with
         # client-fetch replies.
         @sw_partition = Native.sw_partition_new
-        # True while any realm holds a frame element whose navigation was deferred by an
-        # activating registration — the activated marker broadcasts the retry only when set.
-        @sw_navs_deferred = false
-        # Unregistered registrations (their numbers) whose Clear Registration is deferred:
-        # unregister only unmaps the scope, and the workers live on until no client is using the
-        # registration and no extended work is pending (see sw_unregister / try_clear_uninstalls).
-        # (Each version's lifecycle — whose next step is queued, what a step it took waits for — is the
-        # registry's: sw_registry.rs `step`.)
+        # (Each version's lifecycle — whose next step is queued, what a step it took waits for — the registrations
+        # unregistered whose Clear Registration waits, and whether a frame navigation waits on an activating one, are
+        # the registry's: sw_registry.rs `step`, `unregister`, `retry_navs`.)
         # The Register / Update jobs (sw_run_job): `@sw_jobs_queued` the jobs queued to run,
         # `@sw_job_evals` worker handle → the job whose worker it is, settled by its evaluation's
         # outcome, `@sw_jobs_behind` worker handle → the job waiting for that worker's install.
-        @sw_pending_uninstalls = []
-        @sw_jobs_queued        = Set.new
-        @sw_job_evals          = {}
-        @sw_jobs_behind        = {}
+        @sw_jobs_queued = Set.new
+        @sw_job_evals   = {}
+        @sw_jobs_behind = {}
         @sw_nav_outbox    = Thread::Queue.new
         # Race-network-and-fetch-handler bookkeeping: [realm, fetch_id] →
         # {resp:, server_ms:, t0:} — the network leg's PRE-FETCHED response (run
@@ -5757,8 +5751,8 @@ module Capybara
           when 'activated'    then broadcast_to_realms('__csim_swRegistrationActivated', n, text, flag)
           when 'queue_step'   then @runtime.call('__csim_swQueueStep', n)
           when 'continue'     then sw_run(Native.sw_continue(@sw_partition, n))
-          when 'unregister'   then sw_unregister(text)
           when 'try_clear'    then try_clear_uninstalls
+          when 'retry_navs'   then broadcast_to_realms('__csim_swRetryDeferredNavs')
           end
         end
         nil
@@ -5802,12 +5796,7 @@ module Capybara
       # Re-run every frame navigation a realm parked on an activating registration
       # (the engine keeps the frames, frame_navigation.rs `takeSwDeferredFrames`; the retry rebuilds each frame through
       # the normal path, which re-consults the — now settled — registration state).
-      private def retry_deferred_navigations
-        return unless @sw_navs_deferred
-
-        @sw_navs_deferred = false
-        broadcast_to_realms('__csim_swRetryDeferredNavs')
-      end
+      private def retry_deferred_navigations = sw_run(Native.sw_retry_navs(@sw_partition))
 
       # Call a host fn in EVERY live browsing context — the main realm and each frame/window realm.
       # Service-worker registration state is per-realm (each has its own registration objects), so
@@ -5895,22 +5884,12 @@ module Capybara
       end
 
       # The Unregister job at `scope` — a client's `registration.unregister()`, the service worker's own, or a Register
-      # job whose only version failed to install: the registration out of the map (its mode and navigation preload
-      # state with it: a registration made at the scope later is a new one), which every realm's registration object
-      # of it sees at once. Its Clear Registration is parked (spec "Try Clear Registration"): the workers stay live —
-      # an existing controllee keeps its controller and interception — until no client is USING the registration
-      # (controller == its active worker) and none of its workers has pending extended work. The verdict is host
-      # state, so the clear rides the same wakeup invariant as the activation gate: every hold-clearing transition
-      # (client teardown, extended drain, message dispatch, worker reap) funnels through unregister_client / the
-      # try_activate delivery point, and both re-run this check. Whether the map held one.
+      # job whose only version failed to install: the registration out of the map, its Clear Registration waiting until
+      # no client is using it and no version has an event pending (sw_registry.rs `unregister`). Whether the map held one.
       private def sw_unregister(scope)
-        id = Native.sw_unregister(@sw_partition, scope.to_s)
-        @sw_pending_uninstalls << id if id
-        try_clear_uninstalls
-        # A navigation parked on this scope's activation must not wait forever for an
-        # activated marker that now never comes — replay it against the network.
-        retry_deferred_navigations
-        !id.nil?
+        had, cmds = Native.sw_unregister(@sw_partition, scope.to_s)
+        sw_run(cmds)
+        had
       end
 
       # A service worker's own `registration.unregister()` (rode the outbox as
@@ -5929,22 +5908,8 @@ module Capybara
         nil
       end
 
-      private def try_clear_uninstalls
-        return if @sw_pending_uninstalls.empty?
-
-        # (…once no client is using the registration and no version has an event pending: sw_registry.rs `clearable`)
-        ready, @sw_pending_uninstalls = @sw_pending_uninstalls.partition {|id| Native.sw_registration_clearable(@sw_partition, id) }
-        ready.each do |id|
-          # Clear Registration: the versions emptied, then each worker redundant in every realm — a `statechange`
-          # listener already finds the registration empty, as in Chrome (each realm runs its microtasks after each
-          # broadcast, so a later emptying would be seen half done) — then the isolates ended.
-          handles = sw_versions(id).compact.uniq
-          Native.sw_clear_registration(@sw_partition, id)
-          handles.each {|h| sw_update_worker_state(h, 'redundant') }
-          handles.each {|h| worker_terminate(h) }
-        end
-        nil
-      end
+      # Try Clear Registration for each registration unregistered (sw_registry.rs `try_clear`).
+      private def try_clear_uninstalls = sw_run(Native.sw_try_clear(@sw_partition))
 
       # ── Registration update (registration.update() / re-register with a changed
       # updateViaCache) ──
@@ -6559,7 +6524,7 @@ module Capybara
         # activated marker replays the build (__csim_swRetryDeferredNavs). Other callers
         # (form POST to a named frame) dispatch immediately, as before.
         if defer_ok && sw_activating_controller_for(url)
-          @sw_navs_deferred = true
+          Native.sw_defer_navigation(@sw_partition)
           return {'deferred' => true}
         end
         target      = url.to_s
@@ -8236,10 +8201,9 @@ module Capybara
           warn "[capybara-simulated] worker thread still running at the session boundary (#{t.inspect})" unless joined
         end
         @workers.clear
-        @sw_pending_uninstalls = []
-        @sw_jobs_queued        = Set.new
-        @sw_job_evals          = {}
-        @sw_jobs_behind        = {}
+        @sw_jobs_queued = Set.new
+        @sw_job_evals   = {}
+        @sw_jobs_behind = {}
         @worker_outbox.clear
         @worker_outbox_head       = nil
         @worker_in_flight         = 0
@@ -8258,7 +8222,6 @@ module Capybara
         # (keepalive.rs).
         @keepalive_lock.synchronize { @keepalive_results.clear }
         Native.keepalive_clear(@keepalive_session)
-        @sw_navs_deferred    = false
         Native.sw_forget_clients(@sw_partition)
         @sw_direct_replies   = {}
         # Adopted-id aliases go with the client registry. @sw_resulting_seq is NOT reset:

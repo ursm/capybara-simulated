@@ -159,6 +159,11 @@ struct Partition {
     clients: Vec<Client>,
     // (…the ids of the clients that count as focused: the focused context and its ancestors)
     focused: Vec<String>,
+    // The registrations unregistered whose Clear Registration waits — until no client is using one and none of its
+    // versions has an event pending — and whether a frame's navigation parked on an activating registration (the
+    // engine keeps the frames: frame_navigation.rs `takeSwDeferredFrames`), which a settled registration replays.
+    uninstalling: Vec<u32>,
+    navs_deferred: bool,
 }
 
 impl Partition {
@@ -553,39 +558,91 @@ fn may_activate(p: &Partition, candidate: u32) -> bool {
 // Try Clear Registration's verdict for the registration `id`: no client controlled by its active worker, and no version
 // with an event pending ("Service Worker Has No Pending Events") — a message's, an extendable message event's, its
 // install or activate event's.
-pub(crate) fn registration_clearable_for_ruby(partition: u64, id: u32) -> bool {
-    let mut reg = lock();
-    let Some(p) = reg.existing(partition) else { return true };
-    let Some(r) = p.registrations.iter().find(|r| r.id == id) else { return true };
-    if r.active.is_some_and(|a| p.clients.iter().any(|c| c.controller == Some(a))) {
-        return false;
+impl Partition {
+    fn clearable(&self, id: u32) -> bool {
+        let Some(r) = self.registrations.iter().find(|r| r.id == id) else { return true };
+        if r.active.is_some_and(|a| self.clients.iter().any(|c| c.controller == Some(a))) {
+            return false;
+        }
+        r.workers().iter().filter_map(|h| self.workers.get(h)).all(|w| !w.extended() && !w.lifecycle_pending())
     }
-    r.workers().iter().filter_map(|h| p.workers.get(h)).all(|w| !w.extended() && !w.lifecycle_pending())
+    // Try Clear Registration for each registration unregistered: one no client is using and none of whose versions has
+    // an event pending cleared — its versions emptied (and it gone, the map no longer holding it), then each worker
+    // redundant in every realm (a `statechange` listener already finding the registration empty, as in Chrome), then
+    // the isolates ended. The verdict is the registry's, so the clear rides the same wakeups as Try Activate: every
+    // hold-clearing transition (a client gone, an extension drained, a message dispatched, a worker reaped, a step
+    // taken) tries it again.
+    fn try_clear(&mut self, out: &mut Vec<Cmd>) {
+        let (ready, waiting): (Vec<u32>, Vec<u32>) = std::mem::take(&mut self.uninstalling).into_iter().partition(|&id| self.clearable(id));
+        self.uninstalling = waiting;
+        for id in ready {
+            let Some(r) = self.by_id(id) else { continue };
+            let handles = r.workers();
+            r.installing = None;
+            r.waiting = None;
+            r.active = None;
+            if !r.mapped {
+                self.registrations.retain(|r| r.id != id);
+            }
+            for &h in &handles {
+                Self::tell_state(h, "redundant", out);
+            }
+            for &h in &handles {
+                out.push(cmd("terminate", h));
+            }
+        }
+    }
+    // The Unregister job at `scope`: the registration out of the map (its mode and navigation preload state with it: one
+    // made at the scope later is a new one), which every realm's registration object of it sees at once — one with no
+    // version left gone at once, another's Clear Registration waiting (`try_clear`) — and a navigation parked on its
+    // activation, which now never comes, replayed against the network. Whether the map held one.
+    fn unregister(&mut self, scope: &str, out: &mut Vec<Cmd>) -> bool {
+        let Some(r) = self.mapped(scope) else { return false };
+        r.mapped = false;
+        let id = r.id;
+        if r.workers().is_empty() {
+            self.registrations.retain(|r| r.id != id);
+        } else {
+            self.uninstalling.push(id);
+        }
+        self.try_clear(out);
+        self.retry_navs(out);
+        true
+    }
+    // The frame navigations parked on an activating registration replayed (`navs_deferred`).
+    fn retry_navs(&mut self, out: &mut Vec<Cmd>) {
+        if std::mem::take(&mut self.navs_deferred) {
+            out.push(cmd("retry_navs", 0));
+        }
+    }
 }
-// The registration at `scope` unregistered — out of the map, its mode and navigation preload with it: its number, nil
-// where the map held none. One with no version left is gone at once; another stays until it is cleared.
-pub(crate) fn unregister_for_ruby(partition: u64, scope: String) -> Option<u32> {
-    let mut reg = lock();
-    let p = reg.existing(partition)?;
-    let r = p.mapped(&scope)?;
-    r.mapped = false;
-    let id = r.id;
-    if r.workers().is_empty() {
-        p.registrations.retain(|r| r.id != id);
+// Try Clear Registration (`try_clear`): what the host does.
+pub(crate) fn try_clear_for_ruby(partition: u64) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.try_clear(&mut out);
     }
-    Some(id)
+    out
 }
-// Clear Registration: the registration `id`'s versions emptied — and it gone, where the map no longer holds it.
-pub(crate) fn clear_registration_for_ruby(partition: u64, id: u32) {
-    let mut reg = lock();
-    let Some(p) = reg.existing(partition) else { return };
-    let Some(r) = p.by_id(id) else { return };
-    r.installing = None;
-    r.waiting = None;
-    r.active = None;
-    if !r.mapped {
-        p.registrations.retain(|r| r.id != id);
+// The Unregister job at `scope` (`unregister`): [whether the map held one, what the host does].
+pub(crate) fn unregister_for_ruby(partition: u64, scope: String) -> (bool, Vec<Cmd>) {
+    let mut out = Vec::new();
+    let had = lock().existing(partition).is_some_and(|p| p.unregister(&scope, &mut out));
+    (had, out)
+}
+// A frame's navigation parked on an activating registration (`navs_deferred`) — and the ones parked replayed
+// (`retry_navs`), what the host does.
+pub(crate) fn defer_navigation_for_ruby(partition: u64) {
+    if let Some(p) = lock().existing(partition) {
+        p.navs_deferred = true;
     }
+}
+pub(crate) fn retry_navs_for_ruby(partition: u64) -> Vec<Cmd> {
+    let mut out = Vec::new();
+    if let Some(p) = lock().existing(partition) {
+        p.retry_navs(&mut out);
+    }
+    out
 }
 // ── Matching (Service Workers "Match Service Worker Registration") ──
 // The worker a request of `url` goes to and its registration's scope: of the registrations the map holds, the one whose
@@ -652,8 +709,9 @@ pub(crate) fn controller_for_ruby(partition: u64, handle: u32, live: bool) -> Op
 // end a worker's isolate ("terminate"), fire a registration's `updatefound` ("update_found",
 // registration), have a worker fire its activate event ("activate"), tell every realm a worker is its registration's
 // active one ("activated", handle, script URL, whether it intercepts), queue a worker's next step as a task of the
-// window's ("queue_step"), take the rest of a step once what came before it was done ("continue"), unregister the
-// registration at a scope ("unregister", 0, scope), and try to clear the registrations unregistered ("try_clear").
+// window's ("queue_step"), take the rest of a step once what came before it was done ("continue"), try to clear the
+// registrations unregistered once that was ("try_clear"), and replay the frame navigations parked on an activating
+// registration ("retry_navs").
 pub(crate) type Cmd = (&'static str, u32, String, bool);
 fn cmd(kind: &'static str, n: u32) -> Cmd {
     (kind, n, String::new(), false)
@@ -749,7 +807,7 @@ impl Partition {
         }
         Self::retire(handle, out);
         if let Some(scope) = self.mapped_scope(id).filter(|_| self.by_id(id).is_some_and(|r| r.workers().is_empty())) {
-            out.push(("unregister", 0, scope, false));
+            self.unregister(&scope, out);
         }
         out.push(cmd("try_clear", 0));
     }
@@ -969,6 +1027,33 @@ mod tests {
     }
 
     #[test]
+    fn clears_an_unregistered_registration_once_no_client_uses_it() {
+        let p = partition_new_for_ruby();
+        let scope = || "https://a.test/".to_owned();
+        let id = note_registered_for_ruby(p, scope());
+        let kinds = |cmds: Vec<Cmd>| cmds.into_iter().map(|(k, n, t, _)| format!("{k} {n} {t}").trim_end().to_owned()).collect::<Vec<_>>();
+        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
+        set_version(p, id, "active".into(), Some(1));
+        activated(p, scope(), 1);
+        note_client_for_ruby(p, "c".into(), "https://a.test/".into(), "window".into(), "top-level".into(), None, Some(1));
+        defer_navigation_for_ruby(p);
+        // (…out of the map at once, the parked navigation replayed, the clear waiting on the client)
+        let (had, cmds) = unregister_for_ruby(p, scope());
+        assert!(had);
+        assert_eq!(kinds(cmds), ["retry_navs 0"]);
+        assert!(registrations_for_ruby(p).is_empty());
+        assert_eq!(versions_for_ruby(p, id), (None, None, Some(1)));
+        assert!(kinds(try_clear_for_ruby(p)).is_empty());
+        // (…the client gone: the versions emptied, then the worker redundant, then ended)
+        forget_client_for_ruby(p, "c".into());
+        assert_eq!(kinds(try_clear_for_ruby(p)), ["state 1 redundant", "terminate 1"]);
+        assert_eq!(versions_for_ruby(p, id), (None, None, None));
+        assert!(kinds(retry_navs_for_ruby(p)).is_empty());
+        assert_eq!(unregister_for_ruby(p, scope()), (false, Vec::new()));
+        clear_for_ruby(p);
+    }
+
+    #[test]
     fn lets_a_worker_activate_as_try_activate_has_it() {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
@@ -1146,15 +1231,15 @@ mod tests {
         note_registered_for_ruby(p, "c/".into());
         let order: Vec<String> = registrations_for_ruby(p).into_iter().map(|r| r.0).collect();
         assert_eq!(order, ["a/", "b/", "c/"]);
-        // Unregistered, it leaves the map but keeps its version until it is cleared.
-        assert_eq!(unregister_for_ruby(p, "a/".into()), Some(id));
-        assert_eq!(unregister_for_ruby(p, "a/".into()), None);
+        // Unregistered, it leaves the map — its version, which nothing holds, cleared with it.
+        let (had, cmds) = unregister_for_ruby(p, "a/".into());
+        assert!(had);
+        assert_eq!(cmds.into_iter().map(|c| c.0).collect::<Vec<_>>(), ["state", "terminate"]);
+        assert_eq!(unregister_for_ruby(p, "a/".into()), (false, Vec::new()));
         assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (false, "true".into()));
-        assert_eq!(versions_for_ruby(p, id), (Some(7), None, None));
+        assert_eq!(versions_for_ruby(p, id), (None, None, None));
         let again = note_registered_for_ruby(p, "a/".into());
         assert_ne!(again, id);
-        clear_registration_for_ruby(p, id);
-        assert_eq!(versions_for_ruby(p, id), (None, None, None));
         assert!(set_worker_state_for_ruby(p, 7, "redundant".into()));
         assert_eq!(worker_for_ruby(p, 7), Some(("a/sw.js".into(), "classic".into(), "redundant".into(), id)));
         clear_for_ruby(p);
