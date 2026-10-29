@@ -191,7 +191,8 @@ RSpec.describe 'Service Worker bindings' do
   end
 
   # A service worker's clients and events, generated from their IDL: its scope's Clients and the WindowClient a page is
-  # to it; a window opened only on a user's activation, which a worker here never has (InvalidAccessError); an event a
+  # to it — focused, as the page's document has focus (HTML "has focus steps", WPT extendable-message-event's top-level
+  # client); a window opened only on a user's activation, which a worker here never has (InvalidAccessError); an event a
   # page made is untrusted, so it extends nothing (InvalidStateError, §4.5.1), where the platform's message event does
   # while it is dispatched — through every microtask its handlers chain — and its lifecycle step waits for a lifetime
   # promise added after a handler; a FetchEvent needs its request; a router condition needs a member.
@@ -211,7 +212,7 @@ RSpec.describe 'Service Worker bindings' do
     JS
     poll_until { session.evaluate_script('globalThis.__out !== null') }
     expect(session.evaluate_script('globalThis.__out')).to eq(
-      'clients' => [true, true, true, false, 'visible', 'InvalidAccessError', 'TypeError'],
+      'clients' => [true, true, true, true, 'visible', 'InvalidAccessError', 'TypeError'],
       'events' => ['InvalidStateError', 'TypeError', true, true, nil, 'none', 'TypeError', 'none', true]
     )
   end

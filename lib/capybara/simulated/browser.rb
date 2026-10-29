@@ -529,8 +529,6 @@ module Capybara
         # (The service-worker clients — every frame/window and worker client, what a service
         # worker's Clients and an opaque child's inherited controller read — are the engine's
         # registry's, partition `@sw_partition`: sw_note_client. Forgotten when the last worker exits.)
-        # The realm holding the focus chain (`note_focused_realm`); nil until a first focus.
-        @focused_realm_id    = nil
         # Cross-isolate MessagePort channels: each end's holder and the messages waiting for one
         # (`port_end_here`). Cleared with the workers.
         @port_ends           = {}
@@ -6600,45 +6598,26 @@ module Capybara
       # when the focused navigable goes away, so a realm that held the focus chain must not
       # keep it — otherwise `WindowClient.focused` stays true for a client that no longer exists.
       def note_realm_discarded(realm_id)
-        note_focused_realm(0) if @focused_realm_id == realm_id.to_i
+        focus_changed if @runtime.realm_direct_call(0, '__csimBlurRealm', realm_id.to_i)
         nil
       end
 
-      # The focused BROWSING CONTEXT (HTML "focused area of the top-level traversable"):
-      # the realm whose document owns the focus chain. Reported by the realm that commits a
-      # focus — focusing an <iframe> hands focus to its NESTED context, so that realm is
-      # reported rather than the container's. Feeds `WindowClient.focused` — the registry's, which a
-      # service worker reads (it can't query the browser).
-      def note_focused_realm(realm_id)
-        rid = realm_id.to_i
-        return nil if @focused_realm_id == rid
-
-        @focused_realm_id = rid
+      # The focus moved to another BROWSING CONTEXT (HTML "focused area of the top-level
+      # traversable" — the engine's: navigables.rs `set_focused_realm`), which feeds
+      # `WindowClient.focused` — the registry's, which a service worker reads (it can't query
+      # the browser).
+      def focus_changed
         Native.sw_set_focused(@sw_partition, focused_client_ids)
         nil
       end
 
-      # Every client id that counts as focused: the focused context AND its ANCESTORS.
-      # `WindowClient.focused` follows `document.hasFocus()`, which is true for the whole chain
-      # up from the focused frame — a page containing the focused iframe is itself focused
-      # (clients-matchall-include-uncontrolled expects the top-level window and the focused
-      # nested frame to BOTH report true). Not a single winner, despite the name of the field.
-      def focused_client_ids
-        return [] if @focused_realm_id.nil?
-
-        ids = []
-        rid = @focused_realm_id
-        16.times do
-          ids << sw_client_id(rid)
-          # A top-level browsing context ends the chain: the main realm, and an auxiliary window
-          # (whose OPENER is not its ancestor — `document.hasFocus()` is false in the opener while
-          # the popup holds the focus, so its client must not be dragged in).
-          break if @runtime.top_level_realm?(rid)
-
-          rid = @runtime.frame_realm_parent(rid).to_i
-        end
-        ids.uniq
-      end
+      # Every client id that counts as focused: the focused context's AND its ANCESTORS'
+      # (navigables.rs `focus_chain`). `WindowClient.focused` follows `document.hasFocus()`,
+      # which is true for the whole chain up from the focused frame — a page containing the
+      # focused iframe is itself focused (clients-matchall-include-uncontrolled expects the
+      # top-level window and the focused nested frame to BOTH report true) — and stops at a
+      # top-level one: an auxiliary window's OPENER is no ancestor of it.
+      def focused_client_ids = (@runtime.realm_direct_call(0, '__csimFocusChain') || []).map {|rid| sw_client_id(rid) }.uniq
 
       # A worker's service-worker Client id. Distinct from the realm ids below so the
       # client-message router can tell a worker client from a browsing context.
@@ -8566,7 +8545,6 @@ module Capybara
         # id uniqueness across the whole process is the invariant the aliases rely on.
         @sw_client_aliases   = {}
         @sw_realm_aliases    = {}
-        @focused_realm_id    = nil
         @port_ends           = {}
         @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {

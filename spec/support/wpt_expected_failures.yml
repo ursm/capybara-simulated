@@ -5266,14 +5266,13 @@ html/webappapis/dynamic-markup-insertion/opening-the-input-stream/event-listener
   is the associated Document of a Window (frame is removed)
 - Custom event listeners are to be removed from Window for an active but not fully
   active document
-- Standard event listeners are to be removed from Window
 - Standard event listeners are to be removed from Window for a non-active document
   that is the associated Document of a Window (frame is removed)
 - Standard event listeners are to be removed from Window for an active but not fully
   active document
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/ignore-opens-during-unload.window.js:
-- document.open should bail out when ignore-opens-during-unload is greater than 0 during beforeunload event (open(parent)
-  while unloading parent and child)
+- document.open should bail out when ignore-opens-during-unload is greater than 0
+  during beforeunload event (open(parent) while unloading parent and child)
 html/webappapis/dynamic-markup-insertion/opening-the-input-stream/origin-check-in-document-open-same-origin-domain.sub.html:
 - It should not be possible to implicitly open same origin-domain (but not same origin)
   documents.
@@ -5660,7 +5659,6 @@ service-workers/cache-storage/credentials.https.html:
 service-workers/service-worker/ServiceWorkerGlobalScope/error-message-event.https.html:
 - Verify error event is received
 service-workers/service-worker/ServiceWorkerGlobalScope/extendable-message-event.https.html:
-- Post an extendable message from a top-level client
 - Post extendable messages among service workers
 - "[harness] TIMEOUT"
 service-workers/service-worker/ServiceWorkerGlobalScope/fetch-on-the-right-interface.https.any.js:

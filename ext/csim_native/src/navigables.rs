@@ -44,6 +44,9 @@ pub(crate) struct Navigables {
     // it is about:blank: HTML "navigate" replaces the entry of one).
     navigable_ids: HashMap<i32, u32>,
     firsts: HashSet<i32>,
+    // The realm whose document the focus is in — the focused navigable's, a frame's where an element in it is focused
+    // or the frame itself is (HTML "focused area of the top-level traversable") — the page's until a focus moves it.
+    focused: i32,
     top_names: HashMap<i32, Vec<u16>>,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
@@ -471,6 +474,33 @@ impl RealmArena {
         realms.sort_unstable();
         realms
     }
+    // The focus moved into realm `realm`'s document — whether that moved it from another's.
+    pub(crate) fn set_focused_realm(&mut self, realm: i32) -> bool {
+        std::mem::replace(&mut self.navigables.focused, realm) != realm
+    }
+    // …or out of it, its browsing context discarded: back to the page's (HTML: the top-level traversable's) — whether it
+    // was in it.
+    pub(crate) fn blur_realm(&mut self, realm: i32) -> bool {
+        let was = self.navigables.focused == realm && realm != 0;
+        if was {
+            self.navigables.focused = 0;
+        }
+        was
+    }
+    // The realms whose documents have focus: the focused one's and its ancestors', up to its top-level one's — not the
+    // opener of a window, which is no ancestor of it.
+    pub(crate) fn focus_chain(&self) -> Vec<i32> {
+        let mut chain = vec![self.navigables.focused];
+        while let Some(&parent) = chain.last().and_then(|r| self.navigables.parents.get(r)) {
+            chain.push(parent);
+        }
+        chain
+    }
+    // HTML "has focus steps" for `doc` (`document.hasFocus()`): a fully active document on the focus chain — its
+    // top-level traversable's system focus taken as had, there being no window manager to give it to another.
+    pub(crate) fn has_focus(&self, doc: NodeId) -> bool {
+        self.document_fully_active(doc) && self.get(doc).is_some_and(|d| self.focus_chain().contains(&d.realm))
+    }
     // …realm `cid`'s document, where it has one (a worker's none).
     pub(crate) fn realm_document(&self, cid: i32) -> Option<NodeId> {
         self.navigables.documents.get(&cid).copied()
@@ -505,6 +535,9 @@ impl RealmArena {
             nav.parents.remove(&cid);
             nav.navigable_ids.remove(&cid);
             nav.firsts.remove(&cid);
+            if nav.focused == cid {
+                nav.focused = 0;
+            }
             self.note_discarded();
             let dead: Vec<NodeId> = self.navigables.children.keys().copied().filter(|&c| self.get(c).is_none()).collect();
             for container in dead {
@@ -789,6 +822,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameRealm", frame_realm, context_id);
     crate::dom::register(scope, ns, "realmNavigable", realm_navigable, context_id);
     crate::dom::register(scope, ns, "realmTree", realm_tree, context_id);
+    crate::dom::register(scope, ns, "setFocusedRealm", set_focused_realm, context_id);
+    crate::dom::register(scope, ns, "blurRealm", blur_realm, context_id);
+    crate::dom::register(scope, ns, "focusChain", focus_chain, context_id);
+    crate::dom::register(scope, ns, "hasFocus", has_focus, context_id);
     crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
     crate::dom::register(scope, ns, "realmsMadeIn", realms_made_in, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
@@ -903,6 +940,25 @@ fn realm_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         v8::Boolean::new(scope, first).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.setFocusedRealm(realm) / __dom.blurRealm(realm) -> whether the focus moved (`set_focused_realm` / `blur_realm`).
+fn set_focused_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    rv.set_bool(crate::dom::dom(scope).arena.set_focused_realm(realm));
+}
+fn blur_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    rv.set_bool(crate::dom::dom(scope).arena.blur_realm(realm));
+}
+// __dom.focusChain() -> the realms whose documents have focus (`focus_chain`).
+fn focus_chain(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let chain = crate::dom::dom(scope).arena.focus_chain();
+    rv.set(realm_array(scope, &chain));
+}
+// __dom.hasFocus(docNid) -> `document.hasFocus()` (`has_focus`).
+fn has_focus(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let doc = nid_arg(scope, &args, 0);
+    rv.set_bool(doc.is_some_and(|doc| crate::dom::dom(scope).arena.has_focus(doc)));
 }
 // __dom.navigableRealms(id) / __dom.realmsMadeIn(realm) -> realm ids (`Navigables::navigable_realms` / `realms_made_in`).
 fn navigable_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

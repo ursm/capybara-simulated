@@ -426,12 +426,6 @@ module Capybara
       # through its own navigation.
       def window_realm_meta = (@window_realm_meta ||= {})
 
-      # Is this realm a TOP-LEVEL browsing context? The main realm is, and so is an auxiliary
-      # window realm — `frame_realm_parent` answers 0 for one because it has no parent FRAME,
-      # which is not the same as being nested in the main window. An ancestor walk (the focus
-      # chain, most of all) has to stop here rather than step into the opener.
-      def top_level_realm?(realm_id) = realm_id.to_i.zero? || window_realm_meta.key?(realm_id.to_i)
-
       def dispose_frame_realms
         @realm_module_handles&.clear
         @module_sw_ctxs&.clear

@@ -140,7 +140,7 @@ module Capybara
         '__csimClientPortPost'     => ->(b, *a) { b.port_post(a[0], a[1]); nil },
         # The focus chain moved into this realm's browsing context (a focus() commit, or an
         # <iframe> focused in its container, which hands focus to the nested context).
-        '__csimNoteFocusedRealm'   => ->(b, *a) { b.note_focused_realm(a[0]); nil },
+        '__csimFocusChanged'       => ->(b, *_) { b.focus_changed; nil },
         # This realm is a service-worker client: reported at document load and again whenever
         # control is installed, by the realm, because only it knows its own URL, frame type and
         # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.

@@ -117,4 +117,25 @@ RSpec.describe 'document focus state' do
     expect(s.evaluate_script("[document.activeElement.id, document.activeElement.matches(':focus'), document.activeElement.matches(':focus-visible')]"))
       .to eq(['adopted', true, false])
   end
+
+  # A document has focus where it is on the focus chain (HTML "has focus steps"): the page's, and a frame's only while
+  # the focus is in it — Chrome 156, measured 2026-10-29: `[true,false,true,true,"iframe",true,false]`.
+  it 'is had by a frame only while the focus is in it' do
+    s = simulated_session(lambda {|_env|
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><input id=t><iframe srcdoc="<input id=i>"></iframe>']]
+    })
+    s.visit '/'
+    got = s.evaluate_script(<<~JS)
+      (() => {
+        const f = frames[0];
+        const r = [document.hasFocus(), f.document.hasFocus()];
+        f.document.getElementById('i').focus();
+        r.push(document.hasFocus(), f.document.hasFocus(), document.activeElement.localName);
+        document.getElementById('t').focus();
+        r.push(document.hasFocus(), f.document.hasFocus());
+        return r;
+      })()
+    JS
+    expect(got).to eq([true, false, true, true, 'iframe', true, false])
+  end
 end
