@@ -859,13 +859,17 @@ impl RealmArena {
         } else {
             target
         };
+        // (…this realm's `parent` for `_parent`, and for a name its parent's navigable has)
+        let parent_realm = self.live_container(current).and_then(|c| self.get(c)).map(|n| n.realm);
         let parent = target_keyword(&String::from_utf16_lossy(target)) == TARGET_PARENT;
         match self.choose_navigable(current, target) {
             Choice::Current => OpenRoute::Own,
             Choice::TopLevel(r) | Choice::Window(r) if r == current => OpenRoute::Own,
             Choice::Frame(c) if self.frame_realm(c) == Some(current) => OpenRoute::Own,
             Choice::TopLevel(r) => OpenRoute::Navigable(Some(r), if parent { OpenWindow::Parent } else { OpenWindow::Top }),
-            Choice::Frame(c) if parent => OpenRoute::Navigable(self.frame_realm(c), OpenWindow::Parent),
+            Choice::Frame(c) if parent || (self.frame_realm(c).is_some() && self.frame_realm(c) == parent_realm) => {
+                OpenRoute::Navigable(self.frame_realm(c), OpenWindow::Parent)
+            }
             Choice::Frame(c) => OpenRoute::Navigable(self.frame_realm(c), OpenWindow::Container(c)),
             Choice::Window(w) => OpenRoute::Navigable(Some(w), OpenWindow::Window),
             Choice::Blocked => OpenRoute::None,
