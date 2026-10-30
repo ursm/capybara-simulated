@@ -11197,8 +11197,11 @@ module Capybara
           # about:srcdoc carries its own markup.)
           if url.to_s.match?(ABOUT_BLANK)
             # (…its origin its initiator's, an opaque one for none: a visit's — HTML "determine the origin", Chrome
-            # measured — and its base URL that document's)
-            inherit_creator(origin: url_origin(initiator).to_s, base: initiator.to_s, url: referer.to_s) if initiator
+            # measured — and its base URL that document's; a window's initial about:blank no navigation's, a `noopener`
+            # one's origin a new opaque one: HTML "window open steps")
+            if initiator && leaving_origin != :initial
+              inherit_creator(origin: url_origin(initiator).to_s, base: initiator.to_s, url: referer.to_s)
+            end
             commits.(initiator && url_origin(initiator))
             @current_url = url.to_s
             record_response(200, {'content-type' => 'text/html'})
