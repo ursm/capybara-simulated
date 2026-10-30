@@ -2358,11 +2358,14 @@ module Capybara
         rows.size
       end
       # …one of them: by `delta` (`history_go`), or, another window's `go(0)`, the page's reload, by its own document (HTML
-      # "apply the reload history step").
+      # "apply the reload history step") — a navigation begun after the one another window planned before it, which it
+      # aborts (session_history.rs `cancel_planned_before`).
       private def apply_queued_traversal(token, delta, realm, asked, force: false)
         return history_go(delta, force: force, realm: realm, token: token) unless delta.zero?
+        return unless asked
 
-        from_document(0) { refresh(user_activated: false, through_ui: false) } if asked
+        @session_history.cancel_planned_before(token)
+        from_document(0) { refresh(user_activated: false, through_ui: false) }
       end
       # …those, as the driver takes the navigations the page planned with them — the traversal they make first, its
       # cancelling of the ones it cancels in (HTML "apply the history step") — where one makes a document again (whose

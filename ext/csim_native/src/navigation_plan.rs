@@ -232,6 +232,10 @@ impl NavigationPlan {
     }
     // A traversal of the document's window that makes its document again planned (`Traversal`): the navigation planned
     // before it let go — HTML "apply the history step" sets the ongoing navigation to "traversal".
+    // …and whether one is planned.
+    pub(crate) fn traversal_planned(&self) -> bool {
+        self.own.traversal.is_some()
+    }
     pub(crate) fn plan_traversal(&mut self, traversal: Traversal) {
         self.supersede();
         self.own.traversal = Some(traversal);
@@ -445,14 +449,22 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
     ]
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
-// in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]` and `[realm,
-// "reload", activated, blob]` — and `[realm, "traverse", step, url, referrer]` (`Traversal`). A window closed is stepped no more, and plans none the host takes — nor one closing, whose
-// navigation the task its close queued aborts (HTML "destroy a top-level traversable"): taken, and let go.
+// in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]`, `[realm, "reload",
+// activated, blob]` and `[realm, "traverse", step, url, referrer]` (`Traversal`). A window closed is stepped no more,
+// and plans none the host takes — nor one closing, whose navigation the task its close queued aborts (HTML "destroy a
+// top-level traversable"): taken, and let go.
 fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
     for w in windows {
-        let own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
+        let mut own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
+        // (…a location's or a reload's let go where a traversal its window queued makes its document again: its task,
+        // which plans that traversal, goes ahead of them — HTML "apply the history step" sets the ongoing navigation to
+        // "traversal", as the page's does: browser.rb `apply_planned_traversals_before_navigations`)
+        let arena = &crate::dom::dom(scope).arena;
+        if own.traversal.is_none() && arena.window_history(w).is_some_and(|(h, _)| h.queued_documents()) {
+            own = Own::default();
+        }
         if (own.location.is_some() || own.reload.is_some() || own.traversal.is_some()) && !crate::dom::dom(scope).arena.window_closing(w) {
             taken.push((own.planned, w, own));
         }

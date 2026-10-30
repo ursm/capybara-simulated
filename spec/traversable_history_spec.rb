@@ -15,7 +15,8 @@ RSpec.describe 'the session history of each traversable' do
       body = env['rack.input']&.read.to_s
       requests << [env['REQUEST_METHOD'], env['PATH_INFO'], body, env['HTTP_ORIGIN']]
       title = env['PATH_INFO'].delete_prefix('/')
-      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><title>#{title}</title><p>#{env['REQUEST_METHOD']} #{body}</p>"]]
+      frame = '<iframe src=/inner></iframe>' if env['PATH_INFO'] == '/framed'
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><title>#{title}</title><p>#{env['REQUEST_METHOD']} #{body}</p>#{frame}"]]
     end
   }
   let(:session) { simulated_session(app) }
@@ -40,7 +41,7 @@ RSpec.describe 'the session history of each traversable' do
     end
 
     it "applies its opener's traversals in the order they were asked for" do
-      session.execute_script('w.history.go(-2); w.history.forward()')
+      expect(read('(() => { w.history.go(-2); const at = w.location.pathname; w.history.forward(); return at; })()')).to eq('/c')
       expect(read('w.location.pathname')).to eq('/b')
       expect(requests.map {|r| r[1] }.last(2)).to eq(['/a', '/b'])
     end
@@ -58,6 +59,21 @@ RSpec.describe 'the session history of each traversable' do
       session.execute_script('w.history.go(0)')
       expect(read('[w.location.pathname, w.history.length]')).to eq(['/c', 3])
       expect(hits('/c')).to eq(2)
+    end
+
+    # (…a reload a navigation, the later of the two aborting the earlier: HTML "set the ongoing navigation")
+    it "lets the later of a navigation its opener planned and its `go(0)` win" do
+      session.execute_script("w.location = '/x'; w.history.go(0)")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/c', 3])
+      expect([hits('/x'), hits('/c')]).to eq([0, 2])
+      session.execute_script("w.history.go(0); w.location = '/y'")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/y', 4])
+    end
+
+    it 'is a SecurityError to traverse by a History read before the window went to another origin' do
+      session.execute_script("window.h = w.history; w.location = 'http://b.test/far'")
+      expect(read('(() => { try { h.back(); return null; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+      expect(hits('/b')).to eq(1)
     end
 
     it 'moves it within its document, firing its own popstate after the script that asked' do
@@ -104,6 +120,28 @@ RSpec.describe 'the session history of each traversable' do
     it 'is traversed by its own script' do
       session.execute_script("w.eval('history.back()')")
       expect(read('w.location.pathname')).to eq('/a')
+    end
+
+    # (…HTML "apply the history step" sets the ongoing navigation to "traversal")
+    it 'begins no navigation its own script planned with a traversal' do
+      session.execute_script("w.eval(\"history.back(); location = '/z'\")")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/a', 2])
+      expect(hits('/z')).to eq(0)
+    end
+
+    it 'records a fragment navigation of it as an entry of its own' do
+      session.execute_script("w.location.hash = 'h1'")
+      expect(read('[w.history.length, history.length]')).to eq([3, 1])
+      session.execute_script("w.addEventListener('hashchange', () => { w.document.title = 'hash:' + w.location.hash; }); w.history.back()")
+      expect(read('[w.location.href, w.document.title]')).to eq(['http://a.test/b', 'hash:'])
+    end
+
+    # (…its window's: the one session history its tree has, the window's document moved by it)
+    it "traverses its window's history from a frame of it" do
+      session.execute_script("w.location = '/framed'")
+      session.execute_script("w.history.pushState({n: 1}, '', '/p1'); w.addEventListener('popstate', () => { w.document.title = 'pop'; })")
+      session.execute_script('w.frames[0].history.back()')
+      expect(read('[w.location.pathname, w.document.title, w.frames[0].location.pathname, w.history.length]')).to eq(['/framed', 'pop', '/inner', 4])
     end
   end
 

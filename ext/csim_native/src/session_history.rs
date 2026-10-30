@@ -210,6 +210,9 @@ struct Traversable {
 struct Asked {
     posted: Vec<Posted>,
     planned: Option<Planned>,
+    // …and the token of the last traversal queued before it was planned: one queued after — a reload, `go(0)` — begins
+    // a navigation later, which aborts it (`#cancel_planned_before`).
+    planned_after: u64,
     closing: bool,
     close_due: bool,
 }
@@ -831,16 +834,18 @@ impl SessionHistory {
     fn is_queued(&self) -> bool {
         !self.lock().queued.is_empty()
     }
-    fn queued_documents(&self) -> bool {
+    pub(crate) fn queued_documents(&self) -> bool {
         self.lock().queued.iter().any(|q| q.documents)
     }
     // #last_token -> the token of the traversal queued last, 0 for none ever: those up to it were asked for by now.
     fn last_token(&self) -> u64 {
         self.lock().tokens
     }
-    // #clear_queued: the queue emptied — the page's document gone, whose traversals go with it.
+    // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
+    // (…but those another window asked for, which are the traversable's to take, whatever document it is at)
     fn clear_queued(&self) {
-        self.lock().take_all_queued();
+        let mut t = self.lock();
+        t.queued.retain(|q| q.asked);
     }
     // …the plan with no step passed over (`Traversable::plan`), which the tests read.
     #[cfg(test)]
@@ -1042,6 +1047,15 @@ impl SessionHistory {
         }
         Ok(Some(hash))
     }
+    // #cancel_planned_before(token): the navigation planned of it let go where it was planned before the traversal of
+    // `token` was queued — a reload another window asked for after it, a navigation begun later (HTML "set the ongoing
+    // navigation"), which aborts it.
+    fn cancel_planned_before(&self, token: u64) {
+        let mut t = self.lock();
+        if t.asked.planned.is_some() && t.asked.planned_after < token {
+            asking(&mut t, |t| t.asked.planned = None);
+        }
+    }
     // #asked? -> whether something asked of it waits to be taken; #posted? -> a message.
     fn is_asked(&self) -> bool {
         self.lock().pending() > 0
@@ -1099,6 +1113,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
     class.define_method("take_all_queued", method!(SessionHistory::take_all_queued, 0))?;
     class.define_method("take_asked", method!(SessionHistory::take_asked, 0))?;
+    class.define_method("cancel_planned_before", method!(SessionHistory::cancel_planned_before, 1))?;
     class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("last_token", method!(SessionHistory::last_token, 0))?;
@@ -1435,6 +1450,73 @@ mod tests {
     }
 
     #[test]
+    fn a_traversal_another_window_asked_for_is_a_task_taken_in_the_order_queued() {
+        let popup = SessionHistory::new();
+        for url in ["http://a.test/1", "http://a.test/2", "http://a.test/3"] {
+            popup.push(TOP, 0, url.into(), false, Data::default());
+        }
+        let (own, _) = popup.lock().queue(-1, 0, false);
+        assert!(!popup.is_asked());
+        let (asked, delay) = popup.lock().queue(-1, 0, true);
+        // (…a reload of it too, `go(0)`, which makes its document again)
+        let (reload, _) = popup.lock().queue(0, 0, true);
+        assert_eq!(delay, 0);
+        assert!(popup.is_asked() && window_tasks_pending());
+        // (…its own before the asked one with them, in order; none after the last asked one)
+        let (after, _) = popup.lock().queue(1, 0, false);
+        assert_eq!(popup.take_asked(), vec![(own, -1, 0, false), (asked, -1, 0, true), (reload, 0, 0, true)]);
+        assert!(!popup.is_asked());
+        assert_eq!(popup.take_all_queued(), vec![(after, 1, 0, false)]);
+        // (…its page's let go with its document, those another window asked for kept)
+        popup.lock().queue(-1, 0, false);
+        let (kept, _) = popup.lock().queue(-1, 0, true);
+        popup.clear_queued();
+        assert_eq!(popup.take_asked(), vec![(kept, -1, 0, true)]);
+        // (…a reload asked after a navigation planned aborting it, not one asked before it)
+        let get = |url: &str| Planned { url: url.into(), replace: false, activated: false, referrer: None, policy: None, initiator: None, resource: Resource::Get };
+        let (before, _) = popup.lock().queue(0, 0, true);
+        popup.plan_navigation(get("http://a.test/x"));
+        popup.cancel_planned_before(before);
+        let (after, _) = popup.lock().queue(0, 0, true);
+        assert!(popup.is_asked() && popup.lock().asked.planned.is_some());
+        popup.cancel_planned_before(after);
+        assert!(popup.take_planned().is_none());
+        popup.take_all_queued();
+        assert!(!popup.is_asked());
+        // (…none of a window closing: its close destroys it first)
+        popup.lock().queue(-1, 0, true);
+        popup.close();
+        assert!(!popup.is_asked() && popup.take_asked().is_empty());
+    }
+
+    #[test]
+    fn a_navigation_another_window_planned_carries_its_resource_and_runs_a_javascript_url_of_its_origin_alone() {
+        let plan = |url: &str, resource: Resource| Planned {
+            url: url.into(),
+            replace: false,
+            activated: false,
+            referrer: None,
+            policy: None,
+            initiator: None,
+            resource,
+        };
+        let popup = SessionHistory::new();
+        popup.lock().origin = Some("http://a.test".into());
+        let post = Resource::Post { body: b"k=v".to_vec(), content_type: "application/x-www-form-urlencoded".into(), origin_null: false };
+        popup.plan_navigation(plan("http://a.test/posted", post.clone()));
+        assert_eq!(popup.take_planned().map(|p| p.resource), Some(post));
+        let javascript = |origin: &str| Resource::Javascript { origin: origin.into() };
+        popup.plan_navigation(plan("javascript:1", javascript("http://b.test")));
+        assert!(popup.take_planned().is_none() && !popup.is_asked());
+        popup.plan_navigation(plan("javascript:2", javascript("http://a.test")));
+        assert_eq!(popup.take_planned().map(|p| p.url), Some("javascript:2".into()));
+        // (…the ongoing navigation, which a later one replaces)
+        popup.plan_navigation(plan("javascript:3", javascript("http://a.test")));
+        popup.plan_navigation(plan("http://a.test/c", Resource::Get));
+        assert_eq!(popup.take_planned().map(|p| p.url), Some("http://a.test/c".into()));
+    }
+
+    #[test]
     fn a_window_web_content_did_not_make_closes_only_at_its_first_entry() {
         let page = SessionHistory::new();
         page.push(TOP, TOP, "http://a.test/".into(), false, Data::default());
@@ -1531,7 +1613,10 @@ fn post_to(t: &mut Traversable, posted: Posted) {
 // closed, which no navigation of finishes.
 fn plan_on(t: &mut Traversable, planned: Planned) {
     if !t.closed && !t.asked.closing {
-        asking(t, |t| t.asked.planned = Some(planned));
+        asking(t, |t| {
+            t.asked.planned = Some(planned);
+            t.asked.planned_after = t.tokens;
+        });
     }
 }
 
@@ -1712,7 +1797,6 @@ fn history_of_page_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     rv.set_bool(of_page(crate::dom::realm(scope, cid), realm));
 }
 
-
 // __dom.historyTraverse(delta) -> [token, delay]: a traversal by `delta` the calling realm's `history` asked for, appended
 // to its traversable's session history traversal queue (`traversable_of`, `Traversable::queue`) — [0, 0] for a realm of
 // none, which traverses nothing. Its task, which the bindings queue with that delay, applies it (`applyWindowTraversal`,
@@ -1731,15 +1815,17 @@ fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // that moves the window within its document (HTML "update document for history step application": its location the
 // entry's URL, then `popstate` with its state, which the bindings do); one that makes its document again planned in that
 // document's navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those queued after
-// it left queued, for the document it makes to apply (`queuedWindowTraversals`). Null for a realm of no such window: the
-// page's traversals are the host's to apply.
+// it left queued, for the document it makes to apply (`queuedWindowTraversals`) — as are all of them while one is planned
+// already, applied in turn from the step it goes to. The window's realm first, whose document the moves update (a
+// frame's `history` traverses its window's). Null for a realm of no such window: the page's traversals are the host's to
+// apply.
 fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let cid = crate::dom::realm_id(scope, &args);
     let Some((traversable, window)) = window_traversable(crate::dom::realm(scope, cid), cid) else { return rv.set_null() };
     let mut moves = Vec::new();
     let mut planned = None;
-    {
+    if !crate::dom::realm(scope, window).navigation_plan.traversal_planned() {
         let mut t = lock(&traversable);
         let mut queued = t.take_queued(token).into_iter();
         for q in queued.by_ref() {
@@ -1768,7 +1854,8 @@ fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     if let Some(traversal) = planned {
         crate::dom::realm(scope, window).navigation_plan.plan_traversal(traversal);
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(moves.len() * 2);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(moves.len() * 2 + 1);
+    items.push(v8::Integer::new(scope, window).into());
     for (url, state) in moves {
         let Some(url) = v8::String::new(scope, &url) else { return rv.set_null() };
         items.push(url.into());
