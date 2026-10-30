@@ -7573,7 +7573,7 @@ module Capybara
         key = resolve_against_current(url.to_s)
         return nil unless key.is_a?(String)
         Thread.current[:csim_image_meta] = nil
-        cors, credentials, client = planned_request(plan, realm, key, referrer: referrer)
+        cors, credentials, client = planned_request(plan, realm, referrer: referrer)
         entry = cached_image(key, cors, credentials, client: client)
         return {'unsupported' => true} if entry == :unsupported
         return undecodable_image_result unless entry
@@ -7588,7 +7588,7 @@ module Capybara
       def image_load_start(url, plan, realm: nil)
         key = resolve_against_current(url.to_s)
         return -1 unless key.is_a?(String)
-        cors, credentials, client = planned_request(plan, realm, key)
+        cors, credentials, client = planned_request(plan, realm)
         id = nil
         @image_load_lock.synchronize do
           id = (@image_load_seq += 1)
@@ -7761,7 +7761,7 @@ module Capybara
           # Sec-Fetch-Site does not compare)
           result = rack_fetch('GET', key, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
                               referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true, initiator: client[:initiator],
-                              cookie_cross_site: client[:cookie_cross_site], client_origin: client[:origin], dest: 'image')
+                              ancestors: client[:ancestors], client_origin: client[:origin], dest: 'image')
           # What the image's Resource Timing entry reports of the response — its content type,
           # whether it was redirected to, its status and size — read back on this thread right
           # after; a 404 is a response too, the entry keeping its status. And whether it taints a canvas it is drawn
@@ -8334,10 +8334,10 @@ module Capybara
         # drawn into where a hop left the fetching CLIENT's origin (a frame's own
         # document, not the top window's) — the <img> model, for the client an
         # image's is (image_source_bytes).
-        cors, credentials, client = planned_request(plan, realm, url.to_s)
+        cors, credentials, client = planned_request(plan, realm)
         result = rack_fetch('GET', url, '', {}, 'follow', cors ? 'cors' : nil, credentials: credentials, client_url: client[:url],
                             referrer: client[:referrer], referrer_policy: client[:policy], body_raw: true,
-                            cookie_cross_site: client[:cookie_cross_site], client_origin: client[:origin], dest: 'video')
+                            ancestors: client[:ancestors], client_origin: client[:origin], dest: 'video')
         # (…and the response's facts, its Resource Timing entry's, whether its bytes load or not: none of a network error)
         meta = result && resource_timing_meta(result)
         bytes = result['body_raw'].to_s if resource_loaded?(result) && result['status'].to_i < 400
@@ -10192,12 +10192,13 @@ module Capybara
       # The origin a request of client `client` is made as — its own where it is opaque, else its URL's, the page's for a
       # client of no http(s) URL — as `rack_fetch` judges its request.
       def client_origin_of(client) = client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url)
-      # …and `client` pinned for a fetch of `target_url` made off the main thread (an image's): whether it is cross-site
-      # for cookies worked out here — its document's, or an ancestor's, site another's; an opaque one's always
-      # (`container_cross_site?`) — as no realm is asked from a host thread.
-      def pinned_client(client, target_url)
-        cross = !client[:origin].nil? || container_cross_site?(client[:realm].to_i, target_url)
-        client.merge(cookie_cross_site: cross, realm: nil)
+      # …and `client` pinned for a fetch made off the main thread (an image's): the origins of its document and its
+      # ancestors' up to the top-level one, which the fetch's plan judges its cookies by at every hop (fetch_plan.rs
+      # `ancestors`) — asked here, as no realm is asked from a host thread; an opaque client's own origin is judged by
+      # its `origin` (`null`) all the same.
+      def pinned_client(client)
+        ancestors = client[:realm] ? @runtime.realm_direct_call(0, '__csimAncestorDocuments', client[:realm].to_i, true) || [] : []
+        client.merge(ancestors: ancestors, realm: nil)
       end
       # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
       # and whose origin an Origin header carries, and whether that document's own origin is opaque (a sandbox's)].
@@ -11824,22 +11825,17 @@ module Capybara
         mode, credentials, policy, _, dest, accept = Native.subresource_plan_fields(plan.to_i)
         mode == 'no-cors' ? [nil, 'same-origin', policy, dest, accept] : [mode, credentials, policy, dest, accept]
       end
-      # …and the request a load the host makes for a subresource's `plan` (subresource_plan.rs) is, to `target_url`: whether
-      # it is a CORS one, its credentials mode, its client — pinned, as it is fetched off the main thread, its opacity the
-      # bindings' (`client_for`).
-      private def planned_request(plan, realm, target_url, referrer: nil)
+      # …and the request a load the host makes for a subresource's `plan` (subresource_plan.rs) is: whether it is a CORS
+      # one, its credentials mode, its client — pinned, as it is fetched off the main thread, its opacity the bindings'
+      # (`client_for`).
+      private def planned_request(plan, realm, referrer: nil)
         mode, credentials, policy, opaque = Native.subresource_plan_fields(plan.to_i)
-        [mode == 'cors', credentials, pinned_client(client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, opaque: opaque), target_url)]
+        [mode == 'cors', credentials, pinned_client(client_for(realm, policy, referrer: referrer.to_s.empty? ? nil : referrer, opaque: opaque))]
       end
       # A document's site for cookies (RFC 6265bis "site for cookies"): its top-level document's site where every ancestor
       # of it is of that site, else none (nil) — an about:blank / srcdoc one inheriting its creator's: the engine's
       # (referrer.rs `site_for_cookies`).
       private def site_for_cookies(realm_id) = @runtime.realm_direct_call(0, '__csimSiteForCookies', realm_id.to_i)
-      # Whether a request of realm `realm_id`'s document to `target_url` is cross-site for cookies by its document or an
-      # ancestor's, up to its top-level one — a window's opener none of them (referrer.rs `frame_cross_site`).
-      private def container_cross_site?(realm_id, target_url)
-        @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, true) == true
-      end
 
       # Build + dispatch a navigation request (a document's load, a frame's or the page's) — the shared core of every
       # navigation's hop and of the navigation-preload request, so all of them send the SAME Referer / Origin /

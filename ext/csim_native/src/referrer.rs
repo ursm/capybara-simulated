@@ -150,7 +150,6 @@ pub(crate) fn redirect_taints_for_ruby(tainted: bool, initiator: Option<String>,
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "requestClient", request_client_op, context_id);
     register(scope, ns, "siteForCookies", site_for_cookies_op, context_id);
-    register(scope, ns, "crossSiteForCookies", cross_site_for_cookies_op, context_id);
     register(scope, ns, "documentCookieContext", document_cookie_context_op, context_id);
     register(scope, ns, "ancestorDocuments", ancestor_documents_op, context_id);
 }
@@ -327,13 +326,6 @@ fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
         .map(|u| u.as_deref().and_then(|u| v8::String::new(scope, u)).map_or_else(|| v8::null(scope).into(), Into::into))
         .collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
-}
-// __dom.crossSiteForCookies(realm, target, own) -> `frame_cross_site`.
-fn cross_site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let r = args.get(0).int32_value(scope).unwrap_or(0);
-    let target = args.get(1).to_rust_string_lossy(scope);
-    let own = args.get(2).is_true();
-    rv.set_bool(frame_cross_site(&mut dom(scope).arena, r, &target, own));
 }
 
 // __dom.documentCookieContext(realm, url) -> the context `document.cookie` reads and writes the cookies of `url` in, for
