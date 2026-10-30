@@ -287,7 +287,8 @@ module Capybara
       # are discarded after (`reap_closed_windows`), none of theirs on the stack.
       def run_event_loop_frame(frame_ms)
         reap_closed_windows
-        current = current_browser
+        # (…the primary's where the active window closed: no command of the test's, which alone are refused then)
+        current = active_browser || @browser
         state = current.run_event_loop_frame(frame_ms)
         # Iterate a SNAPSHOT: a window's drain can open or close windows mid-loop (a
         # popup spawning another). Re-check each window is still open before stepping
@@ -312,8 +313,9 @@ module Capybara
       # (the wpt_runner's clock-hold) sees a popup-hosted worker/SW round trip too,
       # not just the active window's.
       def worker_drive_pending?
-        return true if current_browser.worker_drive_pending?
-        @aux_windows.any? {|w| !w[:browser].equal?(current_browser) && w[:browser].worker_drive_pending? }
+        current = active_browser || @browser
+        return true if current.worker_drive_pending?
+        @aux_windows.any? {|w| !w[:browser].equal?(current) && w[:browser].worker_drive_pending? }
       end
 
       # Fold an aux window's frame state into the running aggregate: any window that

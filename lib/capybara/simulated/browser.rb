@@ -1010,7 +1010,7 @@ module Capybara
         # the delivered message never reaches the DOM during find-polling
         # (only `evaluate_script`, which ticks unconditionally, would see
         # it). Non-empty results keep the fast path — no extra tick.
-        return result unless empty_find_result?(result) && (@timers_active || async_io_pending?)
+        return result unless empty_find_result?(result) && (@timers_active || async_io_pending? || background_timers_pending?)
 
         tick_real_time
         return result unless @find_cache_dirty
@@ -1134,10 +1134,21 @@ module Capybara
       # …its others, none in a session of one window (the common one, which pays a Driver predicate).
       private def background_windows = @driver.respond_to?(:several_windows?) && @driver.several_windows? ? session_windows.drop(1) : []
 
-      # Whether another window of the session has timers to run, which no poll of its own runs while this one is the
-      # active window (`step_background_windows`).
-      def background_timers_pending? = background_windows.any?(&:timers_active?)
-      def timers_active? = @timers_active == true
+      # Whether another window of the session has a timer to run within a wait's reach — Capybara's default wait, of
+      # its own clock, which each poll of this one advances (`step_background_windows`): what that window does as it
+      # fires is what a wait may be for (an OAuth or payment pop-up reporting back to its opener), where one further off
+      # (a keep-alive) would make every negative matcher wait out the idle gate for nothing (`polling?`).
+      def background_timers_pending? = background_windows.any?(&:timer_due_within_wait?)
+      def timer_due_within_wait?
+        return false unless @timers_active
+
+        delay = @runtime.next_timer_delay_ms
+        delay >= 0 && delay <= Capybara.default_max_wait_time.to_f * 1000
+      end
+      # …and the settle generation of every window a poll steps, which the idle gate of `polling?` reads: one whose
+      # timers change nothing reads idle, as this one's do.
+      private def polled_settle_gen = background_windows.sum(@runtime.settle_gen, &:settle_gen)
+      def settle_gen = @runtime.settle_gen
 
       # A poll's advance of `ms` run in the session's other windows too (`step_in_background`): every window's event loop
       # runs as the active one's is polled, as `Driver#run_event_loop_frame` steps them all a frame.
@@ -2865,8 +2876,8 @@ module Capybara
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
         # worker's forever `setInterval` (a heartbeat) cannot make every negative matcher wait out its whole timeout.
-        if @timers_active || worker_timers_pending? || background_timers_pending?
-          gen = @runtime.settle_gen
+        if @timers_active || worker_timers_pending? || (background = background_timers_pending?)
+          gen = background ? polled_settle_gen : @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
             @last_polled_gen = gen
             @idle_settle_polls = 0

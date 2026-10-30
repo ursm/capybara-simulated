@@ -93,7 +93,7 @@ module Capybara
         # otherwise never see it. `async_io_pending?` is an O(1) gate
         # (three empty? checks) that lets those cases drain without paying
         # an unconditional tick on timer-driven runloop pages.
-        browser.tick_real_time if browser.timer_wait_elapsed? || browser.async_io_pending?
+        browser.tick_real_time if browser.timer_wait_elapsed? || browser.async_io_pending? || browser.background_timers_pending?
         check_stale
         browser.attr(handle_id, name.to_s)
       end

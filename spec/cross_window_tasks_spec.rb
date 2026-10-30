@@ -22,7 +22,10 @@ RSpec.describe 'a task one window asks of another' do
       '/closer' => "window.addEventListener('load', () => { opener.close(); localStorage.setItem('closedAtOnce', String(opener.closed)); });",
       # (…an OAuth-style pop-up, which reports back to its opener on a timer and closes itself)
       '/waits' => "addEventListener('message', (e) => { if (e.data === 'authorized') document.body.insertAdjacentHTML('beforeend', '<p id=done>done</p>'); });",
-      '/authorizes' => "setTimeout(() => { opener.postMessage('authorized', '*'); close(); }, 100);"
+      '/authorizes' => "setTimeout(() => { opener.postMessage('authorized', '*'); close(); }, 600);",
+      # (…a pop-up whose interval counts in its opener's title, and one whose only timer is a keep-alive far off)
+      '/ticks' => "let n = 0; setInterval(() => { opener.document.title = 'tick ' + (++n); }, 50);",
+      '/idles' => 'setTimeout(() => {}, 30000);'
     }
   }
   let(:hits) { Hash.new(0) }
@@ -32,7 +35,8 @@ RSpec.describe 'a task one window asks of another' do
       hits[env['PATH_INFO']] += 1
       title  = env['PATH_INFO'].delete_prefix('/')
       script = scripts[env['PATH_INFO']]
-      [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{title}</title><script>#{script}</script>"]]
+      body   = "<button onclick=\"window.open('/authorizes')\">sign in</button>" if env['PATH_INFO'] == '/waits'
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{title}</title><script>#{script}</script>#{body}"]]
     end
   }
   let(:session) { simulated_session(app) }
@@ -105,9 +109,22 @@ RSpec.describe 'a task one window asks of another' do
   # (…its timers run as a wait polls the opener, every window's event loop with the active one's)
   it 'runs the timers of a pop-up that is not the active window as a wait polls its opener' do
     session.visit 'http://a.test/waits'
-    open_window('/authorizes')
+    session.click_button 'sign in'
     expect(session).to have_css('#done', wait: 2)
     expect(session.windows.size).to eq(1)
+  end
+
+  it "advances a pop-up's interval as a wait polls its opener" do
+    open_window('/ticks')
+    expect(session).to have_title('tick 10', wait: 2)
+  end
+
+  # (…a timer beyond a wait's reach keeps no negative matcher waiting: Capybara's default wait, of the window's clock)
+  it "keeps no negative matcher waiting on a pop-up's far-off timer" do
+    open_window('/idles')
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    expect(session.has_css?('#nothing', wait: 5)).to be(false)
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
   end
 
   # (…the blob its URL names resolved as the caller's Location parsed it: a revoke after takes none of it back)
