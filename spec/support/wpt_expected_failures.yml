@@ -2439,8 +2439,6 @@ fetch/api/policies/referrer-origin-when-cross-origin-service-worker.https.html:
 fetch/api/policies/referrer-origin-worker.html:
 - Cross-origin referrer is overridden by client origin
 - Request's referrer is origin
-fetch/api/policies/referrer-origin.html:
-- Cross-origin referrer is overridden by client origin
 fetch/api/redirect/redirect-keepalive.https.any.js:
 - "[keepalive][iframe][load] mixed content redirect"
 fetch/api/redirect/redirect-origin.any.js:
@@ -5921,9 +5919,6 @@ service-workers/service-worker/update-after-oneday.https.html:
 - "[harness] TIMEOUT"
 service-workers/service-worker/update-recovery.https.html:
 - Recover from a bad service worker by updating after a failed navigation.
-service-workers/service-worker/websocket-in-service-worker.https.html:
-- Verify WebSockets can be created in a Service Worker
-- "[harness] TIMEOUT"
 service-workers/service-worker/webvtt-cross-origin.https.html:
 - cross-origin text track with approved cors request should not load
 - cross-origin text track with no-cors request should not load

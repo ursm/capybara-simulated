@@ -155,6 +155,11 @@ const TREES = [
                                        // isolates; the pure-API slice. cache-abort (unbounded streaming
                                        // fetch) is skip-listed; cache-storage-buckets earns out (Storage
                                        // Buckets subsystem)
+  'eventsource',                       // EventSource (HTML §9.2) — the server-sent events Mastodon and Turbo-ish
+                                       // streaming apps hold open: the stream format, the connection's request
+                                       // (CORS, credentials, Last-Event-ID), reconnection, and close(). The `.py`
+                                       // handlers run through wpt_py_handler.py; the stream reaches its reader
+                                       // over a socket of its own, so the runner serves these hosts on one.
   'websockets',                        // WebSocket client (RFC6455) — the same runtime Action Cable /
                                        // Turbo Streams ride on, validated against the spec's own send /
                                        // receive / close / close-code / protocol / binary tests. The runner

@@ -334,9 +334,18 @@ class _H2Frame:
 
 
 class CookieValue:
-    """wptserve request.cookies value: `.value` is the cookie's bytes."""
+    """wptserve request.cookies value: `.value` is the cookie's bytes — and, as wptserve's, it compares equal to
+    those bytes (eventsource status-reconnect.py: `request.cookies.first(name, b"") == status_code`)."""
     def __init__(self, value):
         self.value = value
+
+    def __eq__(self, other):
+        if isinstance(other, CookieValue):
+            return self.value == other.value
+        return self.value == _b(other)
+
+    def __hash__(self):
+        return hash(self.value)
 
 
 class Cookies:
@@ -355,6 +364,11 @@ class Cookies:
         return iter(self._d)
 
     def get(self, name, default=None):
+        return self._d.get(_b(name), default)
+
+    def first(self, name, default=None):
+        # wptserve's MultiDict.first: the first value for `name` (one per name here — see get_list), else `default`
+        # (eventsource reconnect-fail.py / status-reconnect.py).
         return self._d.get(_b(name), default)
 
     def get_list(self, name):
@@ -480,6 +494,11 @@ class Response:
         if httponly:             parts.append(b'HttpOnly')
         self.headers.append(b'Set-Cookie', b'; '.join(parts))
 
+    def delete_cookie(self, name, path=b'/', domain=None):
+        # wptserve's: the cookie set again empty, expired a day ago (eventsource status-reconnect.py / reconnect-fail.py).
+        import datetime as _dt
+        self.set_cookie(name, b'', path=path, domain=domain, max_age=0, expires=_dt.timedelta(days=-1))
+
 
 def _to_bytes(v):
     if v is None:
@@ -603,12 +622,27 @@ def register_wptserve_stub():
             return json.dumps(rv)
         return handler
     handlers.json_handler = json_handler
+    # wptserve's `pipes.sub(request, response)`: the response's content with its `{{GET[name]}}` / `{{headers[name]}}`
+    # tokens replaced by the request's (eventsource cors.py's cache-control run) — the tokens the runner's static
+    # `pipe=sub` also resolves; any other left as it is, so it shows up in the assertion that reads it.
+    pipes = types.ModuleType('wptserve.pipes')
+    def sub(request, response):
+        def token(m):
+            kind, name = m.group(1), m.group(2).encode('latin-1')
+            value = request.GET.first(name, b'') if kind == 'GET' else request.headers.get(name, b'')
+            return _b(value).decode('latin-1')
+        text = _to_bytes(response.content).decode('latin-1')
+        response.content = re.sub(r'\{\{(GET|headers)\[([^\]]+)\]\}\}', token, text).encode('latin-1')
+        return response
+    pipes.sub = sub
     pkg = types.ModuleType('wptserve')
     pkg.utils = utils
     pkg.handlers = handlers
+    pkg.pipes = pipes
     sys.modules['wptserve'] = pkg
     sys.modules['wptserve.utils'] = utils
     sys.modules['wptserve.handlers'] = handlers
+    sys.modules['wptserve.pipes'] = pipes
 
 
 def main():
