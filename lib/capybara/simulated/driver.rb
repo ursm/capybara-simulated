@@ -487,29 +487,23 @@ module Capybara
       # skipping those: a `noopener` window's name finds none of its opener's, a cross-origin pop-up's none of the page's
       # (Chrome and Firefox open a new window) — none for '' or none `from`. None that is closing: its `close()` takes it
       # out of every lookup by name at once, its discard a task later (WPT close-method.window.js).
+      # Only the session's Browsers are searched, never a window `window.open` made in a Browser's isolate (RealmWindow).
+      # For `from`'s own isolate, its engine has already chosen (navigables.rs `find_navigable`, which judges the frame
+      # that named the window and its sandbox). When it asks here, it chose a new window: a sandboxed frame, or a frame not
+      # familiar with the one of that name, must not reach that window. No other isolate's WindowProxy reaches such a
+      # window (`isolate_window`) until R13 S6 brings every pop-up of a group into its opener's isolate, so another
+      # isolate that names one opens a window of its own meanwhile.
+      # (…"familiar with" between top-level windows, session_history.rs `familiar`: none once its page disowned it, Chrome
+      # and Firefox measured — a window that set `opener = null` is found by no name its opener's cross-origin page gives.
+      # `from`'s page's document is judged, also when a frame of another isolate targets by name — a gap)
       private def named_window(name, from)
         return if name.empty? || from.nil?
 
         window_entries.find {|w|
           target = w[:window]
-          target.window_name == name && !target.closing? && target.browsing_context_group == from.browsing_context_group && reachable?(from, target) &&
-            familiar_with?(from, target)
+          target.is_a?(Browser) && target.window_name == name && !target.closing? &&
+            target.browsing_context_group == from.browsing_context_group && from.traversable.familiar_with?(target.traversable)
         }
-      end
-      # HTML "familiar with", between top-level windows (session_history.rs `familiar`): `from`'s document of `target`'s
-      # document's origin, or `target` an auxiliary browsing context whose opener `from` is familiar with — none once its
-      # page disowned it (Chrome and Firefox measured: a window that set `opener = null` is found by no name its opener's
-      # cross-origin page gives). (…`from`'s page's document judged, a frame's that targets by name too — a gap)
-      # Whether the script of `from`'s isolate can be handed `target`: a window `window.open` made in a Browser's isolate
-      # that isolate's alone — no other isolate's WindowProxy reaches one (`isolate_window`) until R13 S6 brings every
-      # pop-up of a group into its opener's isolate; another reaching its name opens a window of its own meanwhile.
-      private def reachable?(from, target) = !target.is_a?(RealmWindow) || target.host.equal?(from)
-      # (…a window `window.open` made in a Browser's isolate: `from`'s page of its document's origin, or familiar with its
-      # opener, its host's page — whether that one disowned it aside, which its host's engine alone knows)
-      private def familiar_with?(from, target)
-        return from.traversable.familiar_with?(target.traversable) unless target.is_a?(RealmWindow)
-
-        (target.origin != 'null' && target.origin == from.page_origin) || familiar_with?(from, target.host)
       end
 
       # The Browser backing a handle, or nil if the window is closed/unknown.

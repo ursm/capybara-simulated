@@ -7399,13 +7399,9 @@ module Capybara
       def window_realm_gen = @runtime.window_gen
       def window_realms_changed = @runtime.window_realms_changed
       private def window_realm_made(key) = @runtime.window_realm_meta.find {|_, meta| meta[:window_key] == key }&.first
-      # Its URL, its title, its target name: its document's, its browsing context's.
+      # Its URL and its title: its document's.
       def window_realm_url(realm)   = @runtime.realm_call(realm, '__csimLocationHref').to_s
       def window_realm_title(realm) = @runtime.realm_call(realm, '__csimDocumentTitle').to_s
-      def window_realm_name(realm)  = @runtime.realm_call(realm, '__csimWindowName').to_s
-      # …and its document's origin (`familiar_with?`), and the page's.
-      def window_realm_origin(realm) = @runtime.realm_call(realm, '__csimDocumentOriginOf').to_s
-      def page_origin                = @runtime.call('__csimDocumentOriginOf').to_s
       # The user's navigation of it (Capybara's `visit` in it): a new document at `url`, no document its initiator.
       def visit_window_realm(realm, url)
         navigate_window_realm(realm, 'location', [url.to_s, false, nil, nil, nil, true, nil], by_user: true)

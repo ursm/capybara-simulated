@@ -61,8 +61,6 @@ module Capybara
       def refresh         = host.refresh_window_realm(realm!)
       def go_back         = host.traverse_window_realm(realm!, -1)
       def go_forward      = host.traverse_window_realm(realm!, 1)
-      def window_name     = (r = realm) ? host.window_realm_name(r) : ''
-      def origin          = (r = realm) ? host.window_realm_origin(r) : 'null'
       def viewport_width  = host.window_realm_viewport(realm!)[0]
       def viewport_height = host.window_realm_viewport(realm!)[1]
       def screen_size     = host.screen_size

@@ -408,19 +408,17 @@ end
 RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its opener\'s page', :every_host_local do
   let(:session) {
     simulated_session(lambda {|env|
-      req  = Rack::Request.new(env)
-      body = case req.path
+      req         = Rack::Request.new(env)
+      sandbox     = %( sandbox="#{req.params['sandbox']}") if req.params['sandbox']
+      frame_opens = req.params.key?('frame_opens')
+      body        = case req.path
       when '/'
         <<~HTML
           <!doctype html><html><head><meta charset="utf-8"><title>main</title></head><body>
             <p id="main">MAIN</p>
-            <iframe src="http://b.test/frame"></iframe>
-            <iframe src="http://a.test/frame"></iframe>
-            <script>
-              window.w = window.open('', 'w');
-              w.document.write('<!doctype html><title>blank</title><p id="in">IN</p><iframe srcdoc="<p id=deep>DEEP</p>"></iframe>');
-              w.document.close();
-            </script>
+            <iframe src="http://b.test/frame"#{sandbox}></iframe>
+            <iframe src="http://a.test/frame#{'?opens' if frame_opens}"#{sandbox}></iframe>
+            <script>#{open_w unless frame_opens}</script>
           </body></html>
         HTML
       when '/frame'
@@ -428,9 +426,12 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
           <!doctype html><html><head><meta charset="utf-8"></head><body>
             <p id="frame">#{req.host}</p>
             <button id="script">script</button>
+            <button id="url">url</button>
             <button id="inline" onclick="open('', 'w').location = 'http://a.test/landed'">inline</button>
             <script>
               document.getElementById('script').addEventListener('click', () => { open('', 'w').location = 'http://a.test/landed'; });
+              document.getElementById('url').addEventListener('click', () => { open('http://a.test/landed', 'w'); });
+              #{open_w if req.query_string == 'opens'}
             </script>
           </body></html>
         HTML
@@ -440,11 +441,20 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
       [200, {'content-type' => 'text/html'}, [body]]
     })
   }
+  # (…opened by the page's script, or by its frame of its own origin's)
+  let(:open_w) {
+    <<~JS
+      window.w = window.open('', 'w');
+      w.document.write('<!doctype html><title>blank</title><p id="in">IN</p><iframe srcdoc="<p id=deep>DEEP</p>"></iframe>');
+      w.document.close();
+    JS
+  }
+  let(:path)  { '/' }
   let(:main)  { session.windows.first }
-  let(:popup) { session.windows.last }
+  let(:popup) { session.windows[1] }
 
   before do
-    session.visit('http://a.test/')
+    session.visit("http://a.test#{path}")
     expect(session.windows.size).to eq(2)
   end
 
@@ -495,7 +505,7 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
   [[0, 'another origin'], [1, 'its origin']].each do |index, origin|
     it "is found by its name by a script of a frame of #{origin}, which navigates it" do
       session.within_frame(index) do
-        expect(session.evaluate_script("open('', 'w') === open('', 'w')")).to be(true)
+        expect(session.evaluate_script("open('', 'w').closed")).to be(false)
         session.click_button('script')
         expect(session).to have_css('#frame')
       end
@@ -518,5 +528,43 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
       expect(session.windows.size).to eq(2)
       session.within_window(popup) { expect(session).to have_css('#in') }
     end
+  end
+
+  # A frame its name finds no window for — one not familiar with it, or one sandboxed against navigating it — opens a
+  # window of its own by that name, the window of the name left as it was, whether it gave a URL or set the location of
+  # the window it got (Chrome measured).
+  shared_examples 'a frame it is not found from' do |index|
+    it 'opens a window of its own for a script that sets its location' do
+      session.within_frame(index) do
+        expect(session.evaluate_script("(() => { const r = open('', 'w'); r.location = 'http://a.test/landed'; return r.closed; })()")).to be(false)
+      end
+      expect(session.windows.size).to eq(3)
+      session.within_window(session.windows.last) { expect(session).to have_css('#landed', text: 'a.test/landed') }
+      session.within_window(popup) { expect(session).to have_css('#in') }
+    end
+
+    it 'opens a window of its own at the URL a script gives' do
+      session.within_frame(index) { session.click_button('url') }
+      expect(session.windows.size).to eq(3)
+      session.within_window(session.windows.last) { expect(session).to have_css('#landed', text: 'a.test/landed') }
+      session.within_window(popup) { expect(session).to have_css('#in') }
+    end
+  end
+
+  # (…a frame of another origin than the frame that opened it: HTML "familiar with" holds through none of its rules —
+  # not of its origin, not its top-level traversable, its opener a frame of another origin than the one naming it, and
+  # not a frame)
+  context 'opened by a frame of the page, named by a frame of another origin' do
+    let(:path) { '/?frame_opens' }
+
+    include_examples 'a frame it is not found from', 0
+  end
+
+  # (…a frame sandboxed with `allow-scripts allow-popups`: HTML "allowed by sandboxing to navigate" refuses it the
+  # window, which is not its top-level traversable and of which it is not the one permitted sandboxed navigator)
+  context 'named by a sandboxed frame' do
+    let(:path) { '/?sandbox=allow-scripts%20allow-popups' }
+
+    include_examples 'a frame it is not found from', 1
   end
 end
