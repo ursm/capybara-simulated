@@ -1403,12 +1403,15 @@ module Capybara
         env = rack_env_for(url, method: 'GET')
         env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
         env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
-        ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env))
-        env['HTTP_COOKIE']     = ck              unless ck.empty?
+        # (…a top-level navigation from the document's, its cookies and its response's Set-Cookie of that context: a
+        # download is a navigation's response)
+        cookie_context = Native.cookie_context(@current_url, url.to_s, true)
+        attach_cookies(env, env_request_url(env), cookie_context)
         referrer               = Native.referrer_url(@current_url)
         env['HTTP_REFERER']    = referrer if referrer
         response = dispatch_rack_or_http(url, env) or return
         status, headers, body = response
+        store_set_cookies(headers, url, cookie_context)
         return unless status.to_i == 200
         # (…named by the link's `download` value where its Content-Disposition names nothing)
         save_downloaded_response(url, headers, body, hint: filename_hint)
@@ -4182,8 +4185,10 @@ module Capybara
         key      = SecureRandom.base64(16)
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
-        # (…its cookies a same-site request's: a handshake is not yet judged by its client's site for cookies)
-        apply_default_request_env(env, referer: client, cookie_context: same_site_cookie_context(target))
+        # (…its cookies sent, and the handshake's Set-Cookie stored, as its client's site for cookies judges it — a
+        # worker's the site it was made with, the window's its document's, a frame's socket's its window's)
+        cookie_context = Native.cookie_context(worker ? worker_cookie_site(worker) : @current_url, target, false)
+        apply_default_request_env(env, referer: client, cookie_context: cookie_context)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
@@ -4213,7 +4218,7 @@ module Capybara
           @websocket_workers[id]     = worker.handle if worker
           @websocket_threads[id] = Thread.new do
             Thread.current.report_on_exception = false
-            run_websocket_reader(id, csim_io, accept, queue, target)
+            run_websocket_reader(id, csim_io, accept, queue, target, cookie_context)
           end
         end
         id
@@ -4288,7 +4293,7 @@ module Capybara
         # forwarded to JS; the reader queues it before `__open`, so document.cookie sees it in onopen.
         js_events = events.reject do |e|
           if e[:type] == '__setcookie'
-            merge_set_cookie({'set-cookie' => e[:cookies]}, e[:url])
+            store_set_cookies({'set-cookie' => e[:cookies]}, e[:url], e[:cookie_context])
             true
           end
         end
@@ -4353,7 +4358,7 @@ module Capybara
 
       # Background-thread frame reader: verify the 101 handshake, then loop
       # decoding server→client frames into queue events until close / EOF.
-      private def run_websocket_reader(id, sock, expected_accept, client_queue, target)
+      private def run_websocket_reader(id, sock, expected_accept, client_queue, target, cookie_context)
         queue = WsHeard.new(client_queue, -> { @websocket_lock.synchronize { @websocket_sockets.key?(id) } })
         ok, protocol, cookies = ws_read_handshake(sock, expected_accept)
         unless ok
@@ -4362,7 +4367,7 @@ module Capybara
         end
         # Store any handshake-response cookies (the main thread does the store) BEFORE `open` fires,
         # so a document.cookie read in `onopen` sees them.
-        queue << {id: id, type: '__setcookie', cookies: cookies, url: target} unless cookies.empty?
+        queue << {id: id, type: '__setcookie', cookies: cookies, url: target, cookie_context: cookie_context} unless cookies.empty?
         # Carry the negotiated subprotocol — Action Cable's client closes the
         # connection in its `onopen` unless `webSocket.protocol` is one it knows
         # (`actioncable-v1-json`).
@@ -4681,7 +4686,7 @@ module Capybara
             k = line[0...idx].strip.downcase
             v = line[(idx + 1)..].to_s.strip
             # Slices of the BINARY socket buffer (see `RuntimeShared.utf8_text`) — a repeated one's values combined:
-            # Set-Cookie's a line each, as `merge_set_cookie` reads them, any other's with `, ` (Fetch's "combine").
+            # Set-Cookie's a line each, as `store_set_cookies` reads them, any other's with `, ` (Fetch's "combine").
             k = RuntimeShared.utf8_text(k)
             v = RuntimeShared.utf8_text(v)
             headers[k] = headers.key?(k) ? [headers[k], v].join(k == 'set-cookie' ? "\n" : ', ') : v
@@ -8809,7 +8814,7 @@ module Capybara
               # cookie stored in the jar, not handed to the script.
               ev = msg[:event]
               if ev[:type] == '__setcookie'
-                merge_set_cookie({'set-cookie' => ev[:cookies]}, ev[:url])
+                store_set_cookies({'set-cookie' => ev[:cookies]}, ev[:url], ev[:cookie_context])
               else
                 rt.call('__csim_deliverWebSocketEvents', [ev])
               end
@@ -10791,13 +10796,9 @@ module Capybara
 
       # The URL a request built into `env` is for — the TARGET server's (SERVER_NAME / HTTP_HOST), not the current
       # document's, so a cross-origin fetch sends the target's cookies rather than leaking the document's (cors-cookies);
-      # read off the request itself, never a forwarding header a page may set (X-Forwarded-Host, Forwarded) — and
-      # whether it goes over a secure channel.
+      # read off the request itself, never a forwarding header a page may set (X-Forwarded-Host, Forwarded).
       def env_request_url(env)
         "#{env['rack.url_scheme']}://#{env['HTTP_HOST'] || env['SERVER_NAME']}#{env['SCRIPT_NAME']}#{env['PATH_INFO']}"
-      end
-      def env_secure_channel?(env)
-        %w[https wss].include?(env['rack.url_scheme']) || potentially_trustworthy_url?("http://#{env['HTTP_HOST'] || env['SERVER_NAME']}")
       end
 
       # The context a cookie is set or retrieved in, as the session's cookie store (cookie_jar.rs) takes it: through an
@@ -11795,9 +11796,14 @@ module Capybara
           env['HTTP_COOKIE'] = cookies
         end
       end
-      # …and the context of a request no client's site for cookies judges: same-site, over a secure channel where `url`
-      # is potentially trustworthy.
-      def same_site_cookie_context(url) = COOKIE_HTTP | (potentially_trustworthy_url?(url) ? COOKIE_SECURE : 0)
+      # …and the site a worker's requests are judged by for cookies: the one it was made with (none — 'null' — for an
+      # opaque creator's), else its script's URL.
+      private def worker_cookie_site(worker)
+        record = Thread.current[:csim_worker_record]
+        return worker.url unless record&.key?(:site_for_cookies)
+
+        record[:site_for_cookies] || 'null'
+      end
 
       # Referer / Origin / Fetch-Metadata for a NAVIGATION request (a document load — form
       # submit, location set, link activation). Unlike a fetch/XHR (which carries a per-request
@@ -12184,15 +12190,6 @@ module Capybara
       # goes to.
       def potentially_trustworthy_url?(url)
         Native.potentially_trustworthy_origin(parse_url(url.to_s)&.fetch(:origin).to_s)
-      end
-
-      # A WebSocket handshake's Set-Cookie fields stored for `url`, as a same-site response's: a handshake is not yet
-      # judged by its client's site for cookies.
-      def merge_set_cookie(headers, url)
-        return if header_field(headers, 'set-cookie').to_s.empty?
-
-        url = document_cookie_url unless cookie_host(url)
-        store_set_cookies(headers, url, same_site_cookie_context(url))
       end
 
       # A response's Set-Cookie fields — one cookie each (Rack 2 joins them with a newline, Rack 3 gives an Array;

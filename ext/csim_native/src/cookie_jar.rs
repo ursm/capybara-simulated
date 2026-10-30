@@ -68,6 +68,15 @@ pub(crate) const TOP_LEVEL_NAV: u32 = 16;
 pub(crate) fn request_context(secure: bool, cross_site: bool, lax_retrieve: bool, top_level_nav: bool) -> u32 {
     HTTP | if secure { SECURE } else { 0 } | if cross_site { CROSS_SITE } else { 0 } | if lax_retrieve { LAX_RETRIEVE } else { 0 } | if top_level_nav { TOP_LEVEL_NAV } else { 0 }
 }
+// Capybara::Simulated::Native.cookie_context(client, target, top_level_get) -> the context of a request to `target`
+// judged by one site for cookies, `client`'s (a document's URL or a worker's site — nil or 'null' for none, cross-site to
+// every target: referrer.rs `cross_site_for_cookies`): a host request the fetch and navigation chains do not make — a
+// WebSocket handshake, a download — a top-level navigation's GET (`top_level_get`) retrieving Lax cookies and its
+// response setting SameSite ones.
+pub(crate) fn context_for_ruby(client: Option<String>, target: String, top_level_get: bool) -> u32 {
+    let secure = crate::referrer::http_origin(&target).as_deref().is_some_and(crate::url_ops::potentially_trustworthy);
+    request_context(secure, crate::referrer::cross_site_for_cookies(client.as_deref(), &target), top_level_get, top_level_get)
+}
 
 // A cookie's longest life: 400 days (§5.6.1, §5.6.2).
 const MAX_AGE_MS: f64 = 400.0 * 24.0 * 3600.0 * 1000.0;
