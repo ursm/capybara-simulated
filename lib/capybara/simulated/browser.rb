@@ -2507,12 +2507,16 @@ module Capybara
       # (…`user_activated` a reload's: whether the document it reloads had transient activation as it began — HTML's source
       # snapshot of the navigable's active document — a traversal's none)
       # (…`through_ui` a reload's through a user interface element — the driver's own — judged as the request it reloads
-      # was, cross-site or not: RFC 6265bis §5.2; `location.reload()`'s by its document's site, as any of its navigations)
+      # was, cross-site or not: RFC 6265bis §5.2; `location.reload()`'s made by the document it reloads — HTML "apply the
+      # history step": no source snapshot given, the navigable's active document's is its fetch client — its Sec-Fetch-Site
+      # and its cookies' site that document's, as any of its navigations' (Chrome, measured 2026-10-30: `same-origin`, a
+      # page a cross-site link led to too). A user's traversal or reload is made by none: Sec-Fetch-Site 'none'.)
       def replay_history_entry(id, is_reload: false, user_activated: false, through_ui: false)
         return unless id
 
-        entry = @session_history.entry(id)
-        reloaded = {reloaded_cross_site: (entry[:cross_site] if is_reload && through_ui)}
+        entry     = @session_history.entry(id)
+        initiator = @current_url if is_reload && !through_ui
+        reloaded  = {reloaded_cross_site: (entry[:cross_site] if is_reload && through_ui)}
         @restoring_history_state = entry[:state]
         # (…a traversal referred as the entry's document's request was, HTML's document state, and a POST's re-post too,
         # under the policy it was first sent under; a GET's reload by the document reloading, under its policy — Chrome,
@@ -2520,11 +2524,10 @@ module Capybara
         # (…an entry reached by a POST keeps its body)
         referred = is_reload && !entry[:body] ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
         if entry[:body]
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: nil, origin: entry[:origin],
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: initiator, origin: entry[:origin],
                                                                          user_activated: user_activated, **referred, **reloaded)
         else
-          # (…a user traversal: site 'none')
-          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: nil, user_activated: user_activated, **referred, **reloaded)
+          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: initiator, user_activated: user_activated, **referred, **reloaded)
         end
       ensure
         @restoring_history_state = nil
