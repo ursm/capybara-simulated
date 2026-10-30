@@ -4995,7 +4995,7 @@ module Capybara
 
               # (…"fetch a classic worker script" requires an ok status whoever produced the response — an SW
               # respondWith'ing its 404 page fails the load, a clean `error` event, not a worker that evals HTML)
-              step = fetch.response(r['status'].to_i, location_fields(r['headers'] || {}), r['url'].to_s, false)
+              step = fetch.response(r['status'].to_i, wire_location_fields(r), r['url'].to_s, false)
               next if step == 'follow'
 
               return worker_script_answer(step) {
@@ -12277,6 +12277,13 @@ module Capybara
 
         # (…Rack 2's several fields of a name one String, joined by newlines — an empty one a field all the same)
         loc.empty? ? [loc] : loc.split("\n").uniq
+      end
+      # …and a service worker's response's, field by field as its header list has them, which the wire carries beside
+      # the combined headers that would make two Locations one (response-wire.js `header_list`).
+      def wire_location_fields(wire)
+        list = wire['header_list'] or return location_fields(wire['headers'] || {})
+
+        list.filter_map {|name, value| value if name.to_s.casecmp?('location') }.uniq
       end
       # …as a navigation reads it: its one field, '' for more than one — no followable target — and nil for none.
       def location_field(headers)
