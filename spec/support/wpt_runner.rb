@@ -357,6 +357,18 @@ module WptRunner
   # …each label of a subdomain (`www.élève`, wptserve's two-label product too) written so.
   def idn_labels(subdomain) = subdomain.split('.').map {|label| SUB_IDN_LABELS.fetch(label, label) }.join('.')
 
+  # The escape type of a substitution (wptserve handlers.py `wrap_pipeline`, pipes.py `sub`): the first `sub` of the
+  # pipeline's — a `.sub.` file's own, which wptserve puts ahead of the query's, `html` for a markup file and `none` for
+  # any other; else the query's first `sub(…)`, `html` where it says none (`?pipe=sub`), whatever the file is.
+  MARKUP_EXTENSIONS = %w[.html .htm .xht .xhtml .xml .svg].freeze
+  def substitution_escape(req_path, query)
+    return MARKUP_EXTENSIONS.include?(File.extname(req_path.to_s)) ? 'html' : 'none' if File.basename(req_path.to_s).include?('.sub.')
+
+    sub = query['pipe'].to_s.split('|').map(&:strip).find {|fn| fn.match?(/\Asub(\(|\z)/) }
+    arg = sub.to_s[/\Asub\(\s*(\w*)\s*\)/, 1].to_s
+    arg.empty? ? 'html' : arg
+  end
+
   # (…`headers` the request's Rack env, whose headers `{{headers[name]}}` names)
   def substitute(body, req_path, query = {}, host: nil, scheme: 'http', headers: {})
     # The `{{host}}` / `{{ports}}` / `{{domains}}` / `{{location}}` tokens resolve to the
@@ -393,10 +405,7 @@ module WptRunner
     # web-platform.test its SECURE_ORIGIN). A NON-family host (www.example.com) keeps the
     # request host: its own document origin is the family root there.
     host = SUB_HOST if sub_family
-    markup = %w[.html .htm .xht .xhtml .xml .svg].include?(File.extname(req_path.to_s))
-    # (…but where the request's `pipe=sub(none)` asks for none, wptserve's escape type: a code-injector page's script)
-    unescaped = query['pipe'].to_s.split('|').any? {|fn| fn.strip.match?(/\Asub\(\s*none\s*\)\z/) }
-    escape = markup && !unescaped ? CGI.method(:escapeHTML) : :itself.to_proc
+    escape = substitution_escape(req_path, query) == 'html' ? CGI.method(:escapeHTML) : :itself.to_proc
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.
@@ -429,9 +438,9 @@ module WptRunner
       # the form-action tests rely on (`?action=` → an empty action attribute).
       # (A repeated param resolves to Rack's last value; wptserve takes the first.
       # No vendored `.sub.` template references a repeated GET parameter.)
-      # (…HTML-escaped in a markup file, as wptserve's `sub` is there — `sub(html)` for .html / .xml / .svg and the like,
-      # `sub(none)` for any other: a quote in an attribute value the template puts it in stays in it, meta refresh
-      # parsing.html's `content="{{GET[input]}}"`, where an es-module.sub.js `import` keeps its URL's `&`)
+      # (…escaped as the pipeline's escape type asks, `substitution_escape`: a quote in an attribute value the template
+      # puts it in stays in it, meta refresh parsing.html's `content="{{GET[input]}}"`, where an es-module.sub.js
+      # `import` keeps its URL's `&`)
       when /\AGET\[(\w+)\]\z/          then escape.(query[Regexp.last_match(1)].to_s)
       # …`{{headers[name]}}` the request's own header (empty for none) and `{{uuid()}}` a fresh UUID each time it is
       # written, as wptserve's are (fetch/metadata keys each subtest's recorded headers by one)
