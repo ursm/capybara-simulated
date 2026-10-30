@@ -100,15 +100,16 @@ module Capybara
         '__csimSessionPartition'     => ->(b, *_a) { b.session_partition },
         # …and the space the window's environment ids are minted in (Browser#client_space).
         '__csimClientSpace'          => ->(b, *_a) { b.client_space },
-        '__csimWindowGet'            => ->(b, *a) { b.window_get(a[0], a[1]) },
-        '__csimWindowDocGet'         => ->(b, *a) { b.window_doc_get(a[0], a[1]) },
+        # The number of the top-level traversable the window of handle a[0] is (nil for a window gone): what its
+        # WindowProxy asks its origin of (session_history.rs `traversableSameOrigin`).
+        '__csimWindowTraversable'    => ->(b, *a) { b.window_traversable(a[0]) },
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to
         # the target window's VM (a[0]=window handle, a[1]=ref id, a[2]=prop/method).
         '__csimWindowRefGet'         => ->(b, *a) { b.window_ref_get(a[0], a[1], a[2]) },
         '__csimWindowRefSet'         => ->(b, *a) { b.window_ref_set(a[0], a[1], a[2], a[3]); nil },
         '__csimWindowRefCall'        => ->(b, *a) { b.window_ref_call(a[0], a[1], a[2], a[3]) },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
-        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], user_activated: a[2] == true); nil },
+        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], user_activated: a[2] == true, replace: a[3] == true); nil },
         '__csimWindowJavascriptURL'  => ->(b, *a) { b.run_window_javascript_url(a[0], a[1], a[2]); nil },
         '__csimWindowHistoryGo'      => ->(b, *a) { b.window_history_go(a[0], a[1]) },
         '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },

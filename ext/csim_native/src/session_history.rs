@@ -1137,6 +1137,22 @@ mod tests {
     }
 
     #[test]
+    fn a_document_is_same_origin_with_a_traversable_by_the_key_it_published() {
+        let (page, popup) = (SessionHistory::new(), SessionHistory::new());
+        assert!(!same_origin_with("http://a.test".into(), page.id, popup.id));
+        popup.lock().origin = Some("http://a.test".into());
+        assert!(same_origin_with("http://a.test".into(), page.id, popup.id));
+        assert!(!same_origin_with("http://b.test".into(), page.id, popup.id));
+        // (…an opaque origin's key its isolate's alone: the same key of another isolate's is another origin)
+        popup.lock().origin = Some(published_key("opaque:realm0".into(), popup.id));
+        assert!(!same_origin_with("opaque:realm0".into(), page.id, popup.id));
+        assert!(same_origin_with("opaque:realm0".into(), popup.id, popup.id));
+        let gone = popup.id;
+        drop(popup);
+        assert!(!same_origin_with("opaque:realm0".into(), gone, gone));
+    }
+
+    #[test]
     fn a_saved_history_keeps_the_data_it_had() {
         let h = history();
         let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None], ..Default::default() }).unwrap();
@@ -1207,6 +1223,20 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
     crate::dom::register(scope, ns, "publishTraversableOrigin", publish_origin, context_id);
+    crate::dom::register(scope, ns, "traversableSameOrigin", traversable_same_origin_op, context_id);
+}
+
+// The key a document's origin key `key` stands for among the traversables of every isolate, where the isolate's page is
+// traversable `id`'s: its own — but an opaque one's, which is unique within its isolate alone (realm_location.rs
+// `origin_key`), made the traversable's.
+fn published_key(key: String, id: u64) -> String {
+    if key.starts_with("opaque:") { format!("{key}@t{id}") } else { key }
+}
+// Whether a document of origin key `key`, of the isolate whose page is traversable `own`'s, is same origin with the
+// active document of traversable `target` — by the key that one published: none, for one gone or that published none
+// yet, is never (fail CLOSED).
+fn same_origin_with(key: String, own: u64, target: u64) -> bool {
+    known(target).and_then(|k| k.3).is_some_and(|theirs| theirs == published_key(key, own))
 }
 
 // __dom.publishTraversableOrigin() — the page's document's origin, as it begins to load: the one its traversable is of to
@@ -1215,10 +1245,24 @@ fn publish_origin(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     let arena = crate::dom::realm(scope, 0);
     let id = arena.navigables.history;
     let Some(key) = arena.realm_state_mut(0).map(|s| s.location.origin_key(0)) else { return };
-    let key = if key.starts_with("opaque:") { format!("{key}@t{id}") } else { key };
+    let key = published_key(key, id);
     if let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) {
         traversable.lock().unwrap_or_else(PoisonError::into_inner).origin = Some(key);
     }
+}
+
+// __dom.traversableSameOrigin(id) -> whether the calling realm's document is same origin with the active document of
+// top-level traversable `id`, a window of another isolate — HTML's IsPlatformObjectSameOrigin of the Window and the
+// Location a WindowProxy of that one reaches (platform-globals.js `csimWindowProxy`) — by their keys, as
+// `sameOriginRealm` asks it of a realm of this isolate. Asked as each member is reached: that window's document changes
+// as it navigates, which no realm here is told of.
+fn traversable_same_origin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let target = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let own = arena.navigables.history;
+    let key = arena.realm_state_mut(cid).map(|s| s.location.origin_key(cid));
+    rv.set_bool(key.is_some_and(|key| same_origin_with(key, own, target)));
 }
 
 // __dom.setSessionHistory(id) — the session history of the isolate's window (`SessionHistory#id`), the host's to say.

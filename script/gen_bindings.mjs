@@ -31,7 +31,11 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // members no implementation answers, by name (and why). `namedProperties` / `indexedProperties`: how an installed
 // interface's objects answer its named / indexed property getter themselves (a Proxy of the class's). `nativeIndexed`:
 // an interface the binding makes whose objects with an indexed getter are made natively (webidl.js
-// `nativeIndexedObject`), not as the Proxy `withIndexedGetter` makes.
+// `nativeIndexedObject`), not as the Proxy `withIndexedGetter` makes. `crossOrigin`: the interface's
+// CrossOriginProperties (HTML §7.2.1.3.1), what an object of it answers to another origin's script — each member by its
+// name, an operation `'method'`, an attribute what of it is exposed (`'get'`, `'set'`, `'get set'`, the table's
+// [[NeedsGet]] / [[NeedsSet]]) — emitted as `CROSS_ORIGIN_<NAME>_PROPERTIES`, a Set of the names, and
+// `CROSS_ORIGIN_<NAME>_KINDS`, each one's kind (platform-globals.js, the WindowProxy and the Location of another origin).
 // GlobalEventHandlers' touch handlers, which a desktop with no touch screen — headless Chrome's and Firefox's, measured —
 // exposes on no object: feature detection reads them (flatpickr binds `touchstart` instead of `mousedown` where
 // `window.ontouchstart` is defined).
@@ -269,6 +273,21 @@ const INTERFACES = [
     },
     omitMembers: {
       navigation: 'the Navigation API is not implemented'
+    },
+    crossOrigin: {
+      window:      'get',
+      self:        'get',
+      location:    'get set',
+      close:       'method',
+      closed:      'get',
+      focus:       'method',
+      blur:        'method',
+      frames:      'get',
+      length:      'get',
+      top:         'get',
+      opener:      'get',
+      parent:      'get',
+      postMessage: 'method'
     }
   }],
   ['dom', 'EventTarget', { install: true, omit: { observable: 'when: Observables are not implemented' } }],
@@ -395,7 +414,7 @@ const INTERFACES = [
   ['IndexedDB', 'IDBCursor', { install: true }],
   ['IndexedDB', 'IDBCursorWithValue', { install: true }],
   ['html', 'DOMStringList'],
-  ['html', 'Location', { install: true }],
+  ['html', 'Location', { install: true, crossOrigin: { href: 'set', replace: 'method' } }],
   ['html', 'History', { install: true }],
   ['css-font-loading', 'FontFaceSetLoadEvent', { install: true }],
   ['gamepad', 'GamepadEvent', { install: true }],
@@ -1317,6 +1336,29 @@ function membersOf(def, omit = {}, omitMembers = {}) {
   return members;
 }
 
+// The CrossOriginProperties of the interfaces that have them (their `crossOrigin` option), by interface — each member it
+// names checked against the IDL: an operation's kind `'method'`, an attribute's what of it is exposed, `'set'` only of
+// one with a setter (a writable attribute, or one whose puts go elsewhere: [PutForwards], [Replaceable],
+// [LegacyLenientSetter]).
+const crossOriginTables = [];
+const CROSS_ORIGIN_ATTRIBUTE_KINDS = new Set(['get', 'set', 'get set']);
+function crossOriginTable(name, members, table) {
+  for (const [prop, kind] of Object.entries(table)) {
+    const m = members.find((x) => x.name === prop && x.special !== 'static');
+    const label = `${name}.${prop}`;
+    if (!m) throw new Error(`${label}: a cross-origin property its IDL has no member of`);
+    if (m.type === 'operation') {
+      if (kind !== 'method') throw new Error(`${label}: an operation is a 'method' cross-origin, not '${kind}'`);
+      continue;
+    }
+    if (m.type !== 'attribute') throw new Error(`${label}: a ${m.type} is no cross-origin property`);
+    if (!CROSS_ORIGIN_ATTRIBUTE_KINDS.has(kind)) throw new Error(`${label}: an attribute is 'get', 'set' or 'get set' cross-origin, not '${kind}'`);
+    const forwarded = (m.extAttrs || []).some((e) => ['PutForwards', 'Replaceable', 'LegacyLenientSetter'].includes(e.name));
+    if (kind !== 'get' && m.readonly && !forwarded) throw new Error(`${label}: a readonly attribute has no setter to expose cross-origin`);
+  }
+  return table;
+}
+
 function generateInterface(def, options = {}) {
   const name = def.name;
   if (def.inheritance && !options.install) throw new Error(`${name}: an inherited interface is not generated yet`);
@@ -1336,6 +1378,7 @@ function generateInterface(def, options = {}) {
   let stringifierOut = null;
   const constructors = [];
   const memberList = membersOf(def, options.omit, options.omitMembers);
+  if (options.crossOrigin) crossOriginTables.push([name, crossOriginTable(name, memberList, options.crossOrigin)]);
   for (const m of memberList) {
     const label = `${name}.${m.name || m.type}`;
     if ((m.extAttrs || []).some((e) => e.name === 'Unscopable')) unscopables.push(m.name);
@@ -2009,7 +2052,12 @@ ${htmlElementInterfaces.map(([n, i]) => `  ${/^[a-z][a-z0-9]*$/.test(n) ? n : `'
 // The HTML element interfaces generated, each its install, which dom-class-aliases.js runs on the class it makes of it.
 export const HTML_ELEMENT_INSTALLS = {
 ${htmlElementInstalls.map((n) => `  ${n}: install${n}`).join(',\n')}
-};`;
+};
+${crossOriginTables.map(([n, table]) => `
+// ${n}'s CrossOriginProperties (HTML §7.2.1.3.1): what an object of it answers to a script of another origin — by name,
+// and each one's kind, an operation's 'method', an attribute's what of it is exposed ('get', 'set' or 'get set').
+export const CROSS_ORIGIN_${n.toUpperCase()}_PROPERTIES = Object.freeze(new Set(${JSON.stringify(Object.keys(table))}));
+export const CROSS_ORIGIN_${n.toUpperCase()}_KINDS = Object.freeze({ __proto__: null, ${JSON.stringify(table).slice(1, -1)} });`).join('\n')}`;
 
 // The dictionaries an implementation converts itself — an `any` argument's, as the type its steps name: a canvas's
 // getContext('2d') options a CanvasRenderingContext2DSettings; and the types Web Crypto's "normalize an algorithm"

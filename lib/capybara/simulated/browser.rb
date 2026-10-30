@@ -622,12 +622,13 @@ module Capybara
       # Sec-Fetch-Site, which the cookie layer's SameSite gate reads. A plain
       # driver-initiated visit has none (address-bar semantics, site 'none').
       # (…`user_activated` its source snapshot's transient activation: true for one no document began — the address bar's,
-      # HTML's source snapshot params of no source document — and a window's opener's as it opened it otherwise)
-      def visit(url, referer: nil, referrer_policy: nil, initiator: nil, user_activated: initiator.nil?)
+      # HTML's source snapshot params of no source document — and a window's opener's as it opened it otherwise; `replace`
+      # its history handling "replace", another window's `location.replace()`'s)
+      def visit(url, referer: nil, referrer_policy: nil, initiator: nil, user_activated: initiator.nil?, replace: false)
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
-        navigate(resolve_visit_url(url), referer: referer, referrer_policy: referrer_policy, initiator: initiator, user_activated: user_activated)
+        navigate(resolve_visit_url(url), referer: referer, referrer_policy: referrer_policy, initiator: initiator, user_activated: user_activated, replace: replace)
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
         # browser runs them as tasks — and they may change the page.
@@ -7243,10 +7244,9 @@ module Capybara
       end
 
       def window_location_of(handle)   = @driver.respond_to?(:window_location)     ? @driver.window_location(handle.to_s).to_s     : ''
-      # Cross-window property reads (a WindowProxy `win.foo` / `win.document.foo`):
-      # route to the Driver, which reads a PRIMITIVE off the target window's VM.
-      def window_get(handle, prop)     = (@driver.respond_to?(:window_read) ? @driver.window_read(handle.to_s, prop.to_s, doc: false) : nil)
-      def window_doc_get(handle, prop) = (@driver.respond_to?(:window_read) ? @driver.window_read(handle.to_s, prop.to_s, doc: true)  : nil)
+      # The number of the top-level traversable the window of `handle` is — its session history's (`traversable`) — nil
+      # for a window gone.
+      def window_traversable(handle)   = @driver.respond_to?(:window_traversable)  ? @driver.window_traversable(handle.to_s)       : nil
       # Cross-window remote-ref RPC — SOURCE side: forward a node/object proxy op to
       # the target window's Browser via the Driver.
       def window_ref_get(handle, id, prop)         = (@driver.respond_to?(:window_ref_get) ? @driver.window_ref_get(handle.to_s, id, prop.to_s) : nil)
@@ -7276,23 +7276,27 @@ module Capybara
       # window: form submission, plain navigation, same-document history traversal
       # (history.back/forward/go — restores the previous entry + fires load), and
       # child-frame navigation. Each consume is a no-op when nothing is pending.
+      # (…and what its Location planned, as a member of it another window reaches through the RPC runs here: a part's
+      # setter's navigation, `reload()`'s reload — but the active window's, which takes them as its own task ends, as
+      # `navigate_window` leaves it its navigation: its script may be the one waiting on this call, a pop-up's boot
+      # reaching its `opener`, under which a navigation would rebuild the Context)
       def drain_pending_after_remote_ref
         # (…a traversal it asked for too: a window not the active one runs no task of its own to apply it)
         apply_planned_traversals
+        unless @driver.respond_to?(:current_browser) && @driver.current_browser.equal?(self)
+          consume_pending_location
+          consume_pending_reload
+        end
         consume_pending_form_submit
         consume_pending_navigation
         consume_pending_history_traverse
         consume_pending_frame_nav
       end
-      # Read a primitive property off THIS window's globalThis / document — called
-      # by the Driver to serve another window's cross-window proxy read.
-      def read_property(prop, doc: false)
-        @runtime.call('__csimReadWindowProp', doc, prop.to_s)
-      rescue StandardError
-        nil
-      end
-      def set_window_location(handle, url, user_activated: false)
-        @driver.window_set_location(handle.to_s, url.to_s, user_activated: user_activated) if @driver.respond_to?(:window_set_location)
+      # A Location-object navigation of another window to `url` by this one's script — resolved against its document —
+      # with history handling "replace" where `replace` (its `location.replace()`).
+      def set_window_location(handle, url, user_activated: false, replace: false)
+        return unless @driver.respond_to?(:window_set_location)
+        @driver.window_set_location(self, handle.to_s, url.to_s, user_activated: user_activated, replace: replace)
       end
       # …to a javascript: URL `href`, by a document of origin `origin`: evaluated in that window's document.
       def run_window_javascript_url(handle, href, origin) = (@driver.window_run_javascript_url(handle.to_s, href.to_s, origin.to_s) if @driver.respond_to?(:window_run_javascript_url))
@@ -9790,9 +9794,10 @@ module Capybara
 
       # A navigation of the page planned by the driver (another window's `navigate_window`) — the page's own plan
       # (navigation_plan.rs `planLocation`), as its `location`'s are: taken, as the task ends, by `consume_pending_location`.
-      # (…`user_activated` whether its source document had transient activation as it began)
-      def location_assign(url, user_activated: false)
-        @runtime.call('__csimPlanLocation', resolve_against_current(url.to_s), false, user_activated)
+      # (…`user_activated` whether its source document had transient activation as it began; `replace` whether it
+      # replaces the current entry, a `location.replace()`'s)
+      def location_assign(url, user_activated: false, replace: false)
+        @runtime.call('__csimPlanLocation', resolve_against_current(url.to_s), replace, user_activated)
       end
       # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
@@ -10774,9 +10779,13 @@ module Capybara
       # Mirror that on the Ruby side so `Capybara#go_back` traverses
       # within the pushState chain (fires `popstate`) and only crosses
       # to a real reload when the back hits a `:visit` boundary.
+      # (…but a window still at its initial about:blank — of no entry yet — whose every one replaces it, HTML's "URL and
+      # history update steps": "if document's is initial about:blank is true, then set historyHandling to 'replace'" —
+      # so the navigation away from it replaces it too)
       def history_push(url, state = nil, realm_id = 0)
         return if @history_frozen
         return frame_history_state(realm_id.to_i, url, state, push: true) unless realm_id.to_i.zero?
+        return history_state(url, state) unless @session_history.active(0)
 
         resolved = resolve_against_current(url.to_s)
         record_url_transition(resolved)

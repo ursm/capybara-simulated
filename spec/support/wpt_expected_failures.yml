@@ -3437,10 +3437,6 @@ html/browsers/history/the-location-interface/no-browsing-context.window.js:
   is a no-op
 html/browsers/history/the-location-interface/per-global.window.js:
 - Navigating from the initial about:blank must not replace window.location
-html/browsers/history/the-location-interface/reload_document_open_write.html:
-- Reload document with document.open and document.written content
-html/browsers/history/the-location-interface/reload_document_write.html:
-- Reload document with document.written content
 html/browsers/history/the-location-interface/reload_document_write_onload.html:
 - Reload document with document.written content written in load event
 html/browsers/history/the-location-interface/replace-with-nested-iframe.html:

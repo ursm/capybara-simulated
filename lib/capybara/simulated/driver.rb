@@ -740,26 +740,21 @@ module Capybara
       # raw_: an identity read — this runs inside host-fn callbacks (a popup's boot
       # script reading opener.location), where the ticking current_url must not re-enter.
       def window_location(handle)        = (window_browser(handle)&.raw_current_url).to_s
-      # A cross-window property read (`win.foo` / `win.document.foo`) — read the
-      # primitive off the target window's VM.
-      def window_read(handle, prop, doc: false)
-        b = window_browser(handle) or return nil
-        b.read_property(prop, doc: doc)
-      end
+      # The number of the top-level traversable the window of `handle` is, nil for one gone.
+      def window_traversable(handle)     = window_browser(handle)&.traversable&.id
       # Cross-window remote-ref RPC: route a node/object proxy op to the window
       # that owns the ref (handle), executing in that window's VM.
       def fire_aux_window_load(handle)             = ((b = window_browser(handle)) && b.fire_own_window_load(delayable: false))
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
-      def window_set_location(handle, url, user_activated: false)
+      # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
+      # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
+      # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, with history
+      # handling "replace" where `replace`.
+      def window_set_location(source, handle, url, user_activated: false, replace: false)
         b = window_browser(handle) or return
-        # Per HTML, `w.location = url` parses `url` relative to the ENTRY settings
-        # object — the document of the script doing the assignment (the active
-        # window) — NOT the target window's current document. So a cross-window
-        # `w.location.href = 'resources/x.html'` resolves against the opener's
-        # base, not the aux's (which would double a shared path segment).
-        navigate_window(b, current_browser.resolve_document_url(url), source: current_browser, user_activated: user_activated)
+        navigate_window(b, url, source: source, user_activated: user_activated, replace: replace)
       end
       # A cross-window `w.location = 'javascript:…'`: evaluated in the target window's document (Browser
       # `run_javascript_url_from`), by a document of origin `origin`, as HTML navigates to a javascript: URL.
@@ -799,8 +794,9 @@ module Capybara
       # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
       # V8 context mid-call and abort the running handler. A non-active window
       # can navigate immediately (its VM isn't on the stack).
-      # (…`user_activated` whether the navigating document's window had transient activation as it began)
-      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false)
+      # (…`user_activated` whether the navigating document's window had transient activation as it began; `replace` its
+      # history handling "replace")
+      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
         return if url.nil? || url.to_s.empty? || browser.top_level_data_refused?(url)
         # A blob: navigation loads directly from the opener's blob bytes (not
         # rack-navigable, cross-isolate). Only when the target isn't the active
@@ -811,11 +807,18 @@ module Capybara
           return
         end
         if browser.equal?(current_browser)
-          browser.location_assign(url, user_activated: user_activated)
+          browser.location_assign(url, user_activated: user_activated, replace: replace)
         else
           # A cross-window navigation's initiator is the SETTING window's document
           # (seeds Sec-Fetch-Site → the SameSite cookie gate); raw_ — no re-entrant tick.
-          browser.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url, user_activated: user_activated)
+          browser.visit(
+            url,
+            referer:         referrer,
+            referrer_policy: referrer_policy,
+            initiator:       source&.raw_current_url,
+            user_activated:  user_activated,
+            replace:         replace
+          )
         end
       end
 
