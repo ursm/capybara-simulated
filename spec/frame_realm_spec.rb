@@ -246,16 +246,12 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
   end
 
   # (c) `[[Has]]` / `[[GetOwnProperty]]` are SOP-gated too, so a probe can't enumerate
-  # the same-origin surface: `'document' in frame` is false, a descriptor probe throws,
-  # and a cross-origin-safe name still answers present.
+  # the same-origin surface: `'document' in frame` throws, as a descriptor probe does —
+  # HTML's [[HasProperty]] asks [[GetOwnProperty]], whose CrossOriginPropertyFallback is
+  # a SecurityError for it (Chrome and Firefox measured) — and a cross-origin-safe name
+  # still answers present.
   it 'SOP-gates has / getOwnPropertyDescriptor on a cross-origin window' do
-    expect(cross_window_eval("'document' in w")).to eq('ok:boolean')            # returns a value…
-    expect(session.evaluate_script(<<~JS)).to eq(false)                          # …and it is false
-      (function () {
-        const f = document.createElement('iframe'); f.src = 'http://cross.example.org/child';
-        document.body.appendChild(f); return 'document' in f.contentWindow;
-      })()
-    JS
+    expect(cross_window_eval("'document' in w")).to eq('SecurityError')
     expect(cross_window_eval("'postMessage' in w")).to eq('ok:boolean')
     expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "document")')).to eq('SecurityError')
     # A sensitive (configurable) own property name is hidden from enumeration too.

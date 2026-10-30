@@ -628,7 +628,14 @@ module Capybara
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
-        navigate(resolve_visit_url(url), referer: referer, referrer_policy: referrer_policy, initiator: initiator, user_activated: user_activated, replace: replace)
+        navigate(
+          resolve_visit_url(url),
+          referer:         referer,
+          referrer_policy: referrer_policy,
+          initiator:       initiator,
+          user_activated:  user_activated,
+          replace:         replace
+        )
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
         # browser runs them as tasks — and they may change the page.
@@ -7252,6 +7259,17 @@ module Capybara
       def window_ref_get(handle, id, prop)         = (@driver.respond_to?(:window_ref_get) ? @driver.window_ref_get(handle.to_s, id, prop.to_s) : nil)
       def window_ref_set(handle, id, prop, value)  = (@driver.window_ref_set(handle.to_s, id, prop.to_s, value) if @driver.respond_to?(:window_ref_set))
       def window_ref_call(handle, id, method, args) = (@driver.respond_to?(:window_ref_call) ? @driver.window_ref_call(handle.to_s, id, method.to_s, args) : nil)
+      def window_ref_delete(handle, id, prop)      = (@driver.respond_to?(:window_ref_delete) ? @driver.window_ref_delete(handle.to_s, id, prop.to_s) : false)
+      # A call of this window's script into another window's (a `__csimWindow*` host fn whose target runs script): its
+      # VM on the stack meanwhile, waiting on it (`script_waiting?`) — what another window's script that call runs may
+      # reach back into, and plan a navigation of this one by, which must not rebuild this one's Context under it.
+      def reaching_another_window
+        @reaching_calls = @reaching_calls.to_i + 1
+        yield
+      ensure
+        @reaching_calls -= 1
+      end
+      def script_waiting? = @reaching_calls.to_i.positive?
       # TARGET side: execute the op against THIS window's VM (the Driver calls these
       # on the resolved target Browser).
       def remote_ref_get(id, prop)          = @runtime.call('__csimRemoteRefGet', id, prop.to_s)
@@ -7272,21 +7290,23 @@ module Capybara
         drain_pending_after_remote_ref
         result
       end
+      def remote_ref_delete(id, prop) = @runtime.call('__csimRemoteRefDelete', id, prop.to_s) == true
       # Drain every deferred action a cross-isolate operation may have queued in this
       # window: form submission, plain navigation, same-document history traversal
       # (history.back/forward/go — restores the previous entry + fires load), and
       # child-frame navigation. Each consume is a no-op when nothing is pending.
       # (…and what its Location planned, as a member of it another window reaches through the RPC runs here: a part's
-      # setter's navigation, `reload()`'s reload — but the active window's, which takes them as its own task ends, as
-      # `navigate_window` leaves it its navigation: its script may be the one waiting on this call, a pop-up's boot
-      # reaching its `opener`, under which a navigation would rebuild the Context)
+      # setter's navigation, `reload()`'s reload.) None while a script of this window's waits on a call of its into
+      # another window (`script_waiting?`) — the one this call came back through: `w.f()` whose `f` opens a pop-up whose
+      # boot sets `opener.location.pathname` — under which a navigation would rebuild the Context: that call's own drain
+      # takes them, the outer RPC's as `f` returns, as it takes those of a window its script is on.
       def drain_pending_after_remote_ref
+        return if script_waiting?
+
         # (…a traversal it asked for too: a window not the active one runs no task of its own to apply it)
         apply_planned_traversals
-        unless @driver.respond_to?(:current_browser) && @driver.current_browser.equal?(self)
-          consume_pending_location
-          consume_pending_reload
-        end
+        consume_pending_location
+        consume_pending_reload
         consume_pending_form_submit
         consume_pending_navigation
         consume_pending_history_traverse

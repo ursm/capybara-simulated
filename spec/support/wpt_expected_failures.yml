@@ -3117,9 +3117,6 @@ html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/f
 - Replace during the load event, triggered by formElement.submit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-pageshow.html:
 - Replace during the pageshow event, triggered by formElement.submit()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-popup.html:
-- No replace before load, triggered by formElement.submit() in the opener window,
-  after the opener has loaded
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit.html:
 - Replace before load, triggered by same-document formElement.submit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-load.html:
@@ -3134,12 +3131,6 @@ html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/l
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter.html:
 - href
 - search
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup-during-load.html:
-- No replace before load, triggered by window.open() on a non-_self window
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup-during-pageshow.html:
-- No replace before load, triggered by window.open() on a non-_self window
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup.html:
-- No replace before load, triggered by window.open() on a non-_self window
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self.html:
 - No replace before load, triggered by window.open(_self) on an iframe
 html/browsers/browsing-the-web/navigating-across-documents/source/navigate-child-src-about-blank.html:
@@ -3376,8 +3367,6 @@ html/browsers/history/the-location-interface/scripted_form_submit_assign_during_
 - Assignment to location with form submit during load
 html/browsers/origin/cross-origin-objects/cross-origin-due-to-document-domain-only.html:
 - Cross-origin due to document.domain
-html/browsers/origin/cross-origin-objects/cross-origin-objects-function-name.html:
-- Cross-origin Location `href` setter has correct 'name'
 html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.html:
 - Cross-origin object identity preserved across document.domain
 html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
@@ -3396,8 +3385,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
 - Only certain properties are usable as cross-origin this objects (cross-origin)
 - Only certain properties are usable as cross-origin this objects (cross-site)
 - Only certain properties are usable as cross-origin this objects (same-origin + document.domain)
-- Resolving a promise with a cross-origin location should work (cross-origin)
-- Resolving a promise with a cross-origin location should work (cross-site)
 - Same-origin observers get different accessors for cross-origin Location (cross-origin)
 - Same-origin observers get different accessors for cross-origin Location (cross-site)
 - Same-origin observers get different accessors for cross-origin Location (same-origin
@@ -3416,10 +3403,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
 - "[[Delete]] Should throw on cross-origin objects (cross-origin)"
 - "[[Delete]] Should throw on cross-origin objects (cross-site)"
 - "[[Delete]] Should throw on cross-origin objects (same-origin + document.domain)"
-- "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
-  set up correctly (cross-origin)"
-- "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
-  set up correctly (cross-site)"
 - "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
   set up correctly (same-origin + document.domain)"
 - "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
@@ -3486,19 +3469,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
 - "{}.toString.call() does the right thing on cross-origin objects (cross-site)"
 - "{}.toString.call() does the right thing on cross-origin objects (same-origin +
   document.domain)"
-html/browsers/origin/cross-origin-objects/location-properties-smoke-test.window.js:
-- Verifying that cross-origin access of 'assign' is restricted
-- Verifying that cross-origin access of 'customproperty' is restricted
-- Verifying that cross-origin access of 'hash' is restricted
-- Verifying that cross-origin access of 'host' is restricted
-- Verifying that cross-origin access of 'hostname' is restricted
-- Verifying that cross-origin access of 'pathname' is restricted
-- Verifying that cross-origin access of 'port' is restricted
-- Verifying that cross-origin access of 'protocol' is restricted
-- Verifying that cross-origin access of 'reload' is restricted
-- Verifying that cross-origin access of 'search' is restricted
-- Verifying that cross-origin access of 'toString' is restricted
-- Verifying that cross-origin access of 'valueOf' is restricted
 html/browsers/origin/cross-origin-objects/window-location-and-location-href-cross-realm-set.html:
 - Cross-origin location.href getter throws SecurityError in lexical realm
 - Cross-origin location.href setter throws TypeError in lexical realm on invalid |this|
@@ -3932,7 +3902,6 @@ html/browsers/windows/clear-window-name.https.html:
   set to null
 - "[harness] TIMEOUT"
 html/browsers/windows/consume-user-activation/window-open-multi-global.html:
-- "[harness] TIMEOUT"
 - window.open() and consuming user activation with multiple globals in play
 html/browsers/windows/document-domain-nested-navigate.window.js:
 - Navigated frame to about:blank and document.domain

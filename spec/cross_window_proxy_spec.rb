@@ -7,13 +7,21 @@ require_relative 'support/session_teardown'
 # the real ones, whole; cross-origin, their CrossOriginProperties alone (HTML §7.2.1.3), anything else a SecurityError —
 # asked as each member is reached, by the origin the window's traversable published for its active document.
 RSpec.describe 'a WindowProxy of another isolate\'s window' do
+  # (…a page's script by its path: /opens opens a pop-up when its `f` is called, whose boot — /moves — navigates it)
+  let(:scripts) {
+    {
+      '/opens' => "window.f = () => { window.open('/moves'); return 'returned'; };",
+      '/moves' => "opener.location.pathname = '/dir/moved';"
+    }
+  }
   let(:hits) { Hash.new(0) }
   let(:app) {
-    hits = self.hits
+    hits, scripts = self.hits, self.scripts
     lambda do |env|
       hits[env['PATH_INFO']] += 1
-      title = env['PATH_INFO'].delete_prefix('/')
-      [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{title}</title><p>#{env['HTTP_HOST']}#{env['PATH_INFO']}</p>"]]
+      title  = env['PATH_INFO'].delete_prefix('/')
+      script = scripts[env['PATH_INFO']]
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{title}</title><p>#{env['HTTP_HOST']}#{env['PATH_INFO']}</p><script>#{script}</script>"]]
     end
   }
   let(:session) { simulated_session(app) }
@@ -62,6 +70,29 @@ RSpec.describe 'a WindowProxy of another isolate\'s window' do
     it 'throws a SyntaxError for a navigation to no URL' do
       expect(read("w.location.href = 'http://a.test:-1/'")).to eq('SyntaxError')
     end
+
+    it "lists its Location's members, which JSON serializes" do
+      expect(read('Object.keys(w.location).length')).to eq(14)
+      expect(read('JSON.parse(JSON.stringify(w.location)).pathname')).to eq('/pop')
+    end
+
+    it "defines and deletes the window's own properties" do
+      expect(read("(Object.defineProperty(w, 'answer', {value: 42, configurable: true}), w.answer)")).to eq(42)
+      expect(read('[delete w.answer, typeof w.answer]')).to eq([true, 'undefined'])
+    end
+
+    # (…Chrome and Firefox measured)
+    it 'has this window its opener' do
+      expect(read('w.opener === window')).to be(true)
+    end
+
+    # (…a script of its that calls into another window, and through it is navigated, navigated as that call returns —
+    # not under it, which would rebuild its Context with its script on the stack)
+    it 'is navigated by a window it opened as the call that opened it returns' do
+      open_window('/opens')
+      expect(read('w.f()')).to eq('returned')
+      expect(read('w.location.pathname')).to eq('/dir/moved')
+    end
   end
 
   context 'of another origin' do
@@ -72,7 +103,22 @@ RSpec.describe 'a WindowProxy of another isolate\'s window' do
       expect(read('w.history')).to eq('SecurityError')
       expect(read('w.name')).to eq('SecurityError')
       expect(read("(w.name = 'x', 'set')")).to eq('SecurityError')
-      expect(read("'document' in w")).to be(false)
+      expect(read('w.addEventListener')).to eq('SecurityError')
+      expect(read('(w.onload = () => {}, "set")')).to eq('SecurityError')
+      expect(read('w.__csimDocumentHtml')).to eq('SecurityError')
+    end
+
+    # (…[[HasProperty]] by [[GetOwnProperty]], HTML's: Chrome and Firefox measured)
+    it 'is a SecurityError to ask for a member it does not expose, and true for one it does' do
+      expect(read("'document' in w")).to eq('SecurityError')
+      expect(read("'name' in w")).to eq('SecurityError')
+      expect(read("['location' in w, 'then' in w]")).to eq([true, true])
+      expect(read("'pathname' in w.location")).to eq('SecurityError')
+      expect(read("'replace' in w.location")).to be(true)
+    end
+
+    it 'has this window its opener' do
+      expect(read('w.opener === window')).to be(true)
     end
 
     it "is a SecurityError for its Location's every member but the href setter and replace()" do

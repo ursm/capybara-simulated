@@ -748,6 +748,7 @@ module Capybara
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
+      def window_ref_delete(handle, id, prop)      = (b = window_browser(handle)) ? b.remote_ref_delete(id, prop) : false
       # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
       # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
       # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, with history
@@ -770,8 +771,9 @@ module Capybara
       # (pushState) traversal — popstate already fired — or a no-op.
       def window_history_go(handle, delta)
         b = window_browser(handle) or return false
-        if b.equal?(current_browser)
-          # `opener.history.back()` targeting the active window: defer (can't
+        if b.equal?(current_browser) || b.script_waiting?
+          # `opener.history.back()` targeting the active window — or one whose
+          # script waits on a call into another (Browser#script_waiting?): defer (can't
           # rebuild the running VM mid-call) and return false — the active
           # window's load fires through its own navigation path when the pending
           # traversal drains, NOT via the aux-load deferral the caller would run.
@@ -793,20 +795,23 @@ module Capybara
       # `someProxyToSelf.location = …` — DEFER via the location-assign queue:
       # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
       # V8 context mid-call and abort the running handler. A non-active window
-      # can navigate immediately (its VM isn't on the stack).
+      # can navigate immediately (its VM isn't on the stack) — but one whose script
+      # waits on a call of its into another window (Browser#script_waiting?), which
+      # is on it: deferred likewise, the drain of the call that reached it taking it.
       # (…`user_activated` whether the navigating document's window had transient activation as it began; `replace` its
       # history handling "replace")
       private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
         return if url.nil? || url.to_s.empty? || browser.top_level_data_refused?(url)
+        deferred = browser.equal?(current_browser) || browser.script_waiting?
         # A blob: navigation loads directly from the opener's blob bytes (not
         # rack-navigable, cross-isolate). Only when the target isn't the active
         # window (boot rebuilds its ctx — unsafe mid-call on the running window).
         # (…one no store resolves a network error, as a new window's is)
-        if url.to_s.start_with?('blob:') && !browser.equal?(current_browser)
+        if url.to_s.start_with?('blob:') && !deferred
           browser.fail_blob_document(url) unless load_blob_into_window(browser, url, source)
           return
         end
-        if browser.equal?(current_browser)
+        if deferred
           browser.location_assign(url, user_activated: user_activated, replace: replace)
         else
           # A cross-window navigation's initiator is the SETTING window's document

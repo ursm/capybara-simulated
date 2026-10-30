@@ -1338,8 +1338,9 @@ function membersOf(def, omit = {}, omitMembers = {}) {
 
 // The CrossOriginProperties of the interfaces that have them (their `crossOrigin` option), by interface — each member it
 // names checked against the IDL: an operation's kind `'method'`, an attribute's what of it is exposed, `'set'` only of
-// one with a setter (a writable attribute, or one whose puts go elsewhere: [PutForwards], [Replaceable],
-// [LegacyLenientSetter]).
+// one whose set does something: a writable attribute, or one whose puts go to another ([PutForwards]) — not a
+// [Replaceable] one's, which shadows the attribute on the object it is set on, nor a [LegacyLenientSetter] one's, which
+// does nothing, neither the attribute's to expose across origins.
 const crossOriginTables = [];
 const CROSS_ORIGIN_ATTRIBUTE_KINDS = new Set(['get', 'set', 'get set']);
 function crossOriginTable(name, members, table) {
@@ -1353,7 +1354,7 @@ function crossOriginTable(name, members, table) {
     }
     if (m.type !== 'attribute') throw new Error(`${label}: a ${m.type} is no cross-origin property`);
     if (!CROSS_ORIGIN_ATTRIBUTE_KINDS.has(kind)) throw new Error(`${label}: an attribute is 'get', 'set' or 'get set' cross-origin, not '${kind}'`);
-    const forwarded = (m.extAttrs || []).some((e) => ['PutForwards', 'Replaceable', 'LegacyLenientSetter'].includes(e.name));
+    const forwarded = (m.extAttrs || []).some((e) => e.name === 'PutForwards');
     if (kind !== 'get' && m.readonly && !forwarded) throw new Error(`${label}: a readonly attribute has no setter to expose cross-origin`);
   }
   return table;
