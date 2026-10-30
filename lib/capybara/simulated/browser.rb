@@ -3913,8 +3913,19 @@ module Capybara
           @event_source_workers.delete(id.to_i)
           @event_source_threads.delete(id.to_i)
         }
-        thread&.kill
+        cancel_event_source_reader(thread)
         nil
+      end
+
+      # The session's own cancellation of an event stream's reader — `close()`, a navigation, a worker's end, `reset!` —
+      # raised into its thread rather than killing it, so the in-process app call defers it alone (`app_call`), never
+      # the app's own timeouts, and the reader lets go of the body and the socket it holds as it ends.
+      EventSourceCancelled = Class.new(Exception)
+      private_constant :EventSourceCancelled
+      private def cancel_event_source_reader(thread)
+        thread.raise(EventSourceCancelled) if thread&.alive?
+      rescue ThreadError
+        # (…it ended meanwhile)
       end
 
       # The sources of a worker that ended: each closed with it (HTML "worker event loop" teardown).
@@ -3924,7 +3935,7 @@ module Capybara
           ids.each {|id| @event_source_workers.delete(id) }
           ids.filter_map {|id| @event_source_threads.delete(id) }
         }
-        threads.each(&:kill)
+        threads.each {|t| cancel_event_source_reader(t) }
       end
 
       def event_source_poll
@@ -3989,6 +4000,8 @@ module Capybara
         # HTML "reestablish the connection": the stream over, the source reconnects, asking with what it left.
         last_event_id, retry_ms = Native.event_stream_reconnection(parser)
         queue << {id: id, type: '__reconnect', lastEventId: last_event_id, retry: retry_ms}
+      rescue EventSourceCancelled
+        # (…the session closed it: nothing to tell the page, which closed it itself or is gone)
       rescue StandardError => e
         queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
       ensure
@@ -4107,7 +4120,10 @@ module Capybara
           @event_source_workers.clear
           @event_source_threads.values.tap { @event_source_threads.clear }
         }
-        threads.each(&:kill)
+        # (…and given a moment to end — one in the middle of an app call ends once the app has answered — so none is
+        # still in the app as the next test begins)
+        threads.each {|t| cancel_event_source_reader(t) }
+        threads.each {|t| t.join(1) }
         @event_source_queue.clear
       end
 
@@ -12007,16 +12023,17 @@ module Capybara
         [status, utf8_tagged_headers(headers), body]
       end
 
-      # The app's answer to `env`. A reader thread the session may kill as it goes (an event stream's: `close()`, a
-      # navigation, a worker's end) calls it `deferring` that kill until the app has answered — a thread killed in the
-      # middle of a middleware or a query on the test's shared database connection would leave it mid-way for the next
-      # request — and lets go of the body the app gave before it dies.
+      # The app's answer to `env`. A reader thread the session may cancel as it goes (an event stream's:
+      # `EventSourceCancelled`) calls it `deferring` that cancellation until the app has answered — a thread stopped in
+      # the middle of a middleware or a query on the test's shared database connection would leave it mid-way for the
+      # next request — and lets go of the body the app gave before it ends. The session's cancellation alone: the app's
+      # own `Timeout.timeout` (Rack::Timeout, a client library's) still interrupts it.
       def app_call(env, deferring: false)
         return @app.call(env) unless deferring
 
-        Thread.handle_interrupt(Object => :never) {
+        Thread.handle_interrupt(EventSourceCancelled => :never) {
           response = @app.call(env)
-          response[2].close if Thread.pending_interrupt? && response[2].respond_to?(:close)
+          response[2].close if Thread.pending_interrupt?(EventSourceCancelled) && response[2].respond_to?(:close)
           response
         }
       end

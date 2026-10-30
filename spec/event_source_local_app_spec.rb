@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'timeout'
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
@@ -34,6 +35,14 @@ RSpec.describe 'an EventSource to the app' do
         sent = env['HTTP_LAST_EVENT_ID']
         body = sent ? "data: b #{sent}\n\n" : "id: 7\nretry: 50\ndata: a\n\n"
         [200, {'content-type' => 'text/event-stream'}, [body]]
+      when '/slow'
+        # (…an app's own timeout around something slow, answering 503 where it fires)
+        begin
+          Timeout.timeout(0.2) { sleep 1 }
+          [200, {'content-type' => 'text/event-stream'}, ["data: late\n\n"]]
+        rescue Timeout::Error
+          [503, {'content-type' => 'text/plain'}, ['timed out']]
+        end
       when '/w.js'
         [200, {'content-type' => 'text/javascript'}, [<<~JS]]
           const es = new EventSource('/stream');
@@ -69,6 +78,18 @@ RSpec.describe 'an EventSource to the app' do
     JS
     expect(poll_until { session.evaluate_script('window.got.length') == 3 }).to be(true)
     expect(session.evaluate_script('window.got')).to eq(['a 7', 'error 0', 'b 7 7'])
+  end
+
+  # (…the session's own cancellation deferred through the app's call, but nothing else: the app's timeout fires as it
+  # would under any server, and its answer fails the source)
+  it "lets the app's own timeout interrupt it" do
+    session.execute_script(<<~JS)
+      window.got = null;
+      const es = new EventSource('/slow');
+      es.onerror = () => { window.got = 'error ' + es.readyState; };
+      es.onmessage = (e) => { window.got = e.data; };
+    JS
+    expect(poll_until { session.evaluate_script('window.got') }).to eq('error 2')
   end
 
   it "delivers a worker's events into the worker, and closes its stream as the worker ends" do
