@@ -102,8 +102,7 @@ impl NavigationFetch {
     // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
     // origin `null`, its site cross-site), `initiator_cross_site_ancestor` (whether the initiating document has a
     // cross-site ancestor: referrer.rs `requestClient`), `ancestors` (the document origins above the navigable its cookies
-    // are judged by
-    // — nil none, each nil for one not known), `top_level` (whether it navigates a top-level navigable),
+    // are judged by — nil none, each nil for one not known), `top_level` (whether it navigates a top-level navigable),
     // `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it reloads was
     // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {

@@ -275,13 +275,16 @@ RSpec.describe 'the cookie store' do
 
   # A chain a service worker redirects keeps its redirect-taint into the network leg after it: a page of a's fetch() of
   # b's URL, which its worker answers with a redirect back to a, reaches a cross-site — no SameSite cookie, Sec-Fetch-Site
-  # `cross-site` — as the same chain the network made would (Fetch's redirect-taint walks the whole URL list).
+  # `cross-site` — as the same chain the network made would (Fetch's redirect-taint walks the whole URL list) — and an
+  # XHR's chain the same way.
   it "keeps the redirect-taint of a chain a service worker redirected" do
     seen   = {}
     worker = <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
       self.addEventListener('fetch', e => {
-        if (new URL(e.request.url).pathname === '/bounce') e.respondWith(Response.redirect('https://a.test/echo-sw', 302));
+        const path = new URL(e.request.url).pathname;
+        if (path === '/bounce') e.respondWith(Response.redirect('https://a.test/echo-sw', 302));
+        if (path === '/bounce-home') e.respondWith(Response.redirect('https://a.test/echo-xhr', 302));
       });
     JS
     app = lambda {|env|
@@ -291,7 +294,7 @@ RSpec.describe 'the cookie store' do
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/page'  then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
       else
-        seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']] if req.path.start_with?('/echo')
+        seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE'], env['HTTP_ORIGIN']] if req.path.start_with?('/echo')
         [200, {'content-type' => 'text/plain'}, ['ok']]
       end
     }
@@ -304,10 +307,23 @@ RSpec.describe 'the cookie store' do
         while (!navigator.serviceWorker.controller) await new Promise(res => setTimeout(res, 10));
         await fetch('https://a.test/echo-direct', {credentials: 'include'});
         await fetch('https://b.test/bounce', {mode: 'no-cors', credentials: 'include'});
+        // (…an XHR's chain alike: a same-origin one the worker redirects home untainted, its Origin none, loaded)
+        const x = new XMLHttpRequest();
+        x.open('GET', '/bounce-home');
+        x.onload = () => { window.xhr = ['load', x.status]; };
+        x.onerror = () => { window.xhr = ['error']; };
+        x.send();
       });
     JS
-    poll_until { s.evaluate_script('1') && seen.key?('/echo-sw') }
-    expect(seen).to eq('/echo-direct' => ['s=1; l=1', 'same-origin'], '/echo-sw' => ['', 'cross-site'])
+    poll_until { s.evaluate_script('window.xhr') }
+    expect([seen, s.evaluate_script('window.xhr')]).to eq([
+      {
+        '/echo-direct' => ['s=1; l=1', 'same-origin', nil],
+        '/echo-sw'     => ['', 'cross-site', nil],
+        '/echo-xhr'    => ['s=1; l=1', 'same-origin', nil]
+      },
+      ['load', 200]
+    ])
   end
 
   # A hyperlink's download is the top-level navigation whose response it is: judged by the document whose link it is —

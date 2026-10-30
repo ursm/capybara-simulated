@@ -629,8 +629,16 @@ module Capybara
       # HTML's source snapshot params of no source document — and a window's opener's as it opened it otherwise; `replace`
       # its history handling "replace", another window's `location.replace()`'s; `origin_null` whether the initiator's
       # origin is opaque)
-      def visit(url, referer: nil, referrer_policy: nil, initiator: nil, origin_null: false, initiator_cross_site_ancestor: false,
-                user_activated: initiator.nil?, replace: false)
+      def visit(
+        url,
+        referer: nil,
+        referrer_policy: nil,
+        initiator: nil,
+        origin_null: false,
+        initiator_cross_site_ancestor: false,
+        user_activated: initiator.nil?,
+        replace: false
+      )
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
@@ -1493,22 +1501,25 @@ module Capybara
           return save_downloaded_response(url, {'content-type' => mime}, [bytes], hint: filename_hint) if mime
           return
         end
-        source, = realm_referrer_initiator(realm)
-        fetch   = Native::NavigationFetch.new({
-          method:     'GET',
-          url:        url.to_s,
-          body_empty: true,
-          initiator:  initiating_url(realm),
-          top_level:  true,
+        source, policy = realm_referrer_initiator(realm)
+        fetch          = Native::NavigationFetch.new({
+          method:          'GET',
+          url:             url.to_s,
+          body_empty:      true,
+          referrer:        source,
+          referrer_policy: policy.to_s,
+          initiator:       initiating_url(realm),
+          top_level:       true,
           **initiating_document(realm)
         })
         loop do
-          _, target, _, _, _, _, _, _, _, cookie_context = fetch.begin_hop
+          _, target, _, ref_source, ref_policy, _, _, _, _, cookie_context = fetch.begin_hop
           env = rack_env_for(target, method: 'GET')
           env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
           env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
           attach_cookies(env, env_request_url(env), cookie_context)
-          referrer               = Native.referrer_url(source.to_s)
+          # (…its Referer under the document's referrer policy, narrowed at each hop as a redirect's `Referrer-Policy` says)
+          referrer               = Native.request_referrer(ref_policy, ref_source, target)
           env['HTTP_REFERER']    = referrer if referrer
           response = dispatch_rack_or_http(target, env) or return
           status, headers, body = response
@@ -1520,7 +1531,10 @@ module Capybara
 
             next
           end
-          return unless status.to_i == 200
+          unless status.to_i == 200
+            body.close if body.respond_to?(:close)
+            return
+          end
 
           # (…named by the link's `download` value where its Content-Disposition names nothing)
           return save_downloaded_response(target, headers, body, hint: filename_hint)
@@ -11019,7 +11033,7 @@ module Capybara
         commit: {}
       )
         invalidate_find_cache
-        initiating  = initiator ? initiating_document(initiator) : {}
+        initiating  = initiating_document(initiator || realm_id)
         opaque      = initiating[:origin_null] == true
         origin_null = true if opaque
         source, referrer_policy = referrer

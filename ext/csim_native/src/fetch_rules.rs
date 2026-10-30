@@ -507,10 +507,11 @@ fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     rv.set_bool(cors_safelisted_method(&method));
 }
 // __dom.interceptedHop(mode, redirectMode, url, method, requestOrigin, crossed, hops, status, type, responseUrl, redirected,
-// location, taint, site) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits, taint, site] to
+// location, taint, seed) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits, taint, site] to
 // follow (bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin; `taint` its
-// redirect-taint by name, `RedirectTaint::name`; `site` the Sec-Fetch-Site its chain has latched with this hop's URL, `site`
-// that before it — null none — which a network leg after it seeds), or a network error's message.
+// redirect-taint by name, `RedirectTaint::name`, the argument the one before this hop; `site` the Sec-Fetch-Site its chain
+// has latched with this hop's URL, `seed` that before it — null none — which a network leg after it seeds), or a network
+// error's message.
 fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [mode, redirect_mode, url, request_origin, response_type, response_url] = [0, 1, 2, 4, 8, 9].map(|k| args.get(k).to_rust_string_lossy(scope));
     let method = byte_string(scope, args.get(3));

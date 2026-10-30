@@ -59,7 +59,7 @@ pub(crate) struct FetchHops {
 
 impl Client {
     // Whether a hop to `target` is cross-site for cookies (RFC 6265bis §5.2) by its URL alone — the chain's redirect-taint
-    // is `FetchHops::taint`'s: a re-issued navigation's as the navigation judged the hop, any other request's where
+    // the chain's (fetch_chain.rs `RequestChain::taint`, which `hop` is handed): a re-issued navigation's as the navigation judged the hop, any other request's where
     // it navigates a frame with a cross-site ancestor, or its client — a request of none same-site — or any document the
     // request is judged by is cross-site to the target.
     fn cross_site(&self, target: &str) -> bool {
