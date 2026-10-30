@@ -4565,21 +4565,21 @@ module Capybara
             write_io
           }
         }
-        Thread.current[:csim_fetch_env] = nil
+        Thread.current[:csim_fetch_env]            = nil
+        Thread.current[:csim_fetch_cookie_context] = nil
         # (…a CORS request as an XHR's is, by its client)
         resp = rack_fetch_request(request, body, env_extras: env_extras)
         # (…nil, a network error, as `rack_fetch` answers one)
         return resp unless hijacked
         # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is)
         env = Thread.current[:csim_fetch_env] || {}
-        cookie_env = env.slice('csim.cookie_site', 'csim.cookie_cross_site', 'csim.cookie_top_level', 'HTTP_SEC_FETCH_SITE', 'HTTP_SEC_FETCH_MODE', 'HTTP_SEC_FETCH_DEST')
         requested = resolve_against_current(request['url'].to_s).to_s
         query = env['QUERY_STRING'].to_s
         # (…as text: an env's values may be BINARY-tagged, and a binary string crosses to the page as bytes)
         answered = env.empty? ? requested : RuntimeShared.utf8_text(env_request_url(env) + (query.empty? ? '' : "?#{query}"))
         # (…the request's own where no redirect led elsewhere — an env keeps no empty query's `?`)
         answered = requested if answered == requested.chomp('?')
-        @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, credentials: request['credentials'] || 'same-origin', cookie_env: cookie_env, realm: request['clientRealm'].to_i}
+        @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, cookie_context: Thread.current[:csim_fetch_cookie_context], realm: request['clientRealm'].to_i}
         {'handle' => id}
       end
 
@@ -4604,7 +4604,7 @@ module Capybara
           context = @hijack_fetch_contexts.delete(r['handle']) or next
           response =
             unless r['error']
-              merge_set_cookie(r['headers'], context[:url], context[:cookie_env]) unless context[:credentials] == 'omit'
+              store_set_cookies(r['headers'], context[:url], context[:cookie_context])
               response_hash(r['status'], r['headers'], r['body'], context[:url], context[:redirected])
             end
           by_realm[context[:realm]] << {'handle' => r['handle'], 'response' => response}
@@ -9334,8 +9334,8 @@ module Capybara
           when 'opaque_redirect_cached'
             return opaque_redirect_hash(target, cache_entry.status, cache_entry.headers, cache_entry.body)
           end
-          (method, target, hop_headers, drop_length, hop_referer, send_cookies, authorization, origin_value, sec_fetch, cookie_site,
-           lax_ok, revalidate), preflight = args
+          (method, target, hop_headers, drop_length, hop_referer, cookie_context, authorization, origin_value, sec_fetch,
+           revalidate), preflight = args
           env = rack_env_for(target, method: method, input: body || '')
           env['REQUEST_METHOD'] = method   # env_for upcases the method; restore the exact case (open-method-case-sensitive)
           # (…env_for sets Content-Length to the input's size, 0 for none: a bodyless request sends 0 only where its method
@@ -9343,19 +9343,15 @@ module Capybara
           env.delete('CONTENT_LENGTH') if drop_length
           apply_request_headers(env, hop_headers.to_h) unless hop_headers.empty?
           apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if revalidate
-          # The ancestor-chain cookie verdict (a SW-re-fetched navigation into a frame
-          # with a cross-site ancestor): flag the env BEFORE cookies attach so the
-          # SameSite gate in apply_default_request_env sees it, like a navigation would.
-          env['csim.cookie_cross_site'] = true if cookie_cross_site
           # Fetch "fetch" step 12: a request whose header list has no `Accept` carries its destination's — an image's
           # image types, a sheet's CSS, and `*/*` for every other (a script's, a media resource's, a worker's, a
           # beacon's) — not the document navigation's apply_default_request_env falls back to. (A fetch()'s, an XHR's,
           # a frame navigation's has its own already: fetch_rules.rs `defaultRequestHeaders`.)
           env['HTTP_ACCEPT'] ||= Native.default_accept(dest.to_s)
-          apply_default_request_env(env, referer: hop_referer, force: false)
-          # (…cookies as the credentials mode lets the hop send them: `omit` never, `include` always, `same-origin` only to
-          # the document's origin — cors-redirect-credentials / cors-cookies)
-          env.delete('HTTP_COOKIE') unless send_cookies
+          # (…its cookies as the engine's cookie context for the hop has them: none where the credentials mode keeps them
+          # back — `omit` always, `same-origin` to another origin: cors-redirect-credentials / cors-cookies — and SameSite
+          # ones by the site the chain latched so far)
+          apply_default_request_env(env, referer: hop_referer, force: false, cookie_context: cookie_context)
           # (…and an authentication entry sent ahead of a challenge, the caller's own Authorization winning)
           env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
           # The CORS-preflight a cross-origin CORS-unsafe hop sends first, unless the cache covers it (cors.rs).
@@ -9367,27 +9363,15 @@ module Capybara
           end
           env['HTTP_ORIGIN'] = origin_value if origin_value
           if sec_fetch
-            env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'], user, top_level = sec_fetch
+            env['HTTP_SEC_FETCH_SITE'], env['HTTP_SEC_FETCH_MODE'], env['HTTP_SEC_FETCH_DEST'], user = sec_fetch
             env['HTTP_SEC_FETCH_USER'] = '?1' if user
-            # (…and whether it is a top-level navigation's, which may set a SameSite cookie however cross-site:
-            # merge_set_cookie)
-            env['csim.cookie_top_level'] = true if top_level
-          end
-          if cookie_site
-            # (…the one verdict the response's Set-Cookie is stored by too: merge_set_cookie)
-            env['csim.cookie_site'] = cookie_site
-            # SameSite re-filter: cookies attached above (apply_default_request_env ran before this hop's site was known) —
-            # a cross-site hop sheds Strict cookies, and Lax ones but on a top-level navigation's GET.
-            if env['HTTP_COOKIE'] && cookie_site == 'cross-site'
-              ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env), cross_site: true, lax_ok: lax_ok)
-              ck.empty? ? env.delete('HTTP_COOKIE') : env['HTTP_COOKIE'] = ck
-            end
           end
           if env_extras
             env.merge!(env_extras)
-            # (…and the env it went with, where the caller asked something of the request's: a hijacked fetch's cookie
-            # context, which its later response is stored by)
-            Thread.current[:csim_fetch_env] = env
+            # (…and the env it went with and its cookie context, where the caller asked something of the request's: a
+            # hijacked fetch's URL, and the context its later response is stored in)
+            Thread.current[:csim_fetch_env]            = env
+            Thread.current[:csim_fetch_cookie_context] = cookie_context
           end
           response = dispatch_rack_or_http(target, env, method: method, body: body, transport: transport) or return nil
           status, resp_headers, resp_body = response
@@ -9402,9 +9386,9 @@ module Capybara
             status, resp_headers, resp_body = response
             step, *args = plan.response(status.to_i, response_fields(resp_headers), true)
           end
-          # Fetch credentials mode "omit" ignores credentials the response sends back too —
-          # its Set-Cookie is dropped, not stored (cors-cookies / credentials "omit mode").
-          merge_set_cookie(resp_headers, target, env) unless credentials == 'omit'
+          # (…its Set-Cookie stored in the hop's cookie context — not at all where it includes no credentials: Fetch
+          # "HTTP-network fetch", a cross-origin `same-origin` request's like an `omit` one's)
+          store_set_cookies(resp_headers, target, cookie_context)
           case step
           when 'revalidated'
             trace_network(method, target, cache_entry.status, hop_headers, body, cache_entry.headers, nil, t0, false)
@@ -10814,11 +10798,13 @@ module Capybara
       end
 
       # The context a cookie is set or retrieved in, as the session's cookie store (cookie_jar.rs) takes it: through an
-      # HTTP API (not `document.cookie`), over a secure channel, for a cross-site request, one where a Lax cookie goes.
-      COOKIE_HTTP       = 1
-      COOKIE_SECURE     = 2
-      COOKIE_CROSS_SITE = 4
-      COOKIE_LAX_OK     = 8
+      # HTTP API (not `document.cookie`), over a secure channel, for a cross-site request, one where a Lax cookie goes,
+      # and a top-level navigation's response, which may set a SameSite one.
+      COOKIE_HTTP          = 1
+      COOKIE_SECURE        = 2
+      COOKIE_CROSS_SITE    = 4
+      COOKIE_LAX_RETRIEVE  = 8
+      COOKIE_TOP_LEVEL_NAV = 16
       # (…the time a cookie expires by: the app's clock, which a test may travel)
       def cookie_now = Time.now.to_f * 1000
 
@@ -10831,14 +10817,14 @@ module Capybara
       # (`lax_ok:`); only SameSite=None crosses freely. `http: false` is `document.cookie`'s, which no HttpOnly cookie
       # is read through. The bytes the cookies' values are, as the server sent them.
       def cookie_header_for(url, secure:, cross_site: false, lax_ok: true, http: true)
-        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (lax_ok ? COOKIE_LAX_OK : 0)
+        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (lax_ok ? COOKIE_LAX_RETRIEVE : 0)
         Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now)
       end
 
       # …and a set-cookie-string received for `url`, stored as the store says (§5.7) — a SameSite one not from a
       # cross-site response but a top-level navigation's (`cross_site:`, `top_level:`).
       def store_cookie(url, line, secure:, http:, cross_site: false, top_level: false)
-        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (top_level ? COOKIE_LAX_OK : 0)
+        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (top_level ? COOKIE_TOP_LEVEL_NAV : 0)
         Native.cookie_jar_set(@cookie_jar, url.to_s, line.to_s, context, cookie_now)
       end
 
@@ -11763,7 +11749,9 @@ module Capybara
         env
       end
 
-      def apply_default_request_env(env, referer:, force: true)
+      # (…its cookies by `cookie_context`, the engine's for the request (fetch_hop.rs: nil, none), where the caller has one;
+      # else by its Fetch metadata — the requests not yet judged by the engine: a navigation's, a handshake's)
+      def apply_default_request_env(env, referer:, force: true, cookie_context: COOKIES_BY_METADATA)
         # `Rack::MockRequest.env_for` populates `SERVER_NAME` /
         # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
         # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
@@ -11788,12 +11776,12 @@ module Capybara
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
         referrer = Native.referrer_url(referer)
         env['HTTP_REFERER'] = referrer if referrer
+        return attach_cookies(env, env_request_url(env), cookie_context) unless cookie_context.equal?(COOKIES_BY_METADATA)
+
         # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
         # request's host — so a cross-origin request carries the right jar or none.
         # SameSite context from the request's own Fetch metadata (set by
-        # navigation_request_headers before cookies attach). No metadata — a fetch, an
-        # asset / ESM / beacon load — attaches every cookie here, and rack_fetch sheds
-        # the cross-site ones once it knows the hop's site for cookies.
+        # navigation_request_headers before cookies attach).
         # `csim.cookie_cross_site` is the ANCESTOR-CHAIN verdict (RFC 6265bis "site for
         # cookies"): a navigation into a frame with a cross-site ancestor is cross-site
         # for cookies even when its initiator is same-origin — while Sec-Fetch-Site
@@ -11808,6 +11796,19 @@ module Capybara
           env.delete('HTTP_COOKIE')
         else
           env['HTTP_COOKIE'] = ck
+        end
+      end
+      COOKIES_BY_METADATA = Object.new.freeze
+      private_constant :COOKIES_BY_METADATA
+
+      # A request's `Cookie`, as its cookie context lets the jar give it (cookie_jar.rs) — none for nil, a request that
+      # includes no credentials.
+      def attach_cookies(env, url, context)
+        cookies = context && Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now)
+        if cookies.nil? || cookies.empty?
+          env.delete('HTTP_COOKIE')
+        else
+          env['HTTP_COOKIE'] = cookies
         end
       end
 
@@ -12206,18 +12207,25 @@ module Capybara
       # `csim.cookie_site`; else its Fetch metadata's) says whether it was cross-site, and whether a top-level navigation
       # (no metadata: same-site).
       def merge_set_cookie(headers, url, env = nil)
-        sc = header_field(headers, 'set-cookie')
-        return if sc.nil? || sc.empty?
-
         url = document_cookie_url unless cookie_host(url)
-        secure     = potentially_trustworthy_url?(url)
         site       = env && (env['csim.cookie_site'] || env['HTTP_SEC_FETCH_SITE'])
         cross_site = !env.nil? && (site == 'cross-site' || env['csim.cookie_cross_site'] == true)
         top_level  = !env.nil? && (env['csim.cookie_top_level'] == true ||
                                    (env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document'))
-        (sc.is_a?(Array) ? sc : sc.split("\n")).each do |line|
-          store_cookie(url, line, secure: secure, http: true, cross_site: cross_site, top_level: top_level)
-        end
+        context    = COOKIE_HTTP | (potentially_trustworthy_url?(url) ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) |
+                     (top_level ? COOKIE_TOP_LEVEL_NAV : 0)
+        store_set_cookies(headers, url, context)
+      end
+
+      # …stored in `context`, the engine's for the request that got the response (fetch_hop.rs) — none for nil, a request
+      # that included no credentials (Fetch "HTTP-network fetch": a response's cookies are stored only where it did).
+      def store_set_cookies(headers, url, context)
+        return unless context
+
+        sc = header_field(headers, 'set-cookie')
+        return if sc.nil? || sc.empty?
+
+        (sc.is_a?(Array) ? sc : sc.split("\n")).each {|line| Native.cookie_jar_set(@cookie_jar, url.to_s, line.to_s, context, cookie_now) }
       end
 
       # Header names/values are BYTE sequences (RFC 9110), and script reads them

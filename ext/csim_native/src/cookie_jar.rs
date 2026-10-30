@@ -52,14 +52,22 @@ fn lock() -> MutexGuard<'static, Registry> {
 
 // The context a cookie is set or retrieved in, as the host tells it (bits).
 // …through an HTTP API (a `Set-Cookie` header, a request's `Cookie`), not `document.cookie`;
-const HTTP: u32 = 1;
+pub(crate) const HTTP: u32 = 1;
 // …over a secure channel (https, or a host the host takes as potentially trustworthy);
-const SECURE: u32 = 2;
+pub(crate) const SECURE: u32 = 2;
 // …for a request that is cross-site ("site for cookies"), where only a SameSite=None cookie goes — but a Lax one (and
-// one of none) too where it is a top-level navigation by a safe method (`LAX_OK`; setting one, any top-level
-// navigation's response)…
-const CROSS_SITE: u32 = 4;
-const LAX_OK: u32 = 8;
+// one of none) too where it is a top-level navigation by a safe method (`LAX_RETRIEVE`, §5.8.3)…
+pub(crate) const CROSS_SITE: u32 = 4;
+pub(crate) const LAX_RETRIEVE: u32 = 8;
+// …and, setting one, whether the response is a top-level navigation's, of any method, which may set a SameSite one
+// however cross-site (§5.7 step 15) — a different question from the one retrieval asks, of a POST's response too.
+pub(crate) const TOP_LEVEL_NAV: u32 = 16;
+
+// The context of a request's cookies through HTTP, its `Cookie` sent and its `Set-Cookie` stored in it: over a secure
+// channel, cross-site, a top-level navigation's safe-method request, a top-level navigation's of any method.
+pub(crate) fn request_context(secure: bool, cross_site: bool, lax_retrieve: bool, top_level_nav: bool) -> u32 {
+    HTTP | if secure { SECURE } else { 0 } | if cross_site { CROSS_SITE } else { 0 } | if lax_retrieve { LAX_RETRIEVE } else { 0 } | if top_level_nav { TOP_LEVEL_NAV } else { 0 }
+}
 
 // A cookie's longest life: 400 days (§5.6.1, §5.6.2).
 const MAX_AGE_MS: f64 = 400.0 * 24.0 * 3600.0 * 1000.0;
@@ -289,11 +297,11 @@ impl Jar {
             return;
         }
         // SameSite=None needs Secure (Chrome, and the draft's "SameSite=None requires Secure"); any other is not stored
-        // from a cross-site response but a top-level navigation's (§5.7 step 15: `CROSS_SITE`, `LAX_OK`).
+        // from a cross-site response but a top-level navigation's (§5.7 step 15: `CROSS_SITE`, `TOP_LEVEL_NAV`).
         if p.same_site == SameSite::None && !p.secure {
             return;
         }
-        if p.same_site != SameSite::None && context & CROSS_SITE != 0 && context & LAX_OK == 0 {
+        if p.same_site != SameSite::None && context & CROSS_SITE != 0 && context & TOP_LEVEL_NAV == 0 {
             return;
         }
         // A non-secure channel may not shadow a Secure cookie of the name whose domain and path are its (§5.7 step 16).
@@ -351,7 +359,7 @@ impl Jar {
         self.cookies.retain(|c| c.expiry.is_none_or(|e| e > now));
         let Some((host, path)) = host_and_path(url) else { return String::new() };
         let (http, secure_channel, cross_site, lax_ok) =
-            (context & HTTP != 0, context & SECURE != 0, context & CROSS_SITE != 0, context & LAX_OK != 0);
+            (context & HTTP != 0, context & SECURE != 0, context & CROSS_SITE != 0, context & LAX_RETRIEVE != 0);
         let mut found: Vec<&Cookie> = self
             .cookies
             .iter()
@@ -467,7 +475,9 @@ mod tests {
         assert_eq!(j.retrieve("http://a.test/", H, NOW), "h=2; strict=3");
         assert_eq!(j.retrieve("https://a.test/", SECURE, NOW), "s=1; strict=3; none=4");
         assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE, NOW), "none=4");
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | LAX_OK, NOW), "s=1; h=2; none=4");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | LAX_RETRIEVE, NOW), "s=1; h=2; none=4");
+        // (…the storage exception no retrieval one: a cross-site top-level navigation's POST sends no Lax cookie)
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | TOP_LEVEL_NAV, NOW), "none=4");
         // (…a document write leaves an HttpOnly one be)
         j.store("https://a.test/", "h=x", SECURE, NOW);
         assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "s=1; h=2; strict=3; none=4");
@@ -519,7 +529,9 @@ mod tests {
             ("https://a.test/", "lax=1; SameSite=Lax", H | SECURE | CROSS_SITE),
             ("https://a.test/", "def=1", H | SECURE | CROSS_SITE),
             ("https://a.test/", "none=1; SameSite=None; Secure", H | SECURE | CROSS_SITE),
-            ("https://a.test/", "nav=1; SameSite=Strict", H | SECURE | CROSS_SITE | LAX_OK),
+            ("https://a.test/", "nav=1; SameSite=Strict", H | SECURE | CROSS_SITE | TOP_LEVEL_NAV),
+            // (…a cross-site request that may retrieve a Lax cookie sets none: not a top-level navigation's response)
+            ("https://a.test/", "laxget=1; SameSite=Lax", H | SECURE | CROSS_SITE | LAX_RETRIEVE),
         ]);
         let got = j.retrieve("https://a.test/", H | SECURE, NOW);
         assert!(got.starts_with("big="));

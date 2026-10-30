@@ -290,9 +290,10 @@ impl FetchPlan {
     // - ['serve_cache', tainted] — the stored response is the answer;
     // - ['cache_follow', from] — a stored redirect followed from the cache (`from` the hop it was of, for the trace);
     // - ['opaque_redirect_cached'] — a stored redirect, its request's redirect mode "manual";
-    // - ['dispatch', [method, target, header pairs, drop Content-Length, Referer, send cookies, pre-emptive
-    //   Authorization, Origin, Sec-Fetch [site, mode, dest, user, top-level], cookie site, Lax, revalidate],
-    //   preflight] — the request to send, the CORS-preflight first where `preflight` [unsafe names, Origin] says so.
+    // - ['dispatch', [method, target, header pairs, drop Content-Length, Referer, cookie context (nil: no credentials
+    //   included — no `Cookie` sent, no `Set-Cookie` stored; fetch_hop.rs), pre-emptive Authorization, Origin, Sec-Fetch
+    //   [site, mode, dest, user], revalidate], preflight] — the request to send, the CORS-preflight first where
+    //   `preflight` [unsafe names, Origin] says so.
     fn begin_hop(ruby: &Ruby, rb_self: &Self, cache: Option<(u32, bool, RArray)>, now: f64) -> Result<RArray, Error> {
         let plan = rb_self;
         let mut st = plan.st.borrow_mut();
@@ -339,7 +340,7 @@ impl FetchPlan {
         let upper = st.chain.method.to_ascii_uppercase();
         let drop_length = st.chain.body_empty && upper != "POST" && upper != "PUT";
         let referer = st.chain.referer();
-        let (cross_origin, send_cookies, origin, sec, cookie_site, lax) = plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone());
+        let (cross_origin, send_cookies, origin, sec, cookies) = plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone());
         st.referer = referer.clone();
         st.cross_origin = cross_origin;
         st.send_cookies = send_cookies;
@@ -371,12 +372,10 @@ impl FetchPlan {
             pairs(ruby, &plan.sent_headers(&st.chain.headers)).as_value(),
             drop_length.into_value_with(ruby),
             referer.into_value_with(ruby),
-            send_cookies.into_value_with(ruby),
+            cookies.into_value_with(ruby),
             preemptive.into_value_with(ruby),
             origin.into_value_with(ruby),
             sec.into_value_with(ruby),
-            cookie_site.into_value_with(ruby),
-            lax.into_value_with(ruby),
             st.revalidating.into_value_with(ruby),
         ]);
         Ok(command(ruby, "dispatch", &[facts.as_value(), preflight.into_value_with(ruby)]))

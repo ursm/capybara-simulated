@@ -111,6 +111,36 @@ RSpec.describe 'the cookie store' do
     expect(seen.reject {|_, c| c.empty? }).to eq([])
   end
 
+  # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a
+  # same-site, cross-origin fetch() of the default credentials mode (`same-origin`) leaves the jar as it was, where one
+  # of `include` (that the response allows) stores them.
+  it "stores no cookie a fetch() that included no credentials was answered with" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      seen << env['HTTP_COOKIE'].to_s if req.path == '/echo'
+      case req.path
+      when '/give'
+        allow = {'access-control-allow-origin' => 'http://www.example.com', 'access-control-allow-credentials' => 'true'}
+        [200, allow.merge('content-type' => 'text/plain', 'set-cookie' => "#{req.params['name']}=1; Path=/"), ['ok']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
+      end
+    }
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
+    s = simulated_session(app)
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    s.visit 'http://www.example.com/'
+    s.evaluate_async_script(<<~JS)
+      const done = arguments[arguments.length - 1];
+      fetch('http://api.example.com/give?name=kept')
+        .then(() => fetch('http://api.example.com/give?name=sent', {credentials: 'include'}))
+        .then(() => done(), () => done());
+    JS
+    s.visit 'http://api.example.com/echo'
+    expect(seen).to eq(['sent=1'])
+  end
+
   # An image is fetched under its own `referrerpolicy` attribute where it has one, else its document's (HTML).
   it "refers an image's request under its referrerpolicy attribute" do
     seen = {}
