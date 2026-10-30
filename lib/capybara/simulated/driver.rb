@@ -487,12 +487,12 @@ module Capybara
       # skipping those: a `noopener` window's name finds none of its opener's, a cross-origin pop-up's none of the page's
       # (Chrome and Firefox open a new window) — none for '' or none `from`. None that is closing: its `close()` takes it
       # out of every lookup by name at once, its discard a task later (WPT close-method.window.js).
-      # Only the session's Browsers are searched, never a window `window.open` made in a Browser's isolate (RealmWindow).
-      # For `from`'s own isolate, its engine has already chosen (navigables.rs `find_navigable`, which judges the frame
-      # that named the window and its sandbox). When it asks here, it chose a new window: a sandboxed frame, or a frame not
-      # familiar with the one of that name, must not reach that window. No other isolate's WindowProxy reaches such a
-      # window (`isolate_window`) until R13 S6 brings every pop-up of a group into its opener's isolate, so another
-      # isolate that names one opens a window of its own meanwhile.
+      # Only the session's other Browsers are searched: never `from`'s own page, nor a window `window.open` made in a
+      # Browser's isolate (RealmWindow). For `from`'s own isolate, its engine has already chosen (navigables.rs
+      # `find_navigable`, which judges the frame that named the window and its sandbox). When it asks here, it chose a new
+      # window: a sandboxed frame, or a frame not familiar with the window of that name, must not reach it. No other
+      # isolate's WindowProxy reaches a RealmWindow (`isolate_window`) until R13 S6 brings every pop-up of a group into its
+      # opener's isolate, so another isolate that names one opens a window of its own meanwhile.
       # (…"familiar with" between top-level windows, session_history.rs `familiar`: none once its page disowned it, Chrome
       # and Firefox measured — a window that set `opener = null` is found by no name its opener's cross-origin page gives.
       # `from`'s page's document is judged, also when a frame of `from` names another isolate's window, and the frame's
@@ -502,7 +502,7 @@ module Capybara
 
         window_entries.find {|w|
           target = w[:window]
-          target.is_a?(Browser) && target.window_name == name && !target.closing? &&
+          target.is_a?(Browser) && !target.equal?(from) && target.window_name == name && !target.closing? &&
             target.browsing_context_group == from.browsing_context_group && from.traversable.familiar_with?(target.traversable)
         }
       end

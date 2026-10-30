@@ -10317,10 +10317,12 @@ module Capybara
         # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
         # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
         # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
+        # (…the initiator's document gone since it began it — a frame's form that navigated the frame itself after — by
+        # the URL and the policy it referred by as it began it: `source`, `policy`)
         if body.nil? && http_url?(url)
-          by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy}
+          by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          resp = frame_navigation_fetch(url, referred, dest: 'document', download_realm: initiator, user_activated: activated, **by)
+          resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, **by)
           return if resp.nil? || resp['no_document']
 
           headers = resp['headers'] || {}
@@ -10747,7 +10749,7 @@ module Capybara
         # URL"; one into a new window — or a `data:` one, which a top-level browsing context refuses — none, the window's
         # about:blank and its script run not modeled)
         if spec['action'].to_s.match?(/\Ajavascript:/i)
-          target = {self: realm_id, top: 0}.fetch(to) { to if to.is_a?(Integer) }
+          target = {self: realm_id, top: 0, window: route[:window]}.fetch(to) { to if to.is_a?(Integer) }
           return javascript_form_action(target, spec['action'].to_s, realm_id) if target
           return if to == :new_window
         end

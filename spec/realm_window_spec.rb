@@ -417,6 +417,7 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
           <!doctype html><html><head><meta charset="utf-8"><title>main</title></head><body>
             <p id="main">MAIN</p>
             <form action="http://a.test/landed" target="w"><button>form</button></form>
+            <form action="javascript:document.title = 'by script'" target="w"><button>script action</button></form>
             <iframe src="http://b.test/frame"#{sandbox}></iframe>
             <iframe src="http://a.test/frame#{'?opens' if frame_opens}"#{sandbox}></iframe>
             <script>#{open_w unless frame_opens}</script>
@@ -430,13 +431,22 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
             <button id="url">url</button>
             <button id="inline" onclick="open('', 'w').location = 'http://a.test/landed'">inline</button>
             <form action="http://a.test/landed" target="w"><button>form</button></form>
+            <form action="javascript:document.title = 'by script'" target="w"><button>script action</button></form>
+            <form id="post" method="post" action="http://a.test/posted" target="w"><input name="q" value="v"></form>
+            <button id="post-away">post away</button>
             <script>
               document.getElementById('script').addEventListener('click', () => { open('', 'w').location = 'http://a.test/landed'; });
               document.getElementById('url').addEventListener('click', () => { open('http://a.test/landed', 'w'); });
+              document.getElementById('post-away').addEventListener('click', () => {
+                document.getElementById('post').submit();
+                location = '/landed';
+              });
               #{open_w if req.query_string == 'opens'}
             </script>
           </body></html>
         HTML
+      when '/posted'
+        "<!doctype html><html><head><meta charset=\"utf-8\"></head><body><p id=\"posted\">#{req.request_method} q=#{req.POST['q']} #{env['HTTP_ORIGIN']} #{env['HTTP_REFERER']}</p></body></html>"
       else
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>landed</title></head><body><p id=\"landed\">#{req.host}#{req.path}</p></body></html>"
       end
@@ -450,7 +460,8 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
       window.w = window.open('', 'w');
       w.document.write(
         '<!doctype html><title>blank</title><p id="in">IN</p><iframe srcdoc="<p id=deep>DEEP</p>"></iframe>' +
-        '<form action="http://a.test/landed" target="main"><button>to main</button></form>'
+        '<form action="http://a.test/landed" target="main"><button>to main</button></form>' +
+        '<iframe src="http://b.test/frame"></iframe>'
       );
       w.document.close();
     JS
@@ -508,7 +519,10 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
   # familiar with — an auxiliary one whose opener is the frame's top-level traversable — and a `location` set navigates
   # it from another origin as from its own: Location's `href` setter is a cross-origin one, "allowed by sandboxing to
   # navigate" its only check)
-  [[0, 'another origin'], [1, 'its origin']].each do |index, origin|
+  [
+    [0, 'another origin', 'http://b.test http://b.test/'],
+    [1, 'its origin', 'http://a.test http://a.test/frame']
+  ].each do |index, origin, request_from|
     it "is found by its name by a script of a frame of #{origin}, which navigates it" do
       session.within_frame(index) do
         expect(session.evaluate_script("open('', 'w').closed")).to be(false)
@@ -531,6 +545,15 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
       session.within_window(popup) { expect(session).to have_css('#landed', text: 'a.test/landed') }
     end
 
+    # (…the request the frame's document made, its Origin and its Referer, though the frame navigated away as it began)
+    it "takes a POST a frame of #{origin} submits into it by its name, the frame navigated away after" do
+      session.within_frame(index) do
+        session.click_button('post-away')
+        expect(session).to have_css('#landed')
+      end
+      session.within_window(popup) { expect(session).to have_css('#posted', text: "POST q=v #{request_from}") }
+    end
+
     # (…but an inline event handler's `open` is its document's, whose scope comes before the global's in the handler's
     # (HTML "getting the current value of the event handler"): `document.open('', 'w')`, two arguments, reopens the
     # frame's own document, whose `location` it then sets — the frame navigated, the window left as it was. Chrome and
@@ -550,6 +573,40 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
     expect(session.windows.size).to eq(2)
     session.within_window(popup) { expect(session).to have_css('#landed', text: 'a.test/landed') }
     expect(session).to have_css('#main')
+  end
+
+  # (…a `javascript:` action run in it where the form's document is of its origin: HTML "navigate to a javascript: URL")
+  it 'runs the javascript: action of a form submitted into it by its name, from a document of its origin' do
+    session.click_button('script action')
+    session.within_window(popup) { expect(session).to have_title('by script') }
+    session.execute_script("w.document.title = 'blank'")
+    session.within_frame(1) { session.click_button('script action') }
+    session.within_window(popup) { expect(session).to have_title('by script') }
+  end
+
+  it 'ignores the javascript: action of a form submitted into it from a frame of another origin' do
+    session.within_frame(0) { session.click_button('script action') }
+    session.within_window(popup) { expect(session).to have_title('blank') }
+  end
+
+  # (…a frame of another origin in it, which is not familiar with its opener's page: not of its origin, not its
+  # top-level traversable — the window is — and the page no auxiliary one; the window it opens by the page's name a new
+  # one, the page left as it was. Firefox and HTML; Chrome navigates the page, a departure navigables.rs
+  # `find_navigable` notes)
+  [
+    ['a script', "open('http://a.test/landed', 'main')"],
+    ['a link', "const a = document.createElement('a'); a.href = 'http://a.test/landed'; a.target = 'main'; document.body.append(a); a.click()"],
+    ['a form', "const f = document.createElement('form'); f.action = 'http://a.test/landed'; f.target = 'main'; document.body.append(f); f.submit()"]
+  ].each do |by, script|
+    it "opens a window of its own for #{by} of a frame of another origin in it that names its opener's page" do
+      session.within_window(popup) do
+        session.within_frame(1) { session.execute_script(script) }
+      end
+      expect(session).to have_css('#landed', count: 0)
+      expect(session.windows.size).to eq(3)
+      session.within_window(session.windows.last) { expect(session).to have_css('#landed', text: 'a.test/landed') }
+      expect(session).to have_css('#main')
+    end
   end
 
   it "submits a form into its opener's page by that page's name" do
