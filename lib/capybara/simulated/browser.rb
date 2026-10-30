@@ -7452,7 +7452,7 @@ module Capybara
       private def window_tasks_takeable?
         return false unless Native.window_tasks_pending
 
-        (!@taking_window_tasks && @session_history.posted?) || session_windows.drop(1).any? {|b| b.window_asked? && !b.window_busy? }
+        (!@taking_window_tasks && @session_history.inbound?) || session_windows.drop(1).any? {|b| b.window_asked? && !b.window_busy? }
       end
 
       # Whether another window's script asked something of this one — a message posted, a navigation planned, its close
@@ -7471,7 +7471,7 @@ module Capybara
       end
 
       # What another window's script asked of this one, taken as tasks of its own event loop (HTML: a task queued on it by
-      # an agent of another isolate): the messages posted to it (`deliver_posted_messages`) — and, while it is not busy, the
+      # an agent of another isolate): the messages posted to it (`deliver_inbound_tasks`) — and, while it is not busy, the
       # close of it, then the traversals of its session history and the navigation planned of it, which a close leaves
       # none of (session_history.rs `ask_close`).
       # Taken as this window's own step takes its tasks, or, one not the active window, as the active one's takes them
@@ -7484,7 +7484,7 @@ module Capybara
       private def take_window_tasks!
         return 0 if discard_due?
 
-        n = deliver_posted_messages
+        n = deliver_inbound_tasks
         return n if script_waiting? || @navigating
         if @session_history.take_close
           close_steps
@@ -7514,7 +7514,7 @@ module Capybara
       # The tasks other windows queued on this one, each a task of its own, in the order queued: a message another window's
       # script posted to it (session_history.rs `traversablePost`), a `message` event at its window; the `load` of another
       # window a realm of its listens for (`traversableLoaded`), its listeners there run — none of a realm gone since.
-      private def deliver_posted_messages
+      private def deliver_inbound_tasks
         inbound = @session_history.take_inbound
         inbound.each do |kind, *task|
           if kind == :message
@@ -7571,11 +7571,6 @@ module Capybara
           visit(url, replace: planned[:replace], **made)
         end
         true
-      rescue StandardError => e
-        # (…one that raises — the app's own error, a body it cannot read — this window's task's failure, not the driver
-        # command's that took it: the window left where the navigation got to, its handle still the test's to switch to)
-        warn "[csim] a planned navigation to #{url.inspect} raised: #{e.class}: #{e.message[0, 200]}"
-        true
       end
 
       # A BroadcastChannel message queued for delivery to this Browser's channels.
@@ -7618,7 +7613,7 @@ module Capybara
         return 0 if @taking_window_tasks || !Native.window_tasks_pending
 
         taking_window_tasks {
-          n = deliver_posted_messages
+          n = deliver_inbound_tasks
           (script_waiting? || @navigating) ? n : n + session_windows.drop(1).sum(&:take_window_tasks_in_background)
         }
       end
@@ -11383,10 +11378,10 @@ module Capybara
             # (…its origin its initiator's, an opaque one for none: a visit's — HTML "determine the origin", Chrome
             # measured — and its base URL that document's: the page's own where the page navigates itself, else the
             # initiator's URL (its base URL not known here — a gap); its referrer the request's, under the initiator's
-            # policy. A window's initial about:blank is no navigation's — a `noopener` one's origin a new opaque one, a
-            # pop-up's its creator's: HTML "window open steps" — and an opaque initiator's (a sandboxed document's: its seed
+            # policy — the initiator's, though the window be at its initial about:blank still (that one made with the window,
+            # its creator's: `open_initial_document`) — and an opaque initiator's (a sandboxed document's: its seed
             # `cross-site`, `opaque_initiator`) one of no tuple origin, a new opaque one here where HTML has that one)
-            if initiator && @session_history.active(0) && site_seed != 'cross-site'
+            if initiator && site_seed != 'cross-site'
               own  = initiator == @current_url
               base = own ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s
               inherit_creator(origin: url_origin(initiator).to_s, base: base)

@@ -726,6 +726,9 @@ impl Traversable {
     fn publish(&mut self, key: String) {
         if self.reusable.take().as_ref() != Some(&key) {
             self.window += 1;
+            // (…the realms that listened for the load of a Window it shows no more let go: that load is never to come)
+            let window = self.window;
+            self.load_watchers.retain(|w| w.window == window);
         }
         self.origin = Some(key);
     }
@@ -1151,11 +1154,11 @@ impl SessionHistory {
             asking(&mut t, |t| t.asked.planned = None);
         }
     }
-    // #asked? -> whether something asked of it waits to be taken; #posted? -> a task another window queued on it.
+    // #asked? -> whether something asked of it waits to be taken; #inbound? -> a task another window queued on it.
     fn is_asked(&self) -> bool {
         self.lock().pending() > 0
     }
-    fn is_posted(&self) -> bool {
+    fn is_inbound(&self) -> bool {
         !self.lock().asked.inbound.is_empty()
     }
     // #familiar_with?(other) -> whether it is familiar with `other` (`familiar`).
@@ -1200,7 +1203,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("plan_post", method!(SessionHistory::plan_post_for_ruby, 8))?;
     class.define_method("take_planned", method!(SessionHistory::take_planned_for_ruby, 0))?;
     class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
-    class.define_method("posted?", method!(SessionHistory::is_posted, 0))?;
+    class.define_method("inbound?", method!(SessionHistory::is_inbound, 0))?;
     class.define_method("familiar_with?", method!(SessionHistory::is_familiar_with, 1))?;
     class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
@@ -2090,13 +2093,15 @@ fn window_history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
 // of top-level traversable `id`, a window of another isolate (platform-globals.js `csimWindowProxy`: its `history`'s
 // `back()` / `forward()` / `go()`): appended to that one's session history traversal queue (HTML "traverse the history by
 // a delta", its document the source; `go(0)` a reload, "apply the reload history step"), which its own event loop takes
-// as a task — never while the asking script runs (`Queued::asked`).
+// as a task — never while the asking script runs (`Queued::asked`). A reload of one still at its initial about:blank,
+// which no entry is of, none: nothing for the reload step to make again, the navigation it was opened for going on
+// (Chrome and Firefox measured: `w = open(url); w.location.reload()` loads `url`, once).
 fn traversable_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let delta = args.get(1).integer_value(scope).unwrap_or(0);
     let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
     let mut t = lock(&traversable);
-    if !t.closed && !t.asked.closing {
+    if !t.closed && !t.asked.closing && !(delta == 0 && t.initial) {
         t.queue(delta, 0, true);
     }
 }

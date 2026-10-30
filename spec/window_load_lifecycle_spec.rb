@@ -116,6 +116,13 @@ RSpec.describe 'the load of another isolate\'s window' do
     expect(log).to eq('script:loading;DOMContentLoaded;load:true;')
   end
 
+  it 'reloads nothing of a window still at its initial about:blank, the navigation it was opened for going on' do
+    run("localStorage.setItem('log', ''); window.w = open('/logs'); w.location.reload();")
+    expect(read('w.location.pathname')).to eq('/logs')
+    expect(hits['/logs']).to eq(1)
+    expect(log).to eq('script:loading;DOMContentLoaded;load:true;')
+  end
+
   context 'opened by an action of the test' do
     it 'is at its document as `window_opened_by` returns it, a script\'s `window.open` the action ran' do
       window = session.window_opened_by { session.click_button 'open' }
