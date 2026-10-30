@@ -394,7 +394,9 @@ module WptRunner
     # request host: its own document origin is the family root there.
     host = SUB_HOST if sub_family
     markup = %w[.html .htm .xht .xhtml .xml .svg].include?(File.extname(req_path.to_s))
-    escape = markup ? CGI.method(:escapeHTML) : :itself.to_proc
+    # (…but where the request's `pipe=sub(none)` asks for none, wptserve's escape type: a code-injector page's script)
+    unescaped = query['pipe'].to_s.split('|').any? {|fn| fn.strip.match?(/\Asub\(\s*none\s*\)\z/) }
+    escape = markup && !unescaped ? CGI.method(:escapeHTML) : :itself.to_proc
     # File.binread gives ASCII-8BIT; splicing the UTF-8 replacement strings below
     # would raise Encoding::CompatibilityError the moment the body carries any
     # non-ASCII byte. `.sub.` templates are UTF-8 source, so reinterpret as such.

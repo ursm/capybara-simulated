@@ -3013,22 +3013,6 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 - load event does not fire on window.open('about:blank#foo')
 - load event does not fire on window.open('about:blank')
 - load event does not fire on window.open('about:blank?foo')
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204-fragment.html:
-- "[harness] TIMEOUT"
-- location.assign
-- location.href
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204-pushState-replaceState.html:
-- "[harness] TIMEOUT"
-- history.pushState
-- history.replaceState
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204.html:
-- "[harness] TIMEOUT"
-- location.assign
-- location.href
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-aboutblank.html:
-- "[harness] TIMEOUT"
-- location.assign
-- location.href
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-nourl.html:
 - "[harness] TIMEOUT"
 - location.assign
@@ -3113,104 +3097,40 @@ html/browsers/browsing-the-web/navigating-across-documents/refresh/subresource.a
 - Refresh does not affect XMLHttpRequest.
 - "[dedicatedworker] Refresh does not affect Fetch API."
 - "[dedicatedworker] Refresh does not affect XMLHttpRequest."
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click-during-load.html:
-- "[harness] TIMEOUT"
-- aElement.click() during the load event must NOT replace
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click-during-pageshow.html:
-- "[harness] TIMEOUT"
-- aElement.click() during the pageshow event must NOT replace
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click.html:
 - aElement.click() before the load event must NOT replace
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-user-click-during-load.html:
-- User click on <a> during the load event must NOT replace
-- "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-user-click-during-pageshow.html:
-- User click on <a> during the pageshow event must NOT replace
-- "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-user-click.html:
-- User click on <a> before the load event must NOT replace
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit-during-load.html:
 - Replace during the load event, triggered by formElement.submit()
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit-during-pageshow.html:
 - Replace during the pageshow event, triggered by formElement.submit()
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit.html:
 - Replace before load, triggered by formElement.requestSubmit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click-during-load.html:
 - Replace during load, triggered by submitButton.click()
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click-during-pageshow.html:
 - Replace during pageshow, triggered by submitButton.click()
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click.html:
 - Replace before load, triggered by submitButton.click()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-cross-frame-crossorigin.sub.html:
-- No replace before load, triggered by cross-iframe formElement.submit() [iframe is
-  cross-origin]
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-cross-frame.html:
 - No replace before load, triggered by cross-iframe formElement.submit()
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-load.html:
 - Replace during the load event, triggered by formElement.submit()
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-pageshow.html:
 - Replace during the pageshow event, triggered by formElement.submit()
-- "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-popup-crossorigin.sub.html:
-- No replace before load, triggered by formElement.submit() in the opener window,
-  after the opener has loaded [window is cross-origin]
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-popup.html:
 - No replace before load, triggered by formElement.submit() in the opener window,
   after the opener has loaded
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit.html:
 - Replace before load, triggered by same-document formElement.submit()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/history-pushstate-during-load.html:
-- "[harness] TIMEOUT"
-- history.pushState() during the load event must NOT replace
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/history-pushstate-during-pageshow.html:
-- "[harness] TIMEOUT"
-- history.pushState() during the pageshow event must NOT replace
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-load.html:
 - Replace during the load event, triggered by setting iframeElement.src
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-pageshow.html:
 - Replace during the pageshow event, triggered by setting iframeElement.src
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src.html:
 - Replace before load, triggered by setting iframeElement.src
 - "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign-during-load.html:
-- Replace during the load event, triggered by location.assign()
-- "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign-during-pageshow.html:
-- Replace during the pageshow event, triggered by location.assign()
-- "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign-user-click.html:
-- NO replace before load, triggered by location.assign()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign.html:
 - Replace before load, triggered by location.assign()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-during-load.html:
-- "[harness] TIMEOUT"
-- hash
-- href
-- search
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-during-pageshow.html:
-- "[harness] TIMEOUT"
-- hash
-- href
-- search
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-user-click.html:
-- hash
-- href
-- search
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-user-mouseup.html:
-- hash
-- href
-- search
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter.html:
 - href
 - search
@@ -3220,12 +3140,6 @@ html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/w
 - No replace before load, triggered by window.open() on a non-_self window
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup.html:
 - No replace before load, triggered by window.open() on a non-_self window
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self-during-load.html:
-- No replace during load, triggered by window.open(_self) on an iframe
-- "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self-during-pageshow.html:
-- No replace during pageshow, triggered by window.open(_self) on an iframe
-- "[harness] TIMEOUT"
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self.html:
 - No replace before load, triggered by window.open(_self) on an iframe
 html/browsers/browsing-the-web/navigating-across-documents/source/navigate-child-src-about-blank.html:
