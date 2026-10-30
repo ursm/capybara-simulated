@@ -4932,22 +4932,14 @@ module Capybara
         w[:inbox] << {kind: 'sw_message', data: data.to_s, client: client_id, url: client_url}
       end
 
-      # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
-      # @sw_fetch_pending (released by the `fetch_response`) so settle waits for the SW's
-      # respondWith. If the handle is dead, return false so the client falls back to the network.
-      # A controlled worker's MAIN SCRIPT, served through its controlling SW's fetch event —
-      # called on the SPAWNING worker's own thread (run_worker), never the main thread: the
-      # spawn happens inside a JS host callback (`new Worker()`), where a synchronous wait for
-      # an async respondWith deadlocks (the documented worker-interception lesson); a worker
-      # thread parking on a plain Queue is free. The reply bypasses the outbox→main-thread
-      # route entirely (@sw_direct_replies, filled by sw_deliver_fetch_response), so delivery
-      # needs no main-thread drain; sw_direct_fetch still counts the park in
-      # @sw_fetch_pending so the main thread HOLDS THE VIRTUAL CLOCK over the round trip
-      # (see its comment).
-      # Returns {body:, url:, controller:} — see worker_main_script_fetch below.
-      # One main-script fetch event dispatched to `sw_handle` — the raw wire hash, or nil
-      # when the SW never answered within budget (treated as fall-through). Validation and
-      # the redirect chain live in worker_main_script_fetch.
+      # One main-script fetch event of a controlled worker dispatched to `sw_handle` — called on the SPAWNING worker's
+      # own thread (run_worker), never the main thread: the spawn happens inside a JS host callback (`new Worker()`),
+      # where a synchronous wait for an async respondWith deadlocks (the documented worker-interception lesson); a worker
+      # thread parking on a plain Queue is free. The reply bypasses the outbox→main-thread route entirely
+      # (@sw_direct_replies, filled by sw_deliver_fetch_response), so delivery needs no main-thread drain; sw_direct_fetch
+      # still counts the park in @sw_fetch_pending so the main thread HOLDS THE VIRTUAL CLOCK over the round trip (see its
+      # comment). The raw wire hash, or nil when the SW never answered within budget (treated as fall-through);
+      # validation and the redirect chain live in worker_main_script_fetch.
       private def sw_script_fetch_event(sw_handle, url, client_handle, shared:, creator_client:)
         req = JSON.generate(
           method:      'GET',
@@ -4968,8 +4960,8 @@ module Capybara
       end
 
       # A controlled worker's MAIN SCRIPT fetch, hop by hop as the engine has it (worker_script_fetch.rs
-      # `WorkerScriptFetch`: a same-origin GET, its redirects followed, a hop to another origin or scheme, or the 21st, a
-      # network error): each hop re-matched against the registrations and dispatched to that scope's SW — an SW-provided
+      # `WorkerScriptFetch`: a same-origin GET, its redirects followed, a redirect to another origin or scheme, or the
+      # 21st redirect, a network error): each hop re-matched against the registrations and dispatched to that scope's SW — an SW-provided
       # redirect re-enters interception (HTTP-redirect fetch re-runs main fetch; worker-interception-redirect Case #3) —
       # EXCEPT once a hop fell back to the network: from then on no SW sees the chain (Handle Fetch sets the request's
       # service-workers mode to 'none'; Cases #1/#2).
@@ -4990,8 +4982,6 @@ module Capybara
         last_sw = nil
         loop do
           current, workers_may_answer = fetch.begin_hop
-          return :error unless current
-
           sw = sw_controller_for_navigation(current) if fetch.redirected? && workers_may_answer
           if workers_may_answer && sw
             last_sw = sw
@@ -5004,23 +4994,33 @@ module Capybara
 
               # (…"fetch a classic worker script" requires an ok status whoever produced the response — an SW
               # respondWith'ing its 404 page fails the load, a clean `error` event, not a worker that evals HTML)
-              status = r['status'].to_i
-              step   = fetch.response(status, redirect_location(status, r['headers'] || {}), r['url'].to_s, false)
+              step = fetch.response(r['status'].to_i, location_fields(r['headers'] || {}), r['url'].to_s, false)
               next if step == 'follow'
 
-              return worker_script_answer(step) { {body: Base64.decode64(r['body_b64'].to_s), url: fetch.target, controller: last_sw} }
+              return worker_script_answer(step) {
+                {
+                  body:       Base64.decode64(r['body_b64'].to_s),
+                  url:        fetch.target,
+                  controller: last_sw
+                }
+              }
             end
             # No respondWith (or no answer): fall back to the network for THIS hop.
           end
           res = rack_fetch('GET', current, '', {}, 'manual')
           return :error unless resource_loaded?(res)
 
-          # (…'manual' wraps every 3xx as an opaqueredirect, its status and Location kept beside it: one without a
-          # Location is no script)
-          step = fetch.response((res['redirect_status'] || res['status']).to_i, res['redirect_loc'], '', true)
+          # (…'manual' wraps every 3xx as an opaqueredirect, its status and Location fields kept beside it)
+          step = fetch.response((res['redirect_status'] || res['status']).to_i, res['redirect_locations'], '', true)
           next if step == 'follow'
 
-          return worker_script_answer(step) { {body: res['body'].to_s, url: fetch.target, controller: last_sw} }
+          return worker_script_answer(step) {
+            {
+              body:       res['body'].to_s,
+              url:        fetch.target,
+              controller: last_sw
+            }
+          }
         end
       end
 
@@ -5029,7 +5029,8 @@ module Capybara
       private def worker_script_answer(step)
         case step
         when 'script' then yield
-        when 'fail' then :error
+        when 'fail'   then :error
+        when 'not_ok' then nil
         end
       end
 
@@ -5198,6 +5199,9 @@ module Capybara
         end
       end
 
+      # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
+      # @sw_fetch_pending (released by the `fetch_response`) so settle waits for the SW's
+      # respondWith. If the handle is dead, return false so the client falls back to the network.
       def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
         w = @workers[handle.to_i]
         # (…none to a worker whose thread is gone, which would never answer: the network's)
@@ -9690,6 +9694,8 @@ module Capybara
       private def opaque_redirect_hash(target, status, resp_headers, body_str)
         o_r = response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
         o_r['redirect_status'] = status.to_i
+        # (…and its Location fields as they came, which a worker's script fetch judges as Fetch does: the engine's)
+        o_r['redirect_locations'] = location_fields(resp_headers)
         if (loc = redirect_location(status, resp_headers))
           o_r['redirect_loc'] = resolve_against(loc, target)
         else

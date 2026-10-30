@@ -9,7 +9,7 @@ use crate::fetch_rules::{follow_redirect, request_body_header, Redirected, Redir
 
 pub(crate) type Headers = Vec<(Vec<u8>, Vec<u8>)>;
 
-// Fetch caps a chain at 20 redirects: the 21st dispatch is a network error.
+// Fetch caps a chain at 20 redirects: the 21st is a network error (its 22nd dispatch never made).
 pub(crate) const MAX_REDIRECTS: u32 = 20;
 
 pub(crate) struct RequestChain {
@@ -50,7 +50,7 @@ fn url_text(bytes: &[u8]) -> String {
 }
 
 impl RequestChain {
-    // Another dispatch, None where it would be the 21st (a network error).
+    // Another dispatch, None where it would be the 22nd — past the 20 redirects a chain follows (a network error).
     pub(crate) fn dispatch(&mut self) -> Option<()> {
         self.dispatches += 1;
         (self.dispatches <= MAX_REDIRECTS + 1).then_some(())
