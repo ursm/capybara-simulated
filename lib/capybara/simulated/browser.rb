@@ -7374,12 +7374,13 @@ module Capybara
       private def realm_alive?(realm) = realm.zero? || @runtime.frame_realm_alive?(realm)
       # This window's isolate collected, and the finalizers that leaves due run (the callbacks of other windows' it let go
       # of releasing them there: platform-globals.js `__csimRemoteCallback`) — none while a script of its waits on a call
-      # into another window, its isolate on the stack.
+      # into another window, its isolate on the stack — whether it was.
       def collect_released
-        return if script_waiting?
+        return false if script_waiting?
 
         @runtime.collect_garbage
         @runtime.pump_message_loop
+        true
       end
       # What another window's script did to this one's Window while it shows its initial about:blank — its own properties
       # set or deleted, its event listeners added or removed — in order: the Window the document a navigation of it makes

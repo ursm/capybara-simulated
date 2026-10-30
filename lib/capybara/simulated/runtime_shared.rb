@@ -120,8 +120,8 @@ module Capybara
         '__csimWindowRefRelease'     => ->(b, *a) { b.window_ref_release(a[0], a[1], a[2]); nil },
         '__csimWindowRefReport'      => ->(b, *a) { b.reaching_another_window { b.window_ref_report(a[0], a[1], a[2]) }; nil },
         # …and the window of handle a[0], to which this one handed many, collected, so that it lets go of those it holds no
-        # more (host-queries.js `__remoteCallbackOf`)
-        '__csimWindowRefSweep'       => ->(b, *a) { b.reaching_another_window { b.window_ref_sweep(a[0]) }; nil },
+        # more (host-queries.js `__remoteCallbackOf`) — whether it did
+        '__csimWindowRefSweep'       => ->(b, *a) { b.reaching_another_window { b.window_ref_sweep(a[0]) } == true },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         # (…a navigation another window begins as a task of its own: planned, its source snapshot this window's realm a[4]'s)
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], a[4], user_activated: a[2] == true, replace: a[3] == true); nil },

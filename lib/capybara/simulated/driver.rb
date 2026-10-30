@@ -762,8 +762,10 @@ module Capybara
       def window_ref_sweep(handle)                 = window_browser(handle)&.collect_released
       # The windows' calls into one another, each a host call within the last on the one native stack: nested past
       # `WINDOW_CALL_DEPTH_MAX`, the innermost a RangeError its caller throws, as a browser's one stack overflows — calls
-      # that recurse from window to window without end (host-queries.js `__remoteThrow`'s marker).
-      WINDOW_CALL_DEPTH_MAX = 100
+      # that recurse from window to window without end (host-queries.js `__remoteThrow`'s marker). Each nests ~11 KB of the
+      # main thread's 8 MB stack (Ruby's and V8's frames): Ruby's own "stack level too deep" measured at ~720 nested calls (a
+      # ping-pong 360 round trips deep), so 500, a margin below it — 250 round trips, each two calls.
+      WINDOW_CALL_DEPTH_MAX = 500
       STACK_OVERFLOW = {'__csimThrow' => {'name' => 'RangeError', 'message' => 'Maximum call stack size exceeded', 'stack' => ''}}.freeze
       # …and what a callback of a window gone, or of a document gone, returns: nothing, as a function that returns none.
       UNDEFINED = {'__csimUndefined' => true}.freeze

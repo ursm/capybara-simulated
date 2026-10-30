@@ -56,9 +56,10 @@ RSpec.describe 'a function handed to another isolate\'s window' do
     end
   end
 
+  # (…a ping-pong 240 round trips deep, 480 calls nested, under `Driver::WINDOW_CALL_DEPTH_MAX`)
   it 'throws a RangeError for calls that recurse from window to window without end' do
     expect(read("(() => { try { return ping(1e6); } catch (e) { return e.name; } })()")).to eq('RangeError')
-    expect(read('ping(3)')).to eq(3)
+    expect(read('ping(240)')).to eq(240)
   end
 
   # (…HTML "report the exception": the callback's realm's — its `error` event the opener's, the pop-up's none)
