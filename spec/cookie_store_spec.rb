@@ -213,6 +213,32 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq('/mine' => ['s=1; l=1', 'none'], '/planned' => ['l=1', 'cross-site'])
   end
 
+  # …and by the document that planned it, the frame whose script ran `window.open` or set `w.location` — not its window's
+  # page: a frame of a's under b's page navigating another window to a is same-origin for Fetch Metadata but of an
+  # opaque site for cookies (its Lax cookie alone), and a frame of b's under a's page cross-site to a for both.
+  it 'judges a navigation a frame planned of another window by that frame' do
+    seen = {}
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'    then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/top'    then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><iframe src=\"#{req.params['frame']}\"></iframe>"]]
+      when '/opens'  then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script>open("https://a.test/echo-open", "w1")</script>']]
+      when '/sets'   then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script>open("", "w1").location = "https://a.test/echo-set"</script>']]
+      else
+        seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']] if req.path.start_with?('/echo')
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    first = s.window_opened_by { s.visit 'https://b.test/top?frame=https://a.test/opens' }
+    s.within_window(first) { poll_until { seen.key?('/echo-open') } }
+    s.visit 'https://a.test/top?frame=https://b.test/sets'
+    s.within_window(first) { poll_until { seen.key?('/echo-set') } }
+    expect(seen).to eq('/echo-open' => ['l=1', 'same-origin'], '/echo-set' => ['l=1', 'cross-site'])
+  end
+
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
   # document it reloads was reached by a same-site request — a page a cross-site link led to sends its Strict cookies
   # on no reload of the user's — where the page's own `location.reload()` is judged by its document's site, as any of

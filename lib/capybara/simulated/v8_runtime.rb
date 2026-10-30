@@ -362,6 +362,10 @@ module Capybara
       def frame_realm_alive?(realm_id)
         !(realm_id.nil? || realm_id.zero?) && frame_realms.key?(realm_id)
       end
+      # …or still loading: a frame whose document's parser-time script is running.
+      def frame_realm_present?(realm_id)
+        frame_realm_alive?(realm_id) || loading_frame_realms.key?(realm_id)
+      end
 
       # bridge.js owns the virtual clock; Ruby still drives it because
       # Capybara's polling cadence is wall-clock-anchored. Use `call`

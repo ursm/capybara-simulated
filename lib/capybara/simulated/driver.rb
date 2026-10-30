@@ -523,12 +523,6 @@ module Capybara
         window_browser(handle) or raise Capybara::WindowError, "Unknown window handle: #{handle}"
       end
 
-      # The initiator of a new window's POST: the form document's (`post[:initiator]`, its URL, and `post[:origin_null]`,
-      # whether its origin is opaque — an entered frame's, not the page's), else the source page's.
-      private def post_initiator(post, source)
-        {initiator: post[:initiator] || source&.raw_current_url, origin_null: post[:origin_null] == true}
-      end
-
       # Open (or, by `name`, reuse) an auxiliary window. `target="_blank"`
       # clicks and `window.open` both land here. A non-empty `name` that
       # matches an existing window navigates that window instead of opening a
@@ -561,9 +555,9 @@ module Capybara
           # one is made)
           activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
           if post
-            post_window(existing[:window], url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+            post_window(existing[:window], url, post, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           else
-            navigate_window(existing[:window], url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+            navigate_window(existing[:window], url, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           end
           return existing[:handle]
         end
@@ -615,10 +609,10 @@ module Capybara
         if about_blank || url.to_s.empty?
           aux.traversable.opened_at_initial
         elsif post
-          post_window(aux, url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+          post_window(aux, url, post, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
         else
           blob = {bytes: blob_snapshot['bytes'], type: blob_snapshot['type'].to_s} if blob_snapshot.is_a?(Hash) && blob_snapshot['bytes']
-          navigate_window(aux, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated, blob: blob)
+          navigate_window(aux, url, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated, blob: blob)
         end
         handle
       end
@@ -667,7 +661,7 @@ module Capybara
         # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
         # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
         if (existing = named_window(name.to_s, opener_browser))
-          navigate_window(existing[:window], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy,
+          navigate_window(existing[:window], resolved, source: opener_browser, initiator_realm: opener_realm_id, referrer: referrer, referrer_policy: referrer_policy,
                                                         user_activated: opener_browser.source_activated?(opener_realm_id))
           return existing[:handle]
         end
@@ -826,10 +820,20 @@ module Capybara
       # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
       # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
       # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, sending `referrer`
-      # by `referrer_policy`, with history handling "replace" where `replace`.
-      def window_set_location(source, handle, url, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
+      # by `referrer_policy`, with history handling "replace" where `replace` — its document the one of `source`'s realm
+      # `realm` whose script set it.
+      def window_set_location(source, handle, url, realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
         b = isolate_window(handle) or return
-        navigate_window(b, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace)
+        navigate_window(
+          b,
+          url,
+          source:          source,
+          initiator_realm: realm,
+          referrer:        referrer,
+          referrer_policy: referrer_policy,
+          user_activated:  user_activated,
+          replace:         replace
+        )
       end
       # The handle of the window that opened `browser`'s — none once that one is discarded (HTML's `opener` getter: its
       # opener browsing context's WindowProxy, none for a context gone; WPT opener-closed.html).
@@ -844,17 +848,18 @@ module Capybara
       private def handle_for(browser) = browser.window_handle
 
       # Navigate an existing window, by another window's script (`source`'s): HTML "navigate", whose source snapshot —
-      # the Referer, the initiator (the SETTING window's document, whose site Sec-Fetch-Site and the SameSite cookie gate
-      # measure from — of none where its origin is opaque, a sandboxed one's; raw_ — no re-entrant tick), the activation,
-      # the history handling — is taken here, as the script asks, and whose navigation the window begins as a task of its
-      # own event loop (Browser#take_window_tasks): never while the script that asked is on the stack, nor one of the
-      # window's own (its context rebuilt under it).
+      # the Referer, the initiator (the document of `source`'s realm `initiator_realm` whose script asked — a frame's, not
+      # its page's — whose site Sec-Fetch-Site and whose site for cookies the SameSite cookie gate measure from, of none
+      # where its origin is opaque, a sandboxed one's: Browser#navigation_initiator), the activation, the history handling
+      # — is taken here, as the script asks, and whose navigation the window begins as a task of its own event loop
+      # (Browser#take_window_tasks): never while the script that asked is on the stack, nor one of the window's own (its
+      # context rebuilt under it).
       # (…`user_activated` whether the navigating document's window had transient activation as it began; `replace` its
       # history handling "replace")
       # A blob: URL's blob is resolved here too, in the source's blob URL store (`blob_bytes_for`), as HTML resolves a URL's
       # blob URL entry as it is parsed: one the source revokes after still loads; none, a revoked one's, is a network error.
       # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
-      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
+      private def navigate_window(browser, url, source: nil, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
         return if url.nil? || url.to_s.empty? || Browser::DATA_URL.match?(url.to_s)
         return navigate_realm_window(browser, url, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace) if browser.is_a?(RealmWindow)
 
@@ -865,8 +870,7 @@ module Capybara
           user_activated == true,
           referrer,
           referrer_policy,
-          source&.raw_current_url,
-          source&.document_origin_opaque?(0) == true,
+          source&.navigation_initiator(initiator_realm.to_i),
           blob&.fetch(:bytes),
           blob&.fetch(:type)
         )
@@ -882,22 +886,20 @@ module Capybara
       end
 
       # …a form's submission to it by its name, with a POST resource (HTML "navigate", `documentResource` a POST resource:
-      # its encoded body and content type, from the form's document's origin — `post_initiator`), planned likewise.
-      private def post_window(browser, url, post, source:, referrer:, referrer_policy:, user_activated:)
+      # its encoded body and content type, from the form's document's origin — the initiator's), planned likewise.
+      private def post_window(browser, url, post, source:, initiator_realm:, referrer:, referrer_policy:, user_activated:)
         if browser.is_a?(RealmWindow)
           return navigate_realm_window(browser, url, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, post: [post[:body].to_s, post[:content_type].to_s])
         end
 
-        initiator = post_initiator(post, source)
         browser.traversable.plan_post(
           url.to_s,
           post[:body].to_s,
           post[:content_type].to_s,
-          initiator[:origin_null],
           user_activated == true,
           referrer,
           referrer_policy,
-          initiator[:initiator]
+          source&.navigation_initiator(initiator_realm.to_i)
         )
       end
 

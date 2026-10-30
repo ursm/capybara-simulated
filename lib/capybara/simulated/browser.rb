@@ -628,18 +628,20 @@ module Capybara
       # HTML's source snapshot params of no source document — and a window's opener's as it opened it otherwise; `replace`
       # its history handling "replace", another window's `location.replace()`'s; `origin_null` whether the initiator's
       # origin is opaque)
-      def visit(url, referer: nil, referrer_policy: nil, initiator: nil, origin_null: false, user_activated: initiator.nil?, replace: false)
+      def visit(url, referer: nil, referrer_policy: nil, initiator: nil, origin_null: false, initiator_documents: nil, user_activated: initiator.nil?,
+                replace: false)
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
         navigate(
           resolve_visit_url(url),
-          referer:         referer,
-          referrer_policy: referrer_policy,
-          initiator:       initiator,
-          origin_null:     origin_null,
-          user_activated:  user_activated,
-          replace:         replace
+          referer:             referer,
+          referrer_policy:     referrer_policy,
+          initiator:           initiator,
+          origin_null:         origin_null,
+          initiator_documents: initiator_documents,
+          user_activated:      user_activated,
+          replace:             replace
         )
         # The native state of what earlier pages left unreachable freed, as a settle frees it (see the pump there): a
         # suite that only visits and reads never settles. A page's own FinalizationRegistry callbacks run here too, as a
@@ -7596,7 +7598,16 @@ module Capybara
         return unless @driver.respond_to?(:window_set_location)
 
         referrer, policy = navigation_referrer(realm.to_i)
-        @driver.window_set_location(self, handle.to_s, url.to_s, referrer: referrer, referrer_policy: policy, user_activated: user_activated, replace: replace)
+        @driver.window_set_location(
+          self,
+          handle.to_s,
+          url.to_s,
+          realm:           realm.to_i,
+          referrer:        referrer,
+          referrer_policy: policy,
+          user_activated:  user_activated,
+          replace:         replace
+        )
       end
       # `close()` of the window of `handle` — this one's own, '' — by this window's script (Driver#script_close_window).
       def close_window_of(handle)      = (@driver.script_close_window(self, handle.to_s.empty? ? window_handle.to_s : handle.to_s) if @driver.respond_to?(:script_close_window))
@@ -7791,11 +7802,12 @@ module Capybara
         planned = @session_history.take_planned or return false
         url     = planned[:url]
         made    = {
-          referer:         planned[:referrer],
-          referrer_policy: planned[:policy],
-          initiator:       planned[:initiator],
-          origin_null:     planned[:origin_null],
-          user_activated:  planned[:activated]
+          referer:             planned[:referrer],
+          referrer_policy:     planned[:policy],
+          initiator:           planned[:initiator],
+          origin_null:         planned[:origin_null],
+          initiator_documents: planned[:initiator_documents],
+          user_activated:      planned[:activated]
         }
         if planned[:javascript]
           @runtime.call('__csimEvaluateJavascriptURL', url)
@@ -10659,14 +10671,15 @@ module Capybara
         ancestors = client[:realm] ? @runtime.realm_direct_call(0, '__csimAncestorDocuments', client[:realm].to_i, true) || [] : []
         client.merge(ancestors: ancestors, realm: nil)
       end
-      # The document of realm `realm` (0 the page) as a request's initiator: [the URL whose site Sec-Fetch-Site compares
-      # and whose origin an Origin header carries, and whether that document's own origin is opaque (a sandbox's)].
-      def realm_request_initiator(realm) = request_client(realm).values_at(0, 2)
-      # …that URL alone.
+      # The document of realm `realm` (0 the page) as a request's initiator: the URL whose site Sec-Fetch-Site compares and
+      # whose origin an Origin header carries.
       def realm_creator_url(realm) = request_client(realm)[0]
-      # …whether its origin is opaque alone: a sandboxed document's, the page's a `Content-Security-Policy: sandbox`
+      # …whether its own origin is opaque: a sandboxed document's, the page's a `Content-Security-Policy: sandbox`
       # response's.
       def document_origin_opaque?(realm) = request_client(realm)[2]
+      # …all a navigation of another window it begins carries of it, as its plan takes it (Driver#navigate_window,
+      # session_history.rs `Initiator`): its URL (`initiating_url`), its opacity and its documents (`initiating_document`).
+      def navigation_initiator(realm) = {initiator: initiating_url(realm), **initiating_document(realm)}
       def frame_realm_url(realm_id)
         return @runtime.loading_frame_realm_url(realm_id) unless @runtime.frame_realm_alive?(realm_id)
 
@@ -10831,7 +10844,6 @@ module Capybara
           return log_console('warn', "form submit (target=#{spec['target'].to_s.inspect}) into a new window is not modeled")
         end
 
-        site, origin_null = realm_request_initiator(realm_id) if post
         @driver.open_aux_window(
           url,
           name:             name.to_s,
@@ -10841,7 +10853,7 @@ module Capybara
           referrer:         initiator[0].to_s,
           referrer_policy:  initiator[1].to_s.empty? ? DEFAULT_REFERRER_POLICY : initiator[1],
           user_activated:   activated,
-          post:             post && {body: post[0], content_type: post[1], initiator: site, origin_null: origin_null}
+          post:             post && {body: post[0], content_type: post[1]}
         )
       end
 
@@ -11424,10 +11436,11 @@ module Capybara
       end
       # The URL of the document of realm `realm` as a navigation it initiates begins (HTML's source snapshot): whose site
       # Sec-Fetch-Site compares and whose origin a POST's Origin is, kept across its redirects — an about:blank one's its
-      # creator's (`realm_request_initiator`) — none for a realm gone since (its referrer source then the request's).
+      # creator's (`realm_creator_url`), a loading one's its own — none for a realm gone since (its referrer source then
+      # the request's).
       private def initiating_url(realm)
         realm = realm.to_i
-        realm_creator_url(realm) if realm.zero? || @runtime.frame_realm_alive?(realm)
+        realm_creator_url(realm) if realm.zero? || @runtime.frame_realm_present?(realm)
       end
       # What a navigation the document of realm `realm` initiates carries of it (navigation_fetch.rs): whether its origin is
       # opaque (a sandboxed document's: its Origin `null`, of no site — cross-site to every URL, for Fetch Metadata and
@@ -11435,7 +11448,7 @@ module Capybara
       # cookies are judged by (RFC 6265bis §5.2.1) — none for a realm gone since, as `initiating_url`.
       private def initiating_document(realm)
         realm = realm.to_i
-        return {} unless realm.zero? || @runtime.frame_realm_alive?(realm)
+        return {} unless realm.zero? || @runtime.frame_realm_present?(realm)
 
         {origin_null: document_origin_opaque?(realm) == true, initiator_documents: @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm, true)}
       end
