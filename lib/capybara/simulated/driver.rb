@@ -844,8 +844,8 @@ module Capybara
       private def handle_for(browser) = browser.window_handle
 
       # Navigate an existing window, by another window's script (`source`'s): HTML "navigate", whose source snapshot —
-      # the Referer, the initiator (the SETTING window's document, which seeds Sec-Fetch-Site and so the SameSite cookie
-      # gate; raw_ — no re-entrant tick), the activation, the history handling — is taken here, as the script asks, and
+      # the Referer, the initiator (the SETTING window's document, whose site Sec-Fetch-Site and the SameSite cookie
+      # gate measure from; raw_ — no re-entrant tick), the activation, the history handling — is taken here, as the script asks, and
       # whose navigation the window begins as a task of its own event loop (Browser#take_window_tasks): never while the
       # script that asked is on the stack, nor one of the window's own (its context rebuilt under it).
       # (…`user_activated` whether the navigating document's window had transient activation as it began; `replace` its

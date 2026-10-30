@@ -41,13 +41,12 @@ struct Client {
     top_document: Option<String>,
     ancestors: Vec<Option<String>>,
     worker_site: Option<Option<String>>,
-    // A worker re-issuing the navigation it intercepted: its cookies judged as the navigation's are, by its initiator's
-    // site rather than by its own client.
-    reissued: bool,
-    // A navigation whose cookies are cross-site whatever its initiator's site (navigation_fetch.rs `Nav::cookies`): one
-    // into a frame with a cross-site ancestor, one a document of an opaque origin made, a reload through a user interface
-    // element of a document reached cross-site.
-    navigation_cross_site: bool,
+    // A worker re-issuing the navigation it intercepted (`fetch(event.request)`): whether the hop it intercepted is
+    // cross-site for cookies, the navigation's verdict (navigation_fetch.rs `Nav::cookies`) and so its own — None for any
+    // other request.
+    reissued: Option<bool>,
+    // A navigation into a frame with a cross-site ancestor: cross-site whoever issues it, a worker's rewrite of it too.
+    cross_site_frame: bool,
 }
 
 // What a hop carries (`FetchHops#hop`).
@@ -61,22 +60,20 @@ pub(crate) struct FetchHops {
 
 impl Client {
     // Whether a hop to `target` is cross-site for cookies (RFC 6265bis §5.2), by its URL alone and never by the URLs the
-    // chain went through before it: where it re-issues a navigation that is whatever its initiator's site, else where
-    // its judge is cross-site to the target — a re-issued navigation's its initiator, any other request's its client, a
-    // request of neither same-site — or any document the request is judged by is.
+    // chain went through before it: a re-issued navigation's as the navigation judged the hop, any other request's where
+    // it navigates a frame with a cross-site ancestor, or its client — a request of none same-site — or any document the
+    // request is judged by is cross-site to the target.
     fn cross_site(&self, target: &str) -> bool {
-        if self.navigation_cross_site {
-            return true;
+        if let Some(cross) = self.reissued {
+            return cross;
         }
-        if self.reissued {
-            return fetch_site(self.sec_initiator.as_deref().unwrap_or(""), target) == "cross-site";
-        }
-        self.cookie_client.as_deref().is_some_and(|client| {
+        let judged = |client: &str| {
             cross_site_for_cookies(Some(client), target)
                 || (self.mode.is_none() && self.top_document.as_deref().is_some_and(|top| cross_site_for_cookies(Some(top), target)))
                 || self.ancestors.iter().any(|a| cross_site_for_cookies(a.as_deref(), target))
                 || self.worker_site.as_ref().is_some_and(|site| site.is_none() || crate::realm_location::site(target) != *site)
-        })
+        };
+        self.cross_site_frame || self.cookie_client.as_deref().is_some_and(judged)
     }
     // The chain's Sec-Fetch-Site moved on by a hop to `target` — Fetch Metadata's, for a mode's request and every load
     // that names its destination, None for any other: the widest of its initiator's relation to every URL so far.
@@ -102,8 +99,8 @@ impl Client {
 // origin, the document origin a mode's response is judged by, its client's origin and the origin Sec-Fetch-Site measures
 // from; its client's URL, the top-level document a mode-less load is under, its frame's ancestors' document origins (its
 // own document's first where the client does not judge it: a host-pinned image's or video's, a frame's navigation), a
-// dedicated worker's site for cookies (Some(None): of none); and whether it is a navigation's whose cookies are
-// cross-site whatever its initiator's site (`Client::navigation_cross_site`).
+// dedicated worker's site for cookies (Some(None): of none); whether it navigates a frame with a cross-site ancestor;
+// and, a worker's re-issue of a navigation, whether the hop it intercepted is cross-site for cookies.
 pub(crate) struct ClientFacts {
     pub(crate) mode: Option<String>,
     pub(crate) dest: Option<String>,
@@ -119,6 +116,7 @@ pub(crate) struct ClientFacts {
     pub(crate) top_document: Option<String>,
     pub(crate) ancestors: Vec<Option<String>>,
     pub(crate) worker_site: Option<Option<String>>,
+    pub(crate) cross_site_frame: bool,
     pub(crate) navigation_cross_site: bool,
 }
 
@@ -131,7 +129,9 @@ impl FetchHops {
             None if f.client_origin.as_deref() == Some("null") => Some("null".to_owned()),
             None => f.client_url.or_else(|| f.sec_initiator.clone()),
         };
-        let reissued = f.mode.as_deref() == Some("navigate") && f.nav_dest.as_deref().is_some_and(|d| !d.is_empty());
+        // (…a navigate-mode request with a navigation's destination that is no document's own navigation request)
+        let reissued = (f.mode.as_deref() == Some("navigate") && f.nav_dest.as_deref().is_some_and(|d| !d.is_empty()) && !f.navigation)
+            .then_some(f.navigation_cross_site);
         let client = Client {
             mode: f.mode,
             dest: f.dest,
@@ -148,7 +148,7 @@ impl FetchHops {
             ancestors: f.ancestors,
             worker_site: f.worker_site,
             reissued,
-            navigation_cross_site: f.navigation_cross_site,
+            cross_site_frame: f.cross_site_frame,
         };
         FetchHops { client, sec_site: RefCell::default() }
     }
@@ -241,8 +241,8 @@ mod tests {
             top_document: None,
             ancestors: Vec::new(),
             worker_site: None,
-            reissued: false,
-            navigation_cross_site: false,
+            reissued: None,
+            cross_site_frame: false,
         }
     }
     fn hops(client: Client) -> FetchHops {
@@ -313,14 +313,14 @@ mod tests {
         let post = Client { nav_dest: Some("document".into()), navigation: true, ..client(Some("navigate")) };
         let hop = hops(post).hop("http://a.test/".into(), "POST".into(), Some("http://a.test".into()), None);
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(TOP_LEVEL_NAV));
-        // (…a frame's navigation none of either; one cross-site whatever its initiator's site cross-site, a top-level
-        // one's GET retrieving a Lax cookie all the same)
-        let framed = Client { nav_dest: Some("iframe".into()), navigation_cross_site: true, ..client(Some("navigate")) };
+        // (…a frame's navigation none of either, cross-site where the frame has a cross-site ancestor; a re-issued
+        // top-level one the navigation judged cross-site retrieving a Lax cookie all the same)
+        let framed = Client { nav_dest: Some("iframe".into()), cross_site_frame: true, ..client(Some("navigate")) };
         let hop = hops(framed).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None);
         assert_eq!(cross(&hop), Some(true));
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(0));
-        let opaque = Client { nav_dest: Some("document".into()), navigation_cross_site: true, ..client(Some("navigate")) };
-        let hop = hops(opaque).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None);
+        let reissued = Client { nav_dest: Some("document".into()), reissued: Some(true), ..client(Some("navigate")) };
+        let hop = hops(reissued).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None);
         assert_eq!(cross(&hop), Some(true));
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(LAX_RETRIEVE | TOP_LEVEL_NAV));
     }
@@ -335,18 +335,16 @@ mod tests {
         cached.cached("http://b.test/r".into());
         let hop = cached.hop("http://a.test/x".into(), "GET".into(), None, None);
         assert_eq!((cross(&hop), hop.2.map(|s| s.0)), (Some(false), Some("cross-site")));
-        // (…a re-issued navigation's cookies its initiator's relation to the hop, not the chain's nor its client's)
-        let reissued = hops(Client { reissued: true, nav_dest: Some("document".into()), ..client(Some("navigate")) });
+        // (…a re-issued navigation's cookies the navigation's verdict on the hop, not the chain's nor its client's)
+        let reissued = hops(Client { reissued: Some(false), nav_dest: Some("document".into()), ..client(Some("navigate")) });
         reissued.seed(Some("cross-site".into()));
         let hop = reissued.hop("http://a.test/x".into(), "GET".into(), None, None);
         assert_eq!((cross(&hop), hop.2.map(|s| s.0)), (Some(false), Some("cross-site")));
-        let elsewhere = hops(Client { reissued: true, nav_dest: Some("document".into()), credentials: "include".to_owned(), cookie_client: Some("http://b.test/sw.js".into()),..client(Some("navigate")) });
-        assert_eq!(cross(&elsewhere.hop("http://b.test/x".into(), "GET".into(), None, None)), Some(true));
         // (…an opaque-origin client's request cross-site wherever it goes)
         let opaque = hops(Client { client_origin: Some("null".into()), ..client(Some("cors")) });
         assert_eq!(opaque.hop("http://a.test/x".into(), "GET".into(), None, None).2.map(|s| s.0), Some("cross-site"));
-        // (…a navigation cross-site whatever its initiator's site cross-site at every hop)
-        let frame = hops(Client { navigation_cross_site: true, ..client(None) });
+        // (…a frame with a cross-site ancestor cross-site at every hop)
+        let frame = hops(Client { cross_site_frame: true, ..client(None) });
         assert_eq!(cross(&frame.hop("http://a.test/x".into(), "GET".into(), None, None)), Some(true));
         assert_eq!(cross(&frame.hop("http://a.test/y".into(), "GET".into(), None, None)), Some(true));
     }

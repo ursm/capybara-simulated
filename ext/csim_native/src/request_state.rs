@@ -31,12 +31,15 @@ pub(crate) struct Request {
     reload_navigation: bool,
     history_navigation: bool,
     // A navigation's: the navigating document's origin (none for an opaque one), the redirect chain's latched
-    // Sec-Fetch-Site seed and Origin taint, and the cookie verdict of the frame it commits into (RFC 6265bis
-    // site-for-cookies) — a property of the TARGET frame, which a non-empty init does not reset.
+    // Sec-Fetch-Site seed and Origin taint, the cookie verdict of the frame it commits into (RFC 6265bis
+    // site-for-cookies) — a property of the TARGET frame, which a non-empty init does not reset — and whether the hop it
+    // intercepted is cross-site for cookies (navigation_fetch.rs `Nav::cookies`), which a re-issue of it is and a
+    // non-empty init resets: the request is then the worker's own.
     initiator: Option<String>,
     site_seed: Option<String>,
     origin_null: bool,
     cookie_cross_site: bool,
+    navigation_cross_site: bool,
 }
 
 impl Request {
@@ -60,6 +63,7 @@ impl Request {
             site_seed: None,
             origin_null: false,
             cookie_cross_site: false,
+            navigation_cross_site: false,
         }
     }
 }
@@ -152,6 +156,7 @@ fn construct_request(
         }
         request.site_seed = None;
         request.origin_null = false;
+        request.navigation_cross_site = false;
         request.referrer = "about:client".into();
         request.referrer_policy = String::new();
     }
@@ -305,6 +310,7 @@ const SITE_SEED: u32 = 14;
 const ORIGIN_NULL: u32 = 15;
 const COOKIE_CROSS_SITE: u32 = 16;
 const HEADERS_GUARD: u32 = 17;
+const NAVIGATION_CROSS_SITE: u32 = 18;
 
 // __dom.requestField(state, field) -> the request's `field` (a string, a boolean, or null for an absent origin or
 // seed) — `HEADERS_GUARD` the guard its Headers object takes: a no-cors request's drops the headers no no-cors request
@@ -325,13 +331,14 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         INTEGRITY => &r.integrity,
         DESTINATION => &r.destination,
         HEADERS_GUARD => if r.mode == "no-cors" { "request-no-cors" } else { "request" },
-        KEEPALIVE | RELOAD_NAVIGATION | HISTORY_NAVIGATION | ORIGIN_NULL | COOKIE_CROSS_SITE => {
+        KEEPALIVE | RELOAD_NAVIGATION | HISTORY_NAVIGATION | ORIGIN_NULL | COOKIE_CROSS_SITE | NAVIGATION_CROSS_SITE => {
             let flag = match field {
                 KEEPALIVE => r.keepalive,
                 RELOAD_NAVIGATION => r.reload_navigation,
                 HISTORY_NAVIGATION => r.history_navigation,
                 ORIGIN_NULL => r.origin_null,
-                _ => r.cookie_cross_site,
+                COOKIE_CROSS_SITE => r.cookie_cross_site,
+                _ => r.navigation_cross_site,
             };
             return rv.set_bool(flag);
         }
@@ -389,6 +396,7 @@ fn adopt_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         ("isHistoryNavigation", &mut r.history_navigation),
         ("originNull", &mut r.origin_null),
         ("cookieCrossSite", &mut r.cookie_cross_site),
+        ("navigationCrossSite", &mut r.navigation_cross_site),
     ] {
         if flag(scope, key) {
             *slot = true;

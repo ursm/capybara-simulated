@@ -115,10 +115,10 @@ impl FetchPlan {
     // the host's description, by name: `method`, `url` (resolved), `headers` (pairs), `body_empty`, `redirect`, `mode`
     // (nil a mode-less internal load's), `credentials`, `referrer_policy`, `referrer` (nil its client's URL, '' none),
     // `cache`, `initiator` (a worker re-issuing a navigation: the request's origin whatever its mode), `site_seed`,
-    // `origin_null`, `client_url`, `client_origin`, `ancestors`, `cookie_cross_site`, `nav_dest`, `navigation`, `dest`,
-    // `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil for none),
-    // `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for none);
-    // `sessions` [preflight cache, authentication entries].
+    // `origin_null`, `client_url`, `client_origin`, `ancestors`, `cookie_cross_site`, `navigation_cross_site`, `nav_dest`,
+    // `navigation`, `dest`, `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil
+    // for none), `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for
+    // none); `sessions` [preflight cache, authentication entries].
     fn new(ruby: &Ruby, request: RHash, sessions: (u64, u64)) -> Result<Option<Self>, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -190,7 +190,8 @@ impl FetchPlan {
             top_document: text("top_url")?,
             ancestors,
             worker_site,
-            navigation_cross_site: flag("cookie_cross_site")?,
+            cross_site_frame: flag("cookie_cross_site")?,
+            navigation_cross_site: flag("navigation_cross_site")?,
         });
         hops.seed(text("site_seed")?);
         Ok(Some(FetchPlan {
