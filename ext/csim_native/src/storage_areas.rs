@@ -58,6 +58,20 @@ pub(crate) fn partition_new() -> u64 {
 pub(crate) fn clear(partition: u64) {
     lock().areas.retain(|(p, _, _), _| *p != partition);
 }
+// Shed `to`'s areas made copies of `from`'s, each as it stands — HTML "copy the session storage" a new auxiliary
+// browsing context's is of its opener's (Chrome measured: the copy taken as the window opens, the two apart after).
+pub(crate) fn copy(from: u64, to: u64) {
+    let mut reg = lock();
+    let copies: Vec<_> = reg
+        .areas
+        .iter()
+        .filter(|((p, _, _), _)| *p == from)
+        .map(|((_, site, origin), area)| {
+            ((to, site.clone(), origin.clone()), Area { items: area.items.clone(), places: area.places.clone(), units: area.units })
+        })
+        .collect();
+    reg.areas.extend(copies);
+}
 
 // ── For the bindings ─────────────────────────────────────────────────────────────────────────────────────────────────
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {

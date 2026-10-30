@@ -208,6 +208,19 @@ struct Traversable {
     kept: bool,
     // What the script of another window asked of it, which its own event loop takes as tasks (`Asked`).
     asked: Asked,
+    // Its session storage shed (storage_areas.rs, HTML "session storage map" of the top-level traversable): the page's
+    // its Browser's, which it is told (`#session_storage=`); a window's `window.open` made in an isolate its own, a copy
+    // of its opener's made with it (`SessionHistory::copying`), which goes with it (`owns_storage`).
+    session_storage: u64,
+    owns_storage: bool,
+}
+
+impl Drop for Traversable {
+    fn drop(&mut self) {
+        if self.owns_storage {
+            crate::storage_areas::clear(self.session_storage);
+        }
+    }
 }
 
 // What a window's script in another isolate asked of a top-level traversable — HTML's tasks queued on its event loop by
@@ -744,7 +757,9 @@ impl Drop for SessionHistory {
 
 impl SessionHistory {
     pub(crate) fn new() -> Self {
-        let traversable = Arc::new(Mutex::new(Traversable { state: State::new(), ..Default::default() }));
+        let mut made = Traversable::default();
+        made.state = State::new();
+        let traversable = Arc::new(Mutex::new(made));
         let mut registry = histories();
         registry.0 += 1;
         let id = registry.0;
@@ -958,6 +973,25 @@ impl SessionHistory {
             t.queued.clear();
         });
     }
+    // #session_storage = shed: its session storage's (`session_storage`), its Browser's.
+    fn set_session_storage(&self, shed: u64) {
+        self.lock().session_storage = shed;
+    }
+    // A new one whose session storage is a shed of its own, a copy of shed `from` (none for 0): a window's `window.open`
+    // made, its opener's.
+    pub(crate) fn copying(from: u64) -> Self {
+        let history = Self::new();
+        let shed = crate::storage_areas::partition_new();
+        if from != 0 {
+            crate::storage_areas::copy(from, shed);
+        }
+        {
+            let mut t = history.lock();
+            t.session_storage = shed;
+            t.owns_storage = true;
+        }
+        history
+    }
     // #by_web_content = whether web content made it (`by_web_content`).
     fn set_by_web_content(&self, by: bool) {
         self.lock().by_web_content = by;
@@ -1154,6 +1188,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("close!", method!(SessionHistory::close, 0))?;
     class.define_method("ask_close", method!(SessionHistory::ask_close, 1))?;
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
+    class.define_method("session_storage=", method!(SessionHistory::set_session_storage, 1))?;
     class.define_method("closing?", method!(SessionHistory::is_closing, 0))?;
     class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
     class.define_method("post", method!(SessionHistory::post, 4))?;
@@ -1722,6 +1757,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "remoteId", remote_id_op, context_id);
     crate::dom::register(scope, ns, "traversableClosing", traversable_closing_op, context_id);
     crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
+    crate::dom::register(scope, ns, "sessionStorageShed", session_storage_shed_op, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyTraverse", history_traverse_op, context_id);
     crate::dom::register(scope, ns, "applyWindowTraversal", apply_window_traversal_op, context_id);
@@ -1842,6 +1878,16 @@ fn traversable_of(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mut
 // …and that of a window of this isolate's alone, with its document's realm.
 fn window_traversable(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mutex<Traversable>>, i32)> {
     traversable_of(arena, realm).and_then(|(t, window)| Some((t, window?)))
+}
+// The session storage shed of the top-level traversable realm `realm`'s document is of (`session_storage`), 0 for none.
+pub(crate) fn session_storage_of(arena: &crate::dom::RealmArena, realm: i32) -> u64 {
+    traversable_of(arena, realm).map_or(0, |(t, _)| lock(&t).session_storage)
+}
+// __dom.sessionStorageShed() -> the calling realm's (storage.js).
+fn session_storage_shed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let shed = session_storage_of(&crate::dom::dom(scope).arena, cid);
+    rv.set_double(shed as f64);
 }
 fn lock(t: &Mutex<Traversable>) -> MutexGuard<'_, Traversable> {
     t.lock().unwrap_or_else(PoisonError::into_inner)

@@ -327,6 +327,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moCreate", create, context_id);
     crate::dom::register(scope, ns, "moObserve", observe, context_id);
     crate::dom::register(scope, ns, "moDisconnect", disconnect, context_id);
+    crate::dom::register(scope, ns, "moForgetTargetsHere", forget_targets_here, context_id);
     crate::dom::register(scope, ns, "moRemoveTransients", remove_transients, context_id);
     crate::dom::register(scope, ns, "moRecord", record, context_id);
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
@@ -631,5 +632,16 @@ mod tests {
         assert!(observe_options(ATTRIBUTE_OLD_VALUE | CHILD_LIST, ATTRIBUTES | ATTRIBUTE_OLD_VALUE | CHILD_LIST, false).is_err());
         assert!(observe_options(CHILD_LIST, ATTRIBUTES | CHILD_LIST, true).is_err());
         assert!(observe_options(CHARACTER_DATA_OLD_VALUE | CHILD_LIST, CHARACTER_DATA | CHARACTER_DATA_OLD_VALUE | CHILD_LIST, false).is_err());
+    }
+}
+
+// __dom.moForgetTargetsHere() — every observer's registration on a node of the calling realm let go of: its document is
+// to be a new one, which no observer registered on the old (v8_runtime.rb `reuse_window_realm`).
+fn forget_targets_here(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = &mut crate::dom::dom(scope).arena;
+    let here: Vec<NodeId> = arena.observers.lists.keys().copied().filter(|&id| arena.get(id).is_some_and(|n| n.realm == cid)).collect();
+    for id in here {
+        arena.observers.forget(id);
     }
 }

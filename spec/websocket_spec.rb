@@ -190,6 +190,26 @@ RSpec.describe 'WebSocket' do
     expect(closes.pop(timeout: 5)).to eq(1001)
   end
 
+  # …and to a socket of a window `window.open` made in the page's isolate, which a navigation of the page leaves open.
+  it 'delivers to a pop-up\'s socket, which outlives a navigation of its opener' do
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      w.eval(`
+        window.got = [];
+        window.ws = new WebSocket('ws://' + opener.location.host + '/cable');
+        ws.onmessage = (e) => got.push(e.data);
+        ws.onopen = () => ws.send('first');
+      `);
+    JS
+    expect(poll_until { session.evaluate_script('w.got.length >= 2 && w.got') }).to eq(['hello', 'echo:first'])
+    session.visit('/blank')
+    expect(closes.pop(timeout: 5)).to eq(1001)   # (the page's own, which the visit replaced)
+    session.within_window(session.windows.last) do
+      session.execute_script("ws.send('second')")
+      expect(poll_until { session.evaluate_script('got.length >= 3 && got[2]') }).to eq('echo:second')
+    end
+  end
+
   # What a buffer source is is its internal slots', whatever a page puts on the object or its prototype (a shadowing
   # `byteLength`, a replaced `slice`).
   it 'sends a buffer source by its slots' do

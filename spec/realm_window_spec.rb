@@ -229,7 +229,7 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       w.location = '/second';
     JS
     session.within_window(session.windows.last) { expect(session).to have_css('#second') }
-    session.execute_script("w.document.body.click()")
+    session.execute_script('w.document.body.click()')
     expect(session.evaluate_script('[w.kept, w.loads, w.clicked, w.document.designMode]')).to eq(['kept', 1, nil, 'off'])
   end
 
@@ -240,5 +240,81 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       expect(session).to have_css('#second')
       expect(session.evaluate_script('window.kept')).to be_nil
     end
+  end
+
+  it 'keeps the frame entered in it while its opener navigates' do
+    popup = open_popup
+    session.within_window(popup) do
+      session.within_frame('fr') do
+        session.execute_script("parent.opener.location = '/second'")
+        expect(session).to have_css('#deep')
+      end
+    end
+    expect(session).to have_css('#second')
+  end
+
+  it "reports the frames of its opener's page that page's navigation discarded as closed" do
+    session.visit('/form')
+    session.execute_script("window.w = window.open(); w.f = window.frames[0];")
+    session.visit('/second')
+    session.within_window(session.windows.last) do
+      expect(session.evaluate_script('[f.closed, f.parent === null]')).to eq([true, true])
+    end
+  end
+
+  # HTML "copy the session storage": its own, a copy of its opener's as it opened (Chrome measured: the opener's item
+  # seen, neither's later writes the other's).
+  it "has a sessionStorage of its own, a copy of its opener's" do
+    session.execute_script(<<~JS)
+      sessionStorage.setItem('a', '1');
+      window.w = window.open();
+      w.sessionStorage.setItem('b', '2');
+      sessionStorage.setItem('c', '3');
+    JS
+    expect(session.evaluate_script("[w.sessionStorage.getItem('a'), sessionStorage.getItem('b'), w.sessionStorage.getItem('c')]"))
+      .to eq(['1', nil, nil])
+  end
+
+  it 'closes with the window that hosts it, its document unloaded' do
+    host = session.open_new_window
+    session.within_window(host) do
+      session.visit('/')
+      session.execute_script("window.w = window.open(); w.onunload = () => localStorage.setItem('unloaded', '1');")
+    end
+    expect(session.windows.size).to eq(3)
+    host.close
+    expect(session.windows.size).to eq(1)
+    expect(session.evaluate_script("localStorage.getItem('unloaded')")).to eq('1')
+  end
+
+  it 'is the opener of a pop-up it opens at a URL' do
+    popup = open_popup
+    session.within_window(popup) { session.execute_script("window.open('/second', 'deep')") }
+    expect(session.driver.send(:window_entries).last[:opener]).to eq(popup.handle)
+  end
+
+  it 'is found by its name by another window of its group' do
+    session.execute_script("window.w = window.open('', 'nm'); window.u = window.open('/third')")
+    session.within_window(session.windows.last) do
+      expect(session).to have_css('#third')
+      session.execute_script("window.open('/second', 'nm')")
+    end
+    expect(session.windows.size).to eq(3)
+    session.within_window(session.windows[1]) { expect(session).to have_css('#second') }
+  end
+
+  it 'renews the document it keeps: its adopted sheets, its selection, the observers on it none of the next' do
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      const sheet = new w.CSSStyleSheet();
+      w.document.adoptedStyleSheets = [sheet];
+      w.document.body.textContent = 'x';
+      w.getSelection().selectAllChildren(w.document.body);
+      window.records = 0;
+      new MutationObserver((r) => { records += r.length; }).observe(w.document, {childList: true, subtree: true});
+      w.location = '/second';
+    JS
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    expect(session.evaluate_script('[w.document.adoptedStyleSheets.length, w.getSelection().rangeCount, records]')).to eq([0, 0, 0])
   end
 end

@@ -263,6 +263,7 @@ module Capybara
         # managers (web_locks.rs) every window's realms share.
         @client_space                 = client_space
         @session_storage              = Native.storage_partition_new
+        @session_history.session_storage = @session_storage
         @sticky_headers               = {}
         @timers_active                = false
         # Capybara config is set once per suite; cache the derived
@@ -306,7 +307,8 @@ module Capybara
         # …and the top-level traversable they are rooted in: the page (nil), or a window `window.open` made in this isolate
         # whose realm the driver addresses (`in_window`, RealmWindow) — `switch_to_frame(:top)` back to its document.
         @top_realm_id                 = nil
-        @frame_scope_resets           = 0
+        # …and the scopes `in_window` / `in_top_context` set aside while another runs, `[top, current, frames]` each.
+        @saved_scopes                 = []
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         # The first find of a navigation observes the current DOM without a pre-tick (see
         # timer_wait_elapsed?); armed by the first find, disarmed by reset_timer_state.
@@ -367,6 +369,7 @@ module Capybara
         @websocket_sockets    = {}   # id → csim's socket end
         @websocket_app_sockets = {}  # id → the app's hijack end (closed on teardown)
         @websocket_workers    = {}   # id → the handle of the worker that opened it (none: the window's)
+        @websocket_realms     = {}   # id → the realm whose document opened it (a window's: 0 the page's)
         @websocket_lock       = Mutex.new
         @websocket_queue      = Thread::Queue.new
         @websocket_queue_head = nil   # one-slot buffer for an event hold_for_ws_close parked ahead of the queue
@@ -885,8 +888,15 @@ module Capybara
       # invalidates the active `within_frame` scope.
       def reset_frame_scope
         @current_realm_id = @top_realm_id
-        @frame_stack.clear
-        @frame_scope_resets += 1
+        @frame_stack = []
+      end
+      # …the page's, whichever scope is active: a full page (re)build disposes the page's frame realms, never those of a
+      # window `window.open` made in this isolate, whose scope — active or set aside — keeps its frames.
+      def reset_page_scope
+        reset_frame_scope if @top_realm_id.nil?
+        @saved_scopes.each do |scope|
+          scope[1, 2] = [nil, []] if scope[0].nil?
+        end
       end
 
       # `yield`ed with the driver's commands addressing `window`, a window `window.open` made in this isolate (RealmWindow)
@@ -895,25 +905,25 @@ module Capybara
       # ran, the scope follows it: `retarget_scope`.)
       def in_window(window)
         realm = window.realm or raise Capybara::WindowError, "Window #{window.window_handle} is closed; switch to another window"
-        saved = [@top_realm_id, @current_realm_id, @frame_stack]
-        @top_realm_id     = realm
-        # (…none of the frames it entered once its document was replaced since: they were that one's)
-        window.frame_stack = [] unless window.frame_stack.first.nil? || window.frame_stack.first[:parent_realm_id] == realm
-        @frame_stack      = window.frame_stack
+        @saved_scopes.push([@top_realm_id, @current_realm_id, @frame_stack])
+        @top_realm_id = realm
+        # (…none of the frames it entered once a document of it was replaced since: they were that one's)
+        frames = window.frame_stack
+        frames = [] unless frames.all? {|entry| @runtime.frame_realm_alive?(entry[:realm_id]) }
+        @frame_stack      = frames.dup
         @current_realm_id = @frame_stack.last&.fetch(:realm_id) || realm
         begin
           yield
         ensure
-          window.frame_stack = @frame_stack
-          @top_realm_id, @current_realm_id, @frame_stack = saved
+          window.frame_stack = @frame_stack.dup
+          @top_realm_id, @current_realm_id, @frame_stack = @saved_scopes.pop
         end
       end
       # The window realm `from` replaced by `to`, its next document's (`reload_window_realm`): the scope rooted in it, or
       # at it, following it.
       # (…the frames it had entered gone with the document they were in, as a page's are: `reset_frame_scope`)
+      # (…a document loaded into the window's own realm, `reuse_window_realm`, whose frames are gone all the same)
       private def retarget_scope(from, to)
-        return if from == to
-
         if @top_realm_id == from
           @top_realm_id = to
           reset_frame_scope
@@ -928,19 +938,12 @@ module Capybara
       def in_top_context
         return yield if @current_realm_id.nil? && @frame_stack.empty?
 
-        top, realm, stack, resets = @top_realm_id, @current_realm_id, @frame_stack.dup, @frame_scope_resets
-        @top_realm_id = nil
-        reset_frame_scope
+        @saved_scopes.push([@top_realm_id, @current_realm_id, @frame_stack])
+        @top_realm_id, @current_realm_id, @frame_stack = nil, nil, []
         begin
           yield
         ensure
-          @top_realm_id = top
-          if @frame_scope_resets == resets + 1
-            @current_realm_id = realm
-            @frame_stack.replace(stack)
-          else
-            @current_realm_id = @frame_stack.last&.fetch(:realm_id) || top
-          end
+          @top_realm_id, @current_realm_id, @frame_stack = @saved_scopes.pop
         end
       end
 
@@ -970,7 +973,8 @@ module Capybara
       # refresh's, `open(url, '_self')`'s, and leave a new window one opens at about:blank (measured 2026-10-30, for an
       # HTML, plain-text or SVG one; a browser intervention, no HTML rule). The driver's own `visit` is the user's, which
       # none refuses.
-      def top_level_data_refused?(url) = url.to_s.match?(/\Adata:/i)
+      def top_level_data_refused?(url) = DATA_URL.match?(url.to_s)
+      DATA_URL = /\Adata:/i
 
       def find_css(css, context_handle = nil)
         s = css.to_s
@@ -2226,8 +2230,10 @@ module Capybara
 
       def status_code      = (@last_response_status || 200)
       # Rack 3 lowercases header names; Capybara tests do `['Content-Type']`.
-      def response_headers
-        (@last_response_headers || {}).each_with_object({}) {|(k, v), h|
+      def response_headers = Browser.capitalized_headers(@last_response_headers)
+      # Headers as Capybara's drivers name them: each word capitalized.
+      def self.capitalized_headers(headers)
+        (headers || {}).each_with_object({}) {|(k, v), h|
           h[k.to_s.split('-').map(&:capitalize).join('-')] = v
         }
       end
@@ -4341,6 +4347,7 @@ module Capybara
           @websocket_sockets[id]     = csim_io
           @websocket_app_sockets[id] = app_io
           @websocket_workers[id]     = worker.handle if worker
+          @websocket_realms[id]      = client['clientRealm'].to_i if client
           @websocket_threads[id] = Thread.new do
             Thread.current.report_on_exception = false
             run_websocket_reader(id, csim_io, accept, queue, target, cookie_context)
@@ -4422,8 +4429,12 @@ module Capybara
             true
           end
         end
-        # (…each a task of its own — see deliver_window_messages)
-        js_events.each {|event| @runtime.call('__csim_deliverWebSocketEvents', [event]) }
+        # (…each a task of its own — see deliver_window_messages — of the realm whose document opened its socket: none of
+        # a realm gone since)
+        js_events.each do |event|
+          realm = @websocket_lock.synchronize { @websocket_realms[event[:id]] }.to_i
+          @runtime.realm_call(realm, '__csim_deliverWebSocketEvents', [event]) if realm.zero? || @runtime.frame_realm_alive?(realm)
+        end
         # A terminal event (`__close` / `__error`) completes a close handshake — release the clock
         # hold. Clamp: a server-INITIATED close arrives without a matching ws_close increment.
         terminals = events.count {|e| e[:type] == '__close' || e[:type] == '__error' }
@@ -4450,7 +4461,7 @@ module Capybara
       # The window's sockets, as its document goes (a navigation commits another): each made to disappear, and what
       # its readers had queued for the document gone with it.
       private def drop_document_websockets
-        ws_drop_client
+        ws_drop_client(kept: @runtime.window_realm_trees)
         forget_window_websocket_events
       end
 
@@ -4466,10 +4477,12 @@ module Capybara
       # started as Going Away. Its reader finishes the handshake — torn down here, the app's reply raced csim's
       # closing end — but unheard: the socket is no longer its client's (WsHeard). (`worker`: the handle; none for the
       # window's)
-      private def ws_drop_client(worker = nil)
+      # (…`kept` the realms whose documents a navigation of the page leaves: a window's `window.open` made, its frames')
+      private def ws_drop_client(worker = nil, kept: [])
         @websocket_lock.synchronize do
-          @websocket_sockets.keys.select {|id| @websocket_workers[id] == worker }.each do |id|
+          @websocket_sockets.keys.select {|id| @websocket_workers[id] == worker && !kept.include?(@websocket_realms[id]) }.each do |id|
             @websocket_workers.delete(id)
+            @websocket_realms.delete(id)
             ws_write_frame(@websocket_sockets.delete(id), 0x8, [1001].pack('n')) rescue nil
           end
         end
@@ -7333,20 +7346,25 @@ module Capybara
       # The realm of the document window `key` shows now — the one its first document's was, a navigation's after each
       # (v8_runtime.rb `window_realm_meta`) — none for one gone: closed by a script or the user, its realm
       # discarded with its page's (`dispose_frame_realms`).
-      def window_realm(key)
-        realm = window_realm_made(key)
-        realm unless realm.nil? || window_realm_state(realm) == 2
+      # …as `[realm, closing, gone]`: whether its close was asked (a script's `close()`, its close a task to come) or ran
+      # (window.js `__csimWindowState`).
+      def window_realm_state(key)
+        realm = window_realm_made(key) or return [nil, true, true]
+        state = @runtime.realm_call(realm, '__csimWindowState').to_i
+        [(realm unless state == 2), state.positive?, state == 2]
       end
-      def window_realm?(key) = !window_realm(key).nil?
-      # …whether it is closing (a script's `close()` asked, its close a task to come), or gone (window.js
-      # `__csimWindowState`).
-      def window_realm_closing?(key) = (realm = window_realm_made(key)).nil? || window_realm_state(realm).positive?
+      # …which changes only as a window of this isolate is made, navigated, closed or let go of: the generation that
+      # counts those (v8_runtime.rb `window_realms_changed`), its RealmWindow's cache key.
+      def window_realm_gen = @runtime.window_gen
+      def window_realms_changed = @runtime.window_realms_changed
       private def window_realm_made(key) = @runtime.window_realm_meta.find {|_, meta| meta[:window_key] == key }&.first
-      private def window_realm_state(realm) = @runtime.realm_call(realm, '__csimWindowState').to_i
       # Its URL, its title, its target name: its document's, its browsing context's.
       def window_realm_url(realm)   = @runtime.realm_call(realm, '__csimLocationHref').to_s
       def window_realm_title(realm) = @runtime.realm_call(realm, '__csimDocumentTitle').to_s
       def window_realm_name(realm)  = @runtime.realm_call(realm, '__csimWindowName').to_s
+      # …and its document's origin (`familiar_with?`), and the page's.
+      def window_realm_origin(realm) = @runtime.realm_call(realm, '__csimDocumentOriginOf').to_s
+      def page_origin                = @runtime.call('__csimDocumentOriginOf').to_s
       # The user's navigation of it (Capybara's `visit` in it): a new document at `url`, no document its initiator.
       def visit_window_realm(realm, url)
         navigate_window_realm(realm, 'location', [url.to_s, false, nil, nil, nil, true, nil], by_user: true)
@@ -11269,6 +11287,8 @@ module Capybara
       # areas (storage_areas.rs), which outlive the per-visit `rebuild_ctx` (Forem caches user data in `localStorage` on
       # one page for the next).
       def storage_partitions = [@local_storage, @session_storage]
+      # …its page's sessionStorage shed, which a pop-up it opens copies (Driver#open_aux_window).
+      def session_storage_shed = @session_storage
 
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops
@@ -11839,7 +11859,7 @@ module Capybara
         # A full page (re)build disposes every frame realm, so any active
         # `within_frame` scope is now stale — fall back to the main document.
         # Its frames are new navigables, which the nested histories its document state kept from before are not.
-        reset_frame_scope
+        reset_page_scope
         @session_history.rebuilt
         @frame_leaving_entries = nil
         reset_timer_state

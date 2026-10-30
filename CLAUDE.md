@@ -212,11 +212,13 @@ process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — until
 R13 S6 makes a same-group pop-up a realm of its opener's isolate; and a window
 `window.open` made in its opener's isolate keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
-Document object too, renewed (its listeners and handlers, its design mode and its
-initial-about:blank flag reset) and parsed again, where HTML makes a new one: the
-bridge holds one document per realm, every binding of the realm reading it — its
-expandos and the observers registered on it outlive it (`reuse_window_realm`,
-v8_runtime.rb). List and justify these explicitly; don't let them multiply.
+Document object too, renewed (its listeners, handlers, observer registrations,
+adopted sheets, fonts, selection range, design mode and initial-about:blank flag
+reset) and parsed again, where HTML makes a new one: the bridge holds one document
+per realm — its handle 0, its arena root, the module state of every binding of the
+realm read it — so a second Document of a live realm would need every one of those
+re-keyed; its expandos, and its `html` / `head` / `body` objects, which the parse
+keeps, outlive it (`reuse_window_realm`, v8_runtime.rb). List and justify these explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox

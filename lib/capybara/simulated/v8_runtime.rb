@@ -425,6 +425,10 @@ module Capybara
       # can carry them across, the way a real popup keeps `window.opener` / `window.name`
       # through its own navigation.
       def window_realm_meta = (@window_realm_meta ||= {})
+      # How many times a window `window.open` made in this isolate was made, navigated, closed or let go of — what a
+      # driver's handle on one keys its cache on (RealmWindow).
+      def window_gen = @window_gen || 0
+      def window_realms_changed = (@window_gen = window_gen + 1)
 
       # (…but those of `kept`: the windows `window.open` made in this isolate and their frames, top-level traversables of
       # their own, which outlive the page that opened them — `window_realm_trees`)
@@ -438,7 +442,13 @@ module Capybara
         # whose arenas, and their marks as discarded, lived on until now. Done from the main context
         # (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
         going = (@frame_realms&.keys || []) - kept
-        ids = (going + discarded_realm_ids).uniq
+        # (…where windows are kept, which may hold WindowProxies of the frames going: those report their browsing contexts
+        # discarded — `closed`, no `parent` — and pin no dead global, the arenas that say so kept until no window is)
+        unless kept.empty?
+          going.each {|id| evict_window_proxies(id) }
+          @ctx&.eval_void(going.map {|id| "__dom.discardRealm(#{id.to_i}); __dom.loseNavigableOf(#{id.to_i});" }.join) rescue nil
+        end
+        ids = kept.empty? ? (going + discarded_realm_ids).uniq : discarded_realm_ids.dup
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
@@ -447,6 +457,8 @@ module Capybara
           @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil
         end
         discarded_realm_ids.clear
+        discarded_realm_ids.concat(going) unless kept.empty?
+        window_realms_changed
         return if @frame_realms.nil?
         going.each {|id| @frame_realms.delete(id).dispose rescue nil }
       end
@@ -564,7 +576,7 @@ module Capybara
         @module_sw_ctxs&.delete(id)
         @module_fetch_options&.delete(id)
         @browser.forget_importmap(id)
-        @window_realm_meta&.delete(id)
+        window_realms_changed if @window_realm_meta&.delete(id)
         # Evict from the main realm's stepped windows so `drainChildRealms` stops
         # stepping a disposed context. A FRAME realm is also evicted via the DOM
         # unregister path (its iframe element going away), but a WINDOW realm has no
@@ -1362,6 +1374,7 @@ module Capybara
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
+        window_realms_changed
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial
           realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)

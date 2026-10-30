@@ -66,6 +66,8 @@ module Capybara
         '__setDocumentCookie'        => ->(b, *a) { b.write_document_cookie(a[0].to_s, a[1], a[2], a[3]); nil },
         '__csimDeleteAllCookies'     => ->(b, *_) { b.delete_all_cookies; nil },
         '__csimStoragePartitions'    => ->(b, *_a) { b.storage_partitions },
+        # A window `window.open` made in this isolate closing, or closed (window.js): its RealmWindow asks again.
+        '__csimWindowRealmsChanged'  => ->(b, *_a) { b.window_realms_changed; nil },
         '__csimStorageChanged'       => ->(b, *a) { b.storage_changed(*a[0, 7]); nil },
         '__modalDialog'              => ->(b, *a) { b.handle_modal(a[0], a[1], a[2]) },
         '__csim_pushImportmap'       => ->(b, *a) { b.set_importmap(a[0], a[1]); nil },

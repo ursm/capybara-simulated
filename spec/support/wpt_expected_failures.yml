@@ -7196,11 +7196,6 @@ websockets/unload-a-document/003.html:
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
 - "[harness] TIMEOUT"
-webstorage/storage_session_window_open.window.js:
-- A new window to make sure there is a copy of the previous window's sessionStorage,
-  and that they diverge after a change
-webstorage/storage_session_window_reopen.window.js:
-- ensure that re-opening a named window doesn't copy sessionStorage
 xhr/abort-after-stop.window.js:
 - abort-after-stop
 xhr/access-control-basic-allow-preflight-cache-timeout.any.js:
