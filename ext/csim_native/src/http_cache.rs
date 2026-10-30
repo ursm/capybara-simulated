@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
 
-use magnus::encoding::{EncodingCapable, Index};
-use magnus::{prelude::*, Error, RArray, RHash, RString, Ruby, Value};
+use magnus::value::Opaque;
+use magnus::{gc, prelude::*, DataTypeFunctions, Error, RArray, RHash, RString, Ruby, TypedData, Value};
 
 use crate::civil::{civil_from_days, days_from_civil};
 
@@ -219,13 +219,13 @@ impl Kept {
     }
 }
 
-// A stored response: its status, its body — decoded, as the page reads it, in the encoding it was given in — the size
-// that body had on the wire (what a hit's Resource Timing entry reports as `encodedBodySize`), and what it is kept with,
-// which a 304 replaces whole (`refresh`) so a thread reading it reads one of them.
+// A stored response: its status, its body — decoded, as the page reads it: the String the host stored, frozen, which
+// every hit is handed (a multi-MB bundle copied per hit cost the GC more than the fetch; marked by whatever holds it) —
+// the size that body had on the wire (what a hit's Resource Timing entry reports as `encodedBodySize`), and what it is
+// kept with, which a 304 replaces whole (`refresh`) so a thread reading it reads one of them.
 struct Stored {
     status: u32,
-    body: Vec<u8>,
-    encoding: Index,
+    body: Opaque<RString>,
     encoded: Option<u64>,
     kept: RwLock<Arc<Kept>>,
 }
@@ -270,7 +270,8 @@ fn header_fields(headers: RHash) -> Result<Vec<(String, Vec<u8>)>, Error> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
     headers.foreach(|k: Value, v: Value| {
         if let Some(value) = combine(v)? {
-            let name = k.funcall::<_, _, RString>("to_s", ())?.to_string()?.to_ascii_lowercase();
+            // (…a name's bytes lowercased as an HTTP token's are, ASCII alone — whatever else it holds kept)
+            let name = String::from_utf8_lossy(&crate::fetch_rules::ruby_bytes(k.funcall("to_s", ())?)).to_ascii_lowercase();
             match out.iter_mut().find(|(n, _)| *n == name) {
                 Some(slot) => slot.1 = value,
                 None => out.push((name, value)),
@@ -285,27 +286,45 @@ fn now() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
 }
 
-// The host's HTTP cache: the responses `rack_fetch` stored, by URL — process-wide, GET-only, shared by every thread that
-// fetches (an image load, a keepalive fetch, the page's own).
-#[magnus::wrap(class = "Capybara::Simulated::Native::HttpCache", free_immediately)]
+// The host's HTTP cache: the responses `rack_fetch` stored, by URL (its bytes) — process-wide, GET-only, shared by every
+// thread that fetches (an image load, a keepalive fetch, the page's own). No Ruby code runs while its lock is held, so the
+// GC that marks the bodies (which runs on the thread holding the GVL) never waits on it.
+#[derive(TypedData)]
+#[magnus(class = "Capybara::Simulated::Native::HttpCache", free_immediately, mark)]
 pub(crate) struct HttpCache {
-    entries: Mutex<HashMap<String, Arc<Stored>>>,
+    entries: Mutex<HashMap<Vec<u8>, Arc<Stored>>>,
+}
+
+impl DataTypeFunctions for HttpCache {
+    fn mark(&self, marker: &gc::Marker) {
+        for stored in self.lock().values() {
+            marker.mark(stored.body);
+        }
+    }
 }
 
 // One of its stored responses, as the host has it from a `lookup`: the one it was then, a later `store` of its URL
-// another — a `refresh` of it this one's.
-#[magnus::wrap(class = "Capybara::Simulated::Native::HttpCache::Entry", free_immediately)]
+// another — a `refresh` of it this one's. (…its body marked by it too, which outlives the cache's dropping it)
+#[derive(TypedData)]
+#[magnus(class = "Capybara::Simulated::Native::HttpCache::Entry", free_immediately, mark)]
 pub(crate) struct Entry(Arc<Stored>);
+
+impl DataTypeFunctions for Entry {
+    fn mark(&self, marker: &gc::Marker) {
+        marker.mark(self.0.body);
+    }
+}
 
 impl HttpCache {
     fn new() -> Self {
         HttpCache { entries: Mutex::default() }
     }
-    fn lock(&self) -> MutexGuard<'_, HashMap<String, Arc<Stored>>> {
+    fn lock(&self) -> MutexGuard<'_, HashMap<Vec<u8>, Arc<Stored>>> {
         self.entries.lock().unwrap_or_else(PoisonError::into_inner)
     }
     // #lookup(url) -> its stored response, or nil.
-    fn lookup(&self, url: String) -> Option<Entry> {
+    fn lookup(&self, url: RString) -> Option<Entry> {
+        let url = crate::fetch_rules::ruby_bytes(url);
         self.lock().get(&url).cloned().map(Entry)
     }
     // #clear: every response gone.
@@ -321,15 +340,15 @@ impl HttpCache {
     // #store(url, status, headers, body, encoded) -> whether it was stored: the response `rack_fetch` got for `url`, its
     // cookies not kept (they were set as it came, and a replay is no response that sets them), where its fields allow it
     // (`storable`); `encoded` its body's size on the wire.
-    fn store(&self, url: String, status: u32, headers: RHash, body: RString, encoded: Option<u64>) -> Result<bool, Error> {
+    fn store(&self, url: RString, status: u32, headers: RHash, body: RString, encoded: Option<u64>) -> Result<bool, Error> {
+        let url = crate::fetch_rules::ruby_bytes(url);
         let mut headers = header_fields(headers)?;
         headers.retain(|(k, _)| k != "set-cookie");
         let stored_at = now();
         let Some(policy) = Kept::policy_of(&headers, |f| storable(status, f, stored_at)) else { return Ok(false) };
         let stored = Stored {
             status,
-            body: crate::fetch_rules::ruby_bytes(body),
-            encoding: body.enc_get(),
+            body: RString::new_frozen(body).into(),
             encoded,
             kept: RwLock::new(Arc::new(Kept { headers, stored_at, policy })),
         };
@@ -340,28 +359,35 @@ impl HttpCache {
         entries.insert(url, Arc::new(stored));
         Ok(true)
     }
-    // #refresh(url, entry, headers) -> entry: RFC 9111 §4.3.4 — a 304 that revalidates the response stored for `url`
+    // #refresh(url, entry, headers): RFC 9111 §4.3.4 — a 304 that revalidates the response stored for `url`
     // refreshes it without replacing its body: its header fields updated with the ones the 304 carries — a rotated ETag
     // or Last-Modified what the next revalidation sends — but for those it does not update (`unrefreshed`), and its
     // freshness, no-cache and immutability read again off the fields as they now are (a bare 304 keeps the stored
     // Cache-Control, a new Date shortens an Expires). Where they now forbid storing it — `no-store`, `private`, a Vary it
     // cannot honour — it is dropped, though this request is still answered from it.
-    fn refresh(&self, url: String, entry: &Entry, headers: RHash) -> Result<(), Error> {
-        let mut merged = entry.0.kept().headers.clone();
-        for (name, value) in header_fields(headers)? {
-            if unrefreshed(&name) {
-                continue;
+    // (…the 304's fields read before the entry is locked, so two refreshing it at once each merge into the other's)
+    fn refresh(&self, url: RString, entry: &Entry, headers: RHash) -> Result<(), Error> {
+        let url = crate::fetch_rules::ruby_bytes(url);
+        let fresh_fields = header_fields(headers)?;
+        let dropped = {
+            let mut kept = entry.0.kept.write().unwrap_or_else(PoisonError::into_inner);
+            let mut merged = kept.headers.clone();
+            for (name, value) in fresh_fields {
+                if unrefreshed(&name) {
+                    continue;
+                }
+                match merged.iter_mut().find(|(n, _)| *n == name) {
+                    Some(slot) => slot.1 = value,
+                    None => merged.push((name, value)),
+                }
             }
-            match merged.iter_mut().find(|(n, _)| *n == name) {
-                Some(slot) => slot.1 = value,
-                None => merged.push((name, value)),
-            }
-        }
-        let stored_at = now();
-        let policy = Kept::policy_of(&merged, |f| refreshed(entry.0.status, f, stored_at));
-        let dropped = policy.is_none();
-        let policy = policy.unwrap_or(Policy { max_age: None, no_cache: false, immutable: false });
-        *entry.0.kept.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(Kept { headers: merged, stored_at, policy });
+            let stored_at = now();
+            let policy = Kept::policy_of(&merged, |f| refreshed(entry.0.status, f, stored_at));
+            let dropped = policy.is_none();
+            let policy = policy.unwrap_or(Policy { max_age: None, no_cache: false, immutable: false });
+            *kept = Arc::new(Kept { headers: merged, stored_at, policy });
+            dropped
+        };
         if dropped {
             let mut entries = self.lock();
             if entries.get(&url).is_some_and(|e| Arc::ptr_eq(e, &entry.0)) {
@@ -381,9 +407,7 @@ impl Entry {
         self.0.encoded
     }
     fn body(ruby: &Ruby, rb_self: &Self) -> RString {
-        let body = ruby.str_from_slice(&rb_self.0.body);
-        let _ = body.enc_associate(rb_self.0.encoding);
-        body
+        ruby.get_inner(rb_self.0.body)
     }
     // #headers -> its header fields as they stand, a Hash of lowercase name => binary String.
     fn headers(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
@@ -412,7 +436,7 @@ impl Entry {
     fn fresh_until(&self) -> Option<f64> {
         let kept = self.0.kept();
         let max_age = kept.policy.max_age?;
-        (!kept.policy.no_cache && max_age > 0.0 && fresh(kept.stored_at, Some(max_age), false, now())).then(|| kept.stored_at + max_age)
+        fresh(kept.stored_at, Some(max_age), kept.policy.no_cache, now()).then(|| kept.stored_at + max_age)
     }
     // #revalidation_headers -> the conditional request header fields a revalidation of it sends: its validators.
     fn revalidation_headers(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
