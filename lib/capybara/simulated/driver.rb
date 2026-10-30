@@ -579,16 +579,17 @@ module Capybara
         # navigations' are (HTML "window open steps": "navigate" the new navigable) — a `<form target=_blank method=post>`'s
         # a POST carrying its form's document's origin, a blob: URL's the blob of the click-time snapshot (a link's whose
         # URL its page may revoke first) or of the source's store, the source's document its initiator either way. (…an
-        # about:blank one's none: the initial document at its URL — HTML's "URL and history update steps" in its place)
+        # about:blank one's none: the initial document at its URL — HTML's "URL and history update steps" in its place —
+        # the document it was opened for, whose Window the next does not keep: `opened_at_initial`)
         about_blank = url.to_s.match?(Browser::ABOUT_BLANK)
         aux.open_initial_document(about_blank ? url.to_s : 'about:blank')
-        unless about_blank || url.to_s.empty?
-          if post
-            post_window(aux, url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
-          else
-            blob = {bytes: blob_snapshot['bytes'], type: blob_snapshot['type'].to_s} if blob_snapshot.is_a?(Hash) && blob_snapshot['bytes']
-            navigate_window(aux, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated, blob: blob)
-          end
+        if about_blank || url.to_s.empty?
+          aux.traversable.opened_at_initial
+        elsif post
+          post_window(aux, url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+        else
+          blob = {bytes: blob_snapshot['bytes'], type: blob_snapshot['type'].to_s} if blob_snapshot.is_a?(Hash) && blob_snapshot['bytes']
+          navigate_window(aux, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated, blob: blob)
         end
         handle
       end
@@ -746,6 +747,12 @@ module Capybara
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
       def window_ref_has(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_has(id, prop) : false
       def window_ref_delete(handle, id, prop)      = (b = window_browser(handle)) ? b.remote_ref_delete(id, prop) : false
+      # …and a callback the window of `handle` handed the one of `caller` (a function of its realm `realm`, by its id),
+      # called back in that window — synchronously, as the caller's task runs, as a browser's one event loop would call
+      # it: `w.onload = f` heard as the window's load dispatches.
+      def window_ref_apply(handle, realm, id, this, args, caller)
+        (b = window_browser(handle)) ? b.remote_ref_apply(realm, id, this, args, caller) : nil
+      end
       # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
       # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
       # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, sending `referrer`

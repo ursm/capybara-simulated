@@ -1139,9 +1139,10 @@ module Capybara
       # pop-up reporting back to its opener) — waited on under the idle gate this window's own timers are (`polling?`),
       # keyed on THIS window's settle generation alone: no matcher of its sees another window's document, and what
       # crosses to it from one (a message, a storage event) changes this one's as it is delivered — a pop-up's clock
-      # redrawing its own DOM keeps no failing matcher here waiting out its wait.
-      def background_timers_pending? = background_windows.any?(&:timers_active?)
-      def timers_active? = @timers_active == true
+      # redrawing its own DOM keeps no failing matcher here waiting out its wait. (…or a `load` its document still owes,
+      # held for its images in flight: a pop-up's, whose opener's listeners wait on it — `flush_pending_window_load`)
+      def background_timers_pending? = background_windows.any?(&:steps_pending?)
+      def steps_pending? = @timers_active == true || @window_load_due == true
 
       # A poll's advance of `ms` run in the session's other windows too (`step_in_background`): every window's event loop
       # runs as the active one's is polled, as `Driver#run_event_loop_frame` steps them all a frame.
@@ -1150,10 +1151,10 @@ module Capybara
       end
 
       # …this window's, one not the active window: its timers due within `ms`, what was asked of it, what they leave to
-      # do — none while it is busy, nor from within it (`taking_window_tasks`), which the session's windows' steps may
-      # reach again.
+      # do — its load among it, once nothing holds it (`drain_task_intents`) — none while it is busy, nor from within it
+      # (`taking_window_tasks`), which the session's windows' steps may reach again.
       def step_in_background(ms)
-        return if window_busy? || !(@timers_active || async_io_pending?)
+        return if window_busy? || !(steps_pending? || async_io_pending?)
 
         taking_window_tasks do
           r = @runtime.run_loop_step(ms)
@@ -7302,6 +7303,10 @@ module Capybara
       def window_ref_call(handle, id, method, args) = (@driver.respond_to?(:window_ref_call) ? @driver.window_ref_call(handle.to_s, id, method.to_s, args) : nil)
       def window_ref_has(handle, id, prop)         = (@driver.respond_to?(:window_ref_has) ? @driver.window_ref_has(handle.to_s, id, prop.to_s) : false)
       def window_ref_delete(handle, id, prop)      = (@driver.respond_to?(:window_ref_delete) ? @driver.window_ref_delete(handle.to_s, id, prop.to_s) : false)
+      # …a callback the window of `handle` handed this one, called back there (Driver#window_ref_apply), from this one.
+      def window_ref_apply(handle, realm, id, this, args)
+        @driver.respond_to?(:window_ref_apply) ? @driver.window_ref_apply(handle.to_s, realm.to_i, id, this, args, window_handle.to_s) : nil
+      end
       # A call of this window's script into another window's (a `__csimWindow*` host fn whose target runs script): its
       # VM on the stack meanwhile, waiting on it (`script_waiting?`) — what another window's script that call runs may
       # reach back into, and plan a navigation of this one by, which must not rebuild this one's Context under it.
@@ -7316,6 +7321,7 @@ module Capybara
       # on the resolved target Browser).
       def remote_ref_get(id, prop)          = @runtime.call('__csimRemoteRefGet', id, prop.to_s)
       def remote_ref_set(id, prop, value)
+        note_initial_window(['set', prop.to_s, value]) if id.zero?
         @runtime.call('__csimRemoteRefSet', id, prop.to_s, value)
         # A cross-isolate property set can queue a navigation in THIS (target)
         # window — `w.location.href = …` / `w.location = …`. Drain it (and any other
@@ -7324,6 +7330,7 @@ module Capybara
         nil
       end
       def remote_ref_call(id, method, args)
+        note_initial_window(['call', method.to_s, args || []]) if id.zero? && INITIAL_WINDOW_METHODS.include?(method.to_s)
         result = @runtime.call('__csimRemoteRefCall', id, method.to_s, args || [])
         # A cross-isolate call can queue a pending action in THIS (target) window —
         # `w.form.submit()` (form submit), `w.history.back()` (history traverse),
@@ -7332,8 +7339,30 @@ module Capybara
         drain_pending_after_remote_ref
         result
       end
-      def remote_ref_has(id, prop)    = @runtime.call('__csimRemoteRefHas', id, prop.to_s) == true
-      def remote_ref_delete(id, prop) = @runtime.call('__csimRemoteRefDelete', id, prop.to_s) == true
+      def remote_ref_has(id, prop) = @runtime.call('__csimRemoteRefHas', id, prop.to_s) == true
+      def remote_ref_delete(id, prop)
+        note_initial_window(['delete', prop.to_s]) if id.zero?
+        @runtime.call('__csimRemoteRefDelete', id, prop.to_s) == true
+      end
+      # …a callback of this window's realm `realm` it handed the window of `caller` (`__csimRemoteCallback`), called: with
+      # `this` and `args` as that window serialized them, its result serialized here — none for a realm gone.
+      def remote_ref_apply(realm, id, this, args, caller)
+        return nil unless realm.zero? || @runtime.frame_realm_alive?(realm)
+
+        # (…what it does to this window's document a find here must see: no task of this window's ran it)
+        invalidate_find_cache
+        @runtime.realm_call(realm, '__csimRemoteRefApply', id, this, args || [], caller.to_s)
+      end
+      # What another window's script did to this one's Window while it shows its initial about:blank — its own properties
+      # set or deleted, its event listeners added or removed — in order: the Window the document a navigation of it makes
+      # of that one's origin keeps (HTML's window reuse: `w = open(url); w.data = …; w.onload = f` reaches `url`'s document
+      # and hears its load, Chrome and Firefox measured; session_history.rs `Traversable::publish`), that document's
+      # global given them again as it boots, before its scripts run (bridge.entry.js `__csimBootContext`) — a document a
+      # realm of its own here.
+      INITIAL_WINDOW_METHODS = %w[addEventListener removeEventListener].freeze
+      private def note_initial_window(op)
+        (@initial_window_ops ||= []) << op if @session_history.initial?
+      end
       # Drain every deferred action a cross-isolate operation may have queued in this
       # window: form submission, plain navigation, same-document history traversal
       # (history.back/forward/go — restores the previous entry + fires load), and
@@ -7452,7 +7481,7 @@ module Capybara
       private def window_tasks_takeable?
         return false unless Native.window_tasks_pending
 
-        (!@taking_window_tasks && @session_history.inbound?) || session_windows.drop(1).any? {|b| b.window_asked? && !b.window_busy? }
+        (!@taking_window_tasks && @session_history.posted?) || session_windows.drop(1).any? {|b| b.window_asked? && !b.window_busy? }
       end
 
       # Whether another window's script asked something of this one — a message posted, a navigation planned, its close
@@ -7471,7 +7500,7 @@ module Capybara
       end
 
       # What another window's script asked of this one, taken as tasks of its own event loop (HTML: a task queued on it by
-      # an agent of another isolate): the messages posted to it (`deliver_inbound_tasks`) — and, while it is not busy, the
+      # an agent of another isolate): the messages posted to it (`deliver_posted_messages`) — and, while it is not busy, the
       # close of it, then the traversals of its session history and the navigation planned of it, which a close leaves
       # none of (session_history.rs `ask_close`).
       # Taken as this window's own step takes its tasks, or, one not the active window, as the active one's takes them
@@ -7484,7 +7513,7 @@ module Capybara
       private def take_window_tasks!
         return 0 if discard_due?
 
-        n = deliver_inbound_tasks
+        n = deliver_posted_messages
         return n if script_waiting? || @navigating
         if @session_history.take_close
           close_steps
@@ -7511,20 +7540,14 @@ module Capybara
         }
       end
 
-      # The tasks other windows queued on this one, each a task of its own, in the order queued: a message another window's
-      # script posted to it (session_history.rs `traversablePost`), a `message` event at its window; the `load` of another
-      # window a realm of its listens for (`traversableLoaded`), its listeners there run — none of a realm gone since.
-      private def deliver_inbound_tasks
-        inbound = @session_history.take_inbound
-        inbound.each do |kind, *task|
-          if kind == :message
-            @runtime.call('__csim_deliverWindowMessage', *task)
-          else
-            target, window, realm = task
-            @runtime.realm_call(realm, '__csim_deliverWindowLoad', target, window) if realm.zero? || @runtime.frame_realm_alive?(realm)
-          end
+      # The messages another window's script posted to this one (session_history.rs `traversablePost`), each a task of its
+      # own: a `message` event at its window.
+      private def deliver_posted_messages
+        posted = @session_history.take_posted
+        posted.each do |message|
+          @runtime.call('__csim_deliverWindowMessage', *message)
         end
-        inbound.size
+        posted.size
       end
 
       # HTML "close a top-level traversable", the task a `close()` queued (Driver#script_close_window): its page asked
@@ -7608,14 +7631,22 @@ module Capybara
       # (`drain_pending_navigation_once`), none of which a settle may run — and what was asked of the session's other
       # windows, which no step of their own takes while this one is the active window
       # (`take_window_tasks_in_background`): none while this one's script waits on another window or a navigation of it is
-      # in flight, nor from within a task being taken, which a navigation it runs may reach.
+      # in flight, nor from within a task being taken, which a navigation it runs may reach. (…nor, once, ahead of a task of
+      # this window's already due: a pop-up's navigation this window's script planned answers no sooner than a network
+      # fetch would, after its `setTimeout(…, 0)` — the settle's next step runs that, the next delivery takes the
+      # navigation — a page always due starving none: `@asks_deferred`)
       private def deliver_asked_tasks
         return 0 if @taking_window_tasks || !Native.window_tasks_pending
 
         taking_window_tasks {
-          n = deliver_inbound_tasks
-          (script_waiting? || @navigating) ? n : n + session_windows.drop(1).sum(&:take_window_tasks_in_background)
+          n = deliver_posted_messages
+          next n if script_waiting? || @navigating || defer_asks_once?
+
+          n + session_windows.drop(1).sum(&:take_window_tasks_in_background)
         }
+      end
+      private def defer_asks_once?
+        @asks_deferred = !@asks_deferred && @runtime.next_timer_delay_ms.zero?
       end
 
       # Fire queued cross-window messages (postMessage, BroadcastChannel, `storage`) — each a task of its own: one per
@@ -11677,6 +11708,10 @@ module Capybara
           opts['aboutBase']     = creator[:base]
           opts['referrer']      = creator[:url] unless creator[:url].empty?
         end
+        # (…and what another window did to the Window of its initial about:blank, which it keeps where it is of that one's
+        # origin: `note_initial_window`)
+        ops, @initial_window_ops = @initial_window_ops, nil
+        opts['initialWindow'] = ops if ops
         @document_handle = @runtime.call('__csimBootContext', opts).to_i
         # Drain the app's deferred external-script (chunk) boot chain to quiescence.
         # A dynamically-inserted external <script> runs async (setTimeout 0; HTML
@@ -12661,11 +12696,15 @@ module Capybara
         # ends (`take_load_navigations`) — and what it asked of the session's other windows, the navigation of a pop-up
         # it opened among it, taken by their event loops then (`deliver_asked_tasks`): a `window_opened_by` block's
         # window is at the document it was opened for as the block returns, as it was when its load ran within the
-        # action.
+        # action — after the tasks of this window's already due (`flush_page_init`), which a browser runs before a
+        # network fetch of that document answers: a handler's `setTimeout(() => w.onload = f, 0)` after its `open()`.
         private def driver_action(kind, description)
           result = record_action(kind, description) { yield }
           take_load_navigations
-          deliver_asked_tasks
+          if Native.window_tasks_pending
+            flush_page_init
+            deliver_asked_tasks
+          end
           result
         end
       end

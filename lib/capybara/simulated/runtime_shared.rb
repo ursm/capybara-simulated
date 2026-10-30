@@ -112,6 +112,9 @@ module Capybara
         '__csimWindowRefCall'        => ->(b, *a) { b.reaching_another_window { b.window_ref_call(a[0], a[1], a[2], a[3]) } },
         '__csimWindowRefHas'         => ->(b, *a) { b.reaching_another_window { b.window_ref_has(a[0], a[1], a[2]) } },
         '__csimWindowRefDelete'      => ->(b, *a) { b.reaching_another_window { b.window_ref_delete(a[0], a[1], a[2]) } },
+        # …and a callback of another window's — a function of its realm a[1] it handed this one, by its id a[2] — called
+        # back there with this a[3] and the arguments a[4] (platform-globals.js `__csimRemoteCallback`).
+        '__csimWindowRefApply'       => ->(b, *a) { b.reaching_another_window { b.window_ref_apply(a[0], a[1], a[2], a[3], a[4]) } },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         # (…a navigation another window begins as a task of its own: planned, its source snapshot this window's realm a[4]'s)
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], a[4], user_activated: a[2] == true, replace: a[3] == true); nil },

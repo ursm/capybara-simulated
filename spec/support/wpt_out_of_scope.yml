@@ -39468,12 +39468,6 @@ html/browsers/the-window-object/window-reuse-in-nested-browsing-contexts.tentati
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-html/browsers/the-window-object/window-reuse.tentative.html:
-- name: Initially navigating window to non-about:blank page should reuse synchonously
-    available window
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - name: CSSHSL works as color input
   reason: CSSHSL / CSSRGB were dropped from CSS Typed OM and no browser ships them

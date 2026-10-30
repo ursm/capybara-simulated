@@ -3110,26 +3110,10 @@ html/browsers/history/the-history-interface/007.html:
 - the correct state should be restored when navigating during initial load
 html/browsers/history/the-history-interface/history-state-after-bfcache.window.js:
 - history-state-after-bfcache
-html/browsers/history/the-history-interface/history_back_1.html:
-- "[harness] TIMEOUT"
-- history.back() with session history
-html/browsers/history/the-history-interface/history_forward_1.html:
-- "[harness] TIMEOUT"
-- history.forward() with session history
-html/browsers/history/the-history-interface/history_go_no_argument.html:
-- "[harness] TIMEOUT"
-- history.go()
-html/browsers/history/the-history-interface/history_go_to_uri.html:
-- "[harness] TIMEOUT"
-- history.go() negative tests
 html/browsers/history/the-history-interface/history_go_too_many_calls.optional.html:
 - history go too many calls
 html/browsers/history/the-history-interface/history_go_undefined.html:
-- "[harness] TIMEOUT"
 - history.forward() with session history
-html/browsers/history/the-history-interface/history_go_zero.html:
-- "[harness] TIMEOUT"
-- history.go(0)
 html/browsers/history/the-history-interface/history_go_zero_which_document.window.js:
 - history_go_zero_which_document
 html/browsers/history/the-history-interface/history_pushstate_too_many_calls.optional.html:
@@ -3144,51 +3128,15 @@ html/browsers/history/the-history-interface/history_replacestate_too_many_calls_
 - replaceState checks whether the URL can be rewritten before checking the rate limit
 - replaceState parses the URL before checking the rate limit
 - replaceState serializes state before checking the rate limit
-html/browsers/history/the-history-interface/joint_session_history/001.html:
-- Navigating first iframe
-- Navigating second iframe
-- Session history length on adding new iframe
-- Session history length on initial load
-- Traversing history back (1)
-- Traversing history back (2)
-- Traversing history forward
-- "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/joint_session_history/002.html:
-- Navigating second iframe
-- Session history length on adding new iframe
-- Session history length on initial load
-- "[harness] TIMEOUT"
 html/browsers/history/the-history-interface/traverse_the_history_1.html:
 - Multiple history traversals from the same task
 - "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_2.html:
-- Multiple history traversals, last would be aborted
-- "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_3.html:
-- Multiple history traversals, last would be aborted
-- "[harness] TIMEOUT"
 html/browsers/history/the-history-interface/traverse_the_history_4.html:
 - Multiple history traversals, last would be aborted
-- "[harness] TIMEOUT"
 html/browsers/history/the-history-interface/traverse_the_history_5.html:
 - Multiple history traversals, last would be aborted
-- "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_unload_1.html:
-- Traversing the history, unload event is fired on doucment
-- "[harness] TIMEOUT"
 html/browsers/history/the-history-interface/traverse_the_history_write_after_load_1.html:
 - Traverse the history after document.write after the load event
-- "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_write_after_load_2.html:
-- Traverse the history back and forward when a history entry is written after the
-  load event
-- "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_write_onload_1.html:
-- Traverse the history when a history entry is written in the load event
-- "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_write_onload_2.html:
-- Traverse the history back and forward when a history entry is written in the load
-  event
 - "[harness] TIMEOUT"
 html/browsers/history/the-location-interface/allow_prototype_cycle_through_location.sub.html:
 - cross-origin, but joined via document.domain, location cycle
@@ -3436,18 +3384,6 @@ html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsi
 - Accessing child browsing contexts 3
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-03.html:
 - Indexed child browsing contexts
-html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_1.html:
-- Removing iframe from document removes it from history
-- "[harness] TIMEOUT"
-html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_2.html:
-- Removing iframe from document via innerHTML removes it from history
-- "[harness] TIMEOUT"
-html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_3.html:
-- Removing iframe from document removes it from history
-- "[harness] TIMEOUT"
-html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_4.html:
-- Removing iframe from document removes it from history
-- "[harness] TIMEOUT"
 html/browsers/the-window-object/length-attribute.window.js:
 - Window object's length IDL attribute (and named access)
 html/browsers/the-window-object/named-access-on-the-window-object/cross-origin-named-access.sub.html:
@@ -6091,9 +6027,6 @@ html/semantics/interactive-elements/the-dialog-element/top-layer-stacking-dynami
 html/webappapis/dynamic-markup-insertion/closing-the-input-stream/load-event-after-location-set-during-write.window.js:
 - Setting location from document.write() call should not trigger load event until
   that load completes
-html/webappapis/dynamic-markup-insertion/document-write/047.html:
-- "[harness] TIMEOUT"
-- document.write
 html/webappapis/dynamic-markup-insertion/document-write/iframe_005.html:
 - document.write external script into iframe write back into parent
 html/webappapis/dynamic-markup-insertion/document-write/module-dynamic-import.html:
@@ -6230,9 +6163,6 @@ input-events/input-events-spin-button-click-on-number-input.html:
 - Number input should fire beforeinput event before the input and change event
 input-events/select-event-drag-remove.html:
 - Drag and remove from the select event doesn't crash
-- "[harness] TIMEOUT"
-requestidlecallback/callback-suspended.html:
-- Dispatching idle callbacks should be able to be suspended and then resumed
 - "[harness] TIMEOUT"
 requestidlecallback/callback-timeout-when-busy.html:
 - requestIdleCallback not scheduled when event loop is busy.
@@ -7255,26 +7185,15 @@ websockets/send-many-64K-messages-with-backpressure.any.js:
 - sending 50 messages of size 65536 with backpressure applied should not hang
 - sending 50 messages of size 65536 with backpressure applied should not hang
 - sending 50 messages of size 65536 with backpressure applied should not hang
-websockets/unload-a-document/001.html:
-- 'WebSockets: navigating top-level browsing context'
-- 'WebSockets: navigating top-level browsing context'
-- 'WebSockets: navigating top-level browsing context'
-- "[harness] ERROR"
-- "[harness] ERROR"
-- "[harness] ERROR"
 websockets/unload-a-document/002.html:
 - 'WebSockets: navigating top-level browsing context with closed websocket'
 - 'WebSockets: navigating top-level browsing context with closed websocket'
 - 'WebSockets: navigating top-level browsing context with closed websocket'
-- "[harness] ERROR"
-- "[harness] ERROR"
-- "[harness] ERROR"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
+- "[harness] TIMEOUT"
 websockets/unload-a-document/003.html:
 - 'WebSockets: navigating nested browsing context'
-websockets/unload-a-document/005.html:
-- 'WebSockets: navigating nested browsing context with a websocket in top-level'
-- 'WebSockets: navigating nested browsing context with a websocket in top-level'
-- 'WebSockets: navigating nested browsing context with a websocket in top-level'
 webstorage/localstorage-share-data-unrelated-origins.html:
 - Ensure two about:srcdoc origins cannot share localstorage
 - "[harness] TIMEOUT"

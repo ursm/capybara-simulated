@@ -11,12 +11,25 @@ RSpec.describe 'the load of another isolate\'s window' do
   let(:scripts) {
     {
       # (…a pop-up that logs what its document does, in its origin's localStorage, which its opener reads)
-      '/logs' => <<~JS
+      '/logs'       => <<~JS,
         const log = (s) => localStorage.setItem('log', (localStorage.getItem('log') || '') + s + ';');
         log('script:' + document.readyState);
         document.addEventListener('DOMContentLoaded', () => log('DOMContentLoaded'));
         addEventListener('load', (e) => log('load:' + (e.target === document)));
       JS
+      # (…one reading what its opener gave its Window, as its script runs and as it loads)
+      '/reads'      => "window.seen = [window.foo]; addEventListener('load', () => { seen.push(window.foo); opener.seen = seen.join(); });",
+      # (…one whose load handler reads a flag the opener's listener for that load sets)
+      '/flags'      => "addEventListener('load', () => { opener.heard.push('popup:' + opener.flag); });",
+      '/closes'     => 'onload = () => close();',
+      '/own-onload' => "window.onload = () => opener.heard.push('popup onload');",
+      '/posts'      => <<~JS,
+        opener.postMessage('during-script', '*');
+        document.addEventListener('DOMContentLoaded', () => opener.postMessage('dcl', '*'));
+        addEventListener('load', () => opener.postMessage('in-load', '*'));
+      JS
+      # (…one whose image a slow server holds its load for)
+      '/slow'       => ''
     }
   }
   let(:hits) { Hash.new(0) }
@@ -25,10 +38,18 @@ RSpec.describe 'the load of another isolate\'s window' do
     lambda do |env|
       hits[env['PATH_INFO']] += 1
       next [204, {}, []] if env['PATH_INFO'] == '/204'
+      if env['PATH_INFO'] == '/slowimg'
+        sleep 0.4
+        next [200, {'content-type' => 'image/gif'}, ['GIF89a']]
+      end
 
       title  = env['PATH_INFO'].delete_prefix('/')
       script = scripts[env['PATH_INFO']]
-      body   = %(<button onclick="window.w = window.open('/logs')">open</button><a id="blank" href="/logs" target="_blank">blank</a>)
+      body   = <<~HTML
+        <button onclick="window.w = window.open('/logs')">open</button><a id="blank" href="/logs" target="_blank">blank</a>
+        <button onclick="window.w = window.open('/logs'); setTimeout(() => { w.onload = () => { window.heard = 'later'; }; }, 0)">open later</button>
+      HTML
+      body = '<img src="/slowimg">' if env['PATH_INFO'] == '/slow'
       [200, {'content-type' => 'text/html'}, ["<!doctype html><title>#{title}</title><script>#{script}</script>#{body}"]]
     end
   }
@@ -61,6 +82,55 @@ RSpec.describe 'the load of another isolate\'s window' do
     JS
     expect(heard).to eq([['onload', true, 'http://a.test/logs', true], ['listener', true]])
     expect(log).to eq('script:loading;DOMContentLoaded;load:true;')
+  end
+
+  it "keeps what its opener set on it as `open()` returned, the Window its document's — read as that one's script runs" do
+    run("window.w = open('/reads'); w.foo = 42;")
+    expect(read('[window.seen, w.foo]')).to eq(['42,42', 42])
+  end
+
+  it 'keeps nothing its opener set on a window it opened at about:blank, which a navigation after replaces' do
+    run("window.w = open('about:blank'); w.foo = 42; w.location = '/reads';")
+    expect(read('[window.seen, w.foo]')).to eq([',', nil])
+  end
+
+  # (…as a browser's one event loop does: the opener's listener, put on the Window first, runs first, in the load's own
+  # dispatch — the pop-up still open, its messages tasks after)
+  it "calls its opener's listeners in the dispatch of its load, in the order they were added" do
+    run(<<~JS)
+      window.heard = [];
+      window.flag = 0;
+      window.w = open('/flags');
+      w.addEventListener('load', () => { heard.push('opener'); window.flag = 1; });
+    JS
+    expect(read('window.heard')).to eq(['opener', 'popup:1'])
+  end
+
+  it "calls its opener's listener while it is open, though its own handler closes it" do
+    run("window.heard = []; window.w = open('/closes'); w.addEventListener('load', () => heard.push(w.closed));")
+    expect(read('[window.heard, w.closed]')).to eq([[false], true])
+  end
+
+  it "calls none of its opener's `onload` its own document's replaced, the one event handler" do
+    run("window.heard = []; window.w = open('/own-onload'); w.onload = () => heard.push('opener onload');")
+    expect(read('window.heard')).to eq(['popup onload'])
+  end
+
+  it 'delivers the messages it posted as it loaded after its load, which its opener heard within it' do
+    run(<<~JS)
+      window.heard = [];
+      addEventListener('message', (e) => heard.push(e.data));
+      window.w = open('/posts');
+      w.addEventListener('load', () => heard.push('opener listener'));
+    JS
+    expect(read('window.heard')).to eq(['opener listener', 'during-script', 'dcl', 'in-load'])
+  end
+
+  # (…its load held for an image the server is slow to send, fired as the opener's wait polls, the pop-up not the active
+  # window)
+  it 'fires its load once an image held it, as a wait polls its opener' do
+    run("window.w = open('/slow'); w.onload = () => document.body.insertAdjacentHTML('beforeend', '<p id=loaded>loaded</p>');")
+    expect(session).to have_css('#loaded', wait: 3)
   end
 
   it 'fires none at the load of a document a later navigation makes, its Window another' do
@@ -131,6 +201,12 @@ RSpec.describe 'the load of another isolate\'s window' do
         expect(session.title).to eq('logs')
       end
       expect(log).to eq('script:loading;DOMContentLoaded;load:true;')
+    end
+
+    # (…the opener's tasks already due run first: a browser's network fetch of the document outlasts them)
+    it "fires an `onload` the action's handler set a task after its `open()`" do
+      session.window_opened_by { session.click_button 'open later' }
+      expect(read('window.heard')).to eq('later')
     end
 
     it "is at its document as `window_opened_by` returns it, a link's `_blank` target's" do

@@ -197,30 +197,17 @@ struct Traversable {
     // How many documents its top-level navigable has shown (`#show`): a History, a Document, of another isolate's window
     // is of the one it was read while it showed (`traversableDocument`).
     shown: u64,
-    // The Window of the document it shows, by number (`traversableWindow`): a new one with each document — but the
-    // document a navigation of its initial about:blank makes, of that one's origin, which is that one's Window still
-    // (HTML "create and initialize a Document object": the window reused; Chrome and Firefox measured, a listener the
-    // opener put on it hears the new document's `load`). Whether the document it shows is that initial one, the one it
-    // was made with — shown before any session history entry is (`#show`) — and, as the document after it begins to load,
-    // that one's origin, which the new one's is checked against as it publishes its own (`publish_origin`).
-    window: u64,
+    // Whether the document it shows is its initial about:blank, the one it was made with — shown before any session
+    // history entry is (`#show`) — and whether that document's Window is the one the document before it had (`kept`):
+    // a navigation of the initial about:blank to a document of its origin keeps it (HTML "create and initialize a
+    // Document object", the window reused — Chrome and Firefox measured: what the opener did to `open(url)`'s window as
+    // the call returned, its properties and its listeners, the document's Window has), checked as that document
+    // publishes its origin against the initial one's (`reusable`).
     initial: bool,
     reusable: Option<String>,
-    // The realms of other isolates' windows whose script listens for the `load` of one of its Windows: each told as that
-    // Window's load fires, a task of theirs (`Inbound::Load`) — the listeners theirs, which no function of a realm of
-    // another isolate's can be.
-    load_watchers: Vec<Watcher>,
+    kept: bool,
     // What the script of another window asked of it, which its own event loop takes as tasks (`Asked`).
     asked: Asked,
-}
-
-// A realm watching the `load` of a traversable's Window `window`: the realm `realm` of the isolate whose page is
-// traversable `traversable`'s — the window whose event loop takes the task that tells it.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Watcher {
-    traversable: u64,
-    realm: i32,
-    window: u64,
 }
 
 // What a window's script in another isolate asked of a top-level traversable — HTML's tasks queued on its event loop by
@@ -231,12 +218,9 @@ struct Watcher {
 // closing", set as it asks; the close itself a task: `close_due`) — with the traversals its `history` appended to the
 // traversable's session history traversal queue (`Queued::asked`). Every one of a process's counted in `ASKED`, which
 // the host reads with no lock (`window_tasks_pending`) — a session of one window asks nothing.
-// …and the `load` of another isolate's window one of its realms listens for, as that window's own event loop fired it
-// (`Inbound::Load`), in one queue with the messages: a message that window's document posted as it loaded comes before
-// the load, one its load handlers posted after.
 #[derive(Default)]
 struct Asked {
-    inbound: Vec<Inbound>,
+    posted: Vec<Posted>,
     planned: Option<Planned>,
     // …and the token of the last traversal queued before it was planned: one queued after — a reload, `go(0)` — begins
     // a navigation later, which aborts it (`#cancel_planned_before`).
@@ -252,13 +236,6 @@ struct Posted {
     origin: String,
     target_origin: String,
     source: String,
-}
-// A task another window's event loop queued on this one's: a message posted to it, or the `load` of Window `window` of
-// traversable `target`, which this window's realm `realm` listens for (`Watcher`).
-#[derive(Clone, Debug, PartialEq)]
-enum Inbound {
-    Message(Posted),
-    Load { target: u64, window: u64, realm: i32 },
 }
 // A navigation planned — the traversable's ongoing navigation, one at a time: a second plan replaces the first, as a
 // navigation begun aborts the ongoing one (HTML "set the ongoing navigation") — its URL, whether it replaces the active
@@ -711,7 +688,7 @@ impl Traversable {
     // How many tasks another window's script asked of it wait: what `Asked` holds, and the traversals it queued.
     fn pending(&self) -> usize {
         let a = &self.asked;
-        a.inbound.len() + usize::from(a.planned.is_some()) + usize::from(a.close_due) + self.queued.iter().filter(|q| q.asked).count()
+        a.posted.len() + usize::from(a.planned.is_some()) + usize::from(a.close_due) + self.queued.iter().filter(|q| q.asked).count()
     }
     // …all of them let go: its page gone, or it closed.
     fn forget_asked(&mut self) {
@@ -722,14 +699,9 @@ impl Traversable {
     }
 
     // The document it shows, of origin `key`, as it begins to load: the origin it is of to the others (`familiar`), and
-    // the Window it is of — the initial about:blank's, where it replaces that one and is of its origin, else a new one.
+    // whether it keeps the Window of the one it replaces — that one its initial about:blank, of its origin.
     fn publish(&mut self, key: String) {
-        if self.reusable.take().as_ref() != Some(&key) {
-            self.window += 1;
-            // (…the realms that listened for the load of a Window it shows no more let go: that load is never to come)
-            let window = self.window;
-            self.load_watchers.retain(|w| w.window == window);
-        }
+        self.kept = self.reusable.take().as_ref() == Some(&key);
         self.origin = Some(key);
     }
 
@@ -860,7 +832,7 @@ impl SessionHistory {
         t.state.show(build);
         t.shown += 1;
         // (…the Window it is of yet to be known: the initial about:blank's, where it replaces that one, by the origin it
-        // publishes — `publish_origin`)
+        // publishes — `Traversable::publish`)
         t.reusable = if t.initial { t.origin.clone() } else { None };
         t.initial = t.state.entries.is_empty();
     }
@@ -1041,35 +1013,12 @@ impl SessionHistory {
     }
     // #post(data, origin, target_origin, source): a message another window's script posted to it.
     fn post(&self, data: String, origin: String, target_origin: String, source: String) {
-        post_to(&mut self.lock(), Inbound::Message(Posted { data, origin, target_origin, source }));
+        post_to(&mut self.lock(), Posted { data, origin, target_origin, source });
     }
-    // The tasks other windows queued on it — the messages posted to it, the loads its realms listen for — taken in the
-    // order queued.
-    fn take_inbound(&self) -> Vec<Inbound> {
-        asking(&mut self.lock(), |t| std::mem::take(&mut t.asked.inbound))
-    }
-    // #take_inbound -> [[:message, data, origin, target_origin, source] | [:load, target, window, realm], …].
-    fn take_inbound_for_ruby(ruby: &magnus::Ruby, rb_self: &Self) -> Result<magnus::RArray, magnus::Error> {
-        let rows = ruby.ary_new();
-        for task in rb_self.take_inbound() {
-            let row = ruby.ary_new();
-            match task {
-                Inbound::Message(p) => {
-                    row.push(ruby.to_symbol("message"))?;
-                    for text in [p.data, p.origin, p.target_origin, p.source] {
-                        row.push(text)?;
-                    }
-                }
-                Inbound::Load { target, window, realm } => {
-                    row.push(ruby.to_symbol("load"))?;
-                    row.push(target)?;
-                    row.push(window)?;
-                    row.push(realm)?;
-                }
-            }
-            rows.push(row)?;
-        }
-        Ok(rows)
+    // #take_posted -> [[data, origin, target_origin, source], …]: the messages posted to it, taken in the order posted.
+    fn take_posted(&self) -> Vec<(String, String, String, String)> {
+        let posted = asking(&mut self.lock(), |t| std::mem::take(&mut t.asked.posted));
+        posted.into_iter().map(|p| (p.data, p.origin, p.target_origin, p.source)).collect()
     }
     // A navigation of it another window's script planned — in place of one planned before; none of one closing or
     // closed, which no navigation of finishes.
@@ -1154,12 +1103,22 @@ impl SessionHistory {
             asking(&mut t, |t| t.asked.planned = None);
         }
     }
-    // #asked? -> whether something asked of it waits to be taken; #inbound? -> a task another window queued on it.
+    // #asked? -> whether something asked of it waits to be taken; #posted? -> a message.
     fn is_asked(&self) -> bool {
         self.lock().pending() > 0
     }
-    fn is_inbound(&self) -> bool {
-        !self.lock().asked.inbound.is_empty()
+    fn is_posted(&self) -> bool {
+        !self.lock().asked.posted.is_empty()
+    }
+    // #initial? -> whether it shows its initial about:blank, the document it was made with (`Traversable::initial`).
+    fn is_initial(&self) -> bool {
+        self.lock().initial
+    }
+    // #opened_at_initial: the window opened at about:blank — `open('about:blank')`, its initial about:blank the document
+    // it was opened for, no navigation after: that document is the window's own then, whose Window the next one does not
+    // keep (Chrome and Firefox measured: `w = open('about:blank'); w.foo = 1; w.location = url` — `url`'s has no `foo`).
+    fn opened_at_initial(&self) {
+        self.lock().initial = false;
     }
     // #familiar_with?(other) -> whether it is familiar with `other` (`familiar`).
     fn is_familiar_with(&self, other: &SessionHistory) -> bool {
@@ -1198,12 +1157,14 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("closing?", method!(SessionHistory::is_closing, 0))?;
     class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
     class.define_method("post", method!(SessionHistory::post, 4))?;
-    class.define_method("take_inbound", method!(SessionHistory::take_inbound_for_ruby, 0))?;
+    class.define_method("take_posted", method!(SessionHistory::take_posted, 0))?;
     class.define_method("plan_navigation", method!(SessionHistory::plan_navigation_for_ruby, 8))?;
     class.define_method("plan_post", method!(SessionHistory::plan_post_for_ruby, 8))?;
     class.define_method("take_planned", method!(SessionHistory::take_planned_for_ruby, 0))?;
     class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
-    class.define_method("inbound?", method!(SessionHistory::is_inbound, 0))?;
+    class.define_method("posted?", method!(SessionHistory::is_posted, 0))?;
+    class.define_method("initial?", method!(SessionHistory::is_initial, 0))?;
+    class.define_method("opened_at_initial", method!(SessionHistory::opened_at_initial, 0))?;
     class.define_method("familiar_with?", method!(SessionHistory::is_familiar_with, 1))?;
     class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
@@ -1528,9 +1489,8 @@ mod tests {
         popup.plan_navigation(plan("http://a.test/1", false));
         popup.plan_navigation(plan("http://a.test/2", true));
         assert!(popup.is_asked() && window_tasks_pending());
-        let posted = popup.take_inbound();
-        let data = |t: &Inbound| match t { Inbound::Message(p) => p.data.clone(), Inbound::Load { .. } => String::new() };
-        assert_eq!(posted.iter().map(data).collect::<Vec<_>>(), ["m1", "m2"]);
+        let posted = popup.take_posted();
+        assert_eq!(posted.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(), ["m1", "m2"]);
         // (…the later plan in place of the first)
         assert_eq!(popup.take_planned().map(|p| (p.url, p.replace)), Some(("http://a.test/2".into(), true)));
         assert!(!popup.is_asked());
@@ -1543,7 +1503,7 @@ mod tests {
         assert!(popup.ask_close(&page) && popup.is_closing() && !popup.ask_close(&page));
         popup.plan_navigation(plan("http://a.test/4", false));
         popup.post("m3".into(), "http://a.test".into(), "*".into(), "w0".into());
-        assert!(popup.take_planned().is_none() && popup.take_inbound().is_empty());
+        assert!(popup.take_planned().is_none() && popup.take_posted().is_empty());
         assert!(popup.take_close() && !popup.take_close());
         assert!(!popup.is_asked());
     }
@@ -1654,9 +1614,6 @@ mod tests {
         assert!(!same_origin_with("opaque:realm0".into(), gone, gone));
     }
 
-    // Chrome and Firefox, measured 2026-10-31: a listener the opener put on `open(url)`'s window, at its initial
-    // about:blank, hears the load of the same-origin document its navigation makes — the Window that one's still — and
-    // none of a cross-origin one, nor of the document a navigation after makes.
     #[test]
     fn a_window_is_its_initial_about_blank_s_through_the_navigation_of_its_origin_that_replaces_it() {
         let shows = |h: &SessionHistory, url: Option<&str>, origin: &str| {
@@ -1665,23 +1622,21 @@ mod tests {
             }
             h.show();
             h.lock().publish(origin.into());
-            h.lock().window
+            h.lock().kept
         };
         let popup = history();
-        let initial = shows(&popup, None, "http://a.test");
-        assert_eq!(shows(&popup, Some("http://a.test/1"), "http://a.test"), initial);
-        let next = shows(&popup, Some("http://a.test/2"), "http://a.test");
-        assert_ne!(next, initial);
-        assert_ne!(shows(&popup, Some("http://a.test/3"), "http://a.test"), next);
+        assert!(!shows(&popup, None, "http://a.test") && popup.is_initial());
+        assert!(shows(&popup, Some("http://a.test/1"), "http://a.test") && !popup.is_initial());
+        assert!(!shows(&popup, Some("http://a.test/2"), "http://a.test"));
         let other = history();
-        let initial = shows(&other, None, "http://a.test");
-        assert_ne!(shows(&other, Some("http://b.test/"), "http://b.test"), initial);
+        shows(&other, None, "http://a.test");
+        assert!(!shows(&other, Some("http://b.test/"), "http://b.test"));
         // (…one a navigation that made no document left at its initial about:blank still that one's, for the next)
         let stays = history();
-        let initial = shows(&stays, None, "http://a.test");
+        shows(&stays, None, "http://a.test");
         stays.push(TOP, 0, "http://a.test/204".into(), false, Data::default());
         stays.lock().state.entries.clear();
-        assert_eq!(shows(&stays, Some("http://a.test/1"), "http://a.test"), initial);
+        assert!(shows(&stays, Some("http://a.test/1"), "http://a.test"));
     }
 
     #[test]
@@ -1743,11 +1698,11 @@ pub(crate) fn disowned(id: u64) -> bool {
     known(id).is_some_and(|k| k.1)
 }
 
-// A task queued on a traversable by another's — a message posted to it, a load it listens for — none on one closing or
-// closed: a task queued after the close's, which destroys the document it would run in first.
-fn post_to(t: &mut Traversable, task: Inbound) {
+// A message posted to a traversable — none to one closing or closed: a task queued after the close's, which destroys
+// the document it would run in first.
+fn post_to(t: &mut Traversable, posted: Posted) {
     if !t.closed && !t.asked.closing {
-        asking(t, |t| t.asked.inbound.push(task));
+        asking(t, |t| t.asked.posted.push(posted));
     }
 }
 // …and a navigation planned of one, in place of the one planned before (`Asked::planned`) — none of one closing or
@@ -1763,9 +1718,7 @@ fn plan_on(t: &mut Traversable, planned: Planned) {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "traversablePost", traversable_post_op, context_id);
-    crate::dom::register(scope, ns, "traversableWindow", traversable_window_op, context_id);
-    crate::dom::register(scope, ns, "traversableWatchLoad", traversable_watch_load_op, context_id);
-    crate::dom::register(scope, ns, "traversableLoaded", traversable_loaded_op, context_id);
+    crate::dom::register(scope, ns, "traversableWindowKept", traversable_window_kept_op, context_id);
     crate::dom::register(scope, ns, "traversableClosing", traversable_closing_op, context_id);
     crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
@@ -1804,50 +1757,13 @@ fn publish_origin(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
     lock(&traversable).publish(key);
 }
-
-// __dom.traversableWindow(id) -> the Window of the document top-level traversable `id`, a window of another isolate,
-// shows, by number (`Traversable::window`) — -1 for one gone: what the listeners a realm put on it are on.
-fn traversable_window_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
-    let window = histories().1.get(&id).and_then(Weak::upgrade).map_or(-1.0, |t| lock(&t).window as f64);
-    rv.set_double(window);
-}
-// __dom.traversableWatchLoad(id, window) — the calling realm listens for the `load` of Window `window` of top-level
-// traversable `id`, a window of another isolate (platform-globals.js `csimWindowProxy`): told as that one's event loop
-// fires it, a task of the calling realm's window (`traversableLoaded`). None for a Window it no longer shows, whose
-// document is gone — its load never to come.
-fn traversable_watch_load_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
-    let window = args.get(1).number_value(scope).map_or(0, |n| n as u64);
-    let cid = crate::dom::realm_id(scope, &args);
-    let watcher = Watcher { traversable: crate::dom::realm(scope, cid).navigables.history, realm: cid, window };
-    let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
-    let mut t = lock(&traversable);
-    if t.window == window && !t.load_watchers.contains(&watcher) {
-        t.load_watchers.push(watcher);
-    }
-}
-// __dom.traversableLoaded() — the page's document's `load` fires (bridge.entry.js `__csimFireWindowLoad`): the realms of
-// other isolates that listen for its Window's told, each a task of its window's event loop, queued before any the load's
-// own handlers queue there (`Inbound::Load`); those of a Window before it let go, whose load is never to come. (A frame's
-// load, a window's of this isolate's, nobody's here: no realm of another isolate reaches either.)
-fn traversable_loaded_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    if crate::dom::realm_id(scope, &args) != 0 {
-        return;
-    }
+// __dom.traversableWindowKept() -> whether the page's document, as it begins to load, is of the Window the one it
+// replaces was (`Traversable::publish`): the initial about:blank's, which another window's script may have given
+// properties and listeners its global is then given again (bridge.entry.js `__csimBootContext`).
+fn traversable_window_kept_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = crate::dom::realm(scope, 0).navigables.history;
-    let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
-    let (window, watchers) = {
-        let mut t = lock(&traversable);
-        if t.load_watchers.is_empty() {
-            return;
-        }
-        (t.window, std::mem::take(&mut t.load_watchers))
-    };
-    for w in watchers.into_iter().filter(|w| w.window == window) {
-        let Some(watching) = histories().1.get(&w.traversable).and_then(Weak::upgrade) else { continue };
-        post_to(&mut lock(&watching), Inbound::Load { target: id, window, realm: w.realm });
-    }
+    let kept = histories().1.get(&id).and_then(Weak::upgrade).is_some_and(|t| lock(&t).kept);
+    rv.set_bool(kept);
 }
 
 // __dom.traversableSameOrigin(id) -> whether the calling realm's document is same origin with the active document of
@@ -1867,7 +1783,7 @@ fn traversable_same_origin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
 // __dom.traversablePost(id, data, targetOrigin, origin, source) — a message the calling realm's script posts to
 // top-level traversable `id`, a window of another isolate (platform-globals.js `csimWindowProxy`): `data` its
 // serialization, `origin` the sender's, `source` the sender's window by its host handle — a task of that window's event
-// loop, which it takes as it steps (`SessionHistory#take_inbound`), never one run while the sender's script is.
+// loop, which it takes as it steps (`SessionHistory#take_posted`), never one run while the sender's script is.
 fn traversable_post_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let data = args.get(1).to_rust_string_lossy(scope);
@@ -1875,7 +1791,7 @@ fn traversable_post_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let origin = args.get(3).to_rust_string_lossy(scope);
     let source = args.get(4).to_rust_string_lossy(scope);
     let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
-    post_to(&mut traversable.lock().unwrap_or_else(PoisonError::into_inner), Inbound::Message(Posted { data, origin, target_origin, source }));
+    post_to(&mut traversable.lock().unwrap_or_else(PoisonError::into_inner), Posted { data, origin, target_origin, source });
 }
 // __dom.traversableClosing(id) -> whether top-level traversable `id` — the isolate's page's own, for none — is closing
 // or closed (HTML's `closed` getter: its "is closing", which a `close()` set as it was asked), or gone.
