@@ -4961,8 +4961,9 @@ module Capybara
 
       # A controlled worker's MAIN SCRIPT fetch, hop by hop as the engine has it (worker_script_fetch.rs
       # `WorkerScriptFetch`: a same-origin GET, its redirects followed, a redirect to another origin or scheme, or the
-      # 21st redirect, a network error): each hop re-matched against the registrations and dispatched to that scope's SW — an SW-provided
-      # redirect re-enters interception (HTTP-redirect fetch re-runs main fetch; worker-interception-redirect Case #3) —
+      # 21st redirect, a network error): each hop re-matched against the registrations and dispatched to that scope's
+      # SW — an SW-provided redirect re-enters interception (HTTP-redirect fetch re-runs main fetch;
+      # worker-interception-redirect Case #3) —
       # EXCEPT once a hop fell back to the network: from then on no SW sees the chain (Handle Fetch sets the request's
       # service-workers mode to 'none'; Cases #1/#2).
       #
@@ -12271,7 +12272,11 @@ module Capybara
       # ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION).
       def location_fields(headers)
         loc = header_field(headers, 'location')
-        loc.is_a?(Array) ? loc.uniq : [loc].compact
+        return [] if loc.nil?
+        return loc.uniq if loc.is_a?(Array)
+
+        # (…Rack 2's several fields of a name one String, joined by newlines — an empty one a field all the same)
+        loc.empty? ? [loc] : loc.split("\n").uniq
       end
       # …as a navigation reads it: its one field, '' for more than one — no followable target — and nil for none.
       def location_field(headers)

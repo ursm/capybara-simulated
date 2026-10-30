@@ -84,7 +84,11 @@ impl WorkerScriptFetch {
     // hop's own (a service worker's `respondWith(fetch(elsewhere))`; nil or '' for none), whether it came from the network
     // (`from_network`, after which no service worker answers a hop).
     fn response(&self, status: u32, locations: Option<RArray>, url: Option<String>, from_network: bool) -> Result<&'static str, Error> {
-        let locations = locations.map_or(Ok(Vec::new()), |a| a.into_iter().map(|l| RString::try_convert(l).map(crate::fetch_rules::ruby_bytes)).collect::<Result<Vec<_>, _>>())?;
+        // (…each field's bytes, as the response gave them)
+        let locations = match locations {
+            Some(fields) => fields.into_iter().map(|f| RString::try_convert(f).map(crate::fetch_rules::ruby_bytes)).collect::<Result<Vec<_>, _>>()?,
+            None => Vec::new(),
+        };
         Ok(self.step(status, &locations, url, from_network).name())
     }
 
@@ -97,8 +101,8 @@ impl WorkerScriptFetch {
             return if (200..=299).contains(&status) { Step::Script } else { Step::NotOk };
         }
         // (…the 21st redirect a network error as it is reached — Fetch "HTTP-redirect fetch": a request redirected 20
-        // times already — as a navigation's is)
-        if st.chain.dispatches > MAX_REDIRECTS {
+        // times already — as a navigation's is; one of no Location is the response, step 4 before the count's step 8)
+        if !locations.is_empty() && st.chain.dispatches > MAX_REDIRECTS {
             return Step::Fail;
         }
         let origin = self.origin.clone().unwrap_or_default();
