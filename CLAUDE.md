@@ -204,7 +204,12 @@ the Capybara session's own — is never script-closable, where HTML makes a
 window whose session history has one entry closable by its script
 (`Driver#script_close_window`): closing it would end the session under the
 test that every later command addresses, for a page that merely called
-`close()` on itself. List and justify
+`close()` on itself; and a function another isolate's window holds of a
+document that has since navigated away does nothing and returns undefined,
+where a browser would still run it: each document is a realm rebuilt from the
+snapshot, so the function went with the old one (handle ids are
+process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — until
+R13 S6 makes a same-group pop-up a realm of its opener's isolate. List and justify
 these explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
