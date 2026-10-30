@@ -1,6 +1,7 @@
 // An EventSource object's connection as the page sees it (HTML §9.2): its URL and the origin its messages carry — its
 // URL's until a response announces the connection, then the URL's that response came from — whether it sends
-// credentials, its ready state, and the host's id for its connection — on a handle the bindings' object wraps
+// credentials, its ready state, the host's id for its connection, and what reestablishing it takes: its last event ID
+// string and its reconnection time — on a handle the bindings' object wraps
 // (`__dom.EventSourceStateBase`). The constructor's URL, `close()`, what each event the host delivers does to it, and
 // which response a controlling service worker may answer it with are here; the stream, its reading (event_stream.rs)
 // and the socket are the host's, and the events' objects the bindings'.
@@ -19,12 +20,21 @@ const CONNECTING: u32 = 0;
 const OPEN: u32 = 1;
 const CLOSED: u32 = 2;
 
+// The reconnection time a source starts with (HTML: "an implementation-defined value, probably in the region of a few
+// seconds" — Chrome's).
+const DEFAULT_RECONNECTION_MS: u64 = 3000;
+// …and the longest it waits: the longest a timer can (HTML "timer initialization steps": a timeout past 2^31 - 1 ms is
+// none at all), so a stream's `retry` of more waits as long as any wait may, never not at all.
+const MAX_RECONNECTION_MS: u64 = i32::MAX as u64;
+
 struct Source {
     url: String,
     origin: String,
     with_credentials: bool,
     ready_state: u32,
     id: i32,
+    last_event_id: String,
+    reconnection_ms: u64,
 }
 
 pub(crate) struct SourceHandle {
@@ -61,6 +71,8 @@ fn construct(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         with_credentials: args.get(3).is_true(),
         ready_state: CONNECTING,
         id: 0,
+        last_event_id: String::new(),
+        reconnection_ms: DEFAULT_RECONNECTION_MS,
     };
     let obj = args.this();
     let brand = v8::External::new(scope, std::ptr::addr_of!(BRAND) as *mut std::ffi::c_void);
@@ -116,6 +128,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "esClose", close_op, context_id);
     crate::dom::register(scope, ns, "esDeliver", deliver_op, context_id);
     crate::dom::register(scope, ns, "esServed", served_op, context_id);
+    crate::dom::register(scope, ns, "esReconnect", reconnect_op, context_id);
 }
 
 // The fields `esField` reads, by number (event-source.js names them).
@@ -123,6 +136,7 @@ const URL: u32 = 0;
 const ORIGIN: u32 = 1;
 const WITH_CREDENTIALS: u32 = 2;
 const READY_STATE: u32 = 3;
+const LAST_EVENT_ID: u32 = 4;
 
 // __dom.esField(state, field) -> the source's `field`.
 fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -133,6 +147,7 @@ fn field_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         ORIGIN => &s.origin,
         WITH_CREDENTIALS => return rv.set_bool(s.with_credentials),
         READY_STATE => return rv.set_uint32(s.ready_state),
+        LAST_EVENT_ID => &s.last_event_id,
         _ => return,
     };
     if let Some(t) = v8::String::new(scope, text) {
@@ -239,6 +254,32 @@ fn served_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     rv.set_uint32(fire);
 }
 
+// HTML "reestablish the connection", its first task: a stream that ended — its body read to its end, or cut off — leaves
+// the source connecting again, of the last event ID string and reconnection time the stream left it (`retry`, where the
+// stream set one), the number of ms to wait before asking again; none (None) for one closed already, which no
+// reconnection reopens.
+fn reconnected(s: &mut Source, last_event_id: String, retry: Option<u64>) -> Option<u64> {
+    if s.ready_state == CLOSED {
+        return None;
+    }
+    s.ready_state = CONNECTING;
+    s.last_event_id = last_event_id;
+    if let Some(retry) = retry {
+        s.reconnection_ms = retry.min(MAX_RECONNECTION_MS);
+    }
+    Some(s.reconnection_ms)
+}
+
+// __dom.esReconnect(state, lastEventId, retry) -> the ms to wait before the source asks again, -1 for none
+// (`reconnected`; `retry` -1 where the stream set none).
+fn reconnect_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(source) = source(scope, args.get(0)) else { return };
+    let last_event_id = args.get(1).to_rust_string_lossy(scope);
+    let retry = args.get(2).number_value(scope).filter(|r| *r >= 0.0).map(|r| r as u64);
+    let wait = reconnected(&mut source.borrow_mut(), last_event_id, retry);
+    rv.set_double(wait.map_or(-1.0, |w| w as f64));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,5 +295,19 @@ mod tests {
         assert_eq!(served(CONNECTING, 200, "text/plain"), (CLOSED, FIRE_ERROR));
         assert_eq!(served(CONNECTING, 404, "text/event-stream"), (CLOSED, FIRE_ERROR));
         assert_eq!(served(CLOSED, 200, "text/event-stream"), (CLOSED, FIRE_NONE));
+    }
+
+    #[test]
+    fn a_source_reconnects_of_what_its_stream_left_it() {
+        let mut s = Source { url: String::new(), origin: String::new(), with_credentials: false, ready_state: OPEN, id: 1, last_event_id: String::new(), reconnection_ms: DEFAULT_RECONNECTION_MS };
+        assert_eq!(reconnected(&mut s, "7".into(), None), Some(DEFAULT_RECONNECTION_MS));
+        assert_eq!((s.ready_state, s.last_event_id.as_str()), (CONNECTING, "7"));
+        // (…a retry kept for every later reconnection, until another sets it)
+        assert_eq!(reconnected(&mut s, "8".into(), Some(200)), Some(200));
+        assert_eq!(reconnected(&mut s, "8".into(), None), Some(200));
+        assert_eq!(reconnected(&mut s, "8".into(), Some(u64::MAX)), Some(MAX_RECONNECTION_MS));
+        s.ready_state = CLOSED;
+        assert_eq!(reconnected(&mut s, "9".into(), Some(1)), None);
+        assert_eq!(s.last_event_id, "8");
     }
 }

@@ -330,7 +330,10 @@ pub(crate) fn cors_safelisted_request_header(name: &[u8], value: &[u8]) -> bool 
         return false;
     }
     match name.to_ascii_lowercase().as_slice() {
-        b"accept" => !value.iter().any(|&b| cors_unsafe_byte(b)),
+        // (…`Last-Event-ID` as `Accept`: whatwg/fetch#1788, the safelisting Gecko and WebKit back and every engine already
+        // ships — an EventSource's reconnection sends it cross-origin with no preflight (WPT eventsource/request-credentials,
+        // all three engines) — and that a cooperating server could always smuggle through a redirect anyway (#568))
+        b"accept" | b"last-event-id" => !value.iter().any(|&b| cors_unsafe_byte(b)),
         b"accept-language" | b"content-language" => value.iter().all(|&b| b.is_ascii_alphanumeric() || b" *,-.;=".contains(&b)),
         b"content-type" => {
             if value.iter().any(|&b| cors_unsafe_byte(b)) {
@@ -844,6 +847,8 @@ mod tests {
         assert!(forbidden_request_header(b"X-HTTP-Method-Override", b"get, \tTRACE "));
         assert!(!forbidden_request_header(b"x-http-method", b"GET"));
         assert!(cors_safelisted_request_header(b"Accept-Language", b"en-US,en;q=0.5"));
+        assert!(cors_safelisted_request_header(b"Last-Event-ID", "\u{2026}".as_bytes()));
+        assert!(!cors_safelisted_request_header(b"last-event-id", b"a{b"));
         assert!(!cors_safelisted_request_header(b"accept-language", b"en\x01"));
         assert!(!cors_safelisted_request_header(b"content-language", b"a\"b"));
         assert!(cors_safelisted_request_header(b"content-type", b"text/plain; charset=utf-8"));

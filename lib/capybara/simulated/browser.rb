@@ -3953,7 +3953,10 @@ module Capybara
       # source response": a network error, or a response other than a 200 of `text/event-stream`, fails the connection
       # (no reconnection); any other announces it, its messages of the origin of the URL it came from, and its body read
       # as it comes by HTML's "interpret an event stream" (the engine's, the page's too) — a parser kept from chunk to
-      # chunk, so a record or a line a chunk ends in the middle of goes on in the next.
+      # chunk, so a record or a line a chunk ends in the middle of goes on in the next — and once it ends, the source
+      # reconnects (`__reconnect`, with the last event ID string and reconnection time the stream left).
+      # (…a network error fails the connection where HTML would reestablish it: what fails a fetch here is not told
+      # apart, and a CORS failure — one — is futile to retry, which HTML lets fail; WPT's cross-origin tests expect it)
       private def run_event_source_reader(id, request, queue)
         status, headers, body, url = rack_fetch_request(request, nil, transport: method(:event_stream_transport), stream: true)
         unless body
@@ -3966,14 +3969,20 @@ module Capybara
           return
         end
         queue << {id: id, type: '__open', url: url}
-        parser = Native.event_stream_open
-        body.each do |chunk|
-          Native.event_stream_feed(parser, chunk).each do |type, data, event_id|
-            queue << {id: id, type: type, data: data, lastEventId: event_id}
+        # (…its stream of the last event ID string the source had: a reconnection's request says it)
+        parser = Native.event_stream_open(request.dig('headers', 'Last-Event-ID').to_s)
+        begin
+          body.each do |chunk|
+            Native.event_stream_feed(parser, chunk).each do |type, data, event_id|
+              queue << {id: id, type: type, data: data, lastEventId: event_id}
+            end
           end
+        rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
+          # (…the connection cut off mid-stream: it ends as a stream read to its end does)
         end
-      rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
-        # (…the server closing mid-stream: the stream ends, as normal a lifecycle as any)
+        # HTML "reestablish the connection": the stream over, the source reconnects, asking with what it left.
+        last_event_id, retry_ms = Native.event_stream_reconnection(parser)
+        queue << {id: id, type: '__reconnect', lastEventId: last_event_id, retry: retry_ms}
       rescue StandardError => e
         queue << {id: id, type: '__error', message: "#{e.class}: #{e.message}"}
       ensure

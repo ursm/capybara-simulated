@@ -283,8 +283,9 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("user_agent", magnus::function!(navigator::user_agent_for_ruby, 0))?;
     // A live `text/event-stream`'s chunks read into events by a parser kept between them, as the page reads a whole one
     // (event_stream.rs).
-    native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 0))?;
+    native.define_module_function("event_stream_open", magnus::function!(event_stream::open_for_ruby, 1))?;
     native.define_module_function("event_stream_feed", magnus::function!(event_stream::feed_for_ruby, 2))?;
+    native.define_module_function("event_stream_reconnection", magnus::function!(event_stream::reconnection_for_ruby, 1))?;
     native.define_module_function("event_stream_close", magnus::function!(event_stream::close_for_ruby, 1))?;
     // …and whether a response is one that announces an event source's connection (event_source_state.rs).
     native.define_module_function("event_stream_response_ok", magnus::function!(event_source_state::response_ok_for_ruby, 2))?;
