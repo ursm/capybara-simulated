@@ -84,6 +84,21 @@ impl Data {
         Ok(())
     }
 
+    // …and, an entry of the same document as `leaving`'s (a pushState's, a fragment navigation's), what it was reached by
+    // where `self` names none: the document state the two share (HTML "URL and history update steps", "navigate to a
+    // fragment": the new entry's document state the active one's) — its request's referrer and policy, its document's
+    // referrer, whether its cookies were cross-site. (…a POST's body its own entry's alone: a reload of the URL a page
+    // pushed is a GET of it)
+    fn sharing_document_state(mut self, leaving: &Data) -> Self {
+        for (field, theirs) in self.texts.iter_mut().zip(&leaving.texts) {
+            if field.is_none() {
+                field.clone_from(theirs);
+            }
+        }
+        self.cross_site = self.cross_site.or(leaving.cross_site);
+        self
+    }
+
     // The text field `key` names, where it has one.
     fn text(&self, key: &str) -> Option<&str> {
         self.texts[TEXT_FIELDS.iter().position(|&k| k == key)?].as_deref()
@@ -379,9 +394,9 @@ impl Traversable {
             self.state.clear_forward(build);
         }
         let list = self.state.list_mut(nav, build)?;
-        let doc = match (&leaving, same_document) {
-            (Some(e), true) => e.doc,
-            _ => fresh_doc,
+        let (doc, data) = match (&leaving, same_document) {
+            (Some(e), true) => (e.doc, data.sharing_document_state(&e.data)),
+            _ => (fresh_doc, data),
         };
         if replace {
             if let Some(old) = leaving {
@@ -925,6 +940,19 @@ mod tests {
         assert_eq!(h.active(TOP), Some(a));
         assert_eq!(h.length(), 1);
         assert!(!h.restore(0));
+    }
+
+    #[test]
+    fn an_entry_of_the_same_document_shares_what_it_was_reached_by() {
+        let h = history();
+        let reached = Data { texts: [None, Some("/r".into()), None, None], cross_site: Some(true), post: Some((Arc::from(&b"q=1"[..]), None)), ..Default::default() };
+        h.push(TOP, TOP, "/a".into(), false, reached);
+        let pushed = h.push(TOP, TOP, "/b".into(), true, Data::default()).unwrap();
+        let other = h.push(TOP, TOP, "/c".into(), false, Data::default()).unwrap();
+        let t = h.lock();
+        let data = &t.state.entry(pushed).unwrap().data;
+        assert_eq!((data.text("referer"), data.cross_site, data.post.is_none()), (Some("/r"), Some(true), true));
+        assert_eq!(t.state.entry(other).unwrap().data.cross_site, None);
     }
 
     #[test]

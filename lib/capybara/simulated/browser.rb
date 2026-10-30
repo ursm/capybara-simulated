@@ -2508,15 +2508,18 @@ module Capybara
       # snapshot of the navigable's active document — a traversal's none)
       # (…`through_ui` a reload's through a user interface element — the driver's own — judged as the request it reloads
       # was, cross-site or not: RFC 6265bis §5.2; `location.reload()`'s made by the document it reloads — HTML "apply the
-      # history step": no source snapshot given, the navigable's active document's is its fetch client — its Sec-Fetch-Site
-      # and its cookies' site that document's, as any of its navigations' (Chrome, measured 2026-10-30: `same-origin`, a
-      # page a cross-site link led to too). A user's traversal or reload is made by none: Sec-Fetch-Site 'none'.)
+      # history step": no source snapshot given, the navigable's active document's is its fetch client — its Sec-Fetch-Site,
+      # a re-post's Origin and its cookies' site that document's, as any of its navigations' (`navigate_top_from`: one of an
+      # opaque origin cross-site to every URL, its Origin `null`). Chrome, measured 2026-10-30: `same-origin` and the page's
+      # own Origin, a page a cross-site link or form led to too; a sandboxed page's `cross-site`. A user's traversal or
+      # reload is made by none: Sec-Fetch-Site 'none', a re-post's Origin the one it was first sent with.)
       def replay_history_entry(id, is_reload: false, user_activated: false, through_ui: false)
         return unless id
 
-        entry     = @session_history.entry(id)
-        initiator = @current_url if is_reload && !through_ui
-        reloaded  = {reloaded_cross_site: (entry[:cross_site] if is_reload && through_ui)}
+        entry    = @session_history.entry(id)
+        by_page  = is_reload && !through_ui
+        made     = by_page ? {initiator: realm_creator_url(0), **opaque_initiator(0)} : {initiator: nil}
+        reloaded = {reloaded_cross_site: (entry[:cross_site] if is_reload && through_ui)}
         @restoring_history_state = entry[:state]
         # (…a traversal referred as the entry's document's request was, HTML's document state, and a POST's re-post too,
         # under the policy it was first sent under; a GET's reload by the document reloading, under its policy — Chrome,
@@ -2524,10 +2527,11 @@ module Capybara
         # (…an entry reached by a POST keeps its body)
         referred = is_reload && !entry[:body] ? {} : {referer: entry[:referer], referrer_policy: entry[:referrer_policy]}
         if entry[:body]
-          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, initiator: initiator, origin: entry[:origin],
-                                                                         user_activated: user_activated, **referred, **reloaded)
+          navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, origin: (entry[:origin] unless by_page),
+                                                                         user_activated: user_activated, **made, **referred, **reloaded)
         else
-          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: initiator, user_activated: user_activated, **referred, **reloaded)
+          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: made[:initiator], site_seed: made[:site_seed], user_activated: user_activated,
+                                **referred, **reloaded)
         end
       ensure
         @restoring_history_state = nil
@@ -9826,7 +9830,7 @@ module Capybara
             realm, referrer = initiator
             navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated)
           else
-            from_document(0) { navigate(url, replace: replace, blob: blob, user_activated: activated) }
+            navigate_top_from(0, realm_referrer_initiator(0), url, replace: replace, blob: blob, user_activated: activated)
           end
         end
       end
@@ -9956,7 +9960,7 @@ module Capybara
       # `ScriptTerminatedError`. (…`activated` whether the page had transient activation as it was called)
       def consume_pending_reload
         activated = @runtime.call('__csimTakeReload')
-        refresh(user_activated: activated, through_ui: false) unless activated.nil?
+        from_document(0) { refresh(user_activated: activated, through_ui: false) } unless activated.nil?
       end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends.
       def consume_pending_frame_reload
@@ -10782,9 +10786,9 @@ module Capybara
         resolved = resolve_against_current(url.to_s)
         record_url_transition(resolved)
         @current_url = resolved
-        # (…of the document's state, its referrer with it: a traversal that makes the document again refers as it was)
-        current = @session_history.active(0)
-        record_history({url: resolved, state: state, kind: :push_state, referer: @session_history.text(current, :referer), referrer_policy: @session_history.text(current, :referrer_policy)})
+        # (…of the document's state, what it was reached by with it — session_history.rs `sharing_document_state` — so a
+        # traversal that makes the document again refers as it was, and a user's reload is judged as it was reached)
+        record_history({url: resolved, state: state, kind: :push_state})
       end
 
       # A SAME-DOCUMENT URL change (pushState / replaceState / a fragment navigation) made by a NESTED browsing context:
@@ -10799,7 +10803,7 @@ module Capybara
 
         nav, parent, = frame_navigable(realm_id)
         if push
-          @session_history.push(nav, parent, url.to_s, true, {state: state, referrer: @session_history.text(id, :referrer)})
+          @session_history.push(nav, parent, url.to_s, true, {state: state})
         else
           @session_history.set_url(id, url.to_s) if url
           @session_history.update(id, {state: state})
@@ -11211,6 +11215,12 @@ module Capybara
           loop do
             meth, target, _, ref_source, ref_policy, seed, site, tainted, _, cookies = fetch.begin_hop
             @current_referer = fetch.referrer.to_s
+            # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
+            # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it as
+            # the navigation that made the entry had it)
+            if !from_history && (id = @session_history.active(0))
+              @session_history.update(id, {cross_site: fetch.cross_site?})
+            end
             hop_body = req_body.to_s.empty? ? nil : req_body
             resp_body = nil
             if (sw = any_window_sw_navigation_fetch(target, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
@@ -11258,11 +11268,6 @@ module Capybara
 
             @current_url = target
             record_response(status, headers)
-            # (…whether the request its document was reached by was cross-site, which a reload of it through a user
-            # interface element is judged by — a traversal's leaving it as the navigation that made the entry had it)
-            if !from_history && (id = @session_history.active(0))
-              @session_history.update(id, {cross_site: fetch.cross_site?})
-            end
             # Full-reload navigation rebuilds the JS Context from the warm
             # snapshot. Per-visit fresh VM avoids partial-reset drift
             # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated

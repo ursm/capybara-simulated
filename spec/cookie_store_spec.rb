@@ -168,6 +168,37 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq([['/home', ''], ['/home', ''], ['/home', 's=1'], ['/mine', 's=1'], ['/mine', 's=1']])
   end
 
+  # …an entry of the same document — a pushState's, a fragment navigation's — as that document was reached (HTML: the
+  # two share its document state), and an error document's as the request that failed was.
+  it "judges a user's reload of a pushed entry and of an error document as their document was reached" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => 's=1; SameSite=Strict; Path=/'}, ['set']]
+      when '/link' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><a href="http://a.test/home">go</a> <a href="http://a.test/fail">fail</a>']]
+      else
+        seen << [req.path, env['HTTP_COOKIE'].to_s]
+        # (…a redirect to a `data:` URL a network error, its error document at the URL)
+        next [302, {'location' => 'data:text/html,x'}, ['']] if req.path == '/fail'
+
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'http://a.test/set'
+    s.visit 'http://b.test/link'
+    s.click_link 'go'
+    s.execute_script("history.pushState({}, '', '/pushed')")
+    s.refresh
+    s.execute_script("location.hash = 'x'")
+    s.refresh
+    s.visit 'http://b.test/link'
+    s.click_link 'fail'
+    s.refresh
+    expect(seen).to eq([['/home', ''], ['/pushed', ''], ['/pushed', ''], ['/fail', ''], ['/fail', '']])
+  end
+
   # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a
   # same-site, cross-origin fetch() of the default credentials mode (`same-origin`) leaves the jar as it was, where one
   # of `include` (that the response allows) stores them.
