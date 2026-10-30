@@ -495,7 +495,8 @@ module Capybara
       # isolate that names one opens a window of its own meanwhile.
       # (…"familiar with" between top-level windows, session_history.rs `familiar`: none once its page disowned it, Chrome
       # and Firefox measured — a window that set `opener = null` is found by no name its opener's cross-origin page gives.
-      # `from`'s page's document is judged, also when a frame of another isolate targets by name — a gap)
+      # `from`'s page's document is judged, also when a frame of `from` names another isolate's window, and the frame's
+      # sandbox is not asked — a gap: a frame not familiar with that window, or sandboxed against navigating it, reaches it)
       private def named_window(name, from)
         return if name.empty? || from.nil?
 

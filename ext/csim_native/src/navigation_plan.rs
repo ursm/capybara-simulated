@@ -146,15 +146,17 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
     match arena.choose_navigable(realm, target) {
         Choice::Current => Route::SelfTarget,
         Choice::Frame(container) => Route::Frame(container),
-        Choice::TopLevel(0) => Route::Top,
-        // (…a window's of this isolate, its own tree's — or a discarded frame's own)
-        Choice::TopLevel(window) => Route::Window(window),
-        // (…`_blank`'s, named none; another top-level traversable a name found — another isolate's, whose navigation by
-        // a form is the host's to plan — a new one of its name)
+        // (…the page's: its own tree's, or the one a name found from a window's)
+        Choice::TopLevel(0) | Choice::Window(0) => Route::Top,
+        // (…a window's of this isolate: its own tree's — or a discarded frame's own — or the one a name found from
+        // another tree)
+        Choice::TopLevel(window) | Choice::Window(window) => Route::Window(window),
+        // (…`_blank`'s, named none; a name no navigable of this isolate has — another isolate's window's, whose navigation
+        // by a form is the host's to plan, or none — a new one of its name)
         Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
             Route::NewWindow(Vec::new())
         }
-        Choice::Window(_) | Choice::New => Route::NewWindow(target.to_vec()),
+        Choice::New => Route::NewWindow(target.to_vec()),
         Choice::Blocked => Route::Blocked,
     }
 }

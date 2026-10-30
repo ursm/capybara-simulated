@@ -416,6 +416,7 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
         <<~HTML
           <!doctype html><html><head><meta charset="utf-8"><title>main</title></head><body>
             <p id="main">MAIN</p>
+            <form action="http://a.test/landed" target="w"><button>form</button></form>
             <iframe src="http://b.test/frame"#{sandbox}></iframe>
             <iframe src="http://a.test/frame#{'?opens' if frame_opens}"#{sandbox}></iframe>
             <script>#{open_w unless frame_opens}</script>
@@ -428,6 +429,7 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
             <button id="script">script</button>
             <button id="url">url</button>
             <button id="inline" onclick="open('', 'w').location = 'http://a.test/landed'">inline</button>
+            <form action="http://a.test/landed" target="w"><button>form</button></form>
             <script>
               document.getElementById('script').addEventListener('click', () => { open('', 'w').location = 'http://a.test/landed'; });
               document.getElementById('url').addEventListener('click', () => { open('http://a.test/landed', 'w'); });
@@ -444,8 +446,12 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
   # (…opened by the page's script, or by its frame of its own origin's)
   let(:open_w) {
     <<~JS
+      window.name = 'main';
       window.w = window.open('', 'w');
-      w.document.write('<!doctype html><title>blank</title><p id="in">IN</p><iframe srcdoc="<p id=deep>DEEP</p>"></iframe>');
+      w.document.write(
+        '<!doctype html><title>blank</title><p id="in">IN</p><iframe srcdoc="<p id=deep>DEEP</p>"></iframe>' +
+        '<form action="http://a.test/landed" target="main"><button>to main</button></form>'
+      );
       w.document.close();
     JS
   }
@@ -516,6 +522,15 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
       end
     end
 
+    it "is navigated by a form a frame of #{origin} submits into it by its name" do
+      session.within_frame(index) do
+        session.click_button('form')
+        expect(session).to have_css('#frame')
+      end
+      expect(session.windows.size).to eq(2)
+      session.within_window(popup) { expect(session).to have_css('#landed', text: 'a.test/landed') }
+    end
+
     # (…but an inline event handler's `open` is its document's, whose scope comes before the global's in the handler's
     # (HTML "getting the current value of the event handler"): `document.open('', 'w')`, two arguments, reopens the
     # frame's own document, whose `location` it then sets — the frame navigated, the window left as it was. Chrome and
@@ -530,9 +545,23 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
     end
   end
 
+  it "is navigated by a form its opener's page submits into it by its name" do
+    session.click_button('form')
+    expect(session.windows.size).to eq(2)
+    session.within_window(popup) { expect(session).to have_css('#landed', text: 'a.test/landed') }
+    expect(session).to have_css('#main')
+  end
+
+  it "submits a form into its opener's page by that page's name" do
+    session.within_window(popup) { session.click_button('to main') }
+    expect(session.windows.size).to eq(2)
+    expect(session).to have_css('#landed', text: 'a.test/landed')
+    session.within_window(popup) { expect(session).to have_css('#in') }
+  end
+
   # A frame its name finds no window for — one not familiar with it, or one sandboxed against navigating it — opens a
   # window of its own by that name, the window of the name left as it was, whether it gave a URL or set the location of
-  # the window it got (Chrome measured).
+  # the window it got (Chrome measured; Firefox not).
   shared_examples 'a frame it is not found from' do |index|
     it 'opens a window of its own for a script that sets its location' do
       session.within_frame(index) do
@@ -551,17 +580,20 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
     end
   end
 
-  # (…a frame of another origin than the frame that opened it: HTML "familiar with" holds through none of its rules —
-  # not of its origin, not its top-level traversable, its opener a frame of another origin than the one naming it, and
-  # not a frame)
+  # (…a frame of another origin than the frame that opened it: HTML "familiar with" holds through none of its rules — not
+  # of its origin, not its top-level traversable, not a frame, and its opener a frame the naming one is not familiar with
+  # either: of another origin, and no ancestor of it of the naming frame's)
   context 'opened by a frame of the page, named by a frame of another origin' do
     let(:path) { '/?frame_opens' }
 
     include_examples 'a frame it is not found from', 0
   end
 
-  # (…a frame sandboxed with `allow-scripts allow-popups`: HTML "allowed by sandboxing to navigate" refuses it the
-  # window, which is not its top-level traversable and of which it is not the one permitted sandboxed navigator)
+  # (…a frame sandboxed with `allow-scripts allow-popups`, which is familiar with the window but may not navigate it:
+  # HTML "allowed by sandboxing to navigate" refuses it a window that is not its top-level traversable and of which it is
+  # not the one permitted sandboxed navigator. Strictly, "the rules for choosing a navigable" find the window and its
+  # navigation throws a SecurityError; they leave it to the user agent whether the two "are related enough that it is
+  # ok if they reach each other", and Chrome, measured, opens a new window — the tiebreak, Firefox not measured)
   context 'named by a sandboxed frame' do
     let(:path) { '/?sandbox=allow-scripts%20allow-popups' }
 
