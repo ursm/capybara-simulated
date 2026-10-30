@@ -155,6 +155,17 @@ const TREES = [
                                        // isolates; the pure-API slice. cache-abort (unbounded streaming
                                        // fetch) is skip-listed; cache-storage-buckets earns out (Storage
                                        // Buckets subsystem)
+  'html/browsers/windows',              // the windows a page opens and names (HTML §7.2-7.3): auxiliary
+                                       // browsing contexts and their opener, browsing-context names and the rules
+                                       // for choosing a navigable, noreferrer / noopener — R13's bar, with:
+  'html/browsers/the-window-object',   // window.open / close / closed, named access on the Window
+  'html/browsers/the-windowproxy-exotic-object', // the WindowProxy's [[Get]] / [[DefineOwnProperty]] / identity
+  'html/browsers/history/the-location-interface', // Location: its members, assign / replace / reload, cross-origin
+  'html/browsers/history/the-history-interface',  // History: length / state / go / pushState across documents
+  'html/browsers/origin/cross-origin-objects',    // CrossOriginProperties: what another origin's Window and
+                                       // Location expose, and the SecurityError for the rest
+  'html/browsers/browsing-the-web/navigating-across-documents', // navigation: the initial about:blank, replace,
+                                       // javascript: URLs, the source / target of a navigation
   'eventsource',                       // EventSource (HTML §9.2) — the server-sent events Mastodon and Turbo-ish
                                        // streaming apps hold open: the stream format, the connection's request
                                        // (CORS, credentials, Last-Event-ID), reconnection, and close(). The `.py`

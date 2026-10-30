@@ -39428,6 +39428,69 @@ fetch/metadata/generated/header-link.https.sub.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+html/browsers/browsing-the-web/navigating-across-documents/010.tentative.html:
+- name: 'Link with onclick form submit to javascript url with delayed document.write
+    and href navigation '
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/browsers/the-window-object/open-close/open_fires_resize.tentative.html:
+- name: Opening a popup fires a resize event
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Opening a popup with specified size fires a resize event
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: Opening a window fires a resize event
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/browsers/the-window-object/window-reuse-in-nested-browsing-contexts.tentative.html:
+- name: after the first iframe load event, navigate iframe with initial src == "".
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: after the first iframe load event, navigate iframe with initial src == "about:blank".
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: after the first iframe load event, navigate iframe with no initial src.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: synchronously navigate iframe with initial src == "".
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: synchronously navigate iframe with initial src == "about:blank".
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: synchronously navigate iframe with no initial src.
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+html/browsers/the-window-object/window-reuse.tentative.html:
+- name: Initially navigating window to non-about:blank page should reuse synchonously
+    available window
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: "[harness] TIMEOUT"
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
+- name: synchronously navigating window away from initial about:blank should not reuse
+    window
+  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+    path/suffix. CLAUDE.md rule 1.
 html/canvas/element/fill-and-stroke-styles/2d.fillStyle.CSSHSL.html:
 - name: CSSHSL works as color input
   reason: CSSHSL / CSSRGB were dropped from CSS Typed OM and no browser ships them
@@ -60934,15 +60997,15 @@ websockets/back-forward-cache-with-open-websocket-connection-ccns.tentative.wind
     path/suffix. CLAUDE.md rule 1.
 websockets/cookies/cross-origin-cookie-set.html:
 - name: Cookie should be set
-  reason: >-
-    The test encodes RFC 6265 (2011), which had no SameSite, against the current draft (CLAUDE.md rule 1 clause 3).
-    Its cookie (`ws_test_cookie_test=test;
-    Path=/`) names no SameSite and is set by a WebSocket handshake to another site ({{hosts[alt][www]}}); the
-    test expects it stored. RFC 6265bis (editor's draft, 2026-10, §5.7 storage) has a cookie with no SameSite
-    attribute "set the cookie's same-site-flag to 'Default'", and then, "If the cookie's same-site-flag is not
-    'None'", keeps it only where it "was received from a 'same-site' request" or "from a request which is
-    navigating a top-level traversable" — a cross-site handshake is neither, so the cookie is ignored. Chrome and
-    Safari refuse it (fail the subtest); Firefox stores it.
+  reason: The test encodes RFC 6265 (2011), which had no SameSite, against the current
+    draft (CLAUDE.md rule 1 clause 3). Its cookie (`ws_test_cookie_test=test; Path=/`)
+    names no SameSite and is set by a WebSocket handshake to another site ({{hosts[alt][www]}});
+    the test expects it stored. RFC 6265bis (editor's draft, 2026-10, §5.7 storage)
+    has a cookie with no SameSite attribute "set the cookie's same-site-flag to 'Default'",
+    and then, "If the cookie's same-site-flag is not 'None'", keeps it only where
+    it "was received from a 'same-site' request" or "from a request which is navigating
+    a top-level traversable" — a cross-site handshake is neither, so the cookie is
+    ignored. Chrome and Safari refuse it (fail the subtest); Firefox stores it.
 websockets/stream/tentative/abort.any.js:
 - name: abort after connect should do nothing
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

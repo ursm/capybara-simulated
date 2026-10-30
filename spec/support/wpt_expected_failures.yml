@@ -2951,6 +2951,1201 @@ hr-time/timeOrigin.html:
 - Window and worker timeOrigins differ when worker is created after a delay.
 hr-time/window-worker-timeOrigin.window.js:
 - timeOrigin and now() should be correctly ordered between window and worker
+html/browsers/browsing-the-web/navigating-across-documents/009.html:
+- 'Link with onclick form submit to javascript url with document.write and href navigation '
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/012.html:
+- 'Link with onclick navigation to javascript url with delayed document.write and
+  href navigation '
+html/browsers/browsing-the-web/navigating-across-documents/013.html:
+- 'Link with onclick navigation to javascript url with delayed document.write and
+  href navigation '
+html/browsers/browsing-the-web/navigating-across-documents/014.html:
+- " Link with javascript onclick form submission script order "
+html/browsers/browsing-the-web/navigating-across-documents/015.html:
+- " Link with javascript onclick and href script order "
+html/browsers/browsing-the-web/navigating-across-documents/abort-document-load.html:
+- Aborting a Document load
+html/browsers/browsing-the-web/navigating-across-documents/abort-document-window-stop.sub.window.js:
+- abort-document-window-stop
+html/browsers/browsing-the-web/navigating-across-documents/about-srcdoc-navigation-blocked.window.js:
+- Navigations to about:srcdoc via window.location must be blocked
+- Navigations to about:srcdoc via window.open() must be blocked
+- Navigations to about:srcdoc?query via window.location within an about:srcdoc document
+  must be blocked
+html/browsers/browsing-the-web/navigating-across-documents/child-navigates-parent-cross-origin.window.js:
+- Child document attempts to navigate cross-origin parent via location
+- Child document attempts to navigate cross-origin parent via location.href
+- Child document attempts to navigate cross-origin parent via location.replace()
+html/browsers/browsing-the-web/navigating-across-documents/cross-origin-top-navigation-with-user-activation-in-parent.window.js:
+- Cross-origin top navigation is blocked without user activation, even if the parent
+  has user activation
+html/browsers/browsing-the-web/navigating-across-documents/cross-origin-top-navigation-without-user-activation-nested.window.js:
+- Cross-origin top navigation is blocked without user activation, even if iframe is
+  nested and its direct parent is same-site
+html/browsers/browsing-the-web/navigating-across-documents/cross-origin-top-navigation-without-user-activation.window.js:
+- Cross-origin top navigation is blocked without user activation
+html/browsers/browsing-the-web/navigating-across-documents/failure-check-sequence.https.html:
+- COEP check precedes X-Frame-Options check
+- CSP check precedes COEP check - COEP header first
+- CSP check precedes COEP check - CSP header first
+- CSP check precedes X-Frame-Options check
+html/browsers/browsing-the-web/navigating-across-documents/form-submit-and-window-stop.html: HARNESS_ERROR
+html/browsers/browsing-the-web/navigating-across-documents/grandparent_location_aboutsrcdoc.sub.window.js:
+- "[harness] ERROR"
+- cross-origin grandparent sets location in same-doc navigation
+- cross-origin grandparent sets location to about:srcdoc
+- cross-origin grandparent with sandboxed srcdoc grandchild that self navigate
+- same-origin grandparent sets location in same-doc navigation
+- same-origin grandparent sets location to about:srcdoc
+- same-origin grandparent with sandboxed srcdoc grandchild that self navigates
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204-fragment.html:
+- link click
+- location.assign
+- location.href
+- window.open
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204-pushState-replaceState.html:
+- history.pushState
+- history.replaceState
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204.html:
+- about:blank on top of 204 loads async
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/load-pageshow-events-window-open.html:
+- load event does not fire on window.open('about:blank#foo')
+- load event does not fire on window.open('about:blank')
+- load event does not fire on window.open('about:blank?foo')
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204-fragment.html:
+- "[harness] TIMEOUT"
+- location.assign
+- location.href
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204-pushState-replaceState.html:
+- "[harness] TIMEOUT"
+- history.pushState
+- history.replaceState
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-204.html:
+- "[harness] TIMEOUT"
+- location.assign
+- location.href
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-aboutblank.html:
+- "[harness] TIMEOUT"
+- location.assign
+- location.href
+html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-nourl.html:
+- "[harness] TIMEOUT"
+- location.assign
+- location.href
+html/browsers/browsing-the-web/navigating-across-documents/javascript-url-load-as-html.xhtml:
+- 'javascript: URL navigation to a string must create a HTML document using the correct
+  properties'
+html/browsers/browsing-the-web/navigating-across-documents/javascript-url-no-beforeunload.window.js:
+- 'Navigating an iframe via location.href to a javascript: URL must not fire beforeunload:
+  string completion'
+- 'Navigating an iframe via location.href to a javascript: URL must not fire beforeunload:
+  undefined completion'
+- 'Navigating an iframe via src="" to a javascript: URL after insertion must not fire
+  beforeunload: string completion'
+- 'Navigating an iframe via src="" to a javascript: URL after insertion must not fire
+  beforeunload: undefined completion'
+- 'Navigating an opened window via location.href to a javascript: URL must not fire
+  beforeunload: string completion'
+- 'Navigating an opened window via location.href to a javascript: URL must not fire
+  beforeunload: undefined completion'
+- 'Navigating an opened window with an iframe via location.href to a javascript: URL
+  must not fire beforeunload on the iframe: string completion'
+- 'Navigating an opened window with an iframe via location.href to a javascript: URL
+  must not fire beforeunload on the iframe: undefined completion'
+html/browsers/browsing-the-web/navigating-across-documents/javascript-url-referrer.window.js:
+- no-referrer referrer policy used to create the starting page
+- origin referrer policy used to create the starting page
+- unsafe-url referrer policy used to create the starting page
+html/browsers/browsing-the-web/navigating-across-documents/javascript-url-security-check-failure.sub.html:
+- cross-origin-domain but same-origin, setting location.href
+- cross-origin-domain but same-origin, setting src
+html/browsers/browsing-the-web/navigating-across-documents/javascript-url-security-check-multi-globals.sub.html:
+- Using iframeEl.src
+- Using location.href
+html/browsers/browsing-the-web/navigating-across-documents/javascript-url-security-check-same-origin-domain.sub.html:
+- 'javascript: URL security check for same-origin-domain but not same-origin'
+html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/context-for-location-assign.html:
+- Fetch client and URL resolution for location.assign()
+html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/context-for-location-href.html:
+- Fetch client and URL resolution for location.href setter
+html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/context-for-location.html:
+- Fetch client and URL resolution for location setter
+html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/context-for-window-open.html:
+- Fetch client and URL resolution for window.open()
+html/browsers/browsing-the-web/navigating-across-documents/navigate-to-unparseable-url.html:
+- location.href setter throws a SyntaxError DOMException for unparseable URLs
+html/browsers/browsing-the-web/navigating-across-documents/navigate_too_many_calls.optional.html:
+- fragment navigations through navigate are ignored after too many calls
+- rate-limited navigations cancel pending lazy-load iframe navigations
+html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-cross-origin.sub.window.js:
+- navigation-unload-cross-origin
+html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-data-url.window.js:
+- navigation-unload-data-url
+html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-javascript-url.window.js:
+- navigation-unload-javascript-url
+html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-same-origin.window.js:
+- navigation-unload-same-origin
+html/browsers/browsing-the-web/navigating-across-documents/plugin-document.historical.html:
+- Same-origin PDFs must not create accessible Document objects
+html/browsers/browsing-the-web/navigating-across-documents/redirect-to-about.window.js:
+- An iframe that is navigated to a redirect to about:blank
+- An iframe that is navigated to a redirect to about:nonstandard
+- An iframe that is navigated to a redirect to about:srcdoc
+- An iframe with src set to a redirect to about:blank
+- An iframe with src set to a redirect to about:nonstandard
+- An iframe with src set to a redirect to about:srcdoc
+html/browsers/browsing-the-web/navigating-across-documents/redirect-to-data.html:
+- Loading an iframe with src=redirecting URL
+- Navigating an iframe to a redirecting URL
+html/browsers/browsing-the-web/navigating-across-documents/redirect-to-unparseable-url.html:
+- Navigating to a url (A) that redirects to an unparseable URL (B), saves the URL
+  (A) in the history entry, for later traversal
+html/browsers/browsing-the-web/navigating-across-documents/refresh/after-same-document-navigation.html:
+- Referrer from Refresh after Same-Document Navigation
+html/browsers/browsing-the-web/navigating-across-documents/refresh/navigate.window.js:
+- When navigating the Refresh header needs to be followed
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/refresh/same-document-refresh.html:
+- Same-Document Referrer from Refresh
+html/browsers/browsing-the-web/navigating-across-documents/refresh/subresource.any.js:
+- Refresh does not affect Fetch API.
+- Refresh does not affect XMLHttpRequest.
+- "[dedicatedworker] Refresh does not affect Fetch API."
+- "[dedicatedworker] Refresh does not affect XMLHttpRequest."
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click-during-load.html:
+- "[harness] TIMEOUT"
+- aElement.click() during the load event must NOT replace
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click-during-pageshow.html:
+- "[harness] TIMEOUT"
+- aElement.click() during the pageshow event must NOT replace
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click.html:
+- aElement.click() before the load event must NOT replace
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-user-click-during-load.html:
+- User click on <a> during the load event must NOT replace
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-user-click-during-pageshow.html:
+- User click on <a> during the pageshow event must NOT replace
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-user-click.html:
+- User click on <a> before the load event must NOT replace
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit-during-load.html:
+- Replace during the load event, triggered by formElement.submit()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit-during-pageshow.html:
+- Replace during the pageshow event, triggered by formElement.submit()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit.html:
+- Replace before load, triggered by formElement.requestSubmit()
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click-during-load.html:
+- Replace during load, triggered by submitButton.click()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click-during-pageshow.html:
+- Replace during pageshow, triggered by submitButton.click()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click.html:
+- Replace before load, triggered by submitButton.click()
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-cross-frame-crossorigin.sub.html:
+- No replace before load, triggered by cross-iframe formElement.submit() [iframe is
+  cross-origin]
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-cross-frame.html:
+- No replace before load, triggered by cross-iframe formElement.submit()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-load.html:
+- Replace during the load event, triggered by formElement.submit()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-pageshow.html:
+- Replace during the pageshow event, triggered by formElement.submit()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-popup-crossorigin.sub.html:
+- No replace before load, triggered by formElement.submit() in the opener window,
+  after the opener has loaded [window is cross-origin]
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-popup.html:
+- No replace before load, triggered by formElement.submit() in the opener window,
+  after the opener has loaded
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit.html:
+- Replace before load, triggered by same-document formElement.submit()
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/history-pushstate-during-load.html:
+- "[harness] TIMEOUT"
+- history.pushState() during the load event must NOT replace
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/history-pushstate-during-pageshow.html:
+- "[harness] TIMEOUT"
+- history.pushState() during the pageshow event must NOT replace
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-load.html:
+- Replace during the load event, triggered by setting iframeElement.src
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src-during-pageshow.html:
+- Replace during the pageshow event, triggered by setting iframeElement.src
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src.html:
+- Replace before load, triggered by setting iframeElement.src
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign-during-load.html:
+- Replace during the load event, triggered by location.assign()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign-during-pageshow.html:
+- Replace during the pageshow event, triggered by location.assign()
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign-user-click.html:
+- NO replace before load, triggered by location.assign()
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign.html:
+- Replace before load, triggered by location.assign()
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-during-load.html:
+- "[harness] TIMEOUT"
+- hash
+- href
+- search
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-during-pageshow.html:
+- "[harness] TIMEOUT"
+- hash
+- href
+- search
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-user-click.html:
+- hash
+- href
+- search
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter-user-mouseup.html:
+- hash
+- href
+- search
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter.html:
+- href
+- search
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup-during-load.html:
+- No replace before load, triggered by window.open() on a non-_self window
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup-during-pageshow.html:
+- No replace before load, triggered by window.open() on a non-_self window
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-popup.html:
+- No replace before load, triggered by window.open() on a non-_self window
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self-during-load.html:
+- No replace during load, triggered by window.open(_self) on an iframe
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self-during-pageshow.html:
+- No replace during pageshow, triggered by window.open(_self) on an iframe
+- "[harness] TIMEOUT"
+html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self.html:
+- No replace before load, triggered by window.open(_self) on an iframe
+html/browsers/browsing-the-web/navigating-across-documents/source/navigate-child-src-about-blank.html:
+- Set the src attribute to about:blank and check referrer
+html/browsers/browsing-the-web/navigating-across-documents/top-level-data-url.window.js:
+- Navigating a popup using window.open("data:text/html,...", "", "opener")
+- Navigating a popup using window.open("data:text/html,...", "", "undefined")
+- Navigating a popup using window.open("resources/redirect.py?location=data%3Atext%2Fhtml%2C...",
+  "", "opener")
+- Navigating a popup using window.open("resources/redirect.py?location=data%3Atext%2Fhtml%2C...",
+  "", "undefined")
+html/browsers/history/the-history-interface/001.html:
+- location.hash must be allowed to change (part 2)
+- pushState must be able to set absolute URLs to the same host
+- pushState must not alter location.hash when no URL is provided
+- pushState must not be allowed to create cross-origin URLs
+- pushState must remove all history after the current state
+- pushState must remove any tasks queued by the history traversal task source
+- security errors are expected to be thrown in the context of the document that owns
+  the history object
+html/browsers/history/the-history-interface/002.html:
+- replaceState must be able to set absolute URLs to the same host
+- replaceState must not be allowed to create cross-origin URLs
+- security errors are expected to be thrown in the context of the document that owns
+  the history object
+html/browsers/history/the-history-interface/007.html:
+- history.state should reflect the navigated state onload
+- popstate event should fire before onload fires
+- popstate event should not fire after onload fires
+- the correct state should be restored when navigating during initial load
+html/browsers/history/the-history-interface/history-state-after-bfcache.window.js:
+- history-state-after-bfcache
+html/browsers/history/the-history-interface/history_back_1.html:
+- "[harness] TIMEOUT"
+- history.back() with session history
+html/browsers/history/the-history-interface/history_forward_1.html:
+- "[harness] TIMEOUT"
+- history.forward() with session history
+html/browsers/history/the-history-interface/history_go_no_argument.html:
+- "[harness] TIMEOUT"
+- history.go()
+html/browsers/history/the-history-interface/history_go_to_uri.html:
+- "[harness] TIMEOUT"
+- history.go() negative tests
+html/browsers/history/the-history-interface/history_go_too_many_calls.optional.html:
+- history go too many calls
+html/browsers/history/the-history-interface/history_go_undefined.html:
+- "[harness] TIMEOUT"
+- history.forward() with session history
+html/browsers/history/the-history-interface/history_go_zero.html:
+- "[harness] TIMEOUT"
+- history.go(0)
+html/browsers/history/the-history-interface/history_go_zero_which_document.window.js:
+- history_go_zero_which_document
+html/browsers/history/the-history-interface/history_pushstate_too_many_calls.optional.html:
+- history pushState too many calls
+html/browsers/history/the-history-interface/history_pushstate_too_many_calls_ordering.optional.html:
+- pushState checks whether the URL can be rewritten before checking the rate limit
+- pushState parses the URL before checking the rate limit
+- pushState serializes state before checking the rate limit
+html/browsers/history/the-history-interface/history_replacestate_too_many_calls.optional.html:
+- history replaceState too many calls
+html/browsers/history/the-history-interface/history_replacestate_too_many_calls_ordering.optional.html:
+- replaceState checks whether the URL can be rewritten before checking the rate limit
+- replaceState parses the URL before checking the rate limit
+- replaceState serializes state before checking the rate limit
+html/browsers/history/the-history-interface/joint_session_history/001.html:
+- Navigating first iframe
+- Navigating second iframe
+- Session history length on adding new iframe
+- Session history length on initial load
+- Traversing history back (1)
+- Traversing history back (2)
+- Traversing history forward
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/joint_session_history/002.html:
+- Navigating second iframe
+- Session history length on adding new iframe
+- Session history length on initial load
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_1.html:
+- Multiple history traversals from the same task
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_2.html:
+- Multiple history traversals, last would be aborted
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_3.html:
+- Multiple history traversals, last would be aborted
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_4.html:
+- Multiple history traversals, last would be aborted
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_5.html:
+- Multiple history traversals, last would be aborted
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_unload_1.html:
+- Traversing the history, unload event is fired on doucment
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_write_after_load_1.html:
+- Traverse the history after document.write after the load event
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_write_after_load_2.html:
+- Traverse the history back and forward when a history entry is written after the
+  load event
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_write_onload_1.html:
+- Traverse the history when a history entry is written in the load event
+- "[harness] TIMEOUT"
+html/browsers/history/the-history-interface/traverse_the_history_write_onload_2.html:
+- Traverse the history back and forward when a history entry is written in the load
+  event
+- "[harness] TIMEOUT"
+html/browsers/history/the-location-interface/allow_prototype_cycle_through_location.sub.html:
+- cross-origin, but joined via document.domain, location cycle
+html/browsers/history/the-location-interface/assign-replace-from-iframe.html:
+- Browser sends Referer header in iframe request when location.assign is called from
+  an iframe
+- Browser sends Referer header in iframe request when location.replace is called from
+  an iframe
+- "[harness] TIMEOUT"
+html/browsers/history/the-location-interface/assign-replace-from-top-to-nested-iframe.html:
+- Browser sends Referer header in nested iframe request when location.assign is called
+  on an iframe
+- Browser sends Referer header in nested iframe request when location.replace is called
+  on an iframe
+html/browsers/history/the-location-interface/assign-with-nested-iframe.html:
+- Browser sends Referer header when location.assign is called in iframe document on
+  another nested iframe element
+- "[harness] TIMEOUT"
+html/browsers/history/the-location-interface/create-script-set-location.html:
+- "[harness] ERROR"
+- "[harness] no subtests"
+html/browsers/history/the-location-interface/location-ancestor-origins-inactive-document.sub.html:
+- location.ancestorOrigins returns empty list after iframe is removed and referenced
+  Location's relevant document is null
+- location.ancestorOrigins returns empty list when iframe navigated away and referenced
+  Location's relevant document is null
+html/browsers/history/the-location-interface/location-ancestor-origins-new-object.html:
+- location.ancestorOrigins new object semantics
+html/browsers/history/the-location-interface/location-ancestor-origins-referrerpolicy-snapshot.html:
+- location.ancestorOrigins snapshot timing of referrerpolicy
+- location.ancestorOrigins snapshot timing of referrerpolicy 1
+html/browsers/history/the-location-interface/location-ancestor-origins.sub.html:
+- A -> about:blank -> B1 -> B2
+- A -> about:blank, that set iframe referrer policy=no-referrer -> B1 -> B2
+- Test same-origin referrer policy, A1 -> B1 -> A2 iframe attribute same-origin ->
+  B2
+- Test that loosening policy in policy container has no effect.
+- Test that mutating the iframe referrerpolicy attribute does not impact the hiding/non-hiding
+  when creating a grandchild browsing context (keep origins)
+- Test that mutating the iframe referrerpolicy attribute of B1 before creation of
+  B2 does not impact the hiding/non-hiding when creating a grandchild browsing context
+  (keep null)
+- Test that tightening policy using meta, does not affect list
+- "[harness] TIMEOUT"
+- about:blank's location.ancestorOrigin policy=no-referrer
+- about:blank's location.ancestorOrigin policy=null
+- test no-referrer attribute on iframe for iframe containing B1
+- test of toggle of masked at first origin != parentDocOrigin, A1 -> B1 -> B2 -> A2
+- test sandboxed iframe in A1, A1 iframe attribute sandbox -> C1 -> B1 -> C2
+- test toggle of masked A1 -> B1 iframe for A2 sets no-referrer -> A2
+html/browsers/history/the-location-interface/location-prototype-setting-cross-origin-domain.sub.html:
+- 'Cross-origin via document.domain: setting the prototype to an empty object via
+  __proto__ should throw a "SecurityError" DOMException'
+- 'Cross-origin via document.domain: setting the prototype to its original value via
+  __proto__ should throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
+- 'Cross-origin via document.domain: the prototype is null'
+html/browsers/history/the-location-interface/location-prototype-setting-cross-origin.sub.html:
+- 'Cross-origin: setting the prototype to null via Object.setPrototypeOf should not
+  throw'
+- 'Cross-origin: setting the prototype to null via Reflect.setPrototypeOf should return
+  true'
+html/browsers/history/the-location-interface/location-prototype-setting-goes-cross-origin-domain.sub.html:
+- 'Became cross-origin via document.domain: setting the prototype to an empty object
+  via __proto__ should throw a "SecurityError" DOMException'
+- 'Became cross-origin via document.domain: setting the prototype to null via Object.setPrototypeOf
+  should not throw'
+- 'Became cross-origin via document.domain: setting the prototype to null via Reflect.setPrototypeOf
+  should return true'
+- 'Became cross-origin via document.domain: setting the prototype to null via __proto__
+  should throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
+- 'Became cross-origin via document.domain: setting the prototype to the original
+  value from before going cross-origin via Object.setPrototypeOf should throw a TypeError'
+- 'Became cross-origin via document.domain: setting the prototype to the original
+  value from before going cross-origin via Reflect.setPrototypeOf should return false'
+- 'Became cross-origin via document.domain: setting the prototype to the original
+  value from before going cross-origin via __proto__ should throw a "SecurityError"
+  DOMException'
+- 'Became cross-origin via document.domain: the prototype is now null'
+- 'Became cross-origin via document.domain: the prototype must still be null'
+html/browsers/history/the-location-interface/location-prototype-setting-same-origin-domain.sub.html:
+- 'Same-origin-domain prerequisite check: the original prototype is accessible'
+- "[harness] ERROR"
+html/browsers/history/the-location-interface/location_hash.html:
+- Setting location.hash on srcdoc iframe
+html/browsers/history/the-location-interface/location_port.html:
+- location port
+html/browsers/history/the-location-interface/location_replace_session_history.html:
+- "[harness] TIMEOUT"
+- location.replace replaces the active session history entry
+html/browsers/history/the-location-interface/no-browsing-context.window.js:
+- Getting `ancestorOrigins` of a `Location` object sans browsing context should be
+  []
+- Invoking `assign` with `http://test:test/` on a `Location` object sans browsing
+  context is a no-op
+- Invoking `replace` with `http://test:test/` on a `Location` object sans browsing
+  context is a no-op
+- Setting `href` to `http://test:test/` of a `Location` object sans browsing context
+  is a no-op
+html/browsers/history/the-location-interface/per-global.window.js:
+- Navigating from the initial about:blank must not replace window.location
+html/browsers/history/the-location-interface/reload_document_open_write.html:
+- Reload document with document.open and document.written content
+html/browsers/history/the-location-interface/reload_document_write.html:
+- Reload document with document.written content
+html/browsers/history/the-location-interface/reload_document_write_onload.html:
+- Reload document with document.written content written in load event
+html/browsers/history/the-location-interface/replace-with-nested-iframe.html:
+- Browser sends Referer header when location.replace is called in iframe document
+  on another nested iframe element
+- "[harness] TIMEOUT"
+html/browsers/history/the-location-interface/same-hash.html:
+- Using location.assign("about:srcdoc#te%3Cst") must reset scroll position
+- Using location.assign("about:srcdoc#te%3cst") must reset scroll position
+- Using location.assign("about:srcdoc#te<st") must reset scroll position
+- Using location.hash = "#te%3Cst" must not reset scroll position
+- Using location.hash = "#te%3cst" must reset scroll position
+- Using location.hash = "#te<st" must not reset scroll position
+- Using location.hash = "te%3Cst" must not reset scroll position
+- Using location.hash = "te%3cst" must reset scroll position
+- Using location.hash = "te<st" must not reset scroll position
+- Using location.href = "about:srcdoc#te%3Cst" must reset scroll position
+- Using location.href = "about:srcdoc#te%3cst" must reset scroll position
+- Using location.href = "about:srcdoc#te<st" must reset scroll position
+html/browsers/history/the-location-interface/scripted_click_location_assign_during_load.html:
+- location.assign with click during load
+html/browsers/history/the-location-interface/scripted_form_submit_assign_during_load.html:
+- Assignment to location with form submit during load
+html/browsers/origin/cross-origin-objects/cross-origin-due-to-document-domain-only.html:
+- Cross-origin due to document.domain
+html/browsers/origin/cross-origin-objects/cross-origin-objects-function-name.html:
+- Cross-origin Location `href` setter has correct 'name'
+html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.html:
+- Cross-origin object identity preserved across document.domain
+html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
+- Basic sanity-checking (same-origin + document.domain)
+- Can only enumerate safelisted enumerable properties (cross-origin)
+- Can only enumerate safelisted enumerable properties (cross-site)
+- Can only enumerate safelisted enumerable properties (same-origin + document.domain)
+- Cross-origin Window accessors get local Function.prototype (same-origin + document.domain)
+- Cross-origin functions get local Function.prototype (same-origin + document.domain)
+- LegacyLenientThis behavior (cross-origin)
+- LegacyLenientThis behavior (cross-site)
+- LegacyLenientThis behavior (same-origin + document.domain)
+- Only certain properties are accessible cross-origin (cross-origin)
+- Only certain properties are accessible cross-origin (cross-site)
+- Only certain properties are accessible cross-origin (same-origin + document.domain)
+- Only certain properties are usable as cross-origin this objects (cross-origin)
+- Only certain properties are usable as cross-origin this objects (cross-site)
+- Only certain properties are usable as cross-origin this objects (same-origin + document.domain)
+- Resolving a promise with a cross-origin location should work (cross-origin)
+- Resolving a promise with a cross-origin location should work (cross-site)
+- Same-origin observers get different accessors for cross-origin Location (cross-origin)
+- Same-origin observers get different accessors for cross-origin Location (cross-site)
+- Same-origin observers get different accessors for cross-origin Location (same-origin
+  + document.domain)
+- Same-origin observers get different accessors for cross-origin Window (cross-origin)
+- Same-origin observers get different accessors for cross-origin Window (cross-site)
+- Same-origin observers get different accessors for cross-origin Window (same-origin
+  + document.domain)
+- Same-origin observers get different functions for cross-origin objects (cross-origin)
+- Same-origin observers get different functions for cross-origin objects (cross-site)
+- Same-origin observers get different functions for cross-origin objects (same-origin
+  + document.domain)
+- "[[DefineOwnProperty]] Should throw for cross-origin objects (cross-origin)"
+- "[[DefineOwnProperty]] Should throw for cross-origin objects (cross-site)"
+- "[[DefineOwnProperty]] Should throw for cross-origin objects (same-origin + document.domain)"
+- "[[Delete]] Should throw on cross-origin objects (cross-origin)"
+- "[[Delete]] Should throw on cross-origin objects (cross-site)"
+- "[[Delete]] Should throw on cross-origin objects (same-origin + document.domain)"
+- "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
+  set up correctly (cross-origin)"
+- "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
+  set up correctly (cross-site)"
+- "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
+  set up correctly (same-origin + document.domain)"
+- "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
+  property only if it corresponds to a child window. (cross-origin)"
+- "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
+  property only if it corresponds to a child window. (cross-site)"
+- "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
+  property only if it corresponds to a child window. (same-origin + document.domain)"
+- "[[GetOwnProperty]] - Subframe named 'then' should shadow the default 'then' value
+  (cross-origin)"
+- "[[GetOwnProperty]] - Subframe named 'then' should shadow the default 'then' value
+  (cross-site)"
+- "[[GetOwnProperty]] - Subframes should be visible cross-origin only if their names
+  don't match the names of cross-origin-exposed IDL properties (cross-origin)"
+- "[[GetOwnProperty]] - Subframes should be visible cross-origin only if their names
+  don't match the names of cross-origin-exposed IDL properties (cross-site)"
+- "[[GetOwnProperty]] - Subframes should be visible cross-origin only if their names
+  don't match the names of cross-origin-exposed IDL properties (same-origin + document.domain)"
+- "[[GetPrototypeOf]] should return null (same-origin + document.domain)"
+- "[[OwnPropertyKeys]] should not reorder where 'then' appears if it's a named subframe,
+  nor add another copy of 'then' (cross-origin)"
+- "[[OwnPropertyKeys]] should not reorder where 'then' appears if it's a named subframe,
+  nor add another copy of 'then' (cross-site)"
+- "[[OwnPropertyKeys]] should not reorder where 'then' appears if it's a named subframe,
+  nor add another copy of 'then' (same-origin + document.domain)"
+- "[[OwnPropertyKeys]] should place the symbols after the property names after the
+  subframe indices (cross-origin)"
+- "[[OwnPropertyKeys]] should place the symbols after the property names after the
+  subframe indices (cross-site)"
+- "[[OwnPropertyKeys]] should place the symbols after the property names after the
+  subframe indices (same-origin + document.domain)"
+- "[[OwnPropertyKeys]] should return all properties from cross-origin objects (cross-origin)"
+- "[[OwnPropertyKeys]] should return all properties from cross-origin objects (cross-site)"
+- "[[OwnPropertyKeys]] should return all properties from cross-origin objects (same-origin
+  + document.domain)"
+- "[[OwnPropertyKeys]] should return the right symbol-named properties for cross-origin
+  objects (cross-origin)"
+- "[[OwnPropertyKeys]] should return the right symbol-named properties for cross-origin
+  objects (cross-site)"
+- "[[OwnPropertyKeys]] should return the right symbol-named properties for cross-origin
+  objects (same-origin + document.domain)"
+- "[[PreventExtensions]] should return false cross-origin objects (cross-origin)"
+- "[[PreventExtensions]] should return false cross-origin objects (cross-site)"
+- "[[SetPrototypeOf]] should return false (cross-origin)"
+- "[[SetPrototypeOf]] should return false (cross-site)"
+- "[[SetPrototypeOf]] should return false (same-origin + document.domain)"
+- proto setter |call| on cross-origin Location with null (function set __proto__()
+  { [native code] }, C)
+- proto setter |call| on cross-origin Location with null (function set __proto__()
+  { [native code] }, G)
+- proto setter |call| on cross-origin Location with null (function(p) { Object.setPrototypeOf(this,
+  p); }, C)
+- proto setter |call| on cross-origin Location with null (function(p) { Object.setPrototypeOf(this,
+  p); }, G)
+- proto setter |call| on cross-origin Window with null (function set __proto__() {
+  [native code] }, C)
+- proto setter |call| on cross-origin Window with null (function set __proto__() {
+  [native code] }, G)
+- proto setter |call| on cross-origin Window with null (function(p) { Object.setPrototypeOf(this,
+  p); }, C)
+- proto setter |call| on cross-origin Window with null (function(p) { Object.setPrototypeOf(this,
+  p); }, G)
+- "{}.toString.call() does the right thing on cross-origin objects (cross-origin)"
+- "{}.toString.call() does the right thing on cross-origin objects (cross-site)"
+- "{}.toString.call() does the right thing on cross-origin objects (same-origin +
+  document.domain)"
+html/browsers/origin/cross-origin-objects/location-properties-smoke-test.window.js:
+- Verifying that cross-origin access of 'assign' is restricted
+- Verifying that cross-origin access of 'customproperty' is restricted
+- Verifying that cross-origin access of 'hash' is restricted
+- Verifying that cross-origin access of 'host' is restricted
+- Verifying that cross-origin access of 'hostname' is restricted
+- Verifying that cross-origin access of 'pathname' is restricted
+- Verifying that cross-origin access of 'port' is restricted
+- Verifying that cross-origin access of 'protocol' is restricted
+- Verifying that cross-origin access of 'reload' is restricted
+- Verifying that cross-origin access of 'search' is restricted
+- Verifying that cross-origin access of 'toString' is restricted
+- Verifying that cross-origin access of 'valueOf' is restricted
+html/browsers/origin/cross-origin-objects/window-location-and-location-href-cross-realm-set.html:
+- Cross-origin location.href getter throws SecurityError in lexical realm
+- Cross-origin location.href setter throws TypeError in lexical realm on invalid |this|
+  value
+- Cross-origin window.location setter throws TypeError in lexical realm on invalid
+  |this| value
+- Cross-origin window.location setter throws TypeError in lexical realm on non-coercible
+  URL argument
+- Same-origin window.location getter throws TypeError in holder's realm on invalid
+  |this| value
+- Same-origin window.location setter throws TypeError in holder's realm on invalid
+  |this| value
+html/browsers/the-window-object/BarProp.window.js:
+- BarBrop objects of a nested Window
+- BarProp objects of an auxiliary Window
+html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-01.html:
+- The window's length must return the number of child browsing contexts(in iframe)
+html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-02.html:
+- Accessing child browsing contexts 1
+- Accessing child browsing contexts 3
+html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-03.html:
+- Indexed child browsing contexts
+html/browsers/the-window-object/close-method.window.js:
+- "[harness] TIMEOUT"
+- window.close() affects name targeting immediately
+- window.close() queues a task to discard, but window.closed knows immediately
+html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_1.html:
+- Removing iframe from document removes it from history
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_2.html:
+- Removing iframe from document via innerHTML removes it from history
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_3.html:
+- Removing iframe from document removes it from history
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_4.html:
+- Removing iframe from document removes it from history
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/length-attribute.window.js:
+- Window object's length IDL attribute (and named access)
+html/browsers/the-window-object/named-access-on-the-window-object/cross-origin-named-access.sub.html:
+- Accessing a cross-origin child global by name returns undefined
+html/browsers/the-window-object/named-access-on-the-window-object/navigated-named-objects.window.js:
+- Window's associated Document object is used for finding named objects (<object>
+  with browsing ccontext via cross-site <iframe)>
+- Window's associated Document object is used for finding named objects (<object>
+  with browsing ccontext via same-origin <iframe)>
+- Window's associated Document object is used for finding named objects (<object>
+  with browsing ccontext via srcdoc <iframe)>
+html/browsers/the-window-object/named-access-on-the-window-object/prototype.html:
+- Property on EventTarget.prototype.
+- Property on Object.prototype.
+html/browsers/the-window-object/named-access-on-the-window-object/window-named-properties.html:
+- constructor
+html/browsers/the-window-object/open-close/close_beforeunload.html:
+- Running beforeunload handler in window.close()
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/open-close/close_noopener_beforeunload.html:
+- "[harness] TIMEOUT"
+- closing noopener window with 1 entry
+- closing noopener window with 2 entries
+html/browsers/the-window-object/open-close/close_script_defer.html:
+- Running defer script in window.close()
+html/browsers/the-window-object/open-close/no_window_open_when_term_nesting_level_nonzero.window.js:
+- no popups from another synchronously reachable window
+- no popups from synchronously reachable window
+- no popups with frame navigation
+html/browsers/the-window-object/open-close/open-features-is-popup-condition.html:
+- '"close" should set BarProp visibility to false'
+- '"close=no" should set BarProp visibility to false'
+- '"close=true" should set BarProp visibility to false'
+- '"close=yes" should set BarProp visibility to false'
+- '"height=500" should set BarProp visibility to false'
+- '"innerHeight=500" should set BarProp visibility to false'
+- '"innerWidth=500" should set BarProp visibility to false'
+- '"left=500" should set BarProp visibility to false'
+- '"location" should set BarProp visibility to false'
+- '"location,toolbar,menubar,resizable,scrollbars" should set BarProp visibility to
+  false'
+- '"location,toolbar,menubar,resizable,status" should set BarProp visibility to false'
+- '"location,toolbar,menubar,resizable=no,scrollbars,status" should set BarProp visibility
+  to false'
+- '"location,toolbar,resizable,scrollbars,status" should set BarProp visibility to
+  false'
+- '"location=no" should set BarProp visibility to false'
+- '"location=no,menubar=no,resizable,scrollbars,status" should set BarProp visibility
+  to false'
+- '"location=true" should set BarProp visibility to false'
+- '"location=yes" should set BarProp visibility to false'
+- '"menubar" should set BarProp visibility to false'
+- '"menubar=no" should set BarProp visibility to false'
+- '"menubar=true" should set BarProp visibility to false'
+- '"menubar=yes" should set BarProp visibility to false'
+- '"minimizable" should set BarProp visibility to false'
+- '"minimizable=no" should set BarProp visibility to false'
+- '"minimizable=true" should set BarProp visibility to false'
+- '"minimizable=yes" should set BarProp visibility to false'
+- '"outerHeight=500" should set BarProp visibility to false'
+- '"outerWidth=500" should set BarProp visibility to false'
+- '"personalbar" should set BarProp visibility to false'
+- '"personalbar=no" should set BarProp visibility to false'
+- '"personalbar=true" should set BarProp visibility to false'
+- '"personalbar=yes" should set BarProp visibility to false'
+- '"popup" should set BarProp visibility to false'
+- '"popup=1" should set BarProp visibility to false'
+- '"popup=1,location,toolbar,menubar,resizable,scrollbars,status" should set BarProp
+  visibility to false'
+- '"popup=true" should set BarProp visibility to false'
+- '"popup=true,location,toolbar,menubar,resizable,scrollbars,status" should set BarProp
+  visibility to false'
+- '"popup=yes,location,toolbar,menubar,resizable,scrollbars,status" should set BarProp
+  visibility to false'
+- '"resizable" should set BarProp visibility to false'
+- '"resizable,scrollbars,status" should set BarProp visibility to false'
+- '"resizable=no" should set BarProp visibility to false'
+- '"resizable=true" should set BarProp visibility to false'
+- '"resizable=yes" should set BarProp visibility to false'
+- '"screenX=500" should set BarProp visibility to false'
+- '"screenY=500" should set BarProp visibility to false'
+- '"scrollbars" should set BarProp visibility to false'
+- '"scrollbars=no" should set BarProp visibility to false'
+- '"scrollbars=true" should set BarProp visibility to false'
+- '"scrollbars=yes" should set BarProp visibility to false'
+- '"status" should set BarProp visibility to false'
+- '"status=no" should set BarProp visibility to false'
+- '"status=true" should set BarProp visibility to false'
+- '"status=yes" should set BarProp visibility to false'
+- '"titlebar" should set BarProp visibility to false'
+- '"titlebar=no" should set BarProp visibility to false'
+- '"titlebar=true" should set BarProp visibility to false'
+- '"titlebar=yes" should set BarProp visibility to false'
+- '"toolbar" should set BarProp visibility to false'
+- '"toolbar=no" should set BarProp visibility to false'
+- '"toolbar=true" should set BarProp visibility to false'
+- '"toolbar=yes" should set BarProp visibility to false'
+- '"top=500" should set BarProp visibility to false'
+- '"width=500" should set BarProp visibility to false'
+html/browsers/the-window-object/open-close/open-features-non-integer-height.html:
+- "[harness] TIMEOUT"
+- features "height=405  " should set "height=405"
+- features "height=405*3" should set "height=405"
+- features "height=405.32" should set "height=405"
+- features "height=405.5" should set "height=405"
+- features "height=405/5" should set "height=405"
+- features "height=405LLl" should set "height=405"
+- features "height=405^4" should set "height=405"
+- features "height=405e-1" should set "height=405"
+- features "height=405e1" should set "height=405"
+html/browsers/the-window-object/open-close/open-features-non-integer-innerheight.html:
+- features "innerheight=405  " should set "height=405"
+- features "innerheight=405*3" should set "height=405"
+- features "innerheight=405.32" should set "height=405"
+- features "innerheight=405.5" should set "height=405"
+- features "innerheight=405/5" should set "height=405"
+- features "innerheight=405LLl" should set "height=405"
+- features "innerheight=405^4" should set "height=405"
+- features "innerheight=405e-1" should set "height=405"
+- features "innerheight=405e1" should set "height=405"
+html/browsers/the-window-object/open-close/open-features-non-integer-innerwidth.html:
+- features "innerwidth=405  " should set "width=405"
+- features "innerwidth=405*3" should set "width=405"
+- features "innerwidth=405.32" should set "width=405"
+- features "innerwidth=405.5" should set "width=405"
+- features "innerwidth=405/5" should set "width=405"
+- features "innerwidth=405LLl" should set "width=405"
+- features "innerwidth=405^4" should set "width=405"
+- features "innerwidth=405e-1" should set "width=405"
+- features "innerwidth=405e1" should set "width=405"
+html/browsers/the-window-object/open-close/open-features-non-integer-left.html:
+- features "left=105  " should set "left=105"
+- features "left=105*3" should set "left=105"
+- features "left=105.32" should set "left=105"
+- features "left=105.5" should set "left=105"
+- features "left=105/5" should set "left=105"
+- features "left=105LLl" should set "left=105"
+- features "left=105^4" should set "left=105"
+- features "left=105e-1" should set "left=105"
+- features "left=105e1" should set "left=105"
+html/browsers/the-window-object/open-close/open-features-non-integer-screenx.html:
+- features "screenx=105  " should set "screenx=105"
+- features "screenx=105*3" should set "screenx=105"
+- features "screenx=105.32" should set "screenx=105"
+- features "screenx=105.5" should set "screenx=105"
+- features "screenx=105/5" should set "screenx=105"
+- features "screenx=105LLl" should set "screenx=105"
+- features "screenx=105^4" should set "screenx=105"
+- features "screenx=105e-1" should set "screenx=105"
+- features "screenx=105e1" should set "screenx=105"
+html/browsers/the-window-object/open-close/open-features-non-integer-screeny.html:
+- features "screeny=405  " should set "screeny=405"
+- features "screeny=405*3" should set "screeny=405"
+- features "screeny=405.32" should set "screeny=405"
+- features "screeny=405.5" should set "screeny=405"
+- features "screeny=405/5" should set "screeny=405"
+- features "screeny=405LLl" should set "screeny=405"
+- features "screeny=405^4" should set "screeny=405"
+- features "screeny=405e-1" should set "screeny=405"
+- features "screeny=405e1" should set "screeny=405"
+html/browsers/the-window-object/open-close/open-features-non-integer-top.html:
+- features "top=105  " should set "top=105"
+- features "top=105*3" should set "top=105"
+- features "top=105.32" should set "top=105"
+- features "top=105.5" should set "top=105"
+- features "top=105/5" should set "top=105"
+- features "top=105LLl" should set "top=105"
+- features "top=105^4" should set "top=105"
+- features "top=105e-1" should set "top=105"
+- features "top=105e1" should set "top=105"
+html/browsers/the-window-object/open-close/open-features-non-integer-width.html:
+- features "width=405  " should set "width=405"
+- features "width=405*3" should set "width=405"
+- features "width=405.32" should set "width=405"
+- features "width=405.5" should set "width=405"
+- features "width=405/5" should set "width=405"
+- features "width=405LLl" should set "width=405"
+- features "width=405^4" should set "width=405"
+- features "width=405e-1" should set "width=405"
+- features "width=405e1" should set "width=405"
+html/browsers/the-window-object/open-close/open-features-tokenization-innerheight-innerwidth.html:
+- '" innerheight = 402" should set height of opened window'
+- '" innerwidth = 401" should set width of opened window'
+- '",innerheight=402,," should set height of opened window'
+- '",innerwidth=401,," should set width of opened window'
+- '"INNERHEIGHT=402" should set height of opened window'
+- '"INNERWIDTH=401" should set width of opened window'
+- '"\ninnerheight= 402" should set height of opened window'
+- '"\ninnerwidth= 401" should set width of opened window'
+- '"innerHeight=402" should set height of opened window'
+- '"innerWidth=401" should set width of opened window'
+- '"innerheight=402" should set height of opened window'
+- '"innerheight==402" should set height of opened window'
+- '"innerwidth=401" should set width of opened window'
+- '"innerwidth==401" should set width of opened window'
+html/browsers/the-window-object/open-close/open-features-tokenization-screenx-screeny.html:
+- '" screenx = 141" should set left position of opened window'
+- '" screeny = 142" should set top position of opened window'
+- '",screenx=141,," should set left position of opened window'
+- '",screeny=142,," should set top position of opened window'
+- '"SCREENX=141" should set left position of opened window'
+- '"SCREENY=142" should set top position of opened window'
+- '"\nscreenx= 141" should set left position of opened window'
+- '"\nscreeny= 142" should set top position of opened window'
+- '"screenX=141" should set left position of opened window'
+- '"screenY=142" should set top position of opened window'
+- '"screenx=141" should set left position of opened window'
+- '"screenx==141" should set left position of opened window'
+- '"screeny=142" should set top position of opened window'
+- '"screeny==142" should set top position of opened window'
+html/browsers/the-window-object/open-close/open-features-tokenization-top-left.html:
+- |-
+  "
+  left= 141" should set left position of opened window
+- '" left = 141" should set left position of opened window'
+- '" top = 142" should set top position of opened window'
+- '",,top= 152, left=152" should set top and left position of opened window'
+- '",left=141,," should set left position of opened window'
+- '",top=142,," should set top position of opened window'
+- '"LEFT=141" should set left position of opened window'
+- '"TOP=142" should set top position of opened window'
+- '"\ttop= 142" should set top position of opened window'
+- '"left=141" should set left position of opened window'
+- '"left==141" should set left position of opened window'
+- '"top=142" should set top position of opened window'
+- '"top=152,,left=152," should set top and left position of opened window'
+- '"top=152,left=152" should set top and left position of opened window'
+- '"top=152==left=152" should set top and left position of opened window'
+- '"top==142" should set top position of opened window'
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/open-close/open-features-tokenization-width-height.html:
+- '" height = 402 , width = 401 ," should set height and width of opened window'
+- '" height = 402" should set height of opened window'
+- '" width = 401" should set width of opened window'
+- '",height=402,," should set height of opened window'
+- '",height=402,,width==401" should set height and width of opened window'
+- '",width=401,," should set width of opened window'
+- '"HEIGHT=402" should set height of opened window'
+- '"HEIGHT=402, WIDTH=401" should set height and width of opened window'
+- '"WIDTH=401" should set width of opened window'
+- '"\nheight= 402" should set height of opened window'
+- '"\nheight= 402,,width=\n401" should set height and width of opened window'
+- '"\nwidth= 401" should set width of opened window'
+- '"height=402" should set height of opened window'
+- '"height=402,width=401" should set height and width of opened window'
+- '"height==402 width = 401" should set height and width of opened window'
+- '"height==402" should set height of opened window'
+- '"width=401" should set width of opened window'
+- '"width==401" should set width of opened window'
+html/browsers/the-window-object/open-close/script-closable.html:
+- Window created by form with noopener is script-closable
+- Window created by form with opener is script-closable
+- Window created by link with noopener is script-closable
+- Window created by link with opener is script-closable
+- Window created by script with noopener is script-closable
+- Window created by script with opener is script-closable
+- "[harness] TIMEOUT"
+html/browsers/the-window-object/security-window/window-security.https.html:
+- A SecurityError exception must be thrown when window.onmousewheel is accessed from
+  a different origin.
+html/browsers/the-window-object/self-et-al.window.js:
+- "[harness] TIMEOUT"
+- iframeWindow.frames before and after removal
+- iframeWindow.globalThis before and after removal
+- popupWindow.frames before, after closing, and after discarding
+- popupWindow.globalThis before, after closing, and after discarding
+- popupWindow.self before, after closing, and after discarding
+- popupWindow.window before, after closing, and after discarding
+html/browsers/the-window-object/window-aliases.html:
+- frames should be the global object
+html/browsers/the-window-object/window-indexed-access-vs-named-access.html:
+- 'Window prototype: document-tree child navigable with target name 1 (named access)'
+- 'Window prototype: document-tree child navigable with target name 2 (named access)'
+- 'Window prototype: document-tree child navigable with target name 3 (named access)'
+- 'Window prototype: element with id 0 (named access)'
+- 'Window prototype: element with id 4 (named access)'
+- 'WindowProxy: document-tree child navigable with target name 3 (named access)'
+- 'WindowProxy: element with id 4 (named access)'
+html/browsers/the-window-object/window-indexed-properties-delete-no-cache.html:
+- Absence of index '0' is not cached
+- Presence of index '0' is not cached
+html/browsers/the-window-object/window-indexed-properties-strict.html:
+- 'Borderline numeric key: 2 ** 32 - 2 is an index (strict mode)'
+- Indexed properties of the window object (strict mode) 1
+- Indexed properties of the window object (strict mode) 2
+- Indexed properties of the window object (strict mode) 3
+html/browsers/the-window-object/window-indexed-properties.html:
+- 'Borderline numeric key: 2 ** 32 - 2 is an index'
+- Ensure indexed properties have the correct configuration
+- Indexed properties of the window object (non-strict mode) 1
+- Indexed properties of the window object (non-strict mode) 2
+- Indexed properties of the window object (non-strict mode) 3
+html/browsers/the-window-object/window-open-noopener.html:
+- noopener window.open targeting _parent
+- noopener window.open targeting _self
+- noopener window.open targeting _top
+html/browsers/the-window-object/window-open-popup-behavior.html:
+- " (expect tab)"
+- ",noopener (expect tab)"
+- ",noopener,noreferrer,popup (expect tab)"
+- ",noreferrer (expect tab)"
+- ",popup (expect popup)"
+- "[harness] TIMEOUT"
+- location=yes,menubar=yes,scrollbars=yes (expect popup)
+- location=yes,menubar=yes,scrollbars=yes,noopener (expect tab)
+- location=yes,menubar=yes,scrollbars=yes,noopener,noreferrer,popup (expect tab)
+- location=yes,menubar=yes,scrollbars=yes,noreferrer (expect tab)
+- location=yes,menubar=yes,scrollbars=yes,popup (expect popup)
+- location=yes,scrollbars=yes,status=yes (expect popup)
+- location=yes,scrollbars=yes,status=yes,noopener (expect tab)
+- location=yes,scrollbars=yes,status=yes,noopener,noreferrer,popup (expect tab)
+- location=yes,scrollbars=yes,status=yes,noreferrer (expect tab)
+- location=yes,scrollbars=yes,status=yes,popup (expect popup)
+- location=yes,toolbar=yes,menubar=yes (expect popup)
+- location=yes,toolbar=yes,menubar=yes,noopener (expect tab)
+- location=yes,toolbar=yes,menubar=yes,noopener,noreferrer,popup (expect tab)
+- location=yes,toolbar=yes,menubar=yes,noreferrer (expect tab)
+- location=yes,toolbar=yes,menubar=yes,popup (expect popup)
+- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes (expect
+  tab)
+- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,noopener
+  (expect tab)
+- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,noopener,noreferrer,popup
+  (expect tab)
+- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,noreferrer
+  (expect tab)
+- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,popup
+  (expect popup)
+- location=yes,toolbar=yes,status=yes (expect popup)
+- location=yes,toolbar=yes,status=yes,noopener (expect tab)
+- location=yes,toolbar=yes,status=yes,noopener,noreferrer,popup (expect tab)
+- location=yes,toolbar=yes,status=yes,noreferrer (expect tab)
+- location=yes,toolbar=yes,status=yes,popup (expect popup)
+- menubar=yes,resizable=yes,scrollbars=yes (expect popup)
+- menubar=yes,resizable=yes,scrollbars=yes,noopener (expect tab)
+- menubar=yes,resizable=yes,scrollbars=yes,noopener,noreferrer,popup (expect tab)
+- menubar=yes,resizable=yes,scrollbars=yes,noreferrer (expect tab)
+- menubar=yes,resizable=yes,scrollbars=yes,popup (expect popup)
+- resizable=yes,scrollbars=yes,status=yes (expect popup)
+- resizable=yes,scrollbars=yes,status=yes,noopener (expect tab)
+- resizable=yes,scrollbars=yes,status=yes,noopener,noreferrer,popup (expect tab)
+- resizable=yes,scrollbars=yes,status=yes,noreferrer (expect tab)
+- resizable=yes,scrollbars=yes,status=yes,popup (expect popup)
+- toolbar=yes,menubar=yes,resizable=yes (expect popup)
+- toolbar=yes,menubar=yes,resizable=yes,noopener (expect tab)
+- toolbar=yes,menubar=yes,resizable=yes,noopener,noreferrer,popup (expect tab)
+- toolbar=yes,menubar=yes,resizable=yes,noreferrer (expect tab)
+- toolbar=yes,menubar=yes,resizable=yes,popup (expect popup)
+- toolbar=yes,resizable=yes,status=yes (expect popup)
+- toolbar=yes,resizable=yes,status=yes,noopener (expect tab)
+- toolbar=yes,resizable=yes,status=yes,noopener,noreferrer,popup (expect tab)
+- toolbar=yes,resizable=yes,status=yes,noreferrer (expect tab)
+- toolbar=yes,resizable=yes,status=yes,popup (expect popup)
+- undefined (expect tab)
+html/browsers/the-window-object/window-open-windowfeatures-values.html:
+- Test popup, expected interpretation is true
+- Test popup=-1, expected interpretation is true
+- Test popup=1, expected interpretation is true
+- Test popup=1foo, expected interpretation is true
+- Test popup=99999, expected interpretation is true
+- Test popup=true, expected interpretation is true
+- Test popup=yes, expected interpretation is true
+html/browsers/the-window-object/window-properties.https.html:
+- 'Window readonly getter in detached iframe: frames'
+- 'Window readonly getter in detached iframe: self'
+- 'Window readonly getter in detached iframe: window'
+- 'Window readonly getter in iframe: frames'
+- 'Window readonly getter in iframe: self'
+- 'Window readonly getter in iframe: window'
+- 'Window readonly getter: frames'
+html/browsers/the-windowproxy-exotic-object/document-tree-child-browsing-context-name-property-set.sub.html:
+- Cross origin child window's name shadows the second candidate of a same origin iframe
+html/browsers/the-windowproxy-exotic-object/windowproxy-prevent-extensions.html: HARNESS_ERROR
+html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-cross-origin-domain.sub.html:
+- 'Cross-origin via document.domain: setting the prototype to an empty object via
+  __proto__ should throw a "SecurityError" DOMException'
+- 'Cross-origin via document.domain: setting the prototype to null via Object.setPrototypeOf
+  should not throw'
+- 'Cross-origin via document.domain: setting the prototype to null via Reflect.setPrototypeOf
+  should return true'
+- 'Cross-origin via document.domain: setting the prototype to null via __proto__ should
+  throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
+- 'Cross-origin via document.domain: the prototype is null'
+- 'Cross-origin via document.domain: the prototype must still be null'
+html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-cross-origin.sub.html:
+- 'Cross-origin: setting the prototype to null via Object.setPrototypeOf should not
+  throw'
+- 'Cross-origin: setting the prototype to null via Reflect.setPrototypeOf should return
+  true'
+html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-goes-cross-origin-domain.sub.html:
+- 'Became cross-origin via document.domain: setting the prototype to an empty object
+  via __proto__ should throw a "SecurityError" DOMException'
+- 'Became cross-origin via document.domain: setting the prototype to null via Object.setPrototypeOf
+  should not throw'
+- 'Became cross-origin via document.domain: setting the prototype to null via Reflect.setPrototypeOf
+  should return true'
+- 'Became cross-origin via document.domain: setting the prototype to null via __proto__
+  should throw a "SecurityError" since it ends up in CrossOriginGetOwnProperty'
+- 'Became cross-origin via document.domain: setting the prototype to the original
+  value from before going cross-origin via __proto__ should throw a "SecurityError"
+  DOMException'
+- 'Became cross-origin via document.domain: the prototype is now null'
+- 'Became cross-origin via document.domain: the prototype must still be null'
+html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-same-origin-domain.sub.html:
+- 'Same-origin-domain prerequisite check: the original prototype is accessible'
+- "[harness] ERROR"
+html/browsers/the-windowproxy-exotic-object/windowproxy-prototype-setting-same-origin.html:
+- 'Same-origin: setting the prototype to an empty object via Object.setPrototypeOf
+  should throw a TypeError'
+- 'Same-origin: setting the prototype to an empty object via Reflect.setPrototypeOf
+  should return false'
+- 'Same-origin: setting the prototype to an empty object via __proto__ should throw
+  a TypeError'
+- 'Same-origin: the prototype must still be its original value'
+html/browsers/windows/auxiliary-browsing-contexts/named-lookup-noopener.html:
+- Two noopener window.open() calls create separate windows
+- Two rel=noopener <a href> clicks create separate windows
+html/browsers/windows/auxiliary-browsing-contexts/named-lookup-scoped-to-browsing-context-group.html:
+- named lookup scoped to browsing context group
+html/browsers/windows/auxiliary-browsing-contexts/no-proactive-swap-when-other-contexts-in-group.html:
+- no proactive browsing context group change when other contexts in group
+html/browsers/windows/auxiliary-browsing-contexts/opener-closed.html:
+- An auxiliary browsing context should report `null` for `window.opener` when that
+  browsing context is discarded
+- "[harness] TIMEOUT"
+html/browsers/windows/auxiliary-browsing-contexts/opener-multiple.html:
+- An auxiliary browsing context should be able to open another auxiliary browsing
+  context
+html/browsers/windows/auxiliary-browsing-contexts/opener-setter.html:
+- Auxiliary browsing context created via `window.open` and setting `window.opener`
+  to `null` should report `window.opener` `null`
+- Auxiliary browsing context created via `window.open` and setting `window.opener`
+  to `test` should report `test`
+- "[harness] TIMEOUT"
+html/browsers/windows/auxiliary-browsing-contexts/opener.html:
+- Browsing context created with `window.open` should report `window.opener`
+- Newly-created auxiliary browsing context should report `window.opener`
+- "[harness] TIMEOUT"
+html/browsers/windows/browsing-context-names/choose-_parent-003.html:
+- _parent should reuse window.parent context
+html/browsers/windows/browsing-context-names/choose-_top-001.html:
+- Should choose current browsing context for "_top" if current is top
+html/browsers/windows/browsing-context-names/choose-_top-002.html:
+- Should choose top browsing context for "_top" if current is not top
+html/browsers/windows/browsing-context-names/choose-_top-003.html:
+- choosing _top context should be case-insensitive
+html/browsers/windows/browsing-context-names/duplicate-name-order.html:
+- Duplicate name lookup order
+html/browsers/windows/clear-window-name.https.html:
+- Window.name is not reset at the first navigation away from initial about:blank with
+  noopener
+- Window.name is not reset at the first navigation away from initial about:blank with
+  window.opener set to null
+- Window.name is not reset at the first navigation away from loaded initial about:blank
+- Window.name is not reset at the same-origin navigation with window.opener set to
+  null
+- Window.name is not reset if the document.domain is set to the parent domain
+- Window.name is not reset when there is an opener around
+- Window.name is not reset when there is an opener around (cross-origin)
+- "[harness] TIMEOUT"
+- window.name is not reset after navigating to an about:blank page from a non-about:blank
+  page
+html/browsers/windows/consume-user-activation/window-open-multi-global.html:
+- "[harness] TIMEOUT"
+- window.open() and consuming user activation with multiple globals in play
+html/browsers/windows/dangling-markup-window-name.html:
+- Dangling Markup in target is not reset when set by window.open
+html/browsers/windows/document-domain-nested-navigate.window.js:
+- Navigated frame to about:blank and document.domain
+html/browsers/windows/embedded-opener-remove-frame.html:
+- opener of discarded auxiliary browsing context
+- opener of discarded nested browsing context
+html/browsers/windows/embedded-opener.html:
+- opener and embedded documents; using window.open()
+html/browsers/windows/iframe-cross-origin-print.sub.html:
+- "== html/browsers/windows/iframe-nested-print-ref.html"
+html/browsers/windows/iframe-cross-origin-scaled-print.sub.html:
+- "== html/browsers/windows/iframe-nested-scaled-print-ref.html (both renderings blank)"
+html/browsers/windows/iframe-nested-print.html:
+- "== html/browsers/windows/iframe-nested-print-ref.html"
+html/browsers/windows/nested-browsing-contexts/frameElement-siblings.sub.html:
+- it must return the iframe element if the pages are same-origin domain
+html/browsers/windows/nested-browsing-contexts/frameElement.sub.html:
+- The window's frameElement attribute must return its container element if it is a
+  nested browsing context
+html/browsers/windows/nested-browsing-contexts/name-attribute.window.js:
+- "[harness] TIMEOUT"
+- cross-origin <embed name=>
+- cross-origin <embed name=initialvalue>
+- cross-origin <embed>
+- cross-origin <object name=>
+- cross-origin <object name=initialvalue>
+- cross-origin <object>
+- same-origin <embed name=>
+- same-origin <embed name=initialvalue>
+- same-origin <embed>
+- same-origin <object name=>
+- same-origin <object name=initialvalue>
+- same-origin <object>
+html/browsers/windows/nested-browsing-contexts/window-parent-null.html:
+- "`window.parent` null when parent browsing context container removed"
+html/browsers/windows/nested-browsing-contexts/window-parent.html:
+- "`window.parent` for multiple nested browsing contexts"
+html/browsers/windows/nested-browsing-contexts/window-top-null.html:
+- "`window.top`null when any ancestor browsing context container removed"
+html/browsers/windows/nested-browsing-contexts/window-top.html:
+- One nested iframe
+- Two nested iframes
+html/browsers/windows/noreferrer-window-name.html:
+- Following a noreferrer link with a named target should not cause creation of a window
+  that can be targeted by another noreferrer link with the same named target
+- "[harness] TIMEOUT"
+html/browsers/windows/opener-string.window.js:
+- Setting popup.opener to a string
+html/browsers/windows/restore-window-name-manual.https.html:
+- "[harness] TIMEOUT"
+- "[harness] no subtests"
+html/browsers/windows/targeting-cross-origin-nested-browsing-contexts.html:
+- Targeting nested browsing contexts
 html/canvas/element/color-type/2d.color.type.u8p3.to.f16srgb.to.u8p3.html:
 - test srgb float16 canvas storing 8-bit display-p3 data accurately
 html/canvas/element/color-type/2d.color.type.u8srgb.to.f16p3.to.u8srgb.html:
