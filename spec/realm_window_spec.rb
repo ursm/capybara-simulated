@@ -385,4 +385,19 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.execute_script("parsed.body.append('y'); detached.setAttribute('f1', '1');")
     expect(session.evaluate_script('recs')).to eq(%w[childList attributes])
   end
+
+  it 'keeps the document of a frame it removed readable across a navigation of its opener' do
+    popup = open_popup
+    session.within_window(popup) do
+      session.execute_script(<<~JS)
+        const frame = document.createElement('iframe');
+        frame.srcdoc = '<title>RM</title>';
+        document.body.appendChild(frame);
+      JS
+      expect(session.evaluate_script("document.querySelectorAll('iframe')[1].contentDocument.title")).to eq('RM')
+      session.execute_script("const f = document.querySelectorAll('iframe')[1]; window.rd = f.contentDocument; f.remove();")
+    end
+    session.visit('/second')
+    session.within_window(popup) { expect(session.evaluate_script('rd.title')).to eq('RM') }
+  end
 end

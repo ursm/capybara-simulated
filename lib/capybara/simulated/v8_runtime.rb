@@ -457,8 +457,10 @@ module Capybara
           ids = (going + discarded_realm_ids + frame_realms_held).uniq
           frame_realms_held.clear
         else
-          ids = discarded_realm_ids.dup
-          frame_realms_held.concat(going)
+          # (…and those of frames the page's or a window's script removed since, which a window's script may hold a
+          # document of just the same)
+          ids = []
+          frame_realms_held.concat(going, discarded_realm_ids)
         end
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
