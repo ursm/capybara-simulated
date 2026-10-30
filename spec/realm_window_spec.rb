@@ -358,4 +358,20 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(session.windows.last) { expect(session).to have_css('#second') }
     expect(session.evaluate_script('[w.document.adoptedStyleSheets.length, w.getSelection().rangeCount, records]')).to eq([0, 0, 0])
   end
+
+  it 'keeps the observers of the nodes of its realm out of the document it renews' do
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      window.parsed = new w.DOMParser().parseFromString('<p>x</p>', 'text/html');
+      window.detached = w.document.createElement('div');
+      window.recs = [];
+      const mo = new MutationObserver((rs) => rs.forEach((r) => recs.push(r.type)));
+      mo.observe(parsed.body, {childList: true});
+      mo.observe(detached, {attributes: true});
+      w.location = '/second';
+    JS
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    session.execute_script("parsed.body.append('y'); detached.setAttribute('f1', '1');")
+    expect(session.evaluate_script('recs')).to eq(%w[childList attributes])
+  end
 end

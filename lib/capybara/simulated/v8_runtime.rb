@@ -448,10 +448,15 @@ module Capybara
           going.each {|id| evict_window_proxies(id) }
           @ctx&.eval_void(going.map {|id| "__dom.discardRealm(#{id.to_i}); __dom.loseNavigableOf(#{id.to_i});" }.join) rescue nil
         end
-        # (…the arenas of the page's frames a kept window may still read dropped only once no window is: `lost_realm_ids`)
-        ids = kept.empty? ? (going + discarded_realm_ids + lost_realm_ids).uniq : discarded_realm_ids.dup
-        lost_realm_ids.clear if kept.empty?
-        lost_realm_ids.concat(going) unless kept.empty?
+        # (…the arenas of the page's frames a kept window may still read dropped once no window is, or past the last
+        # `LOST_REALMS_KEPT`: `lost_realm_ids`)
+        if kept.empty?
+          ids = (going + discarded_realm_ids + lost_realm_ids).uniq
+          lost_realm_ids.clear
+        else
+          lost_realm_ids.concat(going)
+          ids = discarded_realm_ids + lost_realm_ids.shift([lost_realm_ids.size - LOST_REALMS_KEPT, 0].max)
+        end
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
@@ -477,8 +482,13 @@ module Capybara
       # The frame realms the page disposed (`dispose_frame_realm`), its page leave to drop.
       def discarded_realm_ids = (@discarded_realm_ids ||= [])
       # …and those of the page's frames its navigation disposed under kept windows, which may hold their WindowProxies:
-      # their arenas, which say their navigables are lost, dropped once no window is.
+      # their arenas, which say their navigables are lost, dropped once no window is — or, past the last
+      # `LOST_REALMS_KEPT` of them, the oldest: whether a script still holds a proxy of one is its heap's to know (each
+      # realm's map of them lets it go as the page navigates, `evict_window_proxies`), which no host call sees short of a
+      # finalizer per proxy; a proxy of a frame dropped so reads its window as it was, not closed. (A window open across
+      # a run of page navigations keeps 64 frames' arenas at most.)
       def lost_realm_ids = (@lost_realm_ids ||= [])
+      LOST_REALMS_KEPT = 64
 
       # Frame-scoped navigation: tear down the realm `old_id` and build a fresh
       # one for the same `<iframe>` from the just-fetched document, returning the

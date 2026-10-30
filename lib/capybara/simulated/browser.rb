@@ -4455,7 +4455,10 @@ module Capybara
         end
         # A terminal event (`__close` / `__error`) completes its socket's close handshake — release the clock hold (a
         # server-INITIATED close's none: no ws_close held it).
-        events.each {|e| @ws_closing.delete(e[:id]) if e[:type] == '__close' || e[:type] == '__error' }
+        # …and its connection's records let go of: its reader is done with it (`run_websocket_reader` closed its end).
+        ended = events.filter_map {|e| e[:id] if e[:type] == '__close' || e[:type] == '__error' }
+        ended.each {|id| @ws_closing.delete(id) }
+        forget_websockets(ended) unless ended.empty?
         events.size
       end
 
@@ -4478,6 +4481,20 @@ module Capybara
 
       # The window's sockets, as its document goes (a navigation commits another): each made to disappear, and what
       # its readers had queued for the document gone with it.
+      # The records of connections `ids` let go of — their sockets, the app's end, their reader threads, their clients —
+      # once each ended.
+      private def forget_websockets(ids)
+        @websocket_lock.synchronize do
+          ids.each do |id|
+            @websocket_sockets.delete(id)
+            @websocket_app_sockets.delete(id)&.close rescue nil
+            @websocket_threads.delete(id)
+            @websocket_workers.delete(id)
+            @websocket_realms.delete(id)
+          end
+        end
+      end
+
       private def drop_document_websockets
         kept = @runtime.window_realm_trees
         ws_drop_client(kept: kept)

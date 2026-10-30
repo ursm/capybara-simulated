@@ -1879,7 +1879,9 @@ fn traversable_of(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mut
 fn window_traversable(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mutex<Traversable>>, i32)> {
     traversable_of(arena, realm).and_then(|(t, window)| Some((t, window?)))
 }
-// The session storage shed of the top-level traversable realm `realm`'s document is of (`session_storage`), 0 for none.
+// The session storage shed of the top-level traversable realm `realm`'s document is of (`session_storage`) — 0 for none (a
+// removed frame's document, a window's gone): no shed's, whose areas hold nothing (storage_areas.rs `area_key` takes
+// none below 1), never one another traversable shares.
 pub(crate) fn session_storage_of(arena: &crate::dom::RealmArena, realm: i32) -> u64 {
     traversable_of(arena, realm).map_or(0, |(t, _)| lock(&t).session_storage)
 }

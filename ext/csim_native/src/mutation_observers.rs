@@ -327,7 +327,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "moCreate", create, context_id);
     crate::dom::register(scope, ns, "moObserve", observe, context_id);
     crate::dom::register(scope, ns, "moDisconnect", disconnect, context_id);
-    crate::dom::register(scope, ns, "moForgetTargetsHere", forget_targets_here, context_id);
+    crate::dom::register(scope, ns, "moForgetTargetsIn", forget_targets_in, context_id);
     crate::dom::register(scope, ns, "moRemoveTransients", remove_transients, context_id);
     crate::dom::register(scope, ns, "moRecord", record, context_id);
     crate::dom::register(scope, ns, "moTakeRecords", take_records, context_id);
@@ -635,13 +635,14 @@ mod tests {
     }
 }
 
-// __dom.moForgetTargetsHere() — every observer's registration on a node of the calling realm let go of: its document is
-// to be a new one, which no observer registered on the old (v8_runtime.rb `reuse_window_realm`).
-fn forget_targets_here(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
+// __dom.moForgetTargetsIn(docNid) — every observer's registration on document `docNid` and its shadow-including inclusive
+// descendants let go of: it is to be a new document, which no observer registered on the old (v8_runtime.rb
+// `reuse_window_realm`) — none on a node of its realm out of it (a detached one, another document's), which observe on.
+fn forget_targets_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let arena = &mut crate::dom::dom(scope).arena;
-    let here: Vec<NodeId> = arena.observers.lists.keys().copied().filter(|&id| arena.get(id).is_some_and(|n| n.realm == cid)).collect();
-    for id in here {
+    let within: Vec<NodeId> = arena.observers.lists.keys().copied().filter(|&id| arena.shadow_including_inclusive_ancestor(doc, id)).collect();
+    for id in within {
         arena.observers.forget(id);
     }
 }
