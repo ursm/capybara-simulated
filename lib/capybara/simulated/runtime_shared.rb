@@ -118,9 +118,6 @@ module Capybara
         # (…the window of handle a[0] — '' this one — set closing, its close a task of its own)
         '__csimWindowClose'          => ->(b, *a) { b.close_window_of(a[0]); nil },
         '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },
-        # Fire an aux window's OWN `load` event (in its VM) — deferred by the
-        # opener so a child `window.onload` runs after the opener's current task.
-        '__csimFireAuxWindowLoad'    => ->(b, *a) { b.reaching_another_window { b.fire_aux_window_load(a[0]); nil } },
         # a[3] is the CREATING realm (the worker dies when it is discarded); a[4] that context's
         # CURRENT controller handle, which a DEDICATED worker inherits rather than scope-matching
         # its own — often opaque (blob:/data:) — script URL. 0 when the creator is uncontrolled.

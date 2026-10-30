@@ -2218,6 +2218,16 @@ module Capybara
       def inherit_creator(origin:, base:, url: nil)
         @creator = {origin: origin.to_s, base: base.to_s, url: url.to_s} unless origin.to_s.empty? || origin.to_s.start_with?('null')
       end
+      # HTML "create a new browsing context and document": a new window's initial about:blank, made with the window — its
+      # creator's origin and base URL where it has one (`inherit_creator`) — and completely loaded as it is, no parse run
+      # and no `load` fired (Chrome and Firefox measured: none at the window `open(url)` returns, none at `open()`'s), no
+      # session history entry of it; the navigation the window was opened for, if any, a task of its own after
+      # (Driver#open_aux_window), which replaces it — one to about:blank none, the document at its URL instead.
+      def open_initial_document(url = 'about:blank')
+        @current_url = url
+        record_response(200, {'content-type' => 'text/html'})
+        boot_response_into_ctx('', initial: true)
+      end
 
       def set_header(name, value)         ; @sticky_headers[name.to_s] = value.to_s ; end
       # Capybara's `current_window.resize_to(w, h)` lands here; the
@@ -7357,14 +7367,6 @@ module Capybara
       # `close()` of the window of `handle` — this one's own, '' — by this window's script (Driver#script_close_window).
       def close_window_of(handle)      = (@driver.script_close_window(self, handle.to_s.empty? ? window_handle.to_s : handle.to_s) if @driver.respond_to?(:script_close_window))
       def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
-      # An AUXILIARY window's own `load` is fired by its OPENER, one task after the
-      # document boots (platform-globals' `fireAuxLoadSoon`), so that a handler
-      # either side registers right after `window.open()` — the child reporting back
-      # through `window.opener`, the opener's own `w.onload` — is in place first.
-      # Booting must not pre-empt that, hence the flag; the main window has nobody
-      # to wait for and fires its own at the end of its boot.
-      attr_accessor :defer_window_load
-
       # Fire the window `load` for a document that has finished booting — once the
       # navigation that produced it is over AND the driver is back between calls.
       # Both halves matter: a `load` handler may navigate (submit a form, point an
@@ -7381,9 +7383,6 @@ module Capybara
       #   - `find_with_timer_fallback`, ahead of its timer gate — the backstop for a
       #     page that never ticks at all.
       # Returns whether this call fired (the drain chains on it).
-      #
-      # An AUXILIARY window's `load` is its opener's to fire (see
-      # `defer_window_load`), so this only clears the marker there.
       private def flush_pending_window_load
         return unless @window_load_due
         # `load` waits for the document's subresources, and images are now fetched async —
@@ -7398,14 +7397,6 @@ module Capybara
         return false if image_loads_pending? || (@runtime.call('__csimPageLoadDelayed') rescue false)
 
         @window_load_due = false
-        # An AUXILIARY window's first load is its opener's to fire — ONE-SHOT, because
-        # only that first document is opened through the opener; everything the window
-        # navigates to afterwards is its own to announce.
-        if @defer_window_load
-          @defer_window_load = false
-          return false
-        end
-
         fire_own_window_load
         # A `load` handler's own navigation is stashed like any other page-initiated
         # one; apply it here rather than leaving the page half-way through what its
@@ -7420,25 +7411,13 @@ module Capybara
         true
       end
 
-      # Fire an aux window's own window `load` (called by its opener, deferred).
-      def fire_aux_window_load(handle)  = (@driver.fire_aux_window_load(handle.to_s) if @driver.respond_to?(:fire_aux_window_load))
       # A throwing `load` handler (or a frame build that throws while the document's
       # subresources are flushed) is the page's problem, not the driver's — but it has
       # to be VISIBLE, or the page simply looks half-wired with no explanation.
-      # (…`delayable` false for an auxiliary window its opener fires the load of: one in the background, whose browser
-      # neither steps nor delivers its images, fires it with nothing to wait for — HTML would have it wait for them)
-      def fire_own_window_load(delayable: true)
-        @runtime.call('__csimFireWindowLoad', delayable)
+      private def fire_own_window_load
+        @runtime.call('__csimFireWindowLoad')
       rescue StandardError => e
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
-      end
-      # …the one its opener fires (Driver#fire_aux_window_load): the load of the document it has now, which the deferral
-      # of its first document's (`defer_window_load`) was waiting for — none still deferred, none due after, whichever
-      # document that is (one its opener navigated it to before this task, where the first loaded none: a 204's).
-      def fire_window_load_for_opener
-        @defer_window_load = false
-        @window_load_due   = false
-        fire_own_window_load(delayable: false)
       end
       # The session history out of a page's reach while `block` runs a handler of its whose document is on its way out
       # (`history_state` / `history_push` ignore what it asks).
@@ -7532,14 +7511,20 @@ module Capybara
         }
       end
 
-      # The messages another window's script posted to this one (session_history.rs `traversablePost`), each a task of its
-      # own: a `message` event at its window.
+      # The tasks other windows queued on this one, each a task of its own, in the order queued: a message another window's
+      # script posted to it (session_history.rs `traversablePost`), a `message` event at its window; the `load` of another
+      # window a realm of its listens for (`traversableLoaded`), its listeners there run — none of a realm gone since.
       private def deliver_posted_messages
-        posted = @session_history.take_posted
-        posted.each do |message|
-          @runtime.call('__csim_deliverWindowMessage', *message)
+        inbound = @session_history.take_inbound
+        inbound.each do |kind, *task|
+          if kind == :message
+            @runtime.call('__csim_deliverWindowMessage', *task)
+          else
+            target, window, realm = task
+            @runtime.realm_call(realm, '__csim_deliverWindowLoad', target, window) if realm.zero? || @runtime.frame_realm_alive?(realm)
+          end
         end
-        posted.size
+        inbound.size
       end
 
       # HTML "close a top-level traversable", the task a `close()` queued (Driver#script_close_window): its page asked
@@ -7576,12 +7561,20 @@ module Capybara
           @runtime.call('__csimEvaluateJavascriptURL', url)
         elsif (blob = planned[:blob])
           fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url, *blob)
+        elsif url.match?(/\Ablob:/i)
+          # (…one whose URL the source's store resolved to no blob — revoked before it asked — a network error)
+          fail_blob_document(url)
         elsif (post = planned[:post])
           body, content_type, origin_null = post
           navigate_post(url, body, content_type, origin_null: origin_null, **made)
         else
           visit(url, replace: planned[:replace], **made)
         end
+        true
+      rescue StandardError => e
+        # (…one that raises — the app's own error, a body it cannot read — this window's task's failure, not the driver
+        # command's that took it: the window left where the navigation got to, its handle still the test's to switch to)
+        warn "[csim] a planned navigation to #{url.inspect} raised: #{e.class}: #{e.message[0, 200]}"
         true
       end
 
@@ -11551,8 +11544,10 @@ module Capybara
         nil
       end
       # …and as a 204 / 205 makes none (`no_content_response?`): a window with no document yet — one `window.open` made
-      # on such a URL — left at the initial about:blank it was made with: its URL about:blank (Chrome: `about:blank`, from
-      # the window and its opener alike), its session history none of the navigation's.
+      # on such a URL — left at the initial about:blank it was made with (`open_initial_document`), which fires no load:
+      # its URL about:blank (Chrome: `about:blank`, from the window and its opener alike), its session history none of the
+      # navigation's. (…one the driver made no initial document for, the session's first window before its first visit,
+      # given one now)
       private def navigation_made_no_content(url)
         return navigation_made_no_document(url) if window_has_document?
 
@@ -11560,7 +11555,7 @@ module Capybara
         @session_history.forget(0)
         @current_url     = 'about:blank'
         @current_referer = ''   # (…its referrer its creator's, none of the navigation that made no document)
-        boot_response_into_ctx('')
+        open_initial_document if @document_handle.zero?
         nil
       end
       private def window_has_document?
@@ -11590,7 +11585,7 @@ module Capybara
         policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
       end
 
-      def boot_response_into_ctx(html, opaque_origin: false)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -11678,7 +11673,10 @@ module Capybara
           opts['controller'] = controller if controller
         end
         opts['opaqueOrigin'] = true if opaque_origin
-        creator, @creator = @creator, nil
+        # (…kept while the window is at its initial about:blank: the origin the navigation that replaces it leaves —
+        # `leaving_document_origin`)
+        creator = @creator
+        @creator = nil unless initial
         if creator && @current_url.to_s.match?(ABOUT_BLANK)
           opts['creatorOrigin'] = creator[:origin]
           opts['aboutBase']     = creator[:base]
@@ -11719,6 +11717,12 @@ module Capybara
         # The document, loaded, refreshes its service-worker client record (its URL may have moved since it reported
         # itself as it began loading), as a frame's does (V8Runtime).
         @runtime.call('__csim_swReportClient')
+        # (…a new window's initial about:blank completely loaded as it is made, which no parse made and whose `load` never
+        # fires: `open_initial_document`)
+        if initial
+          @runtime.call('__csimCompleteInitialDocument')
+          return
+        end
         # Marked, not fired: a `load` handler may navigate — submit a form, point an
         # iframe somewhere — and a navigation started while THIS one is still in
         # flight (`@navigating`) is not the same thing as one started from an idle
@@ -11726,11 +11730,10 @@ module Capybara
         # navigation, and failing that from the next find.
         @window_load_due = true
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
-        # …and fired HERE for a main document, before anything pumps the task queue:
-        # a browser's `load` precedes the page's own `setTimeout(0)`, and deferring
-        # it to the next drain put every page's load AFTER the init it is supposed to
-        # precede. An AUXILIARY window keeps the deferral — its first load belongs to
-        # its opener, and consuming that one-shot here loses it entirely.
+        # …and fired HERE, before anything pumps the task queue: a browser's `load` precedes the page's own `setTimeout(0)`,
+        # and deferring it to the next drain put every page's load AFTER the init it is supposed to precede — an auxiliary
+        # window's too, in the task of its own its navigation is, the listeners another window put on it told then
+        # (session_history.rs `traversableLoaded`).
         # The window `load` this boot owes waits for the images the parse just started (HTML:
         # load fires after subresources). Give their fetch threads a short GVL-yielding window
         # to land: they overlap the boot's JS (rusty releases the GVL) and are usually done
@@ -11749,7 +11752,7 @@ module Capybara
             sleep 0.005
           end
         end
-        flush_pending_window_load unless @defer_window_load
+        flush_pending_window_load
         flush_page_init
         @load_navigations_due = true
       end
@@ -12660,10 +12663,14 @@ module Capybara
         end
 
         # A driver's action recorded, and the navigations the documents it loaded planned as they loaded taken as it
-        # ends (`take_load_navigations`).
+        # ends (`take_load_navigations`) — and what it asked of the session's other windows, the navigation of a pop-up
+        # it opened among it, taken by their event loops then (`deliver_asked_tasks`): a `window_opened_by` block's
+        # window is at the document it was opened for as the block returns, as it was when its load ran within the
+        # action.
         private def driver_action(kind, description)
           result = record_action(kind, description) { yield }
           take_load_navigations
+          deliver_asked_tasks
           result
         end
       end

@@ -111,9 +111,6 @@ RSpec.describe 'a WindowProxy of another isolate\'s window' do
       expect(read('w.addEventListener')).to eq('SecurityError')
       expect(read('(w.onload = () => {}, "set")')).to eq('SecurityError')
       expect(read('w.__csimDocumentHtml')).to eq('SecurityError')
-      # (…nor the load the driver fires at it, which a page could forge, trusted, or reopen its handlers by)
-      expect(read('w.__csimFireLoad')).to eq('SecurityError')
-      expect(read('w.__csimAwaitLoad')).to eq('SecurityError')
     end
 
     # (…[[HasProperty]] by [[GetOwnProperty]], HTML's: Chrome and Firefox measured)

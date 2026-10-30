@@ -498,27 +498,22 @@ module Capybara
         window_browser(handle) or raise Capybara::WindowError, "Unknown window handle: #{handle}"
       end
 
-      # Open (or, by `name`, reuse) an auxiliary window. `target="_blank"`
-      # clicks and `window.open` both land here. A non-empty `name` that
-      # matches an existing window navigates that window instead of opening a
-      # new one (HTML window-name targeting); `opener_handle` records the
-      # opener so the new window's `window.opener` resolves back to it.
-      # `defer_load`: the caller will fire the new window's `load` itself, one task
-      # later, so that a handler either side registers right after `window.open()` is
-      # in place first (platform-globals' `fireAuxLoadSoon`). ONLY the JS `window.open`
-      # path does that — a `target=_blank` click or `open_new_window` hands nobody a
-      # reference to hook, so their window announces its own load like any other.
-      # (…`activation_realm` the realm of `source`'s whose window chose the new one, whose user activation a new window
-      # consumes — not one a name found)
       # The initiator of a new window's POST: the form document's (`post[:initiator]`, its URL, and `post[:origin_null]`,
       # whether its origin is opaque — an entered frame's, not the page's), else the source page's.
       private def post_initiator(post, source)
         {initiator: post[:initiator] || source&.raw_current_url, origin_null: post[:origin_null] == true}
       end
 
+      # Open (or, by `name`, reuse) an auxiliary window. `target="_blank"`
+      # clicks and `window.open` both land here. A non-empty `name` that
+      # matches an existing window navigates that window instead of opening a
+      # new one (HTML window-name targeting); `opener_handle` records the
+      # opener so the new window's `window.opener` resolves back to it.
+      # (…`activation_realm` the realm of `source`'s whose window chose the new one, whose user activation a new window
+      # consumes — not one a name found)
       # (…`by_script` whether web content made it — a script's `window.open`, a link's or a form's target — which a script
       # may close, not the driver's `open_new_window`: HTML "is created by web content", its traversable's)
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil,
+      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, creator: nil, activation_realm: nil,
                           user_activated: nil, by_script: true)
         name = name.to_s
         # (…a document's to a `data:` URL, which a top-level browsing context refuses one's navigation to — a new window
@@ -555,11 +550,10 @@ module Capybara
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
-        aux.defer_window_load = defer_load
         aux.window_handle = handle
-        # Register BEFORE visiting: the opened document's own boot scripts read
+        # Registered BEFORE its documents boot: their scripts read
         # `window.opener`, which resolves through this entry — so the entry
-        # (with its opener) must exist before `visit` runs those scripts.
+        # (with its opener) must exist before they run.
         aux.window_name = name
         # (…its opener browsing context the one opening it, which another window's familiarity with it goes through)
         if (opener_browser = window_browser(opener_handle))
@@ -578,34 +572,24 @@ module Capybara
         # (…and its initial about:blank document its creator's origin and base URL — the document that called
         # `window.open`: a window it opens at about:blank stays that document, its origin no new opaque one)
         aux.inherit_creator(**creator) if creator && opener_handle
-        if url && !url.empty?
+        # Its initial about:blank, made with it (HTML "create a new auxiliary browsing context": what `open()` hands back is
+        # a window at it, which its opener's script reads as the call returns), firing no load — and the navigation it was
+        # opened for, if any, planned: a task of the window's own that its event loop takes once this one's script is done
+        # (Browser#take_window_tasks), its document parsed, its scripts run and its load fired there, as any of its
+        # navigations' are (HTML "window open steps": "navigate" the new navigable) — a `<form target=_blank method=post>`'s
+        # a POST carrying its form's document's origin, a blob: URL's the blob of the click-time snapshot (a link's whose
+        # URL its page may revoke first) or of the source's store, the source's document its initiator either way. (…an
+        # about:blank one's none: the initial document at its URL — HTML's "URL and history update steps" in its place)
+        about_blank = url.to_s.match?(Browser::ABOUT_BLANK)
+        aux.open_initial_document(about_blank ? url.to_s : 'about:blank')
+        unless about_blank || url.to_s.empty?
           if post
-            # A `<form target=_blank method=post>` loads the new window via POST,
-            # carrying the opener's URL as referrer (unless rel=noreferrer → '').
-            aux.navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, user_activated: activated, **post_initiator(post, source))
-          # A blob: URL isn't rack-navigable and its bytes live in the OPENER's
-          # isolate — load the document directly from a click-time snapshot (a
-          # deferred target=_blank nav may revoke the URL first) or, failing that,
-          # the opener's blob store; one neither resolves is a network error.
-          elsif url.to_s.start_with?('blob:')
-            aux.fail_blob_document(url) unless load_blob_into_window(aux, url, source, snapshot: blob_snapshot)
+            post_window(aux, url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           else
-            # A form submission carries a referrer (the opener's URL) unless the
-            # form opted out via rel=noreferrer (referrer: ''). The OPENER's document
-            # is the navigation initiator — it seeds the popup load's Sec-Fetch-Site
-            # (the SameSite cookie gate reads it). raw_current_url: the ticking
-            # `current_url` must not run re-entrantly inside window.open.
-            aux.visit(url, referer: referrer, referrer_policy: referrer_policy, initiator: source&.raw_current_url, user_activated: activated)
+            blob = {bytes: blob_snapshot['bytes'], type: blob_snapshot['type'].to_s} if blob_snapshot.is_a?(Hash) && blob_snapshot['bytes']
+            navigate_window(aux, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated, blob: blob)
           end
         end
-        handle
-      rescue StandardError => e
-        # Aux window URL-load failure (binary content, network error, …)
-        # shouldn't tear down the test — the handle is already recorded so
-        # `window_opened_by` succeeds; within_window assertions on
-        # `current_url` may still pass through whatever `visit` managed to set
-        # before raising.
-        warn "[csim] open_aux_window(#{url.inspect}) raised: #{e.class}: #{e.message[0, 200]}"
         handle
       end
 
@@ -629,7 +613,7 @@ module Capybara
         # returns null. Same-partition keeps the normal opener.
         noopener ||= resolved.to_s.start_with?('blob:') && cross_partition_blob?(resolved, opener_browser)
         if noopener
-          # (…no opener_handle ⇒ window.opener null; loaded now, as no WindowProxy is handed back to fire its load)
+          # (…no opener_handle ⇒ window.opener null)
           # (…an empty URL about:blank, as the window open steps make it: the opener path's window realm is that already)
           open_aux_window(resolved || 'about:blank', name: name, source: opener_browser, activation_realm: opener_realm_id, referrer: referrer, referrer_policy: referrer_policy)
           return nil
@@ -657,7 +641,6 @@ module Capybara
           activation_realm: opener_realm_id,
           referrer:         referrer,
           referrer_policy:  referrer_policy,
-          defer_load:       true,
           creator:          {origin: about_origin, base: about_base, url: referrer}
         )
       end
@@ -758,15 +741,6 @@ module Capybara
       def window_traversable(handle)     = window_browser(handle)&.traversable&.id
       # Cross-window remote-ref RPC: route a node/object proxy op to the window
       # that owns the ref (handle), executing in that window's VM.
-      # (…the window's own load its opener fires — the stand-in for its load, whose real lifecycle is R13 S5's — after the
-      # tasks asked of it before: a navigation its opener planned as `open()` returned is of the document that load is
-      # then of, a close leaves none to fire it at — WPT navigate-to-about-blank-while-initial-load-pending.html. Taken
-      # within the opener's task, its script on the stack: bounded to this stand-in, gone with it.)
-      def fire_aux_window_load(handle)
-        b = window_browser(handle) or return
-        b.take_window_tasks
-        b.fire_window_load_for_opener unless b.discard_due?
-      end
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
@@ -798,10 +772,11 @@ module Capybara
       # history handling "replace")
       # A blob: URL's blob is resolved here too, in the source's blob URL store (`blob_bytes_for`), as HTML resolves a URL's
       # blob URL entry as it is parsed: one the source revokes after still loads; none, a revoked one's, is a network error.
-      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
+      # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
+      private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
         return if url.nil? || url.to_s.empty? || browser.top_level_data_refused?(url)
 
-        blob = blob_bytes_for(url, source || browser) if url.to_s.start_with?('blob:')
+        blob ||= blob_bytes_for(url, source || browser) if url.to_s.start_with?('blob:')
         browser.traversable.plan_navigation(
           url.to_s,
           replace,

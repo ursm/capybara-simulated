@@ -2960,10 +2960,6 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 - history.replaceState
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204.html:
 - about:blank on top of 204 loads async
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/load-pageshow-events-window-open.html:
-- load event does not fire on window.open('about:blank#foo')
-- load event does not fire on window.open('about:blank')
-- load event does not fire on window.open('about:blank?foo')
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-nourl.html:
 - "[harness] TIMEOUT"
 - location.assign
@@ -3314,8 +3310,6 @@ html/browsers/history/the-location-interface/same-hash.html:
 - Using location.href = "about:srcdoc#te<st" must reset scroll position
 html/browsers/history/the-location-interface/scripted_click_location_assign_during_load.html:
 - location.assign with click during load
-html/browsers/history/the-location-interface/scripted_form_submit_assign_during_load.html:
-- Assignment to location with form submit during load
 html/browsers/origin/cross-origin-objects/cross-origin-due-to-document-domain-only.html:
 - Cross-origin due to document.domain
 html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.html:
@@ -3435,7 +3429,6 @@ html/browsers/origin/cross-origin-objects/window-location-and-location-href-cros
 html/browsers/the-window-object/BarProp.window.js:
 - BarBrop objects of a nested Window
 - BarProp objects of an auxiliary Window
-- "[harness] TIMEOUT"
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-01.html:
 - The window's length must return the number of child browsing contexts(in iframe)
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-02.html:
@@ -3824,8 +3817,6 @@ html/browsers/windows/browsing-context-names/duplicate-name-order.html:
 - Duplicate name lookup order
 html/browsers/windows/clear-window-name.https.html:
 - Window.name is not reset if the document.domain is set to the parent domain
-- Window.name is reset at the first first cross-origin navigation with window.opener
-  set to null
 - "[harness] TIMEOUT"
 html/browsers/windows/consume-user-activation/window-open-multi-global.html:
 - window.open() and consuming user activation with multiple globals in play

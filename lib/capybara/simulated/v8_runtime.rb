@@ -1295,7 +1295,9 @@ module Capybara
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
-        realm.call('__csimFireWindowLoad') rescue nil
+        # (…a new window's initial about:blank completely loaded as it is made, firing no load: bridge.entry.js
+        # `__csimCompleteInitialDocument`)
+        realm.call(retarget_from ? '__csimFireWindowLoad' : '__csimCompleteInitialDocument') rescue nil
         realm.id
       rescue StandardError => e
         @browser.log_console('warn', "window realm load failed: #{e.message}")

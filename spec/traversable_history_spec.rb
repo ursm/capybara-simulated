@@ -183,9 +183,11 @@ RSpec.describe 'the session history of each traversable' do
   end
 
   # (…HTML "navigate" with a POST resource, the steps after the source snapshot continuing as the window's task)
+  # (…once the document it was opened for is in: a submission in the task that opened it aborts that navigation, the
+  # window's ongoing one, which the POST's then replaces its initial about:blank by)
   it 'posts a form to a window of another isolate by its name' do
+    session.execute_script("window.w = window.open('/a', 'named');")
     session.execute_script(<<~JS)
-      window.w = window.open('/a', 'named');
       document.body.insertAdjacentHTML('beforeend', '<form target=named method=post action=/posted><input name=k value=v></form>');
       document.forms[0].submit();
     JS
