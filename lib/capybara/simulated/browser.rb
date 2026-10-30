@@ -4967,13 +4967,12 @@ module Capybara
         sw_direct_fetch(sw_handle, req, client_handle)
       end
 
-      # A controlled worker's MAIN SCRIPT fetch, following the redirect chain the way
-      # Fetch does for a worker script request (mode 'same-origin', redirect 'follow').
-      # Each hop is re-matched against the registrations and dispatched to that scope's
-      # SW — an SW-provided redirect re-enters interception (HTTP-redirect fetch re-runs
-      # main fetch; worker-interception-redirect Case #3) — EXCEPT once a hop fell back
-      # to the network: from then on no SW sees the chain (Handle Fetch sets the
-      # request's service-workers mode to 'none'; Cases #1/#2).
+      # A controlled worker's MAIN SCRIPT fetch, hop by hop as the engine has it (worker_script_fetch.rs
+      # `WorkerScriptFetch`: a same-origin GET, its redirects followed, a hop to another origin or scheme, or the 21st, a
+      # network error): each hop re-matched against the registrations and dispatched to that scope's SW — an SW-provided
+      # redirect re-enters interception (HTTP-redirect fetch re-runs main fetch; worker-interception-redirect Case #3) —
+      # EXCEPT once a hop fell back to the network: from then on no SW sees the chain (Handle Fetch sets the request's
+      # service-workers mode to 'none'; Cases #1/#2).
       #
       # Returns {body:, url:, controller:}:
       #   `url`        — the FINAL RESPONSE URL, which becomes the worker's self.location
@@ -4982,22 +4981,19 @@ module Capybara
       #   `controller` — the SW that got the LAST fetch event; it controls the worker
       #                  even when the final URL left every scope (the spec's "final
       #                  service worker that got a fetch event"), or nil (all-network).
-      # Returns nil when the final response is an HTTP error (the worker fails to load),
-      # or :error when the load is BLOCKED (network-error respondWith, a response type
-      # same-origin mode forbids, a cross-origin / non-http Location, a redirect loop) —
-      # it must fail the worker start, never fall back to the network.
+      # Returns nil when the final response is no script (an HTTP error, a redirect it cannot follow: the worker fails to
+      # load), or :error when the load is BLOCKED (network-error respondWith, a response type same-origin mode forbids, a
+      # cross-origin / non-http Location, a redirect loop) — it must fail the worker start, never fall back to the network.
       def worker_main_script_fetch(sw_handle, url, client_handle, shared: false, creator_client: nil)
-        current    = url.to_s
-        sw         = sw_handle.to_i
-        sw_allowed = true
-        last_sw    = nil
-        hops       = 0
+        fetch   = Native::WorkerScriptFetch.new(url.to_s)
+        sw      = sw_handle.to_i
+        last_sw = nil
         loop do
-          # Attempts = redirects + 1, so exactly MAX_FETCH_REDIRECTS follows succeed
-          # (the same accounting rack_fetch documents at its own loop).
-          return :error if (hops += 1) > MAX_FETCH_REDIRECTS + 1
-          sw = sw_controller_for_navigation(current) if hops > 1 && sw_allowed
-          if sw_allowed && sw
+          current, workers_may_answer = fetch.begin_hop
+          return :error unless current
+
+          sw = sw_controller_for_navigation(current) if fetch.redirected? && workers_may_answer
+          if workers_may_answer && sw
             last_sw = sw
             r = sw_script_fetch_event(sw, current, client_handle, shared:, creator_client:)
             if r && !r['fallthrough']
@@ -5005,47 +5001,36 @@ module Capybara
               # network-error respondWith, or a response its type forbids, is a NETWORK ERROR — the
               # worker must FAIL TO START (worker-interception "cors/no-cors … fails worker start").
               return :error if r['networkError'] || !sw_response_allowed?(r, 'same-origin')
+
+              # (…"fetch a classic worker script" requires an ok status whoever produced the response — an SW
+              # respondWith'ing its 404 page fails the load, a clean `error` event, not a worker that evals HTML)
               status = r['status'].to_i
-              if REDIRECT_STATUSES.include?(status) && (loc = redirect_location(status, r['headers'] || {}))
-                current = resolve_against(loc, r['url'].to_s.empty? ? current : r['url'])
-                return :error unless same_origin_script_hop?(current, url)
-                next
-              end
-              # "Fetch a classic worker script" requires an OK status whoever produced the
-              # response — an SW respondWith'ing its 404 page must fail the load (a clean
-              # `error` event), not start a worker that evals HTML. A redirect status
-              # WITHOUT a Location lands here too, and 3xx is not ok.
-              return nil unless (200..299).cover?(status)
-              return {
-                body:       Base64.decode64(r['body_b64'].to_s),
-                url:        r['url'].to_s.empty? ? current : r['url'],
-                controller: last_sw
-              }
+              step   = fetch.response(status, redirect_location(status, r['headers'] || {}), r['url'].to_s, false)
+              next if step == 'follow'
+
+              return worker_script_answer(step) { {body: Base64.decode64(r['body_b64'].to_s), url: fetch.target, controller: last_sw} }
             end
             # No respondWith (or no answer): fall back to the network for THIS hop.
           end
           res = rack_fetch('GET', current, '', {}, 'manual')
           return :error unless resource_loaded?(res)
-          if (loc = res['redirect_loc'])
-            # A redirect received FROM THE NETWORK: no SW intercepts it or any later hop.
-            sw_allowed = false
-            current    = loc
-            return :error unless same_origin_script_hop?(current, url)
-            next
-          end
-          # 'manual' wraps every 3xx as an opaqueredirect (status 0): one WITHOUT a
-          # Location carries `redirect_status` but no `redirect_loc` — not ok, load fails
-          # (never start a worker on the empty filtered body). Everything else needs the
-          # same OK status the SW branch enforces.
-          return nil if res['redirect_status'] || !(200..299).cover?(res['status'].to_i)
-          return {body: res['body'].to_s, url: current, controller: last_sw}
+
+          # (…'manual' wraps every 3xx as an opaqueredirect, its status and Location kept beside it: one without a
+          # Location is no script)
+          step = fetch.response((res['redirect_status'] || res['status']).to_i, res['redirect_loc'], '', true)
+          next if step == 'follow'
+
+          return worker_script_answer(step) { {body: res['body'].to_s, url: fetch.target, controller: last_sw} }
         end
       end
 
-      # A worker-script redirect hop must stay http(s) and same-origin (the request's
-      # mode is 'same-origin'); anything else is a network error for the chain.
-      private def same_origin_script_hop?(next_url, original_url)
-        http_url?(next_url) && url_origin(next_url) == url_origin(original_url.to_s)
+      # …what a hop's answer that ended the fetch (`WorkerScriptFetch#response`) gives the worker: its script (the block's),
+      # none for a response that is no script, or :error for a network error.
+      private def worker_script_answer(step)
+        case step
+        when 'script' then yield
+        when 'fail' then :error
+        end
       end
 
       # A controlled worker's `importScripts(url)`, routed through its SW's fetch event —
@@ -9218,10 +9203,6 @@ module Capybara
         cache[[eff, url]] ||= parse_url(url.to_s, eff)&.fetch(:href) || url
       end
 
-      # Fetch caps a request at 20 redirects: the 21st is a network error (redirect-count) — an event source's and a
-      # worker script's chain counted here (a navigation's by its fetch, navigation_fetch.rs; a fetch's by its plan,
-      # fetch_plan.rs), each dispatching 20 hops and the response.
-      MAX_FETCH_REDIRECTS = 20
       # The policy of a document no `<meta name="referrer">` or header sets one for (Referrer Policy §3).
       DEFAULT_REFERRER_POLICY = Native.default_referrer_policy.freeze
 
