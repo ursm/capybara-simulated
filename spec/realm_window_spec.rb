@@ -281,6 +281,17 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     end
   end
 
+  # (…however many navigations after: its WindowProxy answers as a browsing context's gone, the document it showed read
+  # still — Chrome measured: `closed` true, `parent` null, its title and text its document's)
+  it "keeps a held frame of its opener's page closed across many navigations of that page, its document readable" do
+    session.visit('/form')
+    session.execute_script("window.w = window.open(); w.eval(\"window.f = opener.frames[0]\");")
+    70.times {|i| session.visit(i.even? ? '/second' : '/third') }
+    session.within_window(session.windows.last) do
+      expect(session.evaluate_script('[f.closed, f.parent, f.top, f.document.title, f.document.querySelector("a").id]')).to eq([true, nil, nil, '', 'top'])
+    end
+  end
+
   # HTML "copy the session storage": its own, a copy of its opener's as it opened (Chrome measured: the opener's item
   # seen, neither's later writes the other's).
   it "has a sessionStorage of its own, a copy of its opener's" do

@@ -1125,7 +1125,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "realmsMadeIn", realms_made_in, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
-    crate::dom::register(scope, ns, "loseNavigableOf", lose_navigable_of, context_id);
     crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigableRealm", parked_navigable_realm, context_id);
     crate::dom::register(scope, ns, "takeLostNavigables", take_lost_navigables, context_id);
@@ -1279,16 +1278,6 @@ fn discard_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).discard_navigable(container));
-}
-
-// __dom.loseNavigableOf(realm): the navigable realm `realm`'s document was the active document of destroyed with the
-// document its container was in — a page's frame, its page navigated, read from a window the page opened, which
-// outlives it (v8_runtime.rb `dispose_frame_realms`): `closed`, no `parent`, as a removed frame's.
-fn lose_navigable_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(realm) = args.get(0).int32_value(scope) else { return };
-    let arena = &mut crate::dom::dom(scope).arena;
-    arena.navigables.lost.insert(realm);
-    arena.note_discarded();
 }
 
 // __dom.takeLostNavigables() -> the realms whose navigables were destroyed between two documents since last asked
