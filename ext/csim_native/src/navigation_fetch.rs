@@ -65,7 +65,7 @@ impl NavigationFetch {
     // (the referrer source, nil none), `referrer_policy`, `initiator` (the URL Sec-Fetch-Site and the request's origin are
     // of, nil none), `origin` (the request's origin serialized, where it is not its initiator's — a re-post's, the one it
     // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
-    // origin `null`, its site cross-site), `site_seed` (a latch carried in, nil none), `ancestors` (the document URLs its
+    // origin `null`, its site cross-site), `site_seed` (a latch carried in, nil none), `ancestors` (the document origins its
     // cookies are judged by — nil none, each nil for one not known), `top_level` (whether it navigates a top-level
     // navigable).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {

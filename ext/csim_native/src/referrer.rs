@@ -258,7 +258,9 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
 
 // The origin of realm `r`'s document, serialized — an about:blank or srcdoc one's its creator's, an opaque one's
 // "null" — which its requests' cookies are judged by (RFC 6265bis §5.2.1: a document's origin, not its URL); None for a
-// realm gone, which no request is judged by: closed rather than open.
+// realm gone, which no request is judged by: closed rather than open. (…a sandboxed one's `null` too, of no site,
+// where §5.2.1 would take its URI's origin: WPT cookies/samesite sandbox-iframe-subresource / -nested expect a
+// sandboxed frame's requests cross-site, as browsers make them — the gate's reading, here)
 fn known_document(arena: &mut RealmArena, r: i32) -> Option<String> {
     let arena = arena.enter_known(r)?;
     Some(arena.location.origin().to_owned())
@@ -312,15 +314,15 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // cross-site for cookies by, besides its own (`frame_cross_site`); a navigation of a frame in it, by its own too.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mut r = args.get(0).int32_value(scope).unwrap_or(0);
-    let mut urls = Vec::new();
+    let mut origins = Vec::new();
     if args.get(1).is_true() {
-        urls.push(known_document(&mut dom(scope).arena, r));
+        origins.push(known_document(&mut dom(scope).arena, r));
     }
     while let Some(p) = dom(scope).arena.parent_realm(r) {
-        urls.push(known_document(&mut dom(scope).arena, p));
+        origins.push(known_document(&mut dom(scope).arena, p));
         r = p;
     }
-    let items: Vec<v8::Local<'_, v8::Value>> = urls
+    let items: Vec<v8::Local<'_, v8::Value>> = origins
         .iter()
         .map(|u| u.as_deref().and_then(|u| v8::String::new(scope, u)).map_or_else(|| v8::null(scope).into(), Into::into))
         .collect();
