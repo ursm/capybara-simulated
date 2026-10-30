@@ -401,3 +401,122 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(popup) { expect(session.evaluate_script('rd.title')).to eq('RM') }
   end
 end
+
+# …beside the frames of the page that opened it — one of another origin, one of its own: the driver's scope back at that
+# page's, its frames entered from there, however the window was addressed; and a frame's script finding the window by its
+# name, its own origin's or another's.
+RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its opener\'s page', :every_host_local do
+  let(:session) {
+    simulated_session(lambda {|env|
+      req  = Rack::Request.new(env)
+      body = case req.path
+      when '/'
+        <<~HTML
+          <!doctype html><html><head><meta charset="utf-8"><title>main</title></head><body>
+            <p id="main">MAIN</p>
+            <iframe src="http://b.test/frame"></iframe>
+            <iframe src="http://a.test/frame"></iframe>
+            <script>
+              window.w = window.open('', 'w');
+              w.document.write('<!doctype html><title>blank</title><p id="in">IN</p><iframe srcdoc="<p id=deep>DEEP</p>"></iframe>');
+              w.document.close();
+            </script>
+          </body></html>
+        HTML
+      when '/frame'
+        <<~HTML
+          <!doctype html><html><head><meta charset="utf-8"></head><body>
+            <p id="frame">#{req.host}</p>
+            <button id="script">script</button>
+            <button id="inline" onclick="open('', 'w').location = 'http://a.test/landed'">inline</button>
+            <script>
+              document.getElementById('script').addEventListener('click', () => { open('', 'w').location = 'http://a.test/landed'; });
+            </script>
+          </body></html>
+        HTML
+      else
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>landed</title></head><body><p id=\"landed\">#{req.host}#{req.path}</p></body></html>"
+      end
+      [200, {'content-type' => 'text/html'}, [body]]
+    })
+  }
+  let(:main)  { session.windows.first }
+  let(:popup) { session.windows.last }
+
+  before do
+    session.visit('http://a.test/')
+    expect(session.windows.size).to eq(2)
+  end
+
+  def expect_page_frames
+    session.within_frame(0) { expect(session).to have_css('#frame', text: 'b.test') }
+    session.within_frame(1) { expect(session).to have_css('#frame', text: 'a.test') }
+    expect(session).to have_css('#main')
+  end
+
+  it "enters the frames of its opener's page after a block in it" do
+    session.within_window(popup) { expect(session).to have_css('#in') }
+    expect_page_frames
+  end
+
+  it "enters the frames of its opener's page after a switch to it and back" do
+    session.switch_to_window(popup)
+    expect(session).to have_css('#in')
+    session.within_frame(0) { expect(session).to have_css('#deep') }
+    session.switch_to_window(main)
+    expect_page_frames
+  end
+
+  it "enters a frame of its own in a block in it, the scope back at its opener's page after" do
+    session.within_window(popup) do
+      session.within_frame(0) { expect(session).to have_css('#deep') }
+      expect(session).to have_css('#in')
+    end
+    expect_page_frames
+  end
+
+  # (…Capybara refuses a window switched to in a frame's block; the driver's switch, which nothing refuses, leaves the
+  # frame entered in the page as it was)
+  it "leaves a frame entered in its opener's page entered across a switch to it" do
+    session.within_frame(0) do
+      expect { session.within_window(popup) {} }.to raise_error(Capybara::ScopeError)
+      session.driver.switch_to_window(popup.handle)
+      expect(session).to have_css('#in')
+      session.driver.switch_to_window(main.handle)
+      expect(session).to have_css('#frame', text: 'b.test')
+    end
+    expect(session).to have_css('#main')
+  end
+
+  # (HTML "the rules for choosing a navigable": the window a frame's `window.open` names is one its browsing context is
+  # familiar with — an auxiliary one whose opener is the frame's top-level traversable — and a `location` set navigates
+  # it from another origin as from its own: Location's `href` setter is a cross-origin one, "allowed by sandboxing to
+  # navigate" its only check)
+  [[0, 'another origin'], [1, 'its origin']].each do |index, origin|
+    it "is found by its name by a script of a frame of #{origin}, which navigates it" do
+      session.within_frame(index) do
+        expect(session.evaluate_script("open('', 'w') === open('', 'w')")).to be(true)
+        session.click_button('script')
+        expect(session).to have_css('#frame')
+      end
+      expect(session.windows.size).to eq(2)
+      session.within_window(popup) do
+        expect(session).to have_css('#landed', text: 'a.test/landed')
+        expect(session.current_url).to eq('http://a.test/landed')
+      end
+    end
+
+    # (…but an inline event handler's `open` is its document's, whose scope comes before the global's in the handler's
+    # (HTML "getting the current value of the event handler"): `document.open('', 'w')`, two arguments, reopens the
+    # frame's own document, whose `location` it then sets — the frame navigated, the window left as it was. Chrome and
+    # Firefox measured: `open === document.open` in an attribute handler)
+    it "is not what an inline handler's `open` in a frame of #{origin} names: the frame's document is" do
+      session.within_frame(index) do
+        session.click_button('inline')
+        expect(session).to have_css('#landed', text: 'a.test/landed')
+      end
+      expect(session.windows.size).to eq(2)
+      session.within_window(popup) { expect(session).to have_css('#in') }
+    end
+  end
+end
