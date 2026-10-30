@@ -4454,6 +4454,7 @@ module Capybara
           @websocket_sockets.clear
           @websocket_app_sockets.clear
           @websocket_workers.clear
+          @websocket_realms.clear
         end
         forget_window_websocket_events
       end
@@ -4461,15 +4462,20 @@ module Capybara
       # The window's sockets, as its document goes (a navigation commits another): each made to disappear, and what
       # its readers had queued for the document gone with it.
       private def drop_document_websockets
-        ws_drop_client(kept: @runtime.window_realm_trees)
-        forget_window_websocket_events
+        kept = @runtime.window_realm_trees
+        ws_drop_client(kept: kept)
+        forget_window_websocket_events(kept)
       end
 
-      private def forget_window_websocket_events
+      # (…but those of the sockets of `kept` realms, the windows a navigation of the page leaves — whose close handshakes
+      # in flight hold the clock no more, the count not kept by socket)
+      private def forget_window_websocket_events(kept = [])
+        events = kept.empty? ? [] : [@websocket_queue_head, *drain_queue(@websocket_queue)].compact
         @websocket_queue.clear
         @websocket_queue_head   = nil
         @ws_close_pending       = 0
         @ws_close_wait_deadline = nil
+        events.each {|e| @websocket_queue << e if kept.include?(@websocket_lock.synchronize { @websocket_realms[e[:id]] }) }
       end
 
       # The sockets of a client that went away — a worker that ended, or the window's document a navigation replaced:
@@ -11287,8 +11293,9 @@ module Capybara
       # areas (storage_areas.rs), which outlive the per-visit `rebuild_ctx` (Forem caches user data in `localStorage` on
       # one page for the next).
       def storage_partitions = [@local_storage, @session_storage]
-      # …its page's sessionStorage shed, which a pop-up it opens copies (Driver#open_aux_window).
-      def session_storage_shed = @session_storage
+      # …the sessionStorage shed of the top-level traversable realm `realm`'s document is of — the page's, or a window's
+      # `window.open` made in this isolate — which a pop-up its script opens copies (Driver#open_aux_window).
+      def session_storage_shed(realm = 0) = (realm.zero? ? @session_storage : @runtime.realm_direct_call(realm, '__csimSessionStorageShed').to_i)
 
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops

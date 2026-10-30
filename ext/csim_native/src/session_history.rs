@@ -1883,9 +1883,10 @@ fn window_traversable(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc
 pub(crate) fn session_storage_of(arena: &crate::dom::RealmArena, realm: i32) -> u64 {
     traversable_of(arena, realm).map_or(0, |(t, _)| lock(&t).session_storage)
 }
-// __dom.sessionStorageShed() -> the calling realm's (storage.js).
+// __dom.sessionStorageShed(realm) -> realm `realm`'s (storage.js: the realm whose global's area it is, whichever realm's
+// method runs).
 fn session_storage_shed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
+    let cid = args.get(0).int32_value(scope).unwrap_or_else(|| crate::dom::realm_id(scope, &args));
     let shed = session_storage_of(&crate::dom::dom(scope).arena, cid);
     rv.set_double(shed as f64);
 }

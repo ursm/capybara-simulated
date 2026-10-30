@@ -21,7 +21,7 @@ module Capybara
         outer_html peek_script rect right_click screenshot_png scroll_by scroll_to select_option send_keys
         send_session_keys set_geolocation set_header set_value_with_events shadow_root_handle submit_form
         switch_to_frame tag_name tick_for_read tick_real_time timer_wait_elapsed? trace_screenshot unselect_option value
-        visible? visible_text with_modal polling?
+        visible? visible_text polling?
       ].freeze
 
       attr_reader :host, :key
@@ -76,6 +76,9 @@ module Capybara
       # The user's close (Capybara's `Window#close`), and its realms let go of after a script's close discarded it.
       def close!   = host.close_window_realm(key)
       def discard! = host.discard_window_realm(key)
+
+      # The modal handler its isolate's, the commands of the block each in the scope of the window it addresses.
+      def with_modal(handler, &block) = host.with_modal(handler, &block)
 
       # ── What it shares with its host: its browsing context group, its isolate's busy-ness
       def browsing_context_group = host.browsing_context_group

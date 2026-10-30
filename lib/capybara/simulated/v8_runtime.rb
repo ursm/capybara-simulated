@@ -448,7 +448,10 @@ module Capybara
           going.each {|id| evict_window_proxies(id) }
           @ctx&.eval_void(going.map {|id| "__dom.discardRealm(#{id.to_i}); __dom.loseNavigableOf(#{id.to_i});" }.join) rescue nil
         end
-        ids = kept.empty? ? (going + discarded_realm_ids).uniq : discarded_realm_ids.dup
+        # (…the arenas of the page's frames a kept window may still read dropped only once no window is: `lost_realm_ids`)
+        ids = kept.empty? ? (going + discarded_realm_ids + lost_realm_ids).uniq : discarded_realm_ids.dup
+        lost_realm_ids.clear if kept.empty?
+        lost_realm_ids.concat(going) unless kept.empty?
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
         going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
@@ -457,7 +460,6 @@ module Capybara
           @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil
         end
         discarded_realm_ids.clear
-        discarded_realm_ids.concat(going) unless kept.empty?
         window_realms_changed
         return if @frame_realms.nil?
         going.each {|id| @frame_realms.delete(id).dispose rescue nil }
@@ -474,6 +476,9 @@ module Capybara
       end
       # The frame realms the page disposed (`dispose_frame_realm`), its page leave to drop.
       def discarded_realm_ids = (@discarded_realm_ids ||= [])
+      # …and those of the page's frames its navigation disposed under kept windows, which may hold their WindowProxies:
+      # their arenas, which say their navigables are lost, dropped once no window is.
+      def lost_realm_ids = (@lost_realm_ids ||= [])
 
       # Frame-scoped navigation: tear down the realm `old_id` and build a fresh
       # one for the same `<iframe>` from the just-fetched document, returning the

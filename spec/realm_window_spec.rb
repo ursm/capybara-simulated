@@ -260,6 +260,10 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(session.windows.last) do
       expect(session.evaluate_script('[f.closed, f.parent === null]')).to eq([true, true])
     end
+    session.visit('/third')
+    session.within_window(session.windows.last) do
+      expect(session.evaluate_script('[f.closed, f.parent === null]')).to eq([true, true])
+    end
   end
 
   # HTML "copy the session storage": its own, a copy of its opener's as it opened (Chrome measured: the opener's item
@@ -293,14 +297,36 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     expect(session.driver.send(:window_entries).last[:opener]).to eq(popup.handle)
   end
 
-  it 'is found by its name by another window of its group' do
-    session.execute_script("window.w = window.open('', 'nm'); window.u = window.open('/third')")
+  # (…by a link of its host's page that names it: another isolate's script, which no WindowProxy of it could be handed,
+  # opens a window of its own meanwhile — R13 S6)
+  it 'is found by its name by a link of the page that opened it' do
+    session.execute_script(<<~JS)
+      window.w = window.open('', 'nm');
+      const a = document.createElement('a');
+      a.id = 'to-nm'; a.href = '/second'; a.target = 'nm'; a.textContent = 'to nm';
+      document.body.appendChild(a);
+    JS
+    session.click_link('to-nm')
+    expect(session.windows.size).to eq(2)
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+  end
+
+  it 'opens a pop-up at a URL with a copy of its own sessionStorage, not its host page\'s' do
+    session.execute_script("sessionStorage.setItem('page', '1'); window.w = window.open(); w.sessionStorage.setItem('popup', '1'); sessionStorage.setItem('late', '1');")
+    session.execute_script("w.eval(\"window.open('/third')\")")
     session.within_window(session.windows.last) do
       expect(session).to have_css('#third')
-      session.execute_script("window.open('/second', 'nm')")
+      expect(session.evaluate_script("['page', 'popup', 'late'].map((k) => sessionStorage.getItem(k))")).to eq(['1', '1', nil])
     end
-    expect(session.windows.size).to eq(3)
-    session.within_window(session.windows[1]) { expect(session).to have_css('#second') }
+  end
+
+  it 'takes a modal its document raises, the commands of the block in the window each addresses' do
+    popup = open_popup
+    session.within_window(popup) do
+      message = session.accept_alert { session.execute_script("setTimeout(() => alert('hi'), 0)") }
+      expect(message).to eq('hi')
+      expect(session).to have_css('#in')
+    end
   end
 
   it 'renews the document it keeps: its adopted sheets, its selection, the observers on it none of the next' do

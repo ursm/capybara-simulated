@@ -492,13 +492,18 @@ module Capybara
 
         window_entries.find {|w|
           target = w[:window]
-          target.window_name == name && !target.closing? && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
+          target.window_name == name && !target.closing? && target.browsing_context_group == from.browsing_context_group && reachable?(from, target) &&
+            familiar_with?(from, target)
         }
       end
       # HTML "familiar with", between top-level windows (session_history.rs `familiar`): `from`'s document of `target`'s
       # document's origin, or `target` an auxiliary browsing context whose opener `from` is familiar with — none once its
       # page disowned it (Chrome and Firefox measured: a window that set `opener = null` is found by no name its opener's
       # cross-origin page gives). (…`from`'s page's document judged, a frame's that targets by name too — a gap)
+      # Whether the script of `from`'s isolate can be handed `target`: a window `window.open` made in a Browser's isolate
+      # that isolate's alone — no other isolate's WindowProxy reaches one (`isolate_window`) until R13 S6 brings every
+      # pop-up of a group into its opener's isolate; another reaching its name opens a window of its own meanwhile.
+      private def reachable?(from, target) = !target.is_a?(RealmWindow) || target.host.equal?(from)
       # (…a window `window.open` made in a Browser's isolate: `from`'s page of its document's origin, or familiar with its
       # opener, its host's page — whether that one disowned it aside, which its host's engine alone knows)
       private def familiar_with?(from, target)
@@ -596,7 +601,7 @@ module Capybara
           aux.inherit_cross_origin_isolation(source)
           aux.inherit_browsing_context_group(source)
           # (…and its session storage a copy of its opener's, as it opens: HTML "copy the session storage" — Chrome measured)
-          Native.storage_copy(source.session_storage_shed, aux.session_storage_shed)
+          Native.storage_copy(source.session_storage_shed(activation_realm.to_i), aux.session_storage_shed)
         end
         # (…and its initial about:blank document its creator's origin and base URL — the document that called
         # `window.open`: a window it opens at about:blank stays that document, its origin no new opaque one)
@@ -833,10 +838,13 @@ module Capybara
       end
       # The handle of the window that opened `browser`'s — none once that one is discarded (HTML's `opener` getter: its
       # opener browsing context's WindowProxy, none for a context gone; WPT opener-closed.html).
+      # (…a window `window.open` made in a Browser's isolate, which no other isolate reaches, its host's page standing in:
+      # a gap until R13 S6)
       def opener_handle_of(browser)
         handle = handle_for(browser)
         opener = window_entries.find {|w| w[:handle] == handle }&.fetch(:opener)
-        opener if window_browser(opener)
+        window = window_browser(opener)
+        window.is_a?(RealmWindow) ? handle_for(window.host) : (opener if window)
       end
       private def handle_for(browser) = browser.window_handle
 

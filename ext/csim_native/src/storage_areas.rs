@@ -186,3 +186,26 @@ fn length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let n = area_key(scope, &args).map_or(0, |k| lock().areas.get(&k).map_or(0, |a| a.items.len()));
     rv.set_uint32(n as u32);
 }
+
+#[cfg(test)]
+mod copy_tests {
+    use super::*;
+
+    #[test]
+    fn a_copy_is_a_shed_apart() {
+        let (from, to) = (partition_new(), partition_new());
+        let key = (String::from("http://a.test"), String::from("http://a.test"));
+        let mut area = Area::default();
+        let (k, v): (Vec<u16>, Vec<u16>) = ("k".encode_utf16().collect(), "v".encode_utf16().collect());
+        area.units = k.len() + v.len();
+        area.places.insert(k.clone(), 0);
+        area.items.push((k, v));
+        lock().areas.insert((from, key.0.clone(), key.1.clone()), area);
+        copy(from, to);
+        assert_eq!(lock().areas.get(&(to, key.0.clone(), key.1.clone())).map(|a| a.items.len()), Some(1));
+        clear(from);
+        assert!(lock().areas.contains_key(&(to, key.0.clone(), key.1.clone())));
+        clear(to);
+        assert!(!lock().areas.contains_key(&(to, key.0, key.1)));
+    }
+}
