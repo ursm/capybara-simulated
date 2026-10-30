@@ -223,9 +223,9 @@ pub(crate) fn navigation_referrer(arena: &mut RealmArena, r: i32, policy: &str) 
 // site and origin are judged by (`creator_url`), the policy it refers by — the element's (`elementPolicy`), else its
 // document's; `no-referrer` for one of an opaque origin, which no element lifts — whether that origin is opaque, the
 // realm it is, and the URL it refers by (`referrer_source`). A realm gone answers the page's URLs, and is still the
-// realm the request is of: one of no document known, cross-site for cookies (`frame_cross_site`). `opaque` a boolean
-// where the bindings tell it (an image's load, which names the policy its document had as the element was inserted):
-// the URL alone is the realm's then, and the document's policy only a srcdoc one's container's.
+// realm the request is of: one of no document known, cross-site for cookies (its `ancestorDocuments` entry None).
+// `opaque` a boolean where the bindings tell it (an image's load, which names the policy its document had as the
+// element was inserted): the URL alone is the realm's then, and the document's policy only a srcdoc one's container's.
 fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = if args.get(0).is_undefined() { crate::dom::realm_id(scope, &args) } else { args.get(0).int32_value(scope).unwrap_or(0) };
     let element_policy = args.get(1).to_rust_string_lossy(scope);
@@ -270,12 +270,9 @@ fn known_document(arena: &mut RealmArena, r: i32) -> Option<String> {
 pub(crate) fn cross_site_for_cookies(url: Option<&str>, target: &str) -> bool {
     url.is_none_or(|url| url == "null" || url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) || fetch_site(url, target) == "cross-site")
 }
-// …a request of realm `r`'s document: where an ancestor's document is of another site than `target`'s — its own too,
-// `own` — up to its top-level one (a window's: its opener is no ancestor).
-fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str, own: bool) -> bool {
-    if own && cross_site_for_cookies(known_document(arena, r).as_deref(), target) {
-        return true;
-    }
+// …realm `r`'s document: where an ancestor's document is of another site than `target`'s, up to its top-level one (a
+// window's: its opener is no ancestor).
+fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str) -> bool {
     while let Some(p) = arena.parent_realm(r) {
         if cross_site_for_cookies(known_document(arena, p).as_deref(), target) {
             return true;
@@ -310,7 +307,8 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 // __dom.ancestorDocuments(realm, own) -> the origins of the documents of realm `realm`'s ancestors (`known_document`),
 // up to its top-level one (null for one not known) — its own first, `own`: what a request its document makes is
-// cross-site for cookies by, besides its own (`frame_cross_site`); a navigation of a frame in it, by its own too.
+// cross-site for cookies by (fetch_hop.rs `cookie_site`), besides its client; by its own too where the client is not
+// the document but the page the host pinned it to (an image's or a video's load), and for a navigation of a frame in it.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mut r = args.get(0).int32_value(scope).unwrap_or(0);
     let mut origins = Vec::new();
@@ -335,7 +333,7 @@ fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 fn document_cookie_context_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = args.get(0).int32_value(scope).unwrap_or(0);
     let url = args.get(1).to_rust_string_lossy(scope);
-    let cross = frame_cross_site(&mut dom(scope).arena, r, &url, false);
+    let cross = frame_cross_site(&mut dom(scope).arena, r, &url);
     rv.set_uint32(crate::cookie_jar::document_context(crate::cookie_jar::secure_target(&url), cross));
 }
 

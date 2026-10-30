@@ -30,8 +30,9 @@ struct Client {
     sec_initiator: Option<String>,
     // What its cookies' site is judged by (RFC 6265bis "site for cookies"): its client — a document or an origin, None
     // for a load with no client — and, cross-site wherever any of them is: the top-level document a mode-less load's is
-    // under, every ancestor of the frame whose document made it (its origin, None for one not known), and the worker's site
-    // for cookies (Some(None): of none, cross-site to every site).
+    // under, every ancestor of the frame whose document made it (its origin, None for one not known) — that document's
+    // own too where the caller names it (an image's or a video's: its client the page, so a gone realm's is None) — and
+    // the worker's site for cookies (Some(None): of none, cross-site to every site).
     cookie_client: Option<String>,
     top_document: Option<String>,
     ancestors: Vec<Option<String>>,
@@ -97,7 +98,8 @@ impl Client {
 // What a fetch's client is (`FetchHops::new`): its request's mode, destination and a navigation's, whether it is a
 // document's own navigation request and whether that document had transient activation, its credentials mode; its
 // origin, the document origin a mode's response is judged by, its client's origin and the origin Sec-Fetch-Site measures
-// from; its client's URL, the top-level document a mode-less load is under, its frame's ancestors' document origins, a
+// from; its client's URL, the top-level document a mode-less load is under, its frame's ancestors' document origins (its
+// own document's first where the client does not judge it: a host-pinned image's or video's, a frame's navigation), a
 // dedicated worker's site for cookies (Some(None): of none); and whether it navigates a frame with a cross-site ancestor.
 pub(crate) struct ClientFacts {
     pub(crate) mode: Option<String>,
