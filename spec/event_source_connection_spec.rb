@@ -11,18 +11,19 @@ require_relative 'support/poll_until'
 # opening it, any other status or type, or a response the CORS check refuses, failing it — an `error` and no `open` — a
 # redirect followed first (redirect mode "follow"), and its messages of the origin of the URL the stream came from.
 RSpec.describe 'an EventSource connection' do
-  # A server that answers its connections in turn with `responses` — each a status and its headers, a stream's open to any
-  # origin unless they say otherwise — then `data: <status>`; the request heads it read kept in `heads`.
+  # A server that answers its connections in turn with `responses` — each a status, its headers, a stream's open to any
+  # origin unless they say otherwise, and its body, `data: <status>` unless it says otherwise; the request heads it read
+  # kept in `heads`.
   def serve(*responses)
     server = TCPServer.new('127.0.0.1', 0)
     heads  = Queue.new
     Thread.new do
-      responses.each do |status, headers|
+      responses.each do |status, headers, body|
         client = server.accept
         heads << client.gets("\r\n\r\n")
         headers = {'Access-Control-Allow-Origin' => '*'}.merge(headers)
         head    = ["HTTP/1.1 #{status} X", *headers.compact.map {|k, v| "#{k}: #{v}" }]
-        client.write((head.join("\r\n") + "\r\n\r\ndata: #{status}\n\n").b)
+        client.write((head.join("\r\n") + "\r\n\r\n" + (body || "data: #{status}\n\n")).b)
         Thread.new(client) {|c| sleep 0.5; c.close }
       end
     rescue StandardError
@@ -114,6 +115,30 @@ RSpec.describe 'an EventSource connection' do
     expect(first_event(url, with_credentials: true)).to eq('error')
     cookies = Array.new(4) { fields(heads.pop(timeout: 5).to_s)['cookie'] }
     expect(cookies).to eq([nil, nil, 'k=v', 'k=v'])
+  end
+
+  # (…a reconnection's `Last-Event-ID` is the user agent's, and sent to another origin with no CORS-preflight, where a
+  # page's fetch() of the same header asks one — fetch_plan.rs `ua_headers`)
+  it 'reconnects to another origin with its last event ID, asking no preflight' do
+    stream = {'Content-Type' => 'text/event-stream'}
+    port, heads = serve([200, stream, "id: 7\nretry: 10\ndata: a\n\n"], [200, stream, "data: b\n\n"])
+    session.execute_script(<<~JS)
+      window.got = [];
+      const es = new EventSource('http://127.0.0.1:#{port}/');
+      es.onmessage = (e) => { got.push(e.data); if (e.data === 'b') es.close(); };
+    JS
+    expect(poll_until { session.evaluate_script('window.got.length') == 2 }).to be(true)
+    second = heads.pop(timeout: 5) && heads.pop(timeout: 5)
+    expect(second).to start_with('GET ')
+    expect(fields(second.to_s)).to include('last-event-id' => '7')
+  end
+
+  it "asks a preflight for a page's fetch() of the same header" do
+    port, heads = serve([204, {'Access-Control-Allow-Headers' => 'last-event-id'}], [200, {}])
+    session.execute_script("fetch('http://127.0.0.1:#{port}/', {headers: {'Last-Event-ID': '7'}}).catch(() => {})")
+    # (…the page's event loop stepped while the request goes out)
+    expect(poll_until { session.evaluate_script('1') && !heads.empty? }).to be(true)
+    expect(heads.pop.to_s).to start_with('OPTIONS ')
   end
 
   it 'gives its messages the origin of the URL a redirect led to' do

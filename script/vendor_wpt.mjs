@@ -158,8 +158,8 @@ const TREES = [
   'eventsource',                       // EventSource (HTML §9.2) — the server-sent events Mastodon and Turbo-ish
                                        // streaming apps hold open: the stream format, the connection's request
                                        // (CORS, credentials, Last-Event-ID), reconnection, and close(). The `.py`
-                                       // handlers run through wpt_py_handler.py; the stream reaches its reader
-                                       // over a socket of its own, so the runner serves these hosts on one.
+                                       // handlers run through wpt_py_handler.py, every stream answered in
+                                       // process by the runner's app.
   'websockets',                        // WebSocket client (RFC6455) — the same runtime Action Cable /
                                        // Turbo Streams ride on, validated against the spec's own send /
                                        // receive / close / close-code / protocol / binary tests. The runner

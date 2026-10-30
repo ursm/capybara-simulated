@@ -60,6 +60,9 @@ pub(crate) struct FetchPlan {
     navigation: bool,
     // The credentials an XHR's `open()` brought, as an `Authorization` value, answering a Basic challenge.
     challenge: Option<String>,
+    // The headers the user agent set itself where a CORS-preflight would not ask about them (lowercased names): an
+    // EventSource reconnection's `Last-Event-ID` (`ua_headers`).
+    ua_headers: Vec<String>,
     // The session's CORS-preflight cache and authentication entries (cors.rs, http_auth.rs).
     preflight_cache: u64,
     auth_entries: u64,
@@ -113,7 +116,8 @@ impl FetchPlan {
     // (nil a mode-less internal load's), `credentials`, `referrer_policy`, `referrer` (nil its client's URL, '' none),
     // `cache`, `initiator` (a worker re-issuing a navigation: the request's origin whatever its mode), `site_seed`,
     // `origin_null`, `client_url`, `client_origin`, `ancestors`, `cookie_cross_site`, `nav_dest`, `navigation`, `dest`,
-    // `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil for none);
+    // `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil for none),
+    // `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for none);
     // `sessions` [preflight cache, authentication entries].
     fn new(ruby: &Ruby, request: RHash, sessions: (u64, u64)) -> Result<Option<Self>, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
@@ -152,6 +156,13 @@ impl FetchPlan {
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map_or(Ok(Vec::new()), |a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>())?;
         let mut headers = header_pairs(RArray::try_convert(get("headers")?)?)?;
+        // (…an EventSource reconnection's `Last-Event-ID`, the one header a user agent sets that it sends cross-origin
+        // with no preflight: HTML sets it in the request's header list and Fetch would preflight it, but Chrome sends
+        // it without one (measured 2026-10-30: a reconnection to another origin, no OPTIONS) while Chrome and Firefox
+        // preflight the same header on a page's fetch() and XHR; whatwg/fetch#1788 (open) would safelist it outright,
+        // and WPT eventsource/request-credentials passes in all three engines only without the preflight)
+        let ua_headers: Option<RArray> = Option::try_convert(get("ua_headers")?)?;
+        let ua_headers = ua_headers.map_or(Ok(Vec::new()), |a| a.into_iter().map(|v| String::try_convert(v).map(|s| s.to_ascii_lowercase())).collect::<Result<Vec<_>, _>>())?;
         // (…the XHR's challenge credentials, which its marker header carries: never sent until a challenge asks for them)
         let challenge = headers
             .iter()
@@ -196,6 +207,7 @@ impl FetchPlan {
             conditional,
             navigation,
             challenge,
+            ua_headers,
             preflight_cache: sessions.0,
             auth_entries: sessions.1,
             st: RefCell::new(State {
@@ -266,8 +278,9 @@ impl FetchPlan {
     }
     // Whether the request is CORS-unsafe — no safelisted method, or a header no CORS-safelisted one: its CORS-preflight's
     // method and header names, None for a safe one.
-    fn unsafe_request(st: &State) -> Option<Vec<String>> {
-        let names = crate::cors::unsafe_header_names(&st.chain.headers);
+    fn unsafe_request(&self, st: &State) -> Option<Vec<String>> {
+        let mut names = crate::cors::unsafe_header_names(&st.chain.headers);
+        names.retain(|n| !self.ua_headers.contains(n));
         (!crate::fetch_rules::cors_safelisted_method(st.chain.method.to_ascii_uppercase().as_bytes()) || !names.is_empty()).then_some(names)
     }
 
@@ -346,7 +359,7 @@ impl FetchPlan {
         // The CORS-preflight, judged at every hop: a cross-origin CORS-unsafe request's, unless the cache covers it.
         let origin_sent = st.chain.effective_origin.clone().unwrap_or_default();
         let preflight = if cross_origin {
-            Self::unsafe_request(&st)
+            plan.unsafe_request(&st)
                 .filter(|names| !crate::cors::covers_request(plan.preflight_cache, origin_sent.clone(), st.chain.target.clone(), plan.credentials == "include", st.chain.method.clone(), names.clone(), now))
                 .map(|names| (names, origin_sent))
         } else {
@@ -377,7 +390,7 @@ impl FetchPlan {
         let (status, acao, acac, methods, headers, max_age, delay) = response;
         st.delay_ms += delay;
         let origin = st.chain.effective_origin.clone().unwrap_or_default();
-        let names = Self::unsafe_request(&st).unwrap_or_default();
+        let names = self.unsafe_request(&st).unwrap_or_default();
         let granted = crate::cors::grant_preflight(
             self.preflight_cache,
             (status, acao, acac, methods, headers, max_age),
@@ -432,7 +445,7 @@ impl FetchPlan {
         if st.cross_origin {
             let origin = st.chain.effective_origin.clone();
             if !crate::cors::check(acao.as_deref(), acac.as_deref(), origin.as_deref(), credentialed) {
-                if Self::unsafe_request(&st).is_some() {
+                if plan.unsafe_request(&st).is_some() {
                     crate::cors::forget(plan.preflight_cache, origin.unwrap_or_default(), st.chain.target.clone());
                 }
                 return Ok(command(ruby, "error", &[ruby.qnil().as_value()]));

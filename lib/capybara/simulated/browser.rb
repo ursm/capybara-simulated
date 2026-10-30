@@ -3896,7 +3896,7 @@ module Capybara
         queue   = worker || @event_source_queue
         # (…a worker's request of the worker's cookie site, which its thread knows)
         record  = Thread.current[:csim_worker_record]
-        @event_source_lock.synchronize do
+        @event_source_lock.synchronize {
           id = (@event_source_seq += 1)
           @event_source_workers[id] = worker.handle if worker
           @event_source_threads[id] = Thread.new do
@@ -3905,7 +3905,7 @@ module Capybara
             run_event_source_reader(id, request, queue)
           end
           id
-        end
+        }
       end
 
       def event_source_close(id)
@@ -3955,12 +3955,18 @@ module Capybara
       # as it comes by HTML's "interpret an event stream" (the engine's, the page's too) — a parser kept from chunk to
       # chunk, so a record or a line a chunk ends in the middle of goes on in the next — and once it ends, the source
       # reconnects (`__reconnect`, with the last event ID string and reconnection time the stream left).
-      # (…a network error fails the connection where HTML would reestablish it: what fails a fetch here is not told
-      # apart, and a CORS failure — one — is futile to retry, which HTML lets fail; WPT's cross-origin tests expect it)
+      # (…a network error HTML reestablishes the connection after, "unless the user agent knows that to be futile":
+      # a connection that could not be made, or was cut off, reconnects; a response the CORS check refused fails it —
+      # the same server gives the same answer — as WPT's cross-origin tests expect)
       private def run_event_source_reader(id, request, queue)
+        Thread.current[:csim_event_stream_unreached] = false
         status, headers, body, url = rack_fetch_request(request, nil, transport: method(:event_stream_transport), stream: true)
         unless body
-          queue << {id: id, type: '__error', message: 'network error'}
+          if Thread.current[:csim_event_stream_unreached]
+            queue << {id: id, type: '__reconnect', lastEventId: request.dig('headers', 'Last-Event-ID').to_s, retry: nil}
+          else
+            queue << {id: id, type: '__error', message: 'network error'}
+          end
           return
         end
         content_type = header_field(headers, 'content-type')
@@ -3996,6 +4002,13 @@ module Capybara
         rescue StandardError
           # (…closed concurrently: reset! killed the thread)
         end
+        # (…and its connection's entry gone with it, where it is still this reader's: a reconnection opens another)
+        @event_source_lock.synchronize do
+          if @event_source_threads[id].equal?(Thread.current)
+            @event_source_threads.delete(id)
+            @event_source_workers.delete(id)
+          end
+        end
       end
 
       # How an event stream's request reaches its server (`rack_fetch`'s `transport`): a connection of its own, raw TCP /
@@ -4028,6 +4041,8 @@ module Capybara
           return [code.to_i, headers, EventStreamBody.new(socket, chunked)]
         end
       rescue IOError, SystemCallError, SocketError, OpenSSL::SSL::SSLError
+        # (…no response at all: the reader reconnects after it, as it does after a stream that ends)
+        Thread.current[:csim_event_stream_unreached] = true
         :network_error
       end
 
@@ -9203,6 +9218,7 @@ module Capybara
           navigation:        r['navigation'] == true,
           dest:              r['dest'],
           user_activated:    r['userActivated'] == true,
+          ua_headers:        r['uaHeaders'],
           env_extras:        env_extras,
           transport:         transport,
           stream:            stream
@@ -9220,7 +9236,7 @@ module Capybara
       # `stream` whether the response is answered with its body unread, `[status, headers, body, url]`, for a reader that
       # takes it as it comes: an event stream's)
       def rack_fetch(method, url, body, headers, redirect_mode, cors_mode = nil, credentials: 'same-origin', env_extras: nil, referrer_policy: nil, referrer: nil, cache_mode: 'default', initiator: nil, site_seed: nil, origin_null: false, client_url: nil, cookie_cross_site: false, nav_dest: nil, body_raw: false, client_origin: nil, client_realm: nil, navigation: false, dest: nil,
-                     user_activated: false, ancestors: nil, transport: nil, stream: false)
+                     user_activated: false, ancestors: nil, ua_headers: nil, transport: nil, stream: false)
         # NB: a relative fetch/XHR URL is resolved against the document's API base URL
         # at OPEN time (XHR open() / fetch()), in JS, NOT here — resolving at send time
         # would wrongly pick up a `<base href>` inserted after open() (open-url-base
@@ -9267,7 +9283,8 @@ module Capybara
             dest:              dest,
             user_activated:    user_activated == true,
             top_url:           @current_url,
-            worker:            worker&.key?(:site_for_cookies) ? [worker[:site_for_cookies]] : nil
+            worker:            worker&.key?(:site_for_cookies) ? [worker[:site_for_cookies]] : nil,
+            ua_headers:        ua_headers
           },
           [@cors_preflight_cache, @auth_cache]
         ) or return nil
@@ -11985,9 +12002,23 @@ module Capybara
         remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless url_is_local?(url)
         return nil if remote == :network_error
 
-        response = framed_response(method, *(remote || @app.call(env))) or return nil
+        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?))) or return nil
         status, headers, body = response
         [status, utf8_tagged_headers(headers), body]
+      end
+
+      # The app's answer to `env`. A reader thread the session may kill as it goes (an event stream's: `close()`, a
+      # navigation, a worker's end) calls it `deferring` that kill until the app has answered — a thread killed in the
+      # middle of a middleware or a query on the test's shared database connection would leave it mid-way for the next
+      # request — and lets go of the body the app gave before it dies.
+      def app_call(env, deferring: false)
+        return @app.call(env) unless deferring
+
+        Thread.handle_interrupt(Object => :never) {
+          response = @app.call(env)
+          response[2].close if Thread.pending_interrupt? && response[2].respond_to?(:close)
+          response
+        }
       end
 
       # A body that ended before its Content-Length did: the bytes that came, and then a network error.

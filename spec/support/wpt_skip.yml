@@ -186,3 +186,12 @@
   file ends a harness ERROR instead of its TIMEOUT (`importScripts` files no
   resource entry) — 2 or 3 runs in 8. Rejoins the gate when `performance.now()`
   resolves below a millisecond.
+"eventsource/format-field-retry.any.js": >-
+  Outcome depends on wall time (2026-10-30): the dedicated-worker case measures a 3000 ms reconnection with the
+  worker's `Date`, within 25 %, and a worker's `Date` is the wall clock PLUS its virtual clock, which a quiet
+  worker paces at real time — so it reads ~6000 when run alone and passes under the gate's parallel load. The
+  window case passes either way. Rejoins the gate when the worker clock no longer counts real time twice (the
+  `worker_clock_runs_double` backlog).
+"eventsource/format-field-retry-bogus.any.js": >-
+  As format-field-retry.any.js's above: its dedicated-worker case times a 3000 ms reconnection by the worker's
+  `Date`, which runs at twice the wall clock while the worker is quiet.
