@@ -209,8 +209,13 @@ document that has since navigated away does nothing and returns undefined,
 where a browser would still run it: each document is a realm rebuilt from the
 snapshot, so the function went with the old one (handle ids are
 process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — until
-R13 S6 makes a same-group pop-up a realm of its opener's isolate. List and justify
-these explicitly; don't let them multiply.
+R13 S6 makes a same-group pop-up a realm of its opener's isolate; and a window
+`window.open` made in its opener's isolate keeps its Window when its initial
+about:blank navigates to a document of its origin, as HTML says, but keeps its
+Document object too, emptied and parsed again, where HTML makes a new one: a
+realm's `document` is a [LegacyUnforgeable] property of its global, which no
+navigation that keeps the global can replace (`reuse_window_realm`,
+v8_runtime.rb). List and justify these explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox

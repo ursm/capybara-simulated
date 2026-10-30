@@ -29,6 +29,19 @@ RSpec.describe 'a window made in its opener\'s isolate' do
         HTML
       when '/second'
         '<!doctype html><html><head><meta charset="utf-8"><title>second</title></head><body><p id="second">SECOND</p></body></html>'
+      when '/boom'
+        raise 'boom'
+      when '/missing'
+        return [404, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><title>missing</title>']]
+      when '/form'
+        <<~HTML
+          <!doctype html><html><head><meta charset="utf-8"><title>form</title></head><body>
+            <form method="post" action="/posted"><input name="q" value="own"><button id="own">own</button></form>
+            <iframe name="fr" srcdoc="<a id=top href=/third target=_top>top</a>"></iframe>
+          </body></html>
+        HTML
+      when '/posted'
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>posted</title></head><body><p id=\"posted\">#{env['REQUEST_METHOD']} #{env['rack.input'].read}</p></body></html>"
       else
         '<!doctype html><html><head><meta charset="utf-8"><title>third</title></head><body><p id="third">THIRD</p></body></html>'
       end
@@ -124,6 +137,25 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     expect(File.binread(path, 8)).to eq("\x89PNG\r\n\x1A\n".b)
   end
 
+  # (…a top-level traversable of its own, which its opener's navigation leaves as it is: its `opener` the new document's
+  # window, the opener browsing context's)
+  it 'outlives a navigation of the page that opened it' do
+    popup = open_popup
+    session.within_window(popup) { session.execute_script('window.ticks = 0; setInterval(() => ticks++, 10)') }
+    session.visit('/second')
+    expect(session).to have_css('#second')
+    expect(session.windows.size).to eq(2)
+    session.within_window(popup) do
+      expect(session).to have_css('#in', text: 'IN')
+      expect(session.evaluate_script('window.opener.document.title')).to eq('second')
+      sleep 0.2
+      expect(session.evaluate_script('ticks')).to be > 0
+      session.fill_in('field', with: 'still')
+      session.click_button('b')
+      expect(session).to have_title('clicked:still')
+    end
+  end
+
   it 'closes, its opener seeing it closed, the session one window again' do
     popup = open_popup
     popup.close
@@ -136,5 +168,51 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(popup) { session.execute_script('window.close()') }
     expect(session.windows.size).to eq(1)
     expect { session.within_window(popup) { nil } }.to raise_error(Capybara::WindowError)
+  end
+
+  it 'raises what the app raised for a visit in it, and answers the status its document was served with' do
+    popup = open_popup
+    session.within_window(popup) do
+      expect { session.visit('/boom') }.to raise_error(RuntimeError, 'boom')
+      session.visit('/missing')
+      expect([session.status_code, session.response_headers['Content-Type']]).to eq([404, 'text/html'])
+    end
+  end
+
+  it 'visits about:blank in it as a new opaque origin, no referrer' do
+    popup = open_popup
+    session.within_window(popup) do
+      session.visit('/second')
+      session.visit('about:blank')
+      expect(session.evaluate_script('[self.origin, document.referrer]')).to eq(['null', ''])
+    end
+  end
+
+  it 'submits a form in it, and from a frame of it navigates it at _top, the scope back at its new document' do
+    popup = open_popup
+    session.within_window(popup) do
+      session.visit('/form')
+      session.within_frame('fr') do
+        session.click_link('top')
+        expect(session).to have_css('#third')
+      end
+      session.visit('/form')
+      session.click_button('own')
+      expect(session).to have_css('#posted', text: 'POST q=own')
+    end
+  end
+
+  it 'takes a form its opener submits into it by its name' do
+    session.execute_script(<<~JS)
+      window.w = window.open('', 'named');
+      const f = document.createElement('form');
+      f.method = 'post'; f.action = '/posted'; f.target = 'named';
+      f.innerHTML = '<input name="q" value="opener">';
+      document.body.appendChild(f);
+      f.submit();
+    JS
+    session.within_window(session.windows.last) do
+      expect(session).to have_css('#posted', text: 'POST q=opener')
+    end
   end
 end

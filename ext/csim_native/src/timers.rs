@@ -532,7 +532,7 @@ fn pending(scope: &mut v8::PinScope<'_, '_>, realm: i32, subtree: bool) -> bool 
     if own || arena.autofocus.pending_in(arena, realm) || crate::animation_ops::frames_due(scope, realm) {
         return true;
     }
-    subtree && dom(scope).arena.child_realms(realm).into_iter().any(|child| pending(scope, child, true))
+    subtree && dom(scope).arena.stepped_realms(realm).into_iter().any(|child| pending(scope, child, true))
 }
 
 // __dom.nextTimerDelay() -> the time, on its clock, to the next work the calling realm's event loop has due — 0 for an
@@ -555,7 +555,7 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         if let Some(&(Due(due), _, _)) = state.timers.order.first() {
             min = min.min(due - state.clock);
         }
-        pending.extend(arena.child_realms(realm));
+        pending.extend(arena.stepped_realms(realm));
         if let Some(delay) = crate::animation_ops::next_frame_delay_of(scope, realm) {
             min = min.min(delay);
         }

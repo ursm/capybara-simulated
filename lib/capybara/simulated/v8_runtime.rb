@@ -426,29 +426,39 @@ module Capybara
       # through its own navigation.
       def window_realm_meta = (@window_realm_meta ||= {})
 
-      def dispose_frame_realms
-        @realm_module_handles&.clear
-        @module_sw_ctxs&.clear
-        @module_fetch_options&.clear
-        @window_realm_meta&.clear
-        @loading_frame_realms&.clear
+      # (…but those of `kept`: the windows `window.open` made in this isolate and their frames, top-level traversables of
+      # their own, which outlive the page that opened them — `window_realm_trees`)
+      def dispose_frame_realms(kept: [])
+        [@realm_module_handles, @module_sw_ctxs, @module_fetch_options, @window_realm_meta, @loading_frame_realms].each do |realms|
+          realms&.reject! {|id, _| !kept.include?(id) }
+        end
         # Free each frame realm's native arena (an isolate-global Dom entry keyed by its context_id)
         # before disposing the realm — otherwise a page's frame arenas accumulate across visits — and
         # those the page disposed before it went (`discarded_realm_ids`: a frame removed or navigated),
         # whose arenas, and their marks as discarded, lived on until now. Done from the main context
         # (its `__dom.dropRealm` frees ANY realm's arena); main (id 0) is untouched.
-        ids = ((@frame_realms&.keys || []) + discarded_realm_ids).uniq
+        going = (@frame_realms&.keys || []) - kept
+        ids = (going + discarded_realm_ids).uniq
         # (…and the blob URLs each realm going with the page made — a frame's, a same-isolate popup's — revoked as its
         # document goes, as the page's own are: the window's registry, browser.rb `revoke_realm_blobs`)
-        (@frame_realms&.keys || []).each {|id| @browser.revoke_realm_blobs(id) rescue nil }
+        going.each {|id| @browser.revoke_realm_blobs(id) rescue nil }
         if @ctx && !ids.empty?
           drops = ids.map {|id| "__dom.dropRealm(#{id.to_i});" }.join
           @ctx.eval_void("if (globalThis.__dom && globalThis.__dom.dropRealm) { #{drops} }") rescue nil
         end
         discarded_realm_ids.clear
         return if @frame_realms.nil?
-        @frame_realms.each_value {|fr| fr.dispose rescue nil }
-        @frame_realms.clear
+        going.each {|id| @frame_realms.delete(id).dispose rescue nil }
+      end
+      # The realms of the windows `window.open` made in this isolate that are open — their documents' and their frames' —
+      # which a navigation of the page leaves as they are: each window a top-level traversable of its own, its opener the
+      # page's browsing context, whichever document it shows next (HTML).
+      def window_realm_trees
+        windows = window_realm_meta.keys.select {|id| frame_realms.key?(id) }
+        windows.flat_map {|id| [id, *realm_descendants(id)] }
+      end
+      private def realm_descendants(id)
+        Array(realm_direct_call(0, '__csimRealmsMadeIn', id.to_i)).flat_map {|child| [child, *realm_descendants(child)] }
       end
       # The frame realms the page disposed (`dispose_frame_realm`), its page leave to drop.
       def discarded_realm_ids = (@discarded_realm_ids ||= [])
@@ -596,8 +606,10 @@ module Capybara
         @ctx&.low_memory_notification
       end
 
-      def settle_gen
-        ctx.call('__settleGenGet').to_i
+      # (…of realm `realm`'s document, a window `window.open` made in this isolate: its own, which none of the page's
+      # changes)
+      def settle_gen(realm = nil)
+        (realm ? realm_call(realm, '__settleGenGet') : ctx.call('__settleGenGet')).to_i
       end
 
       def has_ready_timer?
@@ -621,7 +633,8 @@ module Capybara
       # code warm across visits (measured −4.5..19% suite wall). Only a refused
       # reset falls back to the cold route: dispose the isolate and build a
       # fresh one (synchronously, on this thread).
-      def rebuild_ctx
+      # (…`keep_windows`: a navigation of the page, which the windows it opened outlive — not the session's reset)
+      def rebuild_ctx(keep_windows: true)
         # (…a new page's clock starting where its realm's does, not where the last page's left it)
         @clock = nil
         # Produce any queued bytecode-cache blobs while every queued target
@@ -633,7 +646,8 @@ module Capybara
         # Drop the previous page's iframe realms (a new visit = new nested
         # browsing contexts). Explicit — under warm-compile the isolate
         # survives, so nothing else would ever release them.
-        dispose_frame_realms
+        kept = keep_windows && @ctx ? window_realm_trees : []
+        dispose_frame_realms(kept: kept)
         # …and the blob URLs the last page made revoked in the host registry too, as the engine's store forgets them as the
         # realm begins anew (File API's unloading document cleanup steps).
         @browser.revoke_realm_blobs(0) rescue nil
@@ -668,12 +682,17 @@ module Capybara
             relieve_heap_pressure
             attach_host_fns(@ctx)
             init_realm(@ctx)
+            # (…the WindowProxies of the page's navigable the windows it kept hold — their `opener` — over its new
+            # document's window, as a navigable's are over each document it goes on to)
+            retarget_window_proxies(0, 0) unless kept.empty?
             return @ctx
           rescue StandardError => e
             warn "[capybara-simulated] warm context reset failed, falling back to cold rebuild: #{e.class}: #{e.message}"
             @browser.log_console('warn', "warm context reset failed, falling back to full rebuild: #{e.message}")
           end
         end
+        # (…none of whose realms a new isolate has: the windows kept go with the old one)
+        dispose_frame_realms
         old = @ctx
         @ctx = nil
         # The cold rebuild brings up a *different* isolate, whose in-memory
@@ -697,7 +716,7 @@ module Capybara
       # (…the session's next page in a realm no document has made cross-origin isolated)
       def reset_page
         @cross_origin_isolated = false
-        rebuild_ctx
+        rebuild_ctx(keep_windows: false)
       end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
@@ -1206,6 +1225,49 @@ module Capybara
         nil
       end
 
+      # A document a navigation of a window `window.open` made in this isolate made, loaded into realm `realm` — a new
+      # one's, or the one of its initial about:blank, whose Window it keeps (`reuse_window_realm`): its URL, its origins
+      # (its URL's own, but an about:blank one's, which its initiator's are — `doc_origin` / `location_origin`), its
+      # referrer, its sandboxing, the client its navigation reserved, its entry of the window's session history (history.js
+      # `__csimCommitWindowEntry`), then its parse and its scripts, and its `load`.
+      private def load_window_document(realm, url, body, content_type, entry:, doc_origin: nil, location_origin: nil, about_base: nil, referrer: nil, referrer_policy: nil,
+                                       csp: nil, client_id: nil, refresh: nil, sandbox: nil)
+        realm.call('__csimUpdateLocation', url.to_s)
+        # (…a navigation's to about:blank its base URL the initiator's: HTML "navigate", the about base URL)
+        realm.call('__csimSetAboutBaseURL', about_base.to_s) if !about_base.to_s.empty? && url.to_s.match?(/\Aabout:blank(?:[?#]|\z)/i)
+        # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a
+        # Document object"; its sandboxing a CSP `sandbox`'s)
+        realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
+        realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
+        # (…an about:blank one a navigation made, its navigable's sandboxing: `navigationOrigins`)
+        realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") if sandbox.to_i.positive?
+        adopt_client_id(realm, client_id)
+        realm.call('__csimSetDocumentOrigin', doc_origin&.to_s)
+        realm.call('__csimSetLocationOrigin', location_origin&.to_s)
+        # (…its window's session history told of it, before its scripts read its `history`)
+        realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer)
+        # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
+        realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
+        # As in create_frame_realm: an auxiliary window is a client of its origin too.
+        realm.call('__csim_swReportClient') rescue nil
+        realm.call('__csimFireWindowLoad') rescue nil
+      end
+
+      # Navigate window realm `id` from its initial about:blank to a document of that one's origin: loaded into the same
+      # realm, its Window kept — HTML "create and initialize a Document object" reuses the initial about:blank's Window
+      # for a document of its origin, so what the opener did to `open(url)`'s window as the call returned (its properties,
+      # its listeners: `w.onload = …`) the new document's Window has (Chrome and Firefox measured, S5). Its Document object
+      # is the one its realm has, emptied and parsed again — a gap: HTML makes a new one (CLAUDE.md).
+      def reuse_window_realm(id, url, body, content_type, entry:, **made)
+        realm = frame_realms[id] or return nil
+        window_realm_meta[id][:initial] = false
+        load_window_document(realm, url, body, content_type, entry: entry, **made.except(:viewport))
+        id
+      rescue StandardError => e
+        @browser.log_console('warn', "window realm load failed: #{e.message}")
+        id
+      end
+
       # Build a same-origin auxiliary WINDOW (window.open / open_new_window) as a
       # realm in THIS isolate — like an iframe's frame realm, but top-level: `parent`
       # === `top` === the window itself (the bridge default, so unlike
@@ -1259,28 +1321,16 @@ module Capybara
         # opener, exactly as an empty <iframe>'s is (create_frame_realm's frame_about_base): the
         # origin so the popup isn't cross-origin to the window that opened it, the base so relative
         # resolution inside it still targets the opener's document.
-        if url.to_s.empty?
+        initial = url.to_s.empty?
+        if initial
           realm.call('__csimUpdateLocation', 'about:blank')
           realm.call('__csimSetAboutBaseURL', about_base.to_s)   unless about_base.to_s.empty?
           # (…and its referrer its creator's URL, its referrer policy its creator's: HTML "create a new browsing context and
           # document")
           realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
           realm.eval_void("__dom.takeOpenerOrigins(#{opener_id.to_i});") unless opener_id.nil?
-        else
-          realm.call('__csimUpdateLocation', url.to_s)
-          # (…a navigation's to about:blank its base URL the initiator's: HTML "navigate", the about base URL)
-          realm.call('__csimSetAboutBaseURL', about_base.to_s) if !about_base.to_s.empty? && url.to_s.match?(/\Aabout:blank(?:[?#]|\z)/i)
-          # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a
-          # Document object"; its sandboxing a CSP `sandbox`'s)
-          realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
-          realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
-          # (…an about:blank one a navigation made, its navigable's sandboxing: `navigationOrigins`)
-          realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") if sandbox.to_i.positive?
         end
-        adopt_client_id(realm, client_id)
         realm.call('__csimSetWindowName', window_name.to_s) unless window_name.nil?
-        realm.call('__csimSetDocumentOrigin', doc_origin.to_s)         unless doc_origin.nil?
-        realm.call('__csimSetLocationOrigin', location_origin.to_s)    unless location_origin.nil?
         # Register the realm as alive BEFORE its document loads: its inline scripts run
         # synchronously inside __csimLoadDocument and may post to a BroadcastChannel the
         # opener listens on (a blob popup that posts then self.close()s). The delivery
@@ -1294,18 +1344,24 @@ module Capybara
         ctx.eval_void("__dom.setSteppedWindow(#{realm.id}, true, #{opener_id.nil? ? 'undefined' : opener_id.to_i}, #{window_key.to_i});")
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
-        # and window.name through its own navigation.
-        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
+        # and window.name through its own navigation — and whether it shows its initial about:blank still, whose Window
+        # a document of its origin keeps (`reuse_window_realm`).
+        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key, initial: initial}
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
-        # (…its window's session history told of it, before its scripts read its `history`)
-        realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer) if entry
-        # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
-        realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
-        # As in create_frame_realm: an auxiliary window is a client of its origin too.
-        realm.call('__csim_swReportClient') rescue nil
-        # (…a new window's initial about:blank completely loaded as it is made, firing no load: bridge.entry.js
-        # `__csimCompleteInitialDocument`)
-        realm.call(retarget_from ? '__csimFireWindowLoad' : '__csimCompleteInitialDocument') rescue nil
+        if initial
+          realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
+          # As in create_frame_realm: an auxiliary window is a client of its origin too.
+          realm.call('__csim_swReportClient') rescue nil
+          # (…a new window's initial about:blank completely loaded as it is made, firing no load: bridge.entry.js
+          # `__csimCompleteInitialDocument`)
+          realm.call('__csimCompleteInitialDocument') rescue nil
+        else
+          load_window_document(
+            realm, url, body, content_type,
+            doc_origin: doc_origin, location_origin: location_origin, about_base: about_base, referrer: referrer, referrer_policy: referrer_policy,
+            csp: csp, client_id: client_id, refresh: refresh, sandbox: sandbox, entry: entry
+          )
+        end
         realm.id
       rescue StandardError => e
         @browser.log_console('warn', "window realm load failed: #{e.message}")

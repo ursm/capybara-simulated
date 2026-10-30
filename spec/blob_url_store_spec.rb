@@ -190,9 +190,9 @@ RSpec.describe 'the blob URL store' do
     s.within_window(popup) { expect(s).to have_css('#w', text: 'made') }
   end
 
-  # The next page revokes the URLs every realm of the last one made — a frame's, a same-isolate popup's — as its own:
-  # nothing of the new page resolves them.
-  it "lets a visit revoke the URLs the last page's frames and popups made" do
+  # The next page revokes the URLs every realm of the last one made — a frame's — as its own: nothing of the new page
+  # resolves them. A pop-up the page opened in its isolate outlives it, and the URLs its document made with it.
+  it "lets a visit revoke the URLs the last page's frames made, not those of the pop-ups it opened" do
     page = '<!DOCTYPE html><iframe srcdoc="<script>parent.fu = URL.createObjectURL(new Blob([\'FRAME\']))</script>"></iframe>' \
            "<script>window.pu = open().eval(\"URL.createObjectURL(new Blob(['POP']))\");</script>"
     s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/' ? page : '<p>b']] })
@@ -203,7 +203,7 @@ RSpec.describe 'the blob URL store' do
       window.got = null;
       Promise.all(#{urls.to_json}.map((u) => fetch(u).then(() => 'fetched', () => 'failed'))).then((r) => { window.got = r; });
     JS
-    expect(poll_until { s.evaluate_script('window.got') }).to eq(%w[failed failed])
+    expect(poll_until { s.evaluate_script('window.got') }).to eq(%w[failed fetched])
   end
 
   # Two Capybara sessions are two browsers: a page of one revoking a blob URL a page of the other made — the same origin,

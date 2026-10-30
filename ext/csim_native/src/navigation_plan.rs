@@ -128,13 +128,13 @@ impl RoutedSubmissions {
 
 // Where a form's submission goes (`route`) — the page's, a frame's: its own navigable, the top-level traversable,
 // another frame's — by its container, whatever document it has by the time the host navigates it (none made yet: the
-// host makes it one) — a window's of this isolate (not modeled) or a new one — named by its target, '' for `_blank` —
-// or none its sandbox lets it navigate.
+// host makes it one) — a window's of this isolate, by the realm of its document, or a new one — named by its target, ''
+// for `_blank` — or none its sandbox lets it navigate.
 pub(crate) enum Route {
     SelfTarget,
     Top,
     Frame(crate::dom::NodeId),
-    Window,
+    Window(i32),
     NewWindow(Vec<u16>),
     Blocked,
 }
@@ -148,9 +148,9 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
         Choice::Frame(container) => Route::Frame(container),
         Choice::TopLevel(0) => Route::Top,
         // (…a window's of this isolate, its own tree's — or a discarded frame's own)
-        Choice::TopLevel(_) => Route::Window,
-        // (…`_blank`'s, named none; another top-level traversable a name found — whose navigation by a form is not
-        // modeled — a new one of its name)
+        Choice::TopLevel(window) => Route::Window(window),
+        // (…`_blank`'s, named none; another top-level traversable a name found — another isolate's, whose navigation by
+        // a form is the host's to plan — a new one of its name)
         Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
             Route::NewWindow(Vec::new())
         }
@@ -555,8 +555,9 @@ fn hold_routed_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let cid = realm_id(scope, &args);
     supersede_routed(scope, cid);
 }
-// A route as the host takes it: [kind, at, container] — "self", "top", "window" (a window's of this isolate),
-// "new_window" and the name it opens under ('' for `_blank`), "blocked", or for another frame's "frame" and the realm of
+// A route as the host takes it: [kind, at, container] — "self", "top", "window" and the realm of a window's of this
+// isolate's document, "new_window" and the name it opens under ('' for `_blank`), "blocked", or for another frame's
+// "frame" and the realm of
 // the document its container's navigable has now, or "unbuilt" and the realm of the container's own document and the
 // container, its navigable with none made yet ("none" where the container is gone); else null.
 fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local<'s, v8::Value>; 3] {
@@ -570,7 +571,7 @@ fn route_items<'s>(scope: &mut v8::PinScope<'s, '_>, route: Route) -> [v8::Local
             // (…a container gone with its document: nothing to navigate)
             (None, None) => ("none", None, None),
         },
-        Route::Window => ("window", None, None),
+        Route::Window(window) => ("window", Some(window), None),
         Route::NewWindow(name) => {
             let name = crate::dom::utf16_value(scope, &name);
             return [v8::String::new(scope, "new_window").unwrap().into(), name, v8::null(scope).into()];

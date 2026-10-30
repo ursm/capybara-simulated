@@ -41,12 +41,17 @@ module Capybara
       def window_name     = (r = realm) ? host.window_realm_name(r) : ''
       def viewport_width  = host.window_realm_viewport(realm!)[0]
       def viewport_height = host.window_realm_viewport(realm!)[1]
-      def set_viewport(w, h) = host.set_window_realm_viewport(realm!, w, h)
       def screen_size     = host.screen_size
-      # (…the response its document was made of is the host's to remember for its page alone: Capybara's
-      # `status_code` / `response_headers` are a Selenium-less extension, which a window's document answers as one loaded)
-      def status_code      = 200
-      def response_headers = {}
+      def set_viewport(w, h)
+        host.set_window_realm_viewport(realm!, w, h)
+      end
+      # The response its document was made of, as the page's (Browser#status_code, #response_headers).
+      def status_code = host.window_realm_response(realm!)[0].to_i
+      def response_headers
+        host.window_realm_response(realm!)[1].to_h.each_with_object({}) {|(k, v), h|
+          h[k.to_s.split('-').map(&:capitalize).join('-')] = v
+        }
+      end
 
       # Whether its close ran — a script's close task, or the user's — the window to be let go of, or it went with its
       # host's page (Driver#reap_closed_windows); whether its close was asked.
@@ -59,7 +64,6 @@ module Capybara
       # ── What it shares with its host: its browsing context group, its isolate's event loop and what waits on it
       def browsing_context_group = host.browsing_context_group
       def window_busy?           = host.window_busy?
-      def polling?               = host.polling?
 
       # ── Every other command its host's, for this window's document
       def method_missing(name, *args, **opts, &block)

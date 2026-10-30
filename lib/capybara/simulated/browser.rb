@@ -897,6 +897,8 @@ module Capybara
         realm = window.realm or raise Capybara::WindowError, "Window #{window.window_handle} is closed; switch to another window"
         saved = [@top_realm_id, @current_realm_id, @frame_stack]
         @top_realm_id     = realm
+        # (…none of the frames it entered once its document was replaced since: they were that one's)
+        window.frame_stack = [] unless window.frame_stack.first.nil? || window.frame_stack.first[:parent_realm_id] == realm
         @frame_stack      = window.frame_stack
         @current_realm_id = @frame_stack.last&.fetch(:realm_id) || realm
         begin
@@ -908,9 +910,16 @@ module Capybara
       end
       # The window realm `from` replaced by `to`, its next document's (`reload_window_realm`): the scope rooted in it, or
       # at it, following it.
+      # (…the frames it had entered gone with the document they were in, as a page's are: `reset_frame_scope`)
       private def retarget_scope(from, to)
-        @top_realm_id     = to if @top_realm_id == from
-        @current_realm_id = to if @current_realm_id == from
+        return if from == to
+
+        if @top_realm_id == from
+          @top_realm_id = to
+          reset_frame_scope
+        elsif @current_realm_id == from
+          @current_realm_id = to
+        end
       end
 
       # `yield`ed as the main document's, whichever frame a `within_frame` has entered — a step of its own that the
@@ -2929,7 +2938,9 @@ module Capybara
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
         # worker's forever `setInterval` (a heartbeat) cannot make every negative matcher wait out its whole timeout.
         if @timers_active || worker_timers_pending? || background_timers_pending?
-          gen = @runtime.settle_gen
+          # (…the document's of the window it addresses: the page's, or a window's `in_window` — a matcher in one waits on
+          # none of the other's redraws)
+          gen = @runtime.settle_gen(@top_realm_id)
           if @last_polled_gen.nil? || gen != @last_polled_gen
             @last_polled_gen = gen
             @idle_settle_polls = 0
@@ -6056,8 +6067,10 @@ module Capybara
 
       # …and every one the window's document — and its frames, and their workers — created, as a navigation replaces
       # it (HTML: a worker's owner set emptied). Only a service worker outlives its clients.
+      # (…not those of the windows it opened, which outlive it: v8_runtime.rb `window_realm_trees`)
       private def terminate_document_workers
-        discard_workers(@workers.to_a.reject {|_h, w| w[:service] }.to_h)
+        windows = @runtime.window_realm_trees
+        discard_workers(@workers.to_a.reject {|_h, w| w[:service] || windows.include?(w[:realm]) }.to_h)
       end
 
       # (…`doomed` and — transitively — their NESTED workers, recorded with realm 0 + parent_worker: their Worker
@@ -6288,9 +6301,10 @@ module Capybara
       end
 
       # Handle Service Worker Client Unload for the outgoing document and its frames, as a navigation replaces them:
-      # each no longer a client — which may let a waiting worker activate, or an unregistered registration clear.
+      # each no longer a client — which may let a waiting worker activate, or an unregistered registration clear. (…not
+      # the windows it opened, which outlive it: v8_runtime.rb `window_realm_trees`)
       private def sw_unload_document_clients
-        [*@runtime.frame_realm_ids, 0].each {|rid| sw_unregister_client(rid) }
+        [*(@runtime.frame_realm_ids - @runtime.window_realm_trees), 0].each {|rid| sw_unregister_client(rid) }
       end
 
       # The focus moved to another BROWSING CONTEXT (HTML "focused area of the top-level
@@ -7296,17 +7310,13 @@ module Capybara
         )
       end
 
-      # Open a SAME-ORIGIN auxiliary window as a realm in THIS browser's isolate
-      # (shared heap) rather than a separate Browser/VM, returning the new realm's
-      # context id for `window.open` to wrap in a NATIVE WindowProxy — so
-      # `popup.document` is a real same-isolate Document and cross-window adoptNode
-      # works (dom/nodes/remove-and-adopt-thcrash). Returns nil to fall back to the
-      # separate-VM aux-window path. First stage: about:blank only (a non-blank
-      # same-origin URL still takes the aux path until realm URL-loading lands).
+      # Open an auxiliary window at about:blank — one of this window's browsing context group, its opener the document of
+      # realm `opener_realm_id` — as a realm in THIS browser's isolate, returning the new realm's context id for
+      # `window.open` to wrap in a NATIVE WindowProxy: `popup.document` a real same-isolate Document, its listeners and
+      # callbacks its own. (A pop-up opened at a URL is another isolate's still: Driver#open_window_from_js.)
       # (…its about:blank document's referrer its creator's URL, `creator_url`, and its policy container its creator's
       # clone: HTML "create a new browsing context and document")
-      def open_window_realm(url, name: nil, opener_realm_id: 0, about_base: nil, creator_url: nil)
-        return nil unless url.nil?
+      def open_window_realm(name: nil, opener_realm_id: 0, about_base: nil, creator_url: nil)
         consume_user_activation(opener_realm_id)
         @runtime.create_window_realm(
           '', '', 'text/html',
@@ -7356,6 +7366,8 @@ module Capybara
       end
       # …and its viewport (`resize_to`), its resize steps run: as the page's (`set_viewport`), in its realm.
       def window_realm_viewport(realm) = @runtime.realm_call(realm, '__csimViewportSize').map(&:to_i)
+      # …and the response its document was made of, `[status, headers]` — one no response made, 200.
+      def window_realm_response(realm) = @runtime.window_realm_meta.dig(realm, :response) || [200, {}]
       def set_window_realm_viewport(realm, w, h)
         invalidate_find_cache
         @runtime.realm_call(realm, '__csimSetViewport', w.to_i, h.to_i)
@@ -10213,12 +10225,18 @@ module Capybara
       def consume_pending_window_nav
         return if @runtime.window_realm_meta.empty?
 
-        @runtime.call('__csimTakeWindowNavigations').each {|realm_id, kind, *plan| navigate_window_realm(realm_id, kind, plan) }
+        @runtime.call('__csimTakeWindowNavigations').each do |realm_id, kind, *plan|
+          navigate_window_realm(realm_id, kind, plan)
+        rescue StandardError => e
+          log_console('warn', "window realm self-navigation failed: #{e.message}")
+        end
       end
       # …one of them — or the driver's own, the user's (`by_user`: Capybara's `visit` / `refresh` in the window, which no
-      # document initiates — its request's `Sec-Fetch-Site: none`) — the window's next document's realm returned, nil where
-      # it made none.
-      def navigate_window_realm(realm_id, kind, plan, by_user: false)
+      # document initiates — its request's `Sec-Fetch-Site: none`, an about:blank one's origin a new opaque one, its
+      # referrer none; what the app raises raised to the test, as a visit of the page's is) — the window's next document's
+      # realm returned, nil where it made none. (…the response it was made of kept as the window's, `status_code`)
+      # (…`post` a form's `[body, content type]`, its document's request a POST)
+      def navigate_window_realm(realm_id, kind, plan, by_user: false, post: nil)
         invalidate_find_cache
         case kind
         when 'location'
@@ -10232,7 +10250,7 @@ module Capybara
           step, url, referred = plan
           entry = ['step', step]
         end
-        initiator ||= realm_id
+        initiator ||= realm_id unless by_user
         made = {}
         body, ctype = nil
         if (blob = host_blob(blob))
@@ -10246,10 +10264,12 @@ module Capybara
         # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
         if body.nil? && http_url?(url)
           by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy}
+          by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
           resp = frame_navigation_fetch(url, referred, dest: 'document', download_realm: initiator, user_activated: activated, **by)
           return if resp.nil? || resp['no_document']
 
           headers = resp['headers'] || {}
+          response = [resp['status'], headers]
           body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
           made = {
             csp:             response_csp(headers),
@@ -10264,7 +10284,9 @@ module Capybara
         # window's navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the
         # document it replaces was, HTML's reload reusing its document state's referrer; any other scheme no document it
         # loads here: one of a blob: URL's resolved as it began, above)
-        if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
+        if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i) && by_user
+          body, ctype = '', 'text/html'
+        elsif body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
           body, ctype = '', 'text/html'
           doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
           if kind == 'reload'
@@ -10293,13 +10315,19 @@ module Capybara
           log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
           return
         end
-        made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
-        new_id = @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
-        retarget_scope(realm_id, new_id) if new_id
+        # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept)
+        new_id =
+          if kind == 'location' && @runtime.window_realm_meta.dig(realm_id, :initial) && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp])
+            @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
+          else
+            made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
+            @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
+          end
+        return unless new_id
+
+        @runtime.window_realm_meta[new_id][:response] = response || [200, {}]
+        retarget_scope(realm_id, new_id)
         new_id
-      rescue StandardError => e
-        log_console('warn', "window realm self-navigation failed: #{e.message}")
-        nil
       end
       # The page's reload its `location.reload()` planned (navigation_plan.rs `planReload`), taken after the call returns:
       # running it inside the V8 call would rebuild the Context under it, which V8 terminates with a
@@ -10646,6 +10674,7 @@ module Capybara
         {
           to:       kind == 'frame' ? at : kind.to_sym,
           name:     (at.to_s if kind == 'new_window'),
+          window:   (at if kind == 'window'),
           referrer: [source, policy]
         }
       end
@@ -10671,6 +10700,13 @@ module Capybara
         initiator = route[:referrer]
         # (…whether its window had transient activation as it was submitted: navigation_plan.rs `planSubmission`)
         activated = spec['userActivated'] == true
+        # (…a window's of this isolate — its own document's, or the one its target names — navigated as its own location
+        # navigates it: `navigate_window_realm`)
+        window = to == :window ? route[:window] : (realm_id if to == :self && @runtime.window_realm_meta.key?(realm_id))
+        if window
+          return navigate_window_realm(window, 'location', [url, false, realm_id, *initiator, activated, nil], post: post)
+        end
+
         case to
         when :self, Integer
           frame = to == :self ? realm_id : to
@@ -10683,8 +10719,6 @@ module Capybara
           submit_into_page(realm_id, spec, url, post, initiator, activated)
         when :new_window
           submit_into_new_window(realm_id, spec, route[:name], url, post, initiator, activated)
-        when :window
-          log_console('warn', "form submit (target=#{spec['target'].to_s.inspect}) into a window of this browser is not modeled")
         end
       end
       # …into the page: the page's own form navigating it in place — replacing its session history entry where it is not

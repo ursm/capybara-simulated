@@ -410,10 +410,17 @@ impl RealmArena {
             .iter()
             .filter_map(|(&c, child)| self.stepped_realm(c, child).filter(|_| self.get(c).is_some_and(|n| n.realm == cid)))
             .collect();
+        realms.sort_unstable();
+        realms
+    }
+    // …and the realms whose event loops realm `cid`'s steps with its own: those, and — the page's — the windows
+    // `window.open` made in this isolate, which are top-level traversables of their own, no child of its document (its
+    // unload, its load's delay, its frames' tree none of theirs) but stepped by its event loop, the isolate's.
+    pub(crate) fn stepped_realms(&self, cid: i32) -> Vec<i32> {
+        let mut realms = self.child_realms(cid);
         if cid == 0 {
             realms.extend(&self.navigables.windows);
         }
-        realms.sort_unstable();
         realms
     }
     // The realms of realm `realm`'s descendant navigables' active documents — its frames', theirs, … — in no order:
@@ -1126,6 +1133,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "swMayControlNavigation", sw_may_control_navigation_op, context_id);
     crate::dom::register(scope, ns, "childNavigables", child_navigables, context_id);
     crate::dom::register(scope, ns, "childRealms", child_realms, context_id);
+    crate::dom::register(scope, ns, "steppedRealms", stepped_realms, context_id);
     crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
     crate::dom::register(scope, ns, "closeWindow", close_window, context_id);
@@ -1412,6 +1420,12 @@ fn child_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 fn child_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let realms = crate::dom::realm(scope, cid).child_realms(cid);
+    rv.set(realm_array(scope, &realms));
+}
+// __dom.steppedRealms() -> the realms the calling realm's event loop steps with its own (`stepped_realms`).
+fn stepped_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let realms = crate::dom::realm(scope, cid).stepped_realms(cid);
     rv.set(realm_array(scope, &realms));
 }
 
