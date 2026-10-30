@@ -13,6 +13,9 @@ RSpec.describe 'the session history of each traversable' do
     requests = self.requests
     lambda do |env|
       body = env['rack.input']&.read.to_s
+      # (…/gone a document once, then none: a 204's)
+      next [204, {}, []] if env['PATH_INFO'] == '/gone' && requests.any? {|r| r[1] == '/gone' }
+
       requests << [env['REQUEST_METHOD'], env['PATH_INFO'], body, env['HTTP_ORIGIN']]
       title = env['PATH_INFO'].delete_prefix('/')
       frame = '<iframe src=/inner></iframe>' if env['PATH_INFO'] == '/framed'
@@ -40,14 +43,17 @@ RSpec.describe 'the session history of each traversable' do
       expect(read('w.location.pathname')).to eq('/c')
     end
 
-    it "applies its opener's traversals in the order they were asked for" do
+    # (…the first of those asked of a document that one of them replaces: Chrome and Firefox, measured 2026-10-31; WPT
+    # traverse_the_history_1-5 — the page's own likewise)
+    it "applies the first of its opener's traversals asked in one task, which replaces its document" do
       expect(read('(() => { w.history.go(-2); const at = w.location.pathname; w.history.forward(); return at; })()')).to eq('/c')
-      expect(read('w.location.pathname')).to eq('/b')
-      expect(requests.map {|r| r[1] }.last(2)).to eq(['/a', '/b'])
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/a', 3])
+      expect([hits('/a'), hits('/b')]).to eq([2, 1])
     end
 
-    # (…HTML "apply the history step" sets the ongoing navigation to "traversal": Chrome and Firefox request none, in
-    # either order)
+    # (…HTML "apply the history step" sets the ongoing navigation to "traversal": Chrome and Firefox commit neither, though
+    # each may request one first — measured 2026-10-31: Chrome /x, Firefox /y — whose fetch the traversal aborts; this
+    # driver begins neither, which the request counts pin)
     it 'begins no navigation its opener planned with a traversal' do
       session.execute_script("w.location = '/x'; w.history.back()")
       session.execute_script("w.history.back(); w.location = '/y'")
@@ -74,6 +80,15 @@ RSpec.describe 'the session history of each traversable' do
       session.execute_script("window.h = w.history; w.location = 'http://b.test/far'")
       expect(read('(() => { try { h.back(); return null; } catch (e) { return e.name; } })()')).to eq('SecurityError')
       expect(hits('/b')).to eq(1)
+    end
+
+    # (…a History its document's: one read before another document of its origin replaced it is not fully active —
+    # Chrome and Firefox, measured 2026-10-31)
+    it 'is a SecurityError to use a History read before the window showed another document of its origin' do
+      session.execute_script("window.h = w.history; w.location = '/d'")
+      expect(read('(() => { try { h.back(); return null; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+      expect(read('(() => { try { return h.length; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+      expect(read('[w.history === h, w.history.length, w.location.pathname]')).to eq([false, 4, '/d'])
     end
 
     it 'moves it within its document, firing its own popstate after the script that asked' do
@@ -127,6 +142,28 @@ RSpec.describe 'the session history of each traversable' do
       session.execute_script("w.eval(\"history.back(); location = '/z'\")")
       expect(read('[w.location.pathname, w.history.length]')).to eq(['/a', 2])
       expect(hits('/z')).to eq(0)
+    end
+
+    # (…HTML "navigate": a navigable whose ongoing navigation is "traversal" navigated by none — a task after the one that
+    # planned the traversal too; Chrome and Firefox, measured 2026-10-31)
+    it 'begins no navigation a later task plans while its traversal is under way' do
+      session.execute_script("w.eval(\"history.back(); setTimeout(() => { location = '/z'; }, 0)\")")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/a', 2])
+      expect(hits('/z')).to eq(0)
+    end
+
+    # (…the first of a task's traversals that replaces its document, those after it let go with it — none left behind
+    # where the document it goes to is none: a 204's)
+    it 'takes the first of the traversals one task asks for, and is navigated after one whose response is no document' do
+      session.execute_script("w.location = '/c'")
+      session.execute_script("w.eval('history.go(-2); history.forward()')")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/a', 3])
+      session.execute_script("w.location = '/gone'")
+      session.execute_script("w.eval('history.back()')")
+      session.execute_script("w.eval('history.forward(); history.back()')")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/a', 2])
+      session.execute_script("w.eval(\"location = '/z'\")")
+      expect(read('[w.location.pathname, w.history.length]')).to eq(['/z', 2])
     end
 
     it 'records a fragment navigation of it as an entry of its own' do

@@ -663,6 +663,18 @@ impl RealmArena {
             nav.unloading.remove(&cid);
             nav.prompting.remove(&cid);
             nav.windows.retain(|&w| w != cid);
+            // (…a window's document, whose window goes with it where it is the one the window is at — not one a
+            // navigation of the window replaced: its session history, its opener, what a script did to it)
+            if let Some(key) = nav.window_keys.remove(&cid) {
+                if nav.window_realms.get(&key) == Some(&cid) {
+                    nav.window_realms.remove(&key);
+                    nav.window_histories.remove(&key);
+                    nav.openers.remove(&key);
+                    nav.opened.remove(&key);
+                    nav.closed.remove(&key);
+                    nav.disowned.remove(&key);
+                }
+            }
             if let Some(container) = nav.containers.remove(&cid) {
                 if let Some(child) = nav.children.get_mut(&container).filter(|c| c.realm == Some(cid)) {
                     child.realm = None;

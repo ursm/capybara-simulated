@@ -2299,7 +2299,9 @@ module Capybara
         step, changes = plan
         # (…a navigable whose document it makes again its navigation planned before it no more: HTML "apply the history
         # step" sets its ongoing navigation to "traversal" — Chrome and Firefox: `history.back(); location.href = '/x'`
-        # never requests /x, in either order — one moved within its document keeping its own)
+        # never commits /x, in either order, though either may request it first (measured 2026-10-31, another window's:
+        # Chrome for `w.location = '/x'; w.history.back()`, Firefox for the other order); this requests it in neither — one
+        # moved within its document keeping its own)
         changes.each {|nav, _, same_document| cancel_navigations_for(nav) unless same_document }
         if changes.all? {|(_, _, same_document)| same_document }
           # …unless this is the page being navigated away from, running its last
@@ -2344,17 +2346,23 @@ module Capybara
       # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). The traversal of
       # `token` applied, and those queued before it: none where the driver took them already.
       def apply_planned_traversal(token)
-        @session_history.take_queued(token).each {|row| apply_queued_traversal(*row) }
+        @session_history.take_queued(token).each do |row|
+          apply_queued_traversal(*row)
+        end
       end
       def apply_planned_traversals
-        @session_history.take_all_queued.each {|row| apply_queued_traversal(*row) }
+        @session_history.take_all_queued.each do |row|
+          apply_queued_traversal(*row)
+        end
       end
       # The traversals another window's script asked for (session_history.rs `traversableTraverse`), each a task of this
       # window's own — with those its page queued before them, in the order queued — applied now, its page's script not on
       # the stack. Returns how many.
       private def apply_asked_traversals
         rows = @session_history.take_asked
-        rows.each {|row| apply_queued_traversal(*row, force: true) }
+        rows.each do |row|
+          apply_queued_traversal(*row, force: true)
+        end
         rows.size
       end
       # …one of them: by `delta` (`history_go`), or, another window's `go(0)`, the page's reload, by its own document (HTML
@@ -7558,7 +7566,12 @@ module Capybara
       private def consume_planned_navigation
         planned = @session_history.take_planned or return false
         url     = planned[:url]
-        made    = {referer: planned[:referrer], referrer_policy: planned[:policy], initiator: planned[:initiator], user_activated: planned[:activated]}
+        made    = {
+          referer:         planned[:referrer],
+          referrer_policy: planned[:policy],
+          initiator:       planned[:initiator],
+          user_activated:  planned[:activated]
+        }
         if planned[:javascript]
           @runtime.call('__csimEvaluateJavascriptURL', url)
         elsif (blob = planned[:blob])

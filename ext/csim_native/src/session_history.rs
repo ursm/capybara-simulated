@@ -194,6 +194,9 @@ struct Traversable {
     // Whether web content made it — a script's `window.open`, a link's or a form's target — which makes it
     // script-closable (HTML "is created by web content"), not the driver's own window.
     by_web_content: bool,
+    // How many documents its top-level navigable has shown (`#show`): a History, a Document, of another isolate's window
+    // is of the one it was read while it showed (`traversableDocument`).
+    shown: u64,
     // What the script of another window asked of it, which its own event loop takes as tasks (`Asked`).
     asked: Asked,
 }
@@ -275,7 +278,8 @@ pub(crate) fn window_tasks_pending() -> bool {
 // realm whose `history` asked for it, whether it makes a document again (one it moves within the documents waits a turn:
 // its `popstate` after what is due as the script ends) — and whether the script of another isolate's window asked for it
 // (a `w.history.back()`), which the traversable's own event loop takes as a task (`Asked`), no task of its page's queued
-// for it.
+// for it. And the top-level document it was asked of (its document state, `Entry::doc`), and whether it replaces that
+// one: the traversals asked of a document after one that replaces it are let go as that one is taken (`take_due`).
 #[derive(Clone, Copy)]
 struct Queued {
     token: u64,
@@ -283,6 +287,8 @@ struct Queued {
     realm: i32,
     documents: bool,
     asked: bool,
+    source: u64,
+    replaces: bool,
 }
 impl Queued {
     fn row(self) -> (u64, i64, i32, bool) {
@@ -624,24 +630,44 @@ impl Traversable {
         self.tokens += 1;
         let token = self.tokens;
         let ahead: i64 = self.queued.iter().map(|q| q.delta).sum();
-        let documents = delta == 0 || self.traversal(ahead + delta).is_some_and(|(_, changes)| changes.iter().any(|&(_, _, same)| !same));
-        asking(self, |t| t.queued.push(Queued { token, delta, realm, documents, asked }));
+        let changes = self.traversal(ahead + delta).map(|(_, changes)| changes).unwrap_or_default();
+        let documents = delta == 0 || changes.iter().any(|&(_, _, same)| !same);
+        let replaces = delta == 0 || changes.iter().any(|&(nav, _, same)| nav == TOP && !same);
+        let source = self.state.current_entry(TOP, self.build).map_or(0, |e| e.doc);
+        asking(self, |t| t.queued.push(Queued { token, delta, realm, documents, asked, source, replaces }));
         (token, if documents { 0 } else { 1 })
     }
     // …those queued up to and with the one of `token`, taken off the queue to be applied in order: none where it is not
     // queued (the host applied it already).
     fn take_queued(&mut self, token: u64) -> Vec<Queued> {
         let Some(at) = self.queued.iter().position(|q| q.token == token) else { return Vec::new() };
-        asking(self, |t| t.queued.drain(..=at).collect())
+        self.take_due(at + 1)
     }
     // …those up to and with the last another window asked for — its own before it with it, in the order queued.
     fn take_asked(&mut self) -> Vec<Queued> {
         let Some(at) = self.queued.iter().rposition(|q| q.asked) else { return Vec::new() };
-        asking(self, |t| t.queued.drain(..=at).collect())
+        self.take_due(at + 1)
     }
     // …and every one.
     fn take_all_queued(&mut self) -> Vec<Queued> {
-        asking(self, |t| t.queued.drain(..).collect())
+        self.take_due(self.queued.len())
+    }
+    // The first `n` queued, taken to be applied in order — the page's, a window's of this isolate, another window's
+    // alike: but those asked of a document after a traversal that replaces it, which are let go with it, those still
+    // queued too. The first wins, as Chrome and Firefox have it — measured 2026-10-31, the page's own `go(-2); go(-1)` and
+    // another window's alike; WPT traverse_the_history_1-5 — HTML computing each one's step as it runs, which the
+    // traversal in flight before it leaves to the engines (an attempt to navigate a traversing navigable is ignored).
+    fn take_due(&mut self, n: usize) -> Vec<Queued> {
+        asking(self, |t| {
+            let mut ended = HashSet::new();
+            let taken: Vec<Queued> = t.queued.drain(..n).filter(|q| !ended.contains(&q.source) && (!q.replaces || ended.insert(q.source))).collect();
+            t.queued.retain(|q| !ended.contains(&q.source));
+            taken
+        })
+    }
+    // Whether a traversal queued — one that makes a document again — has a task of its page's still to apply it.
+    fn queued_documents(&self) -> bool {
+        self.queued.iter().any(|q| q.documents && !q.asked)
     }
     // The traversal to `step` applied — the step a plan gave.
     fn go_to(&mut self, step: i64) {
@@ -788,6 +814,7 @@ impl SessionHistory {
         let mut t = self.lock();
         let build = t.build;
         t.state.show(build);
+        t.shown += 1;
     }
     // #clear_name: the navigable target name of the document state the navigation in flight made (its current entry's)
     // the empty string — HTML "finalize a cross-document navigation", the shown document's left as it is.
@@ -835,7 +862,7 @@ impl SessionHistory {
         !self.lock().queued.is_empty()
     }
     pub(crate) fn queued_documents(&self) -> bool {
-        self.lock().queued.iter().any(|q| q.documents)
+        self.lock().queued_documents()
     }
     // #last_token -> the token of the traversal queued last, 0 for none ever: those up to it were asked for by now.
     fn last_token(&self) -> u64 {
@@ -1450,23 +1477,35 @@ mod tests {
     }
 
     #[test]
-    fn a_traversal_another_window_asked_for_is_a_task_taken_in_the_order_queued() {
+    fn a_traversal_another_window_asked_for_is_a_task_taken_in_the_order_queued_the_first_replacing_the_document_winning() {
         let popup = SessionHistory::new();
-        for url in ["http://a.test/1", "http://a.test/2", "http://a.test/3"] {
-            popup.push(TOP, 0, url.into(), false, Data::default());
+        popup.push(TOP, 0, "http://a.test/1".into(), false, Data::default());
+        for url in ["http://a.test/2", "http://a.test/3"] {
+            popup.push(TOP, 0, url.into(), true, Data::default());
         }
+        // (…within its document: its own before the asked one with them, in order; none after the last asked one)
         let (own, _) = popup.lock().queue(-1, 0, false);
         assert!(!popup.is_asked());
         let (asked, delay) = popup.lock().queue(-1, 0, true);
-        // (…a reload of it too, `go(0)`, which makes its document again)
-        let (reload, _) = popup.lock().queue(0, 0, true);
-        assert_eq!(delay, 0);
+        assert_eq!(delay, 1);
         assert!(popup.is_asked() && window_tasks_pending());
-        // (…its own before the asked one with them, in order; none after the last asked one)
         let (after, _) = popup.lock().queue(1, 0, false);
-        assert_eq!(popup.take_asked(), vec![(own, -1, 0, false), (asked, -1, 0, true), (reload, 0, 0, true)]);
+        assert_eq!(popup.take_asked(), vec![(own, -1, 0, false), (asked, -1, 0, true)]);
         assert!(!popup.is_asked());
         assert_eq!(popup.take_all_queued(), vec![(after, 1, 0, false)]);
+        // (…one that replaces its document the first of those asked of that document: those after it let go, asked or
+        // queued still — a reload, `go(0)`, one too)
+        popup.push(TOP, 0, "http://a.test/4".into(), false, Data::default());
+        let (first, delay) = popup.lock().queue(-1, 0, true);
+        assert_eq!(delay, 0);
+        popup.lock().queue(-1, 0, false);
+        popup.lock().queue(0, 0, true);
+        assert_eq!(popup.take_queued(first), vec![(first, -1, 0, true)]);
+        assert!(!popup.is_asked() && !popup.is_queued());
+        let (reload, _) = popup.lock().queue(0, 0, true);
+        popup.lock().queue(-1, 0, true);
+        assert_eq!(popup.take_asked(), vec![(reload, 0, 0, true)]);
+        assert!(!popup.is_asked());
         // (…its page's let go with its document, those another window asked for kept)
         popup.lock().queue(-1, 0, false);
         let (kept, _) = popup.lock().queue(-1, 0, true);
@@ -1628,10 +1667,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyTraverse", history_traverse_op, context_id);
     crate::dom::register(scope, ns, "applyWindowTraversal", apply_window_traversal_op, context_id);
-    crate::dom::register(scope, ns, "queuedWindowTraversals", queued_window_traversals_op, context_id);
     crate::dom::register(scope, ns, "commitWindowEntry", commit_window_entry_op, context_id);
     crate::dom::register(scope, ns, "windowHistoryUpdate", window_history_update_op, context_id);
     crate::dom::register(scope, ns, "traversableTraverse", traversable_traverse_op, context_id);
+    crate::dom::register(scope, ns, "traversableDocument", traversable_document_op, context_id);
     crate::dom::register(scope, ns, "traversablePlanJavascript", traversable_plan_javascript_op, context_id);
     crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
     crate::dom::register(scope, ns, "publishTraversableOrigin", publish_origin, context_id);
@@ -1810,67 +1849,56 @@ fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// __dom.applyWindowTraversal(token) -> the traversal of `token`, and those queued before it, applied to the session
-// history of the calling realm's window — one `window.open` made in this isolate — in order: [url, state, …] of each
-// that moves the window within its document (HTML "update document for history step application": its location the
-// entry's URL, then `popstate` with its state, which the bindings do); one that makes its document again planned in that
-// document's navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those queued after
-// it left queued, for the document it makes to apply (`queuedWindowTraversals`) — as are all of them while one is planned
-// already, applied in turn from the step it goes to. The window's realm first, whose document the moves update (a
-// frame's `history` traverses its window's). Null for a realm of no such window: the page's traversals are the host's to
-// apply.
+// __dom.applyWindowTraversal(token) -> the traversal of `token`, and those queued before it (`Traversable::take_due`),
+// applied to the session history of the calling realm's window — one `window.open` made in this isolate — in order:
+// [window, url, state, hashchange, …] — the window's realm, whose document is moved (a frame's `history` traverses its
+// window's), then of each traversal that moves it within its document its entry's URL and state and whether its
+// fragment changed (HTML "update document for history step application": its location the URL, then `popstate` with
+// the state, then a `hashchange`, which the bindings do); one that makes its document again planned in that document's
+// navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those asked of it after it let
+// go. Null for a realm of no such window: the page's traversals are the host's to apply.
 fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let cid = crate::dom::realm_id(scope, &args);
     let Some((traversable, window)) = window_traversable(crate::dom::realm(scope, cid), cid) else { return rv.set_null() };
     let mut moves = Vec::new();
     let mut planned = None;
-    if !crate::dom::realm(scope, window).navigation_plan.traversal_planned() {
+    {
         let mut t = lock(&traversable);
-        let mut queued = t.take_queued(token).into_iter();
-        for q in queued.by_ref() {
+        for q in t.take_queued(token) {
             let Some((step, changes)) = t.traversal(q.delta) else { continue };
-            let Some(entry) = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2))) else {
+            let from = t.state.current_entry(TOP, t.build).map(|e| e.url.clone()).unwrap_or_default();
+            let Some((entry, same_document)) = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2))) else {
                 t.go_to(step);
                 continue;
             };
-            let (entry, same_document) = entry;
             if same_document {
                 t.go_to(step);
-                moves.push((entry.url, entry.data.state.clone()));
+                let hashchange = fragment(&from) != fragment(&entry.url);
+                moves.push((entry.url, entry.data.state.clone(), hashchange));
                 continue;
             }
             let referrer = entry.data.text("referer").map(str::to_owned);
             planned = Some(crate::navigation_plan::Traversal { step, url: entry.url, referrer });
             break;
         }
-        let rest: Vec<Queued> = queued.collect();
-        if !rest.is_empty() {
-            asking(&mut t, |t| {
-                t.queued.splice(0..0, rest);
-            });
-        }
     }
     if let Some(traversal) = planned {
         crate::dom::realm(scope, window).navigation_plan.plan_traversal(traversal);
     }
-    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(moves.len() * 2 + 1);
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(moves.len() * 3 + 1);
     items.push(v8::Integer::new(scope, window).into());
-    for (url, state) in moves {
+    for (url, state, hashchange) in moves {
         let Some(url) = v8::String::new(scope, &url) else { return rv.set_null() };
         items.push(url.into());
         items.push(state_value(scope, state.as_ref()));
+        items.push(v8::Boolean::new(scope, hashchange).into());
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-
-// __dom.queuedWindowTraversals() -> the tokens of the traversals queued on the calling realm's window's session history:
-// those whose tasks went with the document they were queued in, for the one that replaced it to queue again.
-fn queued_window_traversals_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let tokens: Vec<u64> = window_traversable(crate::dom::realm(scope, cid), cid).map_or_else(Vec::new, |(t, _)| lock(&t).queued.iter().map(|q| q.token).collect());
-    let items: Vec<v8::Local<v8::Value>> = tokens.into_iter().map(|t| v8::Number::new(scope, t as f64).into()).collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
+// A URL's fragment — none where it has none, which an empty one is not.
+fn fragment(url: &str) -> Option<&str> {
+    url.split_once('#').map(|(_, f)| f)
 }
 
 // __dom.commitWindowEntry(url, how, step, referrer) -> the classic history API state the calling realm's
@@ -1944,6 +1972,15 @@ fn traversable_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     if !t.closed && !t.asked.closing {
         t.queue(delta, 0, true);
     }
+}
+
+// __dom.traversableDocument(id) -> which document top-level traversable `id`, a window of another isolate, shows — the
+// number of those it has shown — or -1 for one gone: what a History of it read before its document changed is not of
+// (HTML: a History's document no longer fully active).
+fn traversable_document_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    let shown = histories().1.get(&id).and_then(Weak::upgrade).map_or(-1.0, |t| lock(&t).shown as f64);
+    rv.set_double(shown);
 }
 
 // __dom.traversablePlanJavascript(id, url) — a navigation of top-level traversable `id`, a window of another isolate, to

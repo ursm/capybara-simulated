@@ -232,7 +232,8 @@ impl NavigationPlan {
     }
     // A traversal of the document's window that makes its document again planned (`Traversal`): the navigation planned
     // before it let go — HTML "apply the history step" sets the ongoing navigation to "traversal".
-    // …and whether one is planned.
+    // …and whether one is planned: a location navigation or a reload planned after it is ignored, HTML "navigate"
+    // returning for a navigable whose ongoing navigation is "traversal".
     pub(crate) fn traversal_planned(&self) -> bool {
         self.own.traversal.is_some()
     }
@@ -391,7 +392,8 @@ fn take_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // __dom.planLocation(url, replace, initiatorRealm, policy, activated, blob): the calling realm's document's own
 // navigation planned by its `location` (`Location`), superseding what it planned before — `initiatorRealm` the realm
 // whose script began it, undefined for the document's own, whose Referer under `policy` (a link's, '' its document's) is
-// taken now (referrer.rs `navigation_referrer`); `blob` a `blob:` URL's bytes and type, or undefined.
+// taken now (referrer.rs `navigation_referrer`); `blob` a `blob:` URL's bytes and type, or undefined. None while a
+// traversal is planned (`traversal_planned`).
 fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let replace = args.get(1).is_true();
@@ -405,17 +407,23 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         (r, source, policy)
     });
     let plan = &mut realm(scope, cid).navigation_plan;
+    if plan.traversal_planned() {
+        return;
+    }
     plan.supersede();
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
     plan.own.planned = next_planned();
 }
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
-// `blob:` URL, else undefined (`Reload`).
+// `blob:` URL, else undefined (`Reload`). None while a traversal is planned.
 fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let activated = args.get(0).is_true();
     let blob = (!args.get(1).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(1)));
     let plan = plan(scope, &args);
+    if plan.traversal_planned() {
+        return;
+    }
     plan.supersede();
     plan.own.reload = Some(Reload { activated, blob });
     plan.own.planned = next_planned();
