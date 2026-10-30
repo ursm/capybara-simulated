@@ -11197,10 +11197,14 @@ module Capybara
           # about:srcdoc carries its own markup.)
           if url.to_s.match?(ABOUT_BLANK)
             # (…its origin its initiator's, an opaque one for none: a visit's — HTML "determine the origin", Chrome
-            # measured — and its base URL that document's; a window's initial about:blank no navigation's, a `noopener`
-            # one's origin a new opaque one: HTML "window open steps")
-            if initiator && leaving_origin != :initial
-              inherit_creator(origin: url_origin(initiator).to_s, base: initiator.to_s, url: referer.to_s)
+            # measured — and its base URL that document's: the page's own where the page navigates itself, else the
+            # initiator's URL (its base URL not known here — a gap); its referrer the request's, under the initiator's
+            # policy. A window's initial about:blank is no navigation's — a `noopener` one's origin a new opaque one, a
+            # pop-up's its creator's: HTML "window open steps")
+            if initiator && @session_history.active(0)
+              own  = initiator == @current_url
+              base = own ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s
+              inherit_creator(origin: url_origin(initiator).to_s, base: base)
             end
             commits.(initiator && url_origin(initiator))
             @current_url = url.to_s
