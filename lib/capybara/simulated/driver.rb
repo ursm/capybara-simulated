@@ -408,7 +408,6 @@ module Capybara
       def disposed? = @disposed == true
       def go_back              = current_browser.go_back
       def go_forward           = current_browser.go_forward
-      def reset_history!       = current_browser.reset_history!
       def current_url          = current_browser.current_url || ''
       def html                 = current_browser.html
       def title                = current_browser.title
@@ -449,9 +448,13 @@ module Capybara
       private def window_entries
         [{handle: PRIMARY_HANDLE, browser: @browser, opener: nil}] + @aux_windows
       end
-      # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name), none for ''.
-      private def named_window(name)
-        window_entries.find {|w| w[:browser].window_name == name } unless name.empty?
+      # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name) in `from`'s browsing
+      # context group — HTML "find a navigable by target name" searches its set alone: a `noopener` window's name finds
+      # none of its opener's — none for '' or none `from`.
+      private def named_window(name, from)
+        return if name.empty? || from.nil?
+
+        window_entries.find {|w| w[:browser].window_name == name && w[:browser].browsing_context_group == from.browsing_context_group }
       end
 
       # The Browser backing a handle, or nil if the window is closed/unknown.
@@ -499,7 +502,7 @@ module Capybara
         # A `<form target>` keeps its opener by default (unlike a `target=_blank`
         # LINK, which is noopener) — resolve the opener handle from the source.
         opener_handle ||= handle_for(source) if opener && source
-        if (existing = named_window(name))
+        if (existing = named_window(name, source))
           return existing[:handle] if refused
 
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
@@ -597,7 +600,7 @@ module Capybara
         end
         # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
         # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
-        if (existing = named_window(name.to_s))
+        if (existing = named_window(name.to_s, opener_browser))
           navigate_window(existing[:browser], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy,
                                                         user_activated: opener_browser.source_activated?(opener_realm_id))
           return existing[:handle]

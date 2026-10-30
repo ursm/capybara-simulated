@@ -28,6 +28,36 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     expect(name).to eq('')
   end
 
+  # (…the document a pagehide runs in still its own: the name it sets is the leaving document's — back with it on a
+  # traversal — not the next one's, which took the name as the navigation began: the next one's 'orig' in Chrome and
+  # Firefox, measured)
+  it "set in a pagehide is the leaving document's" do
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'orig'; addEventListener('pagehide', () => { window.name = 'fromhide' })")
+    session.click_link 'same'
+    expect(name).to eq('orig')
+    session.go_back
+    expect(name).to eq('fromhide')
+  end
+
+  # (…about:blank, a window's own and a visit's, a document like any other: of its initiator's origin, an opaque one
+  # for a visit's; an error document of an opaque one too)
+  it 'is cleared through about:blank and by an error document, as any document of another origin clears it' do
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'n'")
+    session.visit 'about:blank'
+    expect(name).to eq('')
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'n'; location.href = 'about:blank'")
+    session.evaluate_script('1')
+    session.visit 'http://b.test/'
+    expect(name).to eq('')
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'n'; location.href = 'blob:http://a.test/gone'")
+    session.evaluate_script('1')
+    expect(name).to eq('')
+  end
+
   it 'is the one its entry had, after a traversal' do
     session.visit 'http://a.test/'
     session.execute_script("window.name = 'first'")
@@ -47,6 +77,18 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
       session.click_link 'away'
       expect(name).to eq('pop')
     end
+  end
+
+  # (…found by a window of its browsing context group alone: a `noopener` one's naming the page's opens one of its own —
+  # HTML "find a navigable by target name", Chrome and Firefox measured)
+  it "is found by none of another browsing context group's windows" do
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'prim'")
+    popup = session.window_opened_by { session.execute_script("window.open('/next', '', 'noopener')") }
+    session.within_window(popup) { session.execute_script("window.open('/hijack', 'prim')") }
+    expect(session).to have_text('a.test/')
+    expect(session).to have_no_text('hijack')
+    expect(session.windows.size).to eq(3)
   end
 
   # (…and the name a page gives its window is the one another's `window.open` finds it by, not the one it opened with)

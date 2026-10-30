@@ -477,7 +477,8 @@ function keepInHarnessOnlyTree(path, buf) {
   if (!/\.(html|htm|xht|xhtml)$/i.test(path)) return false;
   // The same names `WptRunner.test_files` rejects, rejected here too, so a file it would never
   // visit is never committed either.
-  if (/-(ref|notref|manual)\.(html|htm|xht|xhtml)$/i.test(path)) return false;
+  // (…its type flag what comes after the last `-` up to the first `.`, as sourcefile.py reads it: `-manual.https.html`)
+  if (/-(ref|notref|manual)(\.[^/.]+)*\.(html|htm|xht|xhtml)$/i.test(path)) return false;
   return buf.includes('/resources/testharness.js');
 }
 

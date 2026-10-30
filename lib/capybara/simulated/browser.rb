@@ -2244,24 +2244,6 @@ module Capybara
       def go_back        ; history_go(-1, force: true) ; end
       def go_forward     ; history_go(+1, force: true) ; end
 
-      # Reset the session history to empty WITHOUT the full `reset!` (cookies /
-      # storage / viewport / frame scope stay put). A single session that visits
-      # many documents in sequence — the WPT conformance runner reuses one for
-      # the whole 1645-file suite — otherwise accumulates every prior visit's
-      # history entry, so a document that calls `history.back()` (e.g. a bfcache
-      # round-trip test) traverses the SHARED history back into the PREVIOUS
-      # document and re-runs it. Clearing history per visit confines each
-      # document's back / forward to its own navigations, matching a real
-      # browser's fresh-browsing-context isolation, so results don't depend on
-      # visit order. Not wired into `visit` itself — a normal session keeps
-      # cross-`visit` back-navigation (Selenium parity); only callers that want
-      # per-document isolation invoke it.
-      def reset_history!
-        @session_history.clear
-        @frame_history_saved_for = nil
-        @frame_leaving_entries   = nil
-        @pending_history_traverse = nil
-      end
 
       # Traverse the page's session history by `delta` steps — the joint history of the page and its frames
       # (session_history.rs), whichever navigable's `history` asked: each navigable whose active entry the step moves
@@ -11147,9 +11129,14 @@ module Capybara
         flush_outgoing_page_init if !from_history && @timers_active
         # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
         prompt_page_to_unload if !from_history || is_reload
-        # (…the origin of the document it leaves, which one of another origin clears the navigable's name by: none for a
-        # window of no document yet, or of an opaque origin)
+        # (…the origin of the document it leaves, which one of another origin clears the navigable's name by as it commits
+        # — `clear_navigable_name`, an error document's of an opaque one — a replay's left as it was)
         leaving_origin = leaving_document_origin unless from_history
+        commits        = lambda {|origin| clear_navigable_name(leaving_origin, origin) unless from_history }
+        error_document = lambda {|at|
+          commits.(nil)
+          commit_error_document(at)
+        }
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
         fetch = Native::NavigationFetch.new({
@@ -11201,6 +11188,8 @@ module Capybara
           # made with no fetch). (Narrow to about:blank specifically —
           # about:srcdoc carries its own markup.)
           if url.to_s.match?(ABOUT_BLANK)
+            # (…its origin its initiator's, an opaque one for none: a visit's)
+            commits.(initiator && url_origin(initiator))
             @current_url = url.to_s
             record_response(200, {'content-type' => 'text/html'})
             return boot_response_into_ctx('')
@@ -11211,11 +11200,14 @@ module Capybara
           # navigation_fetch.rs `redirect`.)
           if !body && url.to_s.match?(/\Ablob:/i)
             blob ||= blob_snapshot(url)
-            return blob ? boot_blob_document(url, blob[:bytes], blob[:type], flushed: true) : fail_blob_document(url)
+            return error_document.(url) unless blob
+
+            commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
+            return boot_blob_document(url, blob[:bytes], blob[:type], flushed: true)
           end
           # (…a POST to any URL but an HTTP(S) one a network error, its error document at the URL: Fetch "scheme fetch" —
           # a `blob:` URL's fetched by a GET alone)
-          return commit_error_document(url) if body && !http_url?(url)
+          return error_document.(url) if body && !http_url?(url)
 
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
@@ -11234,7 +11226,7 @@ module Capybara
             if (sw = any_window_sw_navigation_fetch(target, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
                                                             dest: 'document', referrer_source: ref_source, origin_url: origin || initiator, referrer_policy: ref_policy,
                                                             site_seed: seed, origin_null: tainted, cookie_context: cookies))
-              return commit_error_document(target) if sw['networkError']
+              return error_document.(target) if sw['networkError']
 
               status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
             else
@@ -11251,13 +11243,13 @@ module Capybara
                 dest:            'document',
                 cookie_context:  cookies,
                 user_activated:  user_activated
-              ) or return commit_error_document(target)
+              ) or return error_document.(target)
               status, headers, resp_body = response
             end
             if (loc = redirect_location(status, headers))
               resp_body.close if resp_body.respond_to?(:close)
               command, to_get = fetch.redirect(status, loc.to_s, referrer_policy_header(headers))
-              return commit_error_document(target) if command == 'fail'
+              return error_document.(target) if command == 'fail'
               return navigation_made_no_document(target) if command == 'hand_off'
 
               redirect_history_entry(fetch.target, get: fetch.request_method == 'GET')
@@ -11276,7 +11268,7 @@ module Capybara
 
             @current_url = target
             record_response(status, headers)
-            clear_navigable_name(leaving_origin, target) unless from_history
+            commits.(url_origin(target))
             # Full-reload navigation rebuilds the JS Context from the warm
             # snapshot. Per-visit fresh VM avoids partial-reset drift
             # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
@@ -11291,25 +11283,26 @@ module Capybara
           restore_flushed_nav_intents
         end
       end
-      # The origin of the page's document a navigation leaves — a window's of none yet its initial about:blank's, its
+      # The origin of the page's document a navigation leaves — a window's of no entry yet its initial about:blank's, its
       # creator's (`inherit_creator`; one it does not know, a `noopener` window's, kept: `clear_navigable_name`) — none
       # for one of an opaque origin (never the same as another).
       private def leaving_document_origin
-        return @creator&.fetch(:origin) || :initial unless window_has_document?
+        return @creator&.fetch(:origin) || :initial unless @session_history.active(0)
 
         url, _, opaque = request_client(0)
         opaque ? nil : url_origin(url)
       end
-      # HTML "finalize a cross-document navigation": a top-level navigable's target name (`window.name`, its document
-      # state's: session_history.rs) cleared where its new document is of another origin than the one it leaves — unless
-      # it is an auxiliary browsing context whose opener is still there (not disowned: `window.opener = null`). (…a
-      # `noopener` window's first navigation away from its initial about:blank leaving it as it is: that document's origin
-      # its creator's, which such a window does not keep here — a gap)
-      private def clear_navigable_name(leaving_origin, url)
-        return if leaving_origin == :initial || (leaving_origin && leaving_origin == url_origin(url))
+      # HTML "finalize a cross-document navigation": the target name of the document state a top-level navigation made
+      # (`window.name` of its document: session_history.rs) cleared where that document's origin (`origin`, none an opaque
+      # one) is another than the one it leaves — unless the window is an auxiliary browsing context whose opener is still
+      # there (not disowned: `window.opener = null`). (…a `noopener` window's first navigation away from its initial
+      # about:blank leaving it as it is — that document's origin its creator's, which such a window does not keep here —
+      # as Chrome and Firefox leave it)
+      private def clear_navigable_name(leaving_origin, origin)
+        return if leaving_origin == :initial || (leaving_origin && leaving_origin == origin)
         return if opener_handle && !@runtime.realm_direct_call(0, '__csimOpenerDisowned')
 
-        @session_history.name = ''
+        @session_history.clear_name
       end
       # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
       # kept, for a response that turns out to make no document (`download_in_place`).
@@ -11398,6 +11391,9 @@ module Capybara
         # history ignored: its entry, and the URL, are the next document's by now — a gap, Chrome's pushState of one
         # adding the old document a step)
         frozen_history { fire_document_teardown }
+        # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving
+        # one's pagehide wrote its own)
+        @session_history.show
         @flushed_nav_intents = nil
         # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
         @session_history.clear_queued

@@ -1018,8 +1018,9 @@ module WptRunner
   # files into the gate, which WPT never runs (they need a human).
   REFERENCE_NAME = /(\A|[-_])(not)?ref[0-9]*([-_]|\z)/
 
+  # (…the basename up to its first `.`: a flag after it — `-manual.https.html` — is none of the type's)
   def reference_or_manual?(rel)
-    base = File.basename(rel, '.*')
+    base = File.basename(rel).split('.').first
     base.end_with?('-manual') || base.match?(REFERENCE_NAME)
   end
 

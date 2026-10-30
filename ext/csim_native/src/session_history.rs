@@ -93,8 +93,8 @@ impl Data {
     // …and, an entry of the same document as `leaving`'s (a pushState's, a fragment navigation's), what it was reached by
     // where `self` names none: the document state the two share (HTML "URL and history update steps", "navigate to a
     // fragment": the new entry's document state the active one's) — its request's referrer and policy, its document's
-    // referrer, whether its cookies were cross-site, its navigable target name. (…a POST's body its own entry's alone: a reload of the URL a page
-    // pushed is a GET of it)
+    // referrer, whether its cookies were cross-site, its navigable target name. (…a POST's body its own entry's alone: a
+    // reload of the URL a page pushed is a GET of it)
     fn sharing_document_state(mut self, leaving: &Data) -> Self {
         for (field, theirs) in self.texts.iter_mut().zip(&leaving.texts) {
             if field.is_none() {
@@ -162,6 +162,10 @@ struct State {
     // The target name the top-level navigable was made with, before it has a document state of its own to hold it (a
     // window `window.open` named: HTML "create a new auxiliary browsing context"), which its first one takes.
     initial_name: Vec<u16>,
+    // The document state of the document the top-level navigable shows (`show`) — its active one's until a navigation's
+    // response commits, though the entry the navigation pushed is current from its start: the one `window.name` reads
+    // and writes, a pagehide's the leaving document's own.
+    shown: Option<u64>,
 }
 
 #[derive(Default)]
@@ -254,17 +258,19 @@ impl State {
         self.find(nav, build).map(|(list, _)| list)
     }
 
-    // …and its current entry.
     // The navigable target name of the top-level navigable's active document state (`window.name`), and — `set_name` —
     // the one every entry of that document has made `name`: the state they share.
+    // (…the shown document's, else the current entry's — none shown yet, or its entries replaced since)
     fn name(&self, build: u32) -> Vec<u16> {
-        match self.current_entry(TOP, build) {
+        let shown = self.shown.and_then(|doc| self.entries.iter().find(|e| e.doc == doc));
+        match shown.or_else(|| self.current_entry(TOP, build)) {
             Some(e) => e.data.name.clone().unwrap_or_default(),
             None => self.initial_name.clone(),
         }
     }
     fn set_name(&mut self, build: u32, name: &[u16]) {
-        let Some(doc) = self.current_entry(TOP, build).map(|e| e.doc) else {
+        let shown = self.shown.filter(|&doc| self.entries.iter().any(|e| e.doc == doc));
+        let Some(doc) = shown.or_else(|| self.current_entry(TOP, build).map(|e| e.doc)) else {
             self.initial_name = name.to_vec();
             return;
         };
@@ -272,7 +278,12 @@ impl State {
             Arc::make_mut(&mut entry.data).name = Some(name.to_vec());
         }
     }
+    // The top-level navigable's document committed: the one its current entry is of is the one it shows.
+    fn show(&mut self, build: u32) {
+        self.shown = self.current_entry(TOP, build).map(|e| e.doc);
+    }
 
+    // …and its current entry.
     fn current_entry(&self, nav: u32, build: u32) -> Option<&Entry> {
         let (list, step) = self.find(nav, build)?;
         self.current_of(nav, list, step)
@@ -599,8 +610,8 @@ impl SessionHistory {
             e.url = url;
         }
     }
-    // #entry(entry) -> {url:, body:, content_type:, origin:, referer:, referrer_policy:, referrer:, state:, form_state:}
-    // of those it has (`Data`; a POST's body and content type, the classic history API state and the form state binary
+    // #entry(entry) -> {url:, body:, content_type:, origin:, referer:, referrer_policy:, referrer:, cross_site:, name:,
+    // state:, form_state:} of those it has (`Data`; a POST's body and content type, the classic history API state and the form state binary
     // strings) — {} for no such entry, or none (nil).
     fn entry(ruby: &magnus::Ruby, rb_self: &Self, id: Option<u64>) -> Result<RHash, magnus::Error> {
         match id.and_then(|id| rb_self.lock().state.entry(id).cloned()) {
@@ -627,6 +638,22 @@ impl SessionHistory {
         let mut t = self.lock();
         let build = t.build;
         t.state.set_name(build, &name.encode_utf16().collect::<Vec<_>>());
+    }
+    // #show: the top-level navigable's document committed (`State::show`), its current entry's.
+    fn show(&self) {
+        let mut t = self.lock();
+        let build = t.build;
+        t.state.show(build);
+    }
+    // #clear_name: the navigable target name of the document state the navigation in flight made (its current entry's)
+    // the empty string — HTML "finalize a cross-document navigation", the shown document's left as it is.
+    fn clear_name(&self) {
+        let mut t = self.lock();
+        let build = t.build;
+        let Some(doc) = t.state.current_entry(TOP, build).map(|e| e.doc) else { return };
+        for entry in t.state.entries.iter_mut().filter(|e| e.doc == doc) {
+            Arc::make_mut(&mut entry.data).name = Some(Vec::new());
+        }
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
@@ -760,6 +787,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("update", method!(SessionHistory::update, 2))?;
     class.define_method("name", method!(SessionHistory::name, 0))?;
     class.define_method("name=", method!(SessionHistory::set_name, 1))?;
+    class.define_method("show", method!(SessionHistory::show, 0))?;
+    class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("queue", method!(SessionHistory::queue, 2))?;
