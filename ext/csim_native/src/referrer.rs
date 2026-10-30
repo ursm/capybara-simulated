@@ -285,7 +285,7 @@ fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str) -> bool {
 // rest up to the top-level one's (`ancestor_documents_op`'s list): the top-level document's origin's site where every
 // document is of that site, None — an opaque origin, same-site with nothing — where one is not, is of an opaque origin,
 // or is not known.
-pub(crate) fn chain_site_for_cookies(documents: &[Option<String>]) -> Option<String> {
+fn chain_site_for_cookies(documents: &[Option<String>]) -> Option<String> {
     let sites = documents.iter().map(|d| d.as_deref().and_then(crate::realm_location::site)).collect::<Option<Vec<_>>>()?;
     let top = sites.last()?;
     sites.iter().all(|s| s == top).then(|| top.clone())
@@ -318,7 +318,7 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // __dom.ancestorDocuments(realm, own) -> `document_chain` (null for one not known): what a request its document makes
 // is cross-site for cookies by (fetch_hop.rs `Client::cross_site`), besides its client; by its own too where the client
 // is not the document but the page the host pinned it to (an image's or a video's load), and for a navigation of a frame
-// in it — and, its own first, the site for cookies of a navigation it initiates (navigation_fetch.rs `Nav::cookies`).
+// in it.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = args.get(0).int32_value(scope).unwrap_or(0);
     let origins = document_chain(&mut dom(scope).arena, r, args.get(1).is_true());

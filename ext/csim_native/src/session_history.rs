@@ -265,32 +265,25 @@ struct Planned {
     resource: Resource,
 }
 // …the document that began it — the frame whose script did, not its window's page — as Browser#navigation_initiator
-// describes it: its URL (an about:blank one's creator's), whose site `Sec-Fetch-Site` measures from; whether its origin
-// is opaque (a sandboxed one's: its `Origin: null`, of no site, cross-site to every URL); and the origins of it and of
-// the documents above it, its own first, whose site for cookies its cookies are judged by (navigation_fetch.rs) — none
-// of either where not known.
+// describes it: its URL (an about:blank one's creator's), whose site `Sec-Fetch-Site` and its cookies measure from
+// (none where not known), and whether its origin is opaque (a sandboxed one's: its `Origin: null`, of no site,
+// cross-site to every URL).
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Initiator {
     url: Option<String>,
     opaque: bool,
-    documents: Option<Vec<Option<String>>>,
 }
 impl Initiator {
-    // …of `{initiator:, origin_null:, initiator_documents:}`, none for nil.
+    // …of `{initiator:, origin_null:}`, none for nil.
     fn from_ruby(ruby: &magnus::Ruby, hash: Option<RHash>) -> Result<Self, magnus::Error> {
         let Some(hash) = hash else { return Ok(Initiator::default()) };
         let get = |key: &str| hash.aref::<_, magnus::Value>(ruby.to_symbol(key));
-        Ok(Initiator {
-            url: Option::<String>::try_convert(get("initiator")?)?,
-            opaque: get("origin_null")?.to_bool(),
-            documents: Option::<Vec<Option<String>>>::try_convert(get("initiator_documents")?)?,
-        })
+        Ok(Initiator { url: Option::<String>::try_convert(get("initiator")?)?, opaque: get("origin_null")?.to_bool() })
     }
     // …into `hash` by those names.
     fn into_ruby(self, ruby: &magnus::Ruby, hash: RHash) -> Result<(), magnus::Error> {
         hash.aset(ruby.to_symbol("initiator"), self.url)?;
-        hash.aset(ruby.to_symbol("origin_null"), self.opaque)?;
-        hash.aset(ruby.to_symbol("initiator_documents"), self.documents)
+        hash.aset(ruby.to_symbol("origin_null"), self.opaque)
     }
 }
 // …a URL fetched with a GET; a `blob:` URL's blob — its bytes and type — as the sender's Location parsed it (HTML: the
@@ -1140,8 +1133,8 @@ impl SessionHistory {
             _ => Some(planned),
         }
     }
-    // #take_planned -> {url:, replace:, activated:, referrer:, policy:, initiator:, origin_null:, initiator_documents:}
-    // and one of blob: [bytes, type], post: [body, content_type], javascript: true — or nil for none (`take_planned`).
+    // #take_planned -> {url:, replace:, activated:, referrer:, policy:, initiator:, origin_null:} and one of blob: [bytes,
+    // type], post: [body, content_type], javascript: true — or nil for none (`take_planned`).
     fn take_planned_for_ruby(ruby: &magnus::Ruby, rb_self: &Self) -> Result<Option<RHash>, magnus::Error> {
         let Some(p) = rb_self.take_planned() else { return Ok(None) };
         let hash = ruby.hash_new();

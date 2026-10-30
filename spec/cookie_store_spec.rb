@@ -159,14 +159,13 @@ RSpec.describe 'the cookie store' do
     ])
   end
 
-  # RFC 6265bis §5.2 judges a navigation by its client's "site for cookies", and §5.2.1 makes a document's that of its
-  # top-level origin only "if the top-level origin is same-site with the document's origin, and with each of the
-  # document's ancestor documents' origins. Otherwise its 'site for cookies' is an origin set to an opaque origin." So a
-  # frame of a's under b's page navigating the top to a is cross-site there — its Lax cookie sent, its Strict one not —
-  # where the same frame under a's page is same-site. Chrome 156 and Firefox 159 both judge by the initiator's origin
-  # alone (measured 2026-10-31: a popup a's frame under b's page opens to a gets the Strict cookie in both); the
-  # draft's explicit rule wins.
-  it "judges a navigation by its initiator's site for cookies" do
+  # A top-level navigation is judged by its initiator's ORIGIN, not by the documents above it: Fetch's "determine the
+  # same-site mode" — "If request's top-level navigation initiator origin is non-null and is not same site with
+  # request's URL's origin, then return 'unset-or-less'" — and Chrome 156 and Firefox 159 alike (measured 2026-10-31: a
+  # popup a's frame under b's page opens to a gets the Strict cookie in both). So a frame of a's navigating the top to a
+  # sends the Strict cookie whether a's page or b's is above it — though RFC 6265bis §5.2.1 would give it, under b's,
+  # an opaque "site for cookies".
+  it "judges a navigation by its initiator's origin" do
     seen = []
     app = lambda {|env|
       req = Rack::Request.new(env)
@@ -186,7 +185,7 @@ RSpec.describe 'the cookie store' do
       s.within_frame(0) { s.click_link 'go' }
       poll_until { seen.size == %w[a b].index(host) + 1 }
     end
-    expect(seen).to eq([['a.test', 's=1; l=1'], ['a.test', 'l=1']])
+    expect(seen).to eq([['a.test', 's=1; l=1'], ['a.test', 's=1; l=1']])
   end
 
   # …and a navigation another window's script planned (session_history.rs `Planned`) by its initiator alike: a
@@ -214,8 +213,9 @@ RSpec.describe 'the cookie store' do
   end
 
   # …and by the document that planned it, the frame whose script ran `window.open` or set `w.location` — not its window's
-  # page: a frame of a's under b's page navigating another window to a is same-origin for Fetch Metadata but of an
-  # opaque site for cookies (its Lax cookie alone), and a frame of b's under a's page cross-site to a for both.
+  # page: a frame of a's under b's page navigating another window to a is same-origin to it, its Strict cookie sent (the
+  # initiator's origin, as above: Chrome 156 and Firefox 159 measured), and a frame of b's under a's page cross-site to
+  # a for Fetch Metadata and cookies alike.
   it 'judges a navigation a frame planned of another window by that frame' do
     seen = {}
     app = lambda {|env|
@@ -236,7 +236,7 @@ RSpec.describe 'the cookie store' do
     s.within_window(first) { poll_until { seen.key?('/echo-open') } }
     s.visit 'https://a.test/top?frame=https://b.test/sets'
     s.within_window(first) { poll_until { seen.key?('/echo-set') } }
-    expect(seen).to eq('/echo-open' => ['l=1', 'same-origin'], '/echo-set' => ['l=1', 'cross-site'])
+    expect(seen).to eq('/echo-open' => ['s=1; l=1', 'same-origin'], '/echo-set' => ['l=1', 'cross-site'])
   end
 
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the

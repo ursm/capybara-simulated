@@ -13,18 +13,15 @@ use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RMod
 
 use crate::cookie_jar::request_context;
 use crate::fetch_chain::{Followed, Judged, RequestChain, MAX_REDIRECTS};
-use crate::referrer::{chain_site_for_cookies, cross_site_for_cookies, fetch_site, http_origin, wider_site};
+use crate::referrer::{cross_site_for_cookies, fetch_site, http_origin, wider_site};
 
 struct Nav {
     chain: RequestChain,
-    // The URL Sec-Fetch-Site measures from (its initiating document's — an about:blank one's creator's), none for one no
-    // document began (a user's); whether that document's origin is opaque — of no site, cross-site to every URL; the
-    // origins of that document and of the documents above it, its own first, whose site for cookies its cookies are
-    // judged by (RFC 6265bis §5.2.1) — none where the host does not know them, the initiator's site then; the
-    // Sec-Fetch-Site latched over the hops so far.
+    // The URL Sec-Fetch-Site and its cookies' site measure from (its initiating document's — an about:blank one's
+    // creator's), none for one no document began (a user's); whether that document's origin is opaque — of no site,
+    // cross-site to every URL; the Sec-Fetch-Site latched over the hops so far.
     initiator: Option<String>,
     initiator_opaque: bool,
-    initiator_documents: Option<Vec<Option<String>>>,
     site: Option<&'static str>,
     // The documents above the navigable it navigates — the one its container is in, and that one's up to the top — by
     // which its cookies are cross-site; none for a navigation no such document's site judges.
@@ -41,9 +38,9 @@ struct Nav {
 
 impl Nav {
     // The hop's cookie context, and whether a document above the navigable is cross-site to its URL. Its cookies are
-    // cross-site where that is so, or where the hop's URL is not same-site with the initiator's site for cookies — that
-    // URL's alone, as RFC 6265bis-14 has it, not every URL the chain went through as Sec-Fetch-Site's — and a reload
-    // through a user interface element's where the request it reloads was, never otherwise (§5.2).
+    // cross-site where that is so, or where the hop's URL is cross-site to its initiator — that URL's alone, as RFC
+    // 6265bis-14 has it, not every URL the chain went through as Sec-Fetch-Site's — and a reload through a user interface
+    // element's where the request it reloads was, never otherwise (§5.2).
     fn cookies(&self) -> (bool, u32) {
         let target = &self.chain.target;
         let frame_cross = self.ancestors.as_ref().is_some_and(|a| a.iter().any(|u| cross_site_for_cookies(u.as_deref(), target)));
@@ -52,18 +49,14 @@ impl Nav {
         let safe = self.chain.method == "GET";
         (frame_cross, request_context(secure, cross, self.top_level && safe, self.top_level))
     }
-    // Whether `target` is cross-site to the initiator's site for cookies (§5.2.1): an opaque one — an opaque-origin
-    // initiator's, or one with a document above it of another site — to every URL; that of the initiator's site where
-    // the host does not know the documents above it; same-site for a navigation no document began (a request of no
-    // client).
+    // Whether `target` is cross-site to the initiator: by its origin — an opaque one's to every URL — not by the site for
+    // cookies of the documents above it (RFC 6265bis §5.2.1), as Fetch's "determine the same-site mode" judges a
+    // top-level navigation by its "top-level navigation initiator origin", and as Chrome 156 and Firefox 159 do (measured
+    // 2026-10-31: a popup a's frame under b's page opens to a gets the Strict cookie in both); same-site for a navigation
+    // no document began (a request of no client). A frame's navigation is cross-site by the documents above the frame
+    // as well (`Nav::cookies`).
     fn initiator_cross_site(&self, target: &str) -> bool {
-        if self.initiator_opaque {
-            return true;
-        }
-        match &self.initiator_documents {
-            Some(documents) => chain_site_for_cookies(documents).is_none_or(|site| crate::realm_location::site(target) != Some(site)),
-            None => fetch_site(self.initiator.as_deref().unwrap_or(""), target) == "cross-site",
-        }
+        self.initiator_opaque || fetch_site(self.initiator.as_deref().unwrap_or(""), target) == "cross-site"
     }
 }
 
@@ -82,25 +75,19 @@ impl NavigationFetch {
     // (the referrer source, nil none), `referrer_policy`, `initiator` (the URL Sec-Fetch-Site and the request's origin are
     // of, nil none), `origin` (the request's origin serialized, where it is not its initiator's — a re-post's, the one it
     // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
-    // origin `null`, its site cross-site), `initiator_documents` (the origins of the initiating document and of those above
-    // it, its own first — `__csimAncestorDocuments(realm, true)` — nil where not known, each nil for one not known),
-    // `ancestors` (the document origins above the navigable its cookies are judged by — nil none, each nil for one not
-    // known), `top_level` (whether it navigates a top-level navigable), `reloaded_cross_site` (a reload through a user
-    // interface element's: whether the request the document it reloads was reached by was cross-site, `#cross_site?` that
-    // one's — nil for any other navigation).
+    // origin `null`, its site cross-site), `ancestors` (the document origins above the navigable its cookies are judged by
+    // — nil none, each nil for one not known), `top_level` (whether it navigates a top-level navigable),
+    // `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it reloads was
+    // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
-        let origins = |key: &str| -> Result<Option<Vec<Option<String>>>, Error> {
-            let list: Option<RArray> = Option::try_convert(get(key)?)?;
-            list.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()
-        };
         let initiator = text("initiator")?.filter(|u| !u.is_empty());
         let origin = text("origin")?.filter(|o| !o.is_empty()).or_else(|| initiator.as_deref().and_then(http_origin));
         let initiator_opaque = get("origin_null")?.to_bool();
         let opaque = initiator_opaque || origin.as_deref() == Some("null");
-        let initiator_documents = origins("initiator_documents")?;
-        let ancestors = origins("ancestors")?;
+        let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
+        let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
         Ok(NavigationFetch {
             origin: origin.clone().unwrap_or_default(),
             st: RefCell::new(Nav {
@@ -117,7 +104,6 @@ impl NavigationFetch {
                 },
                 initiator,
                 initiator_opaque,
-                initiator_documents,
                 site: initiator_opaque.then_some("cross-site"),
                 ancestors,
                 top_level: get("top_level")?.to_bool(),
@@ -243,7 +229,6 @@ mod tests {
             },
             initiator: Some(initiator.to_owned()),
             initiator_opaque: false,
-            initiator_documents: None,
             site: None,
             ancestors: Some(vec![Some("http://a.test/top".to_owned())]),
             top_level: false,
@@ -304,23 +289,18 @@ mod tests {
     }
 
     #[test]
-    fn a_navigation_is_judged_by_its_initiators_site_for_cookies() {
+    fn a_top_level_navigation_is_judged_by_its_initiators_origin() {
         use crate::cookie_jar::CROSS_SITE;
-        let cross = |documents: &[&str], target: &str| {
-            let documents = documents.iter().map(|d| (!d.is_empty()).then(|| (*d).to_owned())).collect();
-            let st = Nav { ancestors: None, top_level: true, initiator_documents: Some(documents), ..nav("GET", target, "http://a.test/page") };
+        let cross = |initiator: &str, opaque: bool, target: &str| {
+            let st = Nav { ancestors: None, top_level: true, initiator_opaque: opaque, ..nav("GET", target, initiator) };
             st.cookies().1 & CROSS_SITE != 0
         };
-        // (…a document of a's under a's top-level one same-site to a; one under b's of an opaque site for cookies,
-        // cross-site even to its own site — and to b's; one not known, or of an opaque origin, likewise)
-        assert!(!cross(&["http://a.test", "http://a.test"], "http://a.test/x"));
-        assert!(!cross(&["http://sub.a.test", "http://a.test"], "http://a.test/x"));
-        assert!(cross(&["http://a.test", "http://b.test"], "http://a.test/x"));
-        assert!(cross(&["http://a.test", "http://b.test"], "http://b.test/x"));
-        assert!(cross(&["http://a.test", ""], "http://a.test/x"));
-        assert!(cross(&["null", "http://a.test"], "http://a.test/x"));
-        // (…none known: its initiator's site)
-        let st = Nav { ancestors: None, top_level: true, ..nav("GET", "http://a.test/x", "http://a.test/page") };
-        assert_eq!(st.cookies().1 & CROSS_SITE, 0);
+        // (…same-site by its origin, whatever documents are above it; an opaque one cross-site to every URL)
+        assert!(!cross("http://a.test/page", false, "http://a.test/x"));
+        assert!(!cross("http://sub.a.test/page", false, "http://a.test/x"));
+        assert!(cross("http://b.test/page", false, "http://a.test/x"));
+        assert!(cross("http://a.test/page", true, "http://a.test/x"));
+        // (…a frame's navigation cross-site by the documents above the frame, however same-site its initiator)
+        assert_eq!(nav("GET", "http://b.test/f", "http://b.test/page").cookies().1 & CROSS_SITE, CROSS_SITE);
     }
 }

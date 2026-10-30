@@ -6721,11 +6721,6 @@ service-workers/service-worker/resource-timing-fetch-variants.https.html:
   responseStart in the client ResourceTiming entry
 service-workers/service-worker/resource-timing.sub.https.html:
 - Controlled resource loads
-service-workers/service-worker/same-site-cookies.https.html:
-- same-origin, nested window.open with cross-site middle frame and fallback service worker
-- same-origin, nested window.open with cross-site middle frame and navpreload service worker
-- same-origin, nested window.open with cross-site middle frame and no service worker
-- same-origin, nested window.open with cross-site middle frame and passthrough service worker
 service-workers/service-worker/service-worker-csp-connect.https.html:
 - Fetch test for connect-src
 - Redirected fetch test for connect-src
