@@ -137,6 +137,31 @@ pub(crate) fn fetch_site_for_ruby(seed: Option<String>, initiator: Option<String
     wider_site(seed.as_deref(), fetch_site(initiator.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""))).to_owned()
 }
 
+// Whether a request's redirect-taint is "cross-site" (Fetch "redirect-taint", which "determine the same-site mode"
+// reads: "If request's redirect-taint is 'cross-site', then return 'unset-or-less'"), kept as its URL list grows hop by
+// hop: once a URL is "not same site with lastURL's origin and request's origin is not same site with lastURL's origin"
+// — a hop away from a URL of another site than the request's own, as a→b→a's back to a is. (The "same-site" level the
+// Origin header reads is `redirect_taints`'.)
+#[derive(Default)]
+pub(crate) struct RedirectTaint {
+    last: Option<String>,
+    cross_site: bool,
+}
+impl RedirectTaint {
+    // …moved on by `url`, the URL list's next, of a request whose origin is `origin` (its serialization; `null` an
+    // opaque one, same site with none) — none for a request no document began, a user's, which no hop taints.
+    pub(crate) fn push(&mut self, origin: Option<&str>, url: &str) {
+        let same_site = |a: &str, b: &str| matches!(fetch_site(a, b), "same-origin" | "same-site");
+        if let (Some(origin), Some(last)) = (origin, self.last.as_deref()) {
+            self.cross_site |= !same_site(last, url) && !same_site(origin, last);
+        }
+        self.last = Some(url.to_owned());
+    }
+    pub(crate) fn cross_site(&self) -> bool {
+        self.cross_site
+    }
+}
+
 // Whether a request whose origin is the one of `initiator` — 'null' already where `tainted` — has it opaque once it
 // follows a redirect from `current` to `location` (Fetch "HTTP-redirect fetch" step 13): where the redirect crosses
 // origin from a URL already off the request's origin. The first hop away keeps it.

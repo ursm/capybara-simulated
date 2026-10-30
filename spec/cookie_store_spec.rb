@@ -108,18 +108,16 @@ RSpec.describe 'the cookie store' do
     expect(seen.reject {|_, c| c.empty? }).to eq([])
   end
 
-  # RFC 6265bis-14 §5.2: a request is same-site where "the request's current url's origin is same-site with the
-  # request's client's 'site for cookies'" — the redirect chain is not considered: drafts -08 to -13 also asked that "the
-  # origin of every url in the request's url list is same-site with the request's current url's origin", which -14
-  # removed (A.14, "Remove consideration of same-site redirect chain", httpwg/http-extensions#2750). So a request a page
-  # makes through another site and back to its own is same-site at home, its Strict cookies sent — an image's (one the
-  # HTTP cache's redirect answers too), a fetch()'s, a navigation's, and a user's — while one another site's page makes
-  # there is cross-site: no cookie for its image, the Lax one alone for its top-level navigation. Sec-Fetch-Site, which
-  # Fetch Metadata still judges over the whole URL list, stays `cross-site`. Chrome 156 sends every cookie here as this
-  # does (measured 2026-10-31, over http: an image, a no-cors fetch() and a script's navigation, a→b→a and b→b→a);
-  # Firefox 159 still applies the withdrawn rule — a→b→a no cookie for the image and the fetch(), the Lax one alone for
-  # the navigation — and the current draft wins.
-  it 'judges a request redirected through another site by the URL it reached' do
+  # Fetch's "determine the same-site mode": "If request's redirect-taint is 'cross-site', then return 'unset-or-less'",
+  # and a request's redirect-taint is "cross-site" once a URL of its URL list "is not same site with lastURL's origin and
+  # request's origin is not same site with lastURL's origin". So a request a page makes through another site and back
+  # to its own is cross-site at home — no SameSite cookie for its image (one the HTTP cache's redirect answers too) or
+  # its fetch(), the Lax one alone for its top-level navigation (a GET of a document) — as one another site's page makes
+  # there is; a user's, of no initiating document, is untainted. Sec-Fetch-Site, which Fetch Metadata judges over the
+  # whole URL list, is `cross-site` alike. Firefox 159 sends these cookies as this does (measured 2026-10-31, over http:
+  # an image, a no-cors fetch() and a script's navigation, a→b→a and b→b→a); Chrome 156 sends a→b→a's every one, Strict
+  # included, as RFC 6265bis-14 (A.14, httpwg/http-extensions#2750) dropped its own redirect-chain rule.
+  it 'taints a request redirected through another site cross-site' do
     seen = []
     app = lambda {|env|
       req = Rack::Request.new(env)
@@ -149,9 +147,9 @@ RSpec.describe 'the cookie store' do
     end
     s.visit 'https://b.test/bounce?to=https://a.test/echo-user'
     expect(seen.uniq.sort).to eq([
-      ['/echo-a-fetch', 's=1; l=1', 'cross-site'],
-      ['/echo-a-img', 's=1; l=1', 'cross-site'],
-      ['/echo-a-nav', 's=1; l=1', 'cross-site'],
+      ['/echo-a-fetch', '', 'cross-site'],
+      ['/echo-a-img', '', 'cross-site'],
+      ['/echo-a-nav', 'l=1', 'cross-site'],
       ['/echo-b-fetch', '', 'cross-site'],
       ['/echo-b-img', '', 'cross-site'],
       ['/echo-b-nav', 'l=1', 'cross-site'],
