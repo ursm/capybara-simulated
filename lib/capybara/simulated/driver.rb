@@ -744,14 +744,38 @@ module Capybara
       # that owns the ref (handle), executing in that window's VM.
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
-      def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
       def window_ref_has(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_has(id, prop) : false
       def window_ref_delete(handle, id, prop)      = (b = window_browser(handle)) ? b.remote_ref_delete(id, prop) : false
+      # (…a function it returns a callback handle for the caller's realm `receiver`)
+      def window_ref_call(handle, id, method, args, receiver)
+        nesting_window_calls { (b = window_browser(handle)) ? b.remote_ref_call(id, method, args, receiver) : nil }
+      end
       # …and a callback the window of `handle` handed the one of `caller` (a function of its realm `realm`, by its id),
       # called back in that window — synchronously, as the caller's task runs, as a browser's one event loop would call
-      # it: `w.onload = f` heard as the window's load dispatches.
-      def window_ref_apply(handle, realm, id, this, args, caller)
-        (b = window_browser(handle)) ? b.remote_ref_apply(realm, id, this, args, caller) : nil
+      # it: `w.onload = f` heard as the window's load dispatches — let go of once the caller holds it no more, and what it
+      # threw out of a dispatch there reported in its own realm.
+      def window_ref_apply(handle, realm, id, this, args, caller, receiver)
+        nesting_window_calls { (b = window_browser(handle)) ? b.remote_ref_apply(realm, id, this, args, caller, receiver) : UNDEFINED }
+      end
+      def window_ref_release(handle, realm, id)  = window_browser(handle)&.remote_ref_release(realm, id)
+      def window_ref_report(handle, realm, thrown) = window_browser(handle)&.remote_ref_report(realm, thrown)
+      def window_ref_sweep(handle)                 = window_browser(handle)&.collect_released
+      # The windows' calls into one another, each a host call within the last on the one native stack: nested past
+      # `WINDOW_CALL_DEPTH_MAX`, the innermost a RangeError its caller throws, as a browser's one stack overflows — calls
+      # that recurse from window to window without end (host-queries.js `__remoteThrow`'s marker).
+      WINDOW_CALL_DEPTH_MAX = 100
+      STACK_OVERFLOW = {'__csimThrow' => {'name' => 'RangeError', 'message' => 'Maximum call stack size exceeded', 'stack' => ''}}.freeze
+      # …and what a callback of a window gone, or of a document gone, returns: nothing, as a function that returns none.
+      UNDEFINED = {'__csimUndefined' => true}.freeze
+      private def nesting_window_calls
+        return STACK_OVERFLOW if @window_call_depth.to_i >= WINDOW_CALL_DEPTH_MAX
+
+        @window_call_depth = @window_call_depth.to_i + 1
+        begin
+          yield
+        ensure
+          @window_call_depth -= 1
+        end
       end
       # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
       # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the

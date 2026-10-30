@@ -14,7 +14,7 @@
 // state kept from before are not (they still count their steps).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError, Weak};
 
 use magnus::{RHash, RString, Symbol, TryConvert};
@@ -1719,6 +1719,7 @@ fn plan_on(t: &mut Traversable, planned: Planned) {
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "traversablePost", traversable_post_op, context_id);
     crate::dom::register(scope, ns, "traversableWindowKept", traversable_window_kept_op, context_id);
+    crate::dom::register(scope, ns, "remoteId", remote_id_op, context_id);
     crate::dom::register(scope, ns, "traversableClosing", traversable_closing_op, context_id);
     crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
@@ -1764,6 +1765,13 @@ fn traversable_window_kept_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::Funct
     let id = crate::dom::realm(scope, 0).navigables.history;
     let kept = histories().1.get(&id).and_then(Weak::upgrade).is_some_and(|t| lock(&t).kept);
     rv.set_bool(kept);
+}
+// __dom.remoteId() -> a number no other call of the process's gives: the id of an object, or a callback, a realm hands
+// a window of another isolate (host-queries.js `__remoteId`) — never one a document after it gives another, so what
+// that window holds of a document gone names nothing in the next.
+fn remote_id_op(_scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    rv.set_double((LAST.fetch_add(1, Ordering::Relaxed) + 1) as f64);
 }
 
 // __dom.traversableSameOrigin(id) -> whether the calling realm's document is same origin with the active document of

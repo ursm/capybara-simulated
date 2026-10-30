@@ -2032,8 +2032,12 @@ module Capybara
         # callback is app code, which may mutate the DOM and queue microtasks — those land here, after the
         # settle quiesced, for the next poll to observe (a browser runs them as tasks, at no set time either).
         @runtime.pump_message_loop
+        # (…and the session's other windows', which run no settle of their own: a callback of this window's another one
+        # let go of let go here — platform-globals.js `__csimRemoteCallback`)
+        background_windows.each(&:pump_platform_tasks)
         @find_cache_dirty = true
       end
+      def pump_platform_tasks = @runtime.pump_message_loop
 
       # Read the anchor-navigation pending intent set by JS-side
       # `el.click()` (Element.prototype.click) on an `<a href>`. Avo's
@@ -7298,15 +7302,20 @@ module Capybara
       def window_traversable(handle)   = @driver.respond_to?(:window_traversable)  ? @driver.window_traversable(handle.to_s)       : nil
       # Cross-window remote-ref RPC — SOURCE side: forward a node/object proxy op to
       # the target window's Browser via the Driver.
-      def window_ref_get(handle, id, prop)         = (@driver.respond_to?(:window_ref_get) ? @driver.window_ref_get(handle.to_s, id, prop.to_s) : nil)
-      def window_ref_set(handle, id, prop, value)  = (@driver.window_ref_set(handle.to_s, id, prop.to_s, value) if @driver.respond_to?(:window_ref_set))
-      def window_ref_call(handle, id, method, args) = (@driver.respond_to?(:window_ref_call) ? @driver.window_ref_call(handle.to_s, id, method.to_s, args) : nil)
-      def window_ref_has(handle, id, prop)         = (@driver.respond_to?(:window_ref_has) ? @driver.window_ref_has(handle.to_s, id, prop.to_s) : false)
-      def window_ref_delete(handle, id, prop)      = (@driver.respond_to?(:window_ref_delete) ? @driver.window_ref_delete(handle.to_s, id, prop.to_s) : false)
-      # …a callback the window of `handle` handed this one, called back there (Driver#window_ref_apply), from this one.
-      def window_ref_apply(handle, realm, id, this, args)
-        @driver.respond_to?(:window_ref_apply) ? @driver.window_ref_apply(handle.to_s, realm.to_i, id, this, args, window_handle.to_s) : nil
+      # (…a call's result, where it is a function, a callback handle for this window's realm `receiver`, `handle:realm`)
+      def window_ref_get(handle, id, prop)                    = (@driver.respond_to?(:window_ref_get) ? @driver.window_ref_get(handle.to_s, id, prop.to_s) : nil)
+      def window_ref_set(handle, id, prop, value)             = (@driver.respond_to?(:window_ref_set) ? @driver.window_ref_set(handle.to_s, id, prop.to_s, value) : nil)
+      def window_ref_call(handle, id, method, args, receiver) = (@driver.respond_to?(:window_ref_call) ? @driver.window_ref_call(handle.to_s, id, method.to_s, args, receiver.to_s) : nil)
+      def window_ref_has(handle, id, prop)                    = (@driver.respond_to?(:window_ref_has) ? @driver.window_ref_has(handle.to_s, id, prop.to_s) : false)
+      def window_ref_delete(handle, id, prop)                 = (@driver.respond_to?(:window_ref_delete) ? @driver.window_ref_delete(handle.to_s, id, prop.to_s) : false)
+      # …a callback the window of `handle` handed this one, called back there (Driver#window_ref_apply), from this one —
+      # its result for this one's realm `receiver` — and let go of, or what it threw out of a dispatch here reported there.
+      def window_ref_apply(handle, realm, id, this, args, receiver)
+        @driver.respond_to?(:window_ref_apply) ? @driver.window_ref_apply(handle.to_s, realm.to_i, id, this, args, window_handle.to_s, receiver.to_s) : nil
       end
+      def window_ref_release(handle, realm, id)  = (@driver.window_ref_release(handle.to_s, realm.to_i, id) if @driver.respond_to?(:window_ref_release))
+      def window_ref_report(handle, realm, thrown) = (@driver.window_ref_report(handle.to_s, realm.to_i, thrown) if @driver.respond_to?(:window_ref_report))
+      def window_ref_sweep(handle)                 = (@driver.window_ref_sweep(handle.to_s) if @driver.respond_to?(:window_ref_sweep))
       # A call of this window's script into another window's (a `__csimWindow*` host fn whose target runs script): its
       # VM on the stack meanwhile, waiting on it (`script_waiting?`) — what another window's script that call runs may
       # reach back into, and plan a navigation of this one by, which must not rebuild this one's Context under it.
@@ -7322,16 +7331,16 @@ module Capybara
       def remote_ref_get(id, prop)          = @runtime.call('__csimRemoteRefGet', id, prop.to_s)
       def remote_ref_set(id, prop, value)
         note_initial_window(['set', prop.to_s, value]) if id.zero?
-        @runtime.call('__csimRemoteRefSet', id, prop.to_s, value)
+        result = @runtime.call('__csimRemoteRefSet', id, prop.to_s, value)
         # A cross-isolate property set can queue a navigation in THIS (target)
         # window — `w.location.href = …` / `w.location = …`. Drain it (and any other
         # pending action it triggered) so the non-active window actions it now.
         drain_pending_after_remote_ref
-        nil
+        result
       end
-      def remote_ref_call(id, method, args)
+      def remote_ref_call(id, method, args, receiver)
         note_initial_window(['call', method.to_s, args || []]) if id.zero? && INITIAL_WINDOW_METHODS.include?(method.to_s)
-        result = @runtime.call('__csimRemoteRefCall', id, method.to_s, args || [])
+        result = @runtime.call('__csimRemoteRefCall', id, method.to_s, args || [], receiver.to_s)
         # A cross-isolate call can queue a pending action in THIS (target) window —
         # `w.form.submit()` (form submit), `w.history.back()` (history traverse),
         # `w.location.assign()` (navigation). Drain them so the non-active window
@@ -7345,13 +7354,32 @@ module Capybara
         @runtime.call('__csimRemoteRefDelete', id, prop.to_s) == true
       end
       # …a callback of this window's realm `realm` it handed the window of `caller` (`__csimRemoteCallback`), called: with
-      # `this` and `args` as that window serialized them, its result serialized here — none for a realm gone.
-      def remote_ref_apply(realm, id, this, args, caller)
-        return nil unless realm.zero? || @runtime.frame_realm_alive?(realm)
+      # `this` and `args` as that window serialized them, its result serialized here for that one's realm `receiver` —
+      # none for a realm gone, nor for an id its document never gave (one a document before it did: ids are the
+      # process's, host-queries.js `__remoteId`).
+      def remote_ref_apply(realm, id, this, args, caller, receiver)
+        return Driver::UNDEFINED unless realm_alive?(realm)
 
         # (…what it does to this window's document a find here must see: no task of this window's ran it)
         invalidate_find_cache
-        @runtime.realm_call(realm, '__csimRemoteRefApply', id, this, args || [], caller.to_s)
+        @runtime.realm_call(realm, '__csimRemoteRefApply', id, this, args || [], caller.to_s, receiver.to_s)
+      end
+      # …let go of: the window it was handed holds it no more (a FinalizationRegistry's, platform-globals.js).
+      def remote_ref_release(realm, id) = (@runtime.realm_call(realm, '__csimRemoteRelease', id) if realm_alive?(realm))
+      # …and what it threw out of a dispatch of that window's, reported in its realm (HTML "report the exception").
+      def remote_ref_report(realm, thrown)
+        @runtime.realm_call(realm, '__csimReportRemoteException', thrown) if realm_alive?(realm)
+        invalidate_find_cache
+      end
+      private def realm_alive?(realm) = realm.zero? || @runtime.frame_realm_alive?(realm)
+      # This window's isolate collected, and the finalizers that leaves due run (the callbacks of other windows' it let go
+      # of releasing them there: platform-globals.js `__csimRemoteCallback`) — none while a script of its waits on a call
+      # into another window, its isolate on the stack.
+      def collect_released
+        return if script_waiting?
+
+        @runtime.collect_garbage
+        @runtime.pump_message_loop
       end
       # What another window's script did to this one's Window while it shows its initial about:blank — its own properties
       # set or deleted, its event listeners added or removed — in order: the Window the document a navigation of it makes

@@ -3128,6 +3128,8 @@ html/browsers/history/the-history-interface/history_replacestate_too_many_calls_
 - replaceState checks whether the URL can be rewritten before checking the rate limit
 - replaceState parses the URL before checking the rate limit
 - replaceState serializes state before checking the rate limit
+html/browsers/history/the-history-interface/joint_session_history/002.html:
+- Navigating second iframe
 html/browsers/history/the-history-interface/traverse_the_history_1.html:
 - Multiple history traversals from the same task
 - "[harness] TIMEOUT"
@@ -7189,9 +7191,6 @@ websockets/unload-a-document/002.html:
 - 'WebSockets: navigating top-level browsing context with closed websocket'
 - 'WebSockets: navigating top-level browsing context with closed websocket'
 - 'WebSockets: navigating top-level browsing context with closed websocket'
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
 websockets/unload-a-document/003.html:
 - 'WebSockets: navigating nested browsing context'
 webstorage/localstorage-share-data-unrelated-origins.html:
@@ -7233,7 +7232,6 @@ xhr/open-url-multi-window-5.htm:
 xhr/open-url-multi-window-6.htm:
 - 'XMLHttpRequest: open() in document that is not fully active (but may be active)
   should throw'
-- "[harness] TIMEOUT"
 xhr/overridemimetype-blob.html:
 - Loading data…
 xhr/progress-events-response-data-gzip.htm:

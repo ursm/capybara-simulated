@@ -108,13 +108,20 @@ module Capybara
         # Cross-window remote-ref RPC: route an opener's node/object proxy op to
         # the target window's VM (a[0]=window handle, a[1]=ref id, a[2]=prop/method).
         '__csimWindowRefGet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_get(a[0], a[1], a[2]) } },
-        '__csimWindowRefSet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_set(a[0], a[1], a[2], a[3]); nil } },
-        '__csimWindowRefCall'        => ->(b, *a) { b.reaching_another_window { b.window_ref_call(a[0], a[1], a[2], a[3]) } },
+        '__csimWindowRefSet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_set(a[0], a[1], a[2], a[3]) } },
+        '__csimWindowRefCall'        => ->(b, *a) { b.reaching_another_window { b.window_ref_call(a[0], a[1], a[2], a[3], a[4]) } },
         '__csimWindowRefHas'         => ->(b, *a) { b.reaching_another_window { b.window_ref_has(a[0], a[1], a[2]) } },
         '__csimWindowRefDelete'      => ->(b, *a) { b.reaching_another_window { b.window_ref_delete(a[0], a[1], a[2]) } },
         # …and a callback of another window's — a function of its realm a[1] it handed this one, by its id a[2] — called
-        # back there with this a[3] and the arguments a[4] (platform-globals.js `__csimRemoteCallback`).
-        '__csimWindowRefApply'       => ->(b, *a) { b.reaching_another_window { b.window_ref_apply(a[0], a[1], a[2], a[3], a[4]) } },
+        # back there with this a[3] and the arguments a[4], its result for this one's realm a[5]
+        # (platform-globals.js `__csimRemoteCallback`); let go of, this window holding it no more; and what it threw out
+        # of a dispatch here, a[2], reported there.
+        '__csimWindowRefApply'       => ->(b, *a) { b.reaching_another_window { b.window_ref_apply(a[0], a[1], a[2], a[3], a[4], a[5]) } },
+        '__csimWindowRefRelease'     => ->(b, *a) { b.window_ref_release(a[0], a[1], a[2]); nil },
+        '__csimWindowRefReport'      => ->(b, *a) { b.reaching_another_window { b.window_ref_report(a[0], a[1], a[2]) }; nil },
+        # …and the window of handle a[0], to which this one handed many, collected, so that it lets go of those it holds no
+        # more (host-queries.js `__remoteCallbackOf`)
+        '__csimWindowRefSweep'       => ->(b, *a) { b.reaching_another_window { b.window_ref_sweep(a[0]) }; nil },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         # (…a navigation another window begins as a task of its own: planned, its source snapshot this window's realm a[4]'s)
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], a[4], user_activated: a[2] == true, replace: a[3] == true); nil },
