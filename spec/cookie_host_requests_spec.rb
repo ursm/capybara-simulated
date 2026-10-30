@@ -4,21 +4,13 @@ require 'digest'
 require 'tmpdir'
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # The requests the host makes outside a fetch's or a navigation's chain judge their cookies by their client's site for
 # cookies all the same (cookie_jar.rs `context_for_ruby`): a WebSocket handshake by its document's — a cross-site one
 # sends no SameSite cookie, and its Set-Cookie stores none — and a download as the top-level navigation it is, its
 # response's cookies stored.
 RSpec.describe "the cookies of a host's own request" do
-  # (…every host the app's while the session is made, which keeps the setting it was made with)
-  def every_host_local
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    yield
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
-
   let(:seen) { [] }
   let(:app) {
     seen = self.seen

@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A cross-document history traversal (history.go(-1)/back()) of a controlled iframe routes
 # through the controlling service worker's fetch event with `request.isHistoryNavigation ===
@@ -11,7 +12,7 @@ require_relative 'support/session_teardown'
 # entry, and the Ruby-side traversal refetch consults the SW. (The WPT surface —
 # cache-storage/cache-keys-attributes — needs the harness's frame model; this pins the
 # mechanism directly.)
-RSpec.describe 'Service Worker history-navigation interception' do
+RSpec.describe 'Service Worker history-navigation interception', :every_host_local do
   let(:worker) {
     <<~JS
       self.addEventListener('fetch', e => {
@@ -33,14 +34,6 @@ RSpec.describe 'Service Worker history-navigation interception' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   # Register the SW at /scope/, wait for activation, load doc A (controlled), navigate to doc B
   # via `src=`, then `history.go(-1)` back to A. Returns [bodyA, bodyBack] textContents.

@@ -3,20 +3,14 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Fetch "HTTP-redirect fetch" taints a request's origin — its Origin then "null" — where a redirect leaves a URL of
 # another origin than the request's own, whatever the request's mode: a no-cors POST led away and on as much as a CORS
 # one (fetch_rules.rs `follow_redirect`). The first hop away keeps the origin; so does a chain that stays home.
-RSpec.describe 'a redirected request' do
+# (…the other origins served in-process)
+RSpec.describe 'a redirected request', :every_host_local do
   include PollUntil
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origins served in-process
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'sends the opaque Origin once a redirect leaves another origin, in no-cors mode too' do
     seen = []

@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # A classic script's or a style sheet's `crossorigin` makes its fetch a CORS request (HTML "potentially CORS-enabled
 # request"): a response of another origin that does not allow it no script or sheet — its element's `error` — where one
@@ -11,16 +12,9 @@ require_relative 'support/https_app_host'
 # a shadow tree's link of the one mode answered by none of the other's — and a sheet origin-clean only where its response
 # is CORS-same-origin (CSSOM): its rules another origin's no-cors one hides, a SecurityError — and a classic script's
 # errors muted where its response is not (HTML): "Script error.", with no location and no error.
-RSpec.describe 'a crossorigin classic script or style sheet', :https do
+# (…the other origin served in-process)
+RSpec.describe 'a crossorigin classic script or style sheet', :https, :every_host_local do
   include PollUntil
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   let(:modes) { {} }
   let(:session) do

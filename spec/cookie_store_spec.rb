@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A session's cookies are its cookie store's, the engine's (cookie_jar.rs), as RFC 6265bis has a user agent keep them: a
 # cookie set with a Domain goes to every host that domain-matches it — a public suffix none — one set with a Path only to
@@ -10,15 +11,6 @@ require_relative 'support/poll_until'
 # is Secure, host-only and at `/`. (They had been a name → value table per host, which read none of these.)
 RSpec.describe 'the cookie store' do
   include PollUntil
-
-  # (…every host the app's while the session is made, which keeps the setting it was made with)
-  def every_host_local
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    yield
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   let(:seen) { [] }
   let(:app) {

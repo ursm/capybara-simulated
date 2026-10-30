@@ -5,12 +5,14 @@ require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # `clients.matchAll()` enumerates the service worker's CONTROLLED clients — every in-scope
 # browsing context, not merely the ones that happened to postMessage the worker — with each
 # window client's live focus state. (WPT: service-workers/service-worker/client-id +
 # clients-matchall + sandboxed-iframe-fetch-event; this pins the mechanism directly.)
-RSpec.describe 'Service Worker client enumeration' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker client enumeration', :every_host_local do
   let(:worker) {
     <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
@@ -157,14 +159,6 @@ RSpec.describe 'Service Worker client enumeration' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   # Register the SW at /scope/, wait for activation, then build one frame per entry in
   # `frames` — a Hash of frame id => src. Returns the loaded session.

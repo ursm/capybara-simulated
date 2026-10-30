@@ -2,20 +2,14 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # Each style sheet request's response is its own (browser.rb `external_asset_response`, sheet_fetch.rs `fetch`):
 # two `<link>`s of one URL of another origin that allows it — one `crossorigin`, one not — are a CORS response and an
 # opaque one, the CORS link's sheet origin-clean (its rules readable) and the other's not (CSSOM: a SecurityError),
 # whichever was inserted first.
-RSpec.describe 'a style sheet response, per request' do
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
-
+# (…the other origin served in-process)
+RSpec.describe 'a style sheet response, per request', :every_host_local do
   def outcome(order)
     links = order.map {|cors| %(<link rel=stylesheet id=#{cors ? 'cors' : 'plain'} href="http://other.test/s.css"#{' crossorigin' if cors}>) }.join
     s = simulated_session(lambda {|env|

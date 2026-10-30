@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'zlib'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Web fonts: a family the document declares an `@font-face` for is FETCHED the first time text
 # needs it (Chrome loads a web font on first use) and measured with the downloaded file's own
@@ -676,9 +677,7 @@ RSpec.describe 'web fonts' do
       else [200, {'content-type' => 'text/html'}, [page]]
       end
     }
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    begin
+    every_host_local do   # Service Workers are modeled only in a universal-server context
       s = simulated_session(a)
       s.visit '/'
       expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
@@ -689,8 +688,6 @@ RSpec.describe 'web fonts' do
         navigator.serviceWorker.controller.postMessage('seen');
       JS
       expect(poll_until { s.evaluate_script('window.seen') }).to eq(['/ahem.ttf'])
-    ensure
-      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
     end
   end
 

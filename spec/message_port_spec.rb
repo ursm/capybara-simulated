@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # MessagePort and BroadcastChannel (HTML §9.4–9.5): a port's messages follow it wherever it is transferred — within a
 # realm, to a frame, to a worker and on from there — and a BroadcastChannel post is a task.
@@ -218,15 +219,7 @@ end
 
 # A message no structured clone takes is the poster's DataCloneError on a service worker's postMessage paths too —
 # the client's to its worker, the worker's to its client: one was dropped silently, the other delivered as `null`.
-RSpec.describe 'a service worker message no structured clone takes' do
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
-
+RSpec.describe 'a service worker message no structured clone takes', :every_host_local do
   it "is the poster's DataCloneError, both ways" do
     sw = <<~JS
       onmessage = (e) => {

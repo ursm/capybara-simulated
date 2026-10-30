@@ -4,11 +4,13 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A frame entered with `within_frame` navigates as any frame does: a controlling service worker's fetch event sees its
 # navigation request — a link's GET, a form's POST with its body — and what it answers with makes the frame's document
 # (Service Workers "Handle Fetch"; HTML "create navigation params by fetching").
-RSpec.describe 'Service Worker entered frame navigation' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker entered frame navigation', :every_host_local do
   include PollUntil
 
   let(:app) {
@@ -42,14 +44,6 @@ RSpec.describe 'Service Worker entered frame navigation' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   def controlled_frame_session
     session = simulated_session(app)

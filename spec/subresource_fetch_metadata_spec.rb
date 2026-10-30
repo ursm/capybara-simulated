@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # The destination and mode a subresource's request reports in its Fetch Metadata (Fetch Metadata Request Headers): a
 # font's `font` (CSS Fonts 4 §4.9.1, a CORS request), a worker's script `worker` / `sharedworker` (HTML "fetch a classic
@@ -196,9 +197,8 @@ RSpec.describe 'a subresource request', :https do
   end
   # (…an about:blank document's request its creator's — its origin, which Sec-Fetch-Site compares, however deep — and not
   # the top-level one's: no referrer of its own to say otherwise; an image's and a style sheet's alike)
-  it "judges an about:blank document's image and sheet by its creator's origin" do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin's frame served in-process
+  # (…the other origin's frame served in-process)
+  it "judges an about:blank document's image and sheet by its creator's origin", :every_host_local do
     load = lambda {|src|
       "const f = document.createElement('iframe'); document.body.append(f); new f.contentWindow.Image().src = '#{src}'; " \
         "const l = f.contentDocument.createElement('link'); l.rel = 'stylesheet'; l.href = '#{src.sub('.png', '.css')}'; f.contentDocument.head.append(l);"
@@ -218,14 +218,11 @@ RSpec.describe 'a subresource request', :https do
     expect(poll_until { s.evaluate_script('1') && sites.slice('/top.png', '/framed.png', '/top.css', '/framed.css').then {|got| got.size == 4 && got } }).to eq(
       '/top.png' => 'same-origin', '/framed.png' => 'cross-site', '/top.css' => 'same-origin', '/framed.css' => 'cross-site'
     )
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
   # …and a blob: document's its blob URL's origin's — the frame of another origin that made it navigated to it — not its
   # parent's.
-  it "judges a blob: document's sheets by its own origin" do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin's frame served in-process
+  # (…the other origin's frame served in-process)
+  it "judges a blob: document's sheets by its own origin", :every_host_local do
     sites = {}
     blob = '<link rel=stylesheet href="https://other.test/own.css"><link rel=stylesheet href="https://www.example.com/page.css">'
     s = simulated_session(lambda {|env|
@@ -238,13 +235,10 @@ RSpec.describe 'a subresource request', :https do
     })
     s.visit '/'
     expect(poll_until { s.evaluate_script('1') && sites.slice('/own.css', '/page.css').then {|got| got.size == 2 && got } }).to eq('/own.css' => 'same-origin', '/page.css' => 'cross-site')
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
   # …the page's own a blob: document too, its subresources its blob URL's origin's requests.
-  it "judges a top-level blob: document's sheets by its own origin" do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+  # (…the other origin served in-process)
+  it "judges a top-level blob: document's sheets by its own origin", :every_host_local do
     sites = {}
     blob = '<link rel=stylesheet href="https://www.example.com/own.css"><link rel=stylesheet href="https://other.test/away.css">'
     s = simulated_session(lambda {|env|
@@ -256,8 +250,6 @@ RSpec.describe 'a subresource request', :https do
     })
     s.visit '/'
     expect(poll_until { s.evaluate_script('1') && sites.slice('/own.css', '/away.css').then {|got| got.size == 2 && got } }).to eq('/own.css' => 'same-origin', '/away.css' => 'cross-site')
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 end
 

@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A frame navigated into a scope while its registration is still ACTIVATING its worker. Handle Fetch sets the frame's
 # active service worker to the registration's active worker before it asks whether that worker handles fetches — a
@@ -12,7 +13,7 @@ require_relative 'support/poll_until'
 # unregister-then-register "does not resurrect the registration", 2 runs in 10). And its controller is the worker as it
 # is: 'activating', then 'activated' with the `statechange` the page waits on — a worker the frame only knows as its
 # controller was minted 'activated' and never moved.
-RSpec.describe 'a frame a still-activating service worker controls' do
+RSpec.describe 'a frame a still-activating service worker controls', :every_host_local do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|
@@ -28,14 +29,6 @@ RSpec.describe 'a frame a still-activating service worker controls' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'is controlled by it, activating, and hears it activate' do
     session = simulated_session(app)

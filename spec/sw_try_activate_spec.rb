@@ -4,12 +4,14 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # Try Activate (Service Workers §8) holds a waiting worker while the active worker is still ACTIVATING, and tries it
 # again once that one's activate event's extend lifetime promises settled (Install's note) — an update installed during
 # the old version's activation activates right after it, with no client left to unload (Chrome measured 2026-10-30:
 # `w2=activated w1=redundant`).
-RSpec.describe 'Service Worker Try Activate' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker Try Activate', :every_host_local do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|
@@ -31,14 +33,6 @@ RSpec.describe 'Service Worker Try Activate' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'activates an update installed while the active worker was still activating, once that one is activated' do
     session = simulated_session(app)

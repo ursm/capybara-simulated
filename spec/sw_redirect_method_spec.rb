@@ -4,11 +4,13 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A redirect a controlling service worker answers with is followed as Fetch's "HTTP-redirect fetch" follows one: a 303
 # rewrites a request to a bodyless GET unless it is a GET or a HEAD already — a HEAD stays a HEAD (step 12), as the
 # network's redirects (browser.rb) do.
-RSpec.describe 'Service Worker redirect method' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker redirect method', :every_host_local do
   include PollUntil
 
   let(:app) {
@@ -38,14 +40,6 @@ RSpec.describe 'Service Worker redirect method' do
   }
 
   let(:origins) { [] }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'keeps a HEAD a HEAD across a 303, and makes a POST a GET' do
     session = simulated_session(app)

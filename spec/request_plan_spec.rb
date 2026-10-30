@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A subresource's request is the engine's plan of it (subresource_plan.rs `plan`): a module script's options carry its
 # own `referrerpolicy` alone, so a later `import()` takes its document's policy as it is then (Fetch "main fetch"); and a
@@ -59,9 +60,8 @@ RSpec.describe 'a subresource request plan' do
   # CORS request — its Origin sent to the other origin — under a `crossorigin` video, and under one of none a same-origin
   # request (its potential-CORS request's same-origin fallback), which another origin's URL is a network error of: none
   # sent — a `crossorigin` on the track itself, which has no such attribute, nothing.
-  it "fetches a track by its media element's crossorigin" do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+  # (…the other origin served in-process)
+  it "fetches a track by its media element's crossorigin", :every_host_local do
     session.visit '/'
     session.execute_script(<<~JS)
       for (const [name, on] of [['video', true], ['track', false]]) {
@@ -79,14 +79,11 @@ RSpec.describe 'a subresource request plan' do
     session.evaluate_script('new Promise((resolve) => setTimeout(resolve, 50))')
     tracks = seen.select {|(path, _, _)| path.end_with?('.vtt') }
     expect(tracks.map {|(path, _, origin)| [path, origin] }).to eq([['/video.vtt', 'http://www.example.com']])
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
   # …and its poster a plain request whatever its `crossorigin` (HTML's poster frame steps), as an image input's is: an
   # `<input type=image>` has no CORS settings attribute — no Origin sent to the other origin for either.
-  it "fetches a poster and an image input as no CORS request" do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+  # (…the other origin served in-process)
+  it "fetches a poster and an image input as no CORS request", :every_host_local do
     session.visit '/'
     session.execute_script(<<~JS)
       const video = document.createElement('video');
@@ -102,8 +99,6 @@ RSpec.describe 'a subresource request plan' do
     JS
     got = poll_until { session.evaluate_script('1') && (hit = seen.select {|(path, _, _)| path.end_with?('.png') }).size == 2 && hit.sort }
     expect(got.map {|(path, _, origin)| [path, origin] }).to eq([['/input.png', nil], ['/poster.png', nil]])
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
   # An image loaded before any page is: its client the page that is none yet, its request made all the same.
   it 'fetches an image before any visit' do

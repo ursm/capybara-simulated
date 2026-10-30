@@ -4,12 +4,14 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A classic script a controlling service worker answers is decoded as a network one is — by its response's Content-Type
 # charset (script.rs `classic_script_encoding`) — whether the parser fetched it or a script inserted it: its bytes and
 # its Content-Type, not a text the host made of them — and refused as a network one is: a `nosniff` one of no JavaScript
 # type is a network error.
-RSpec.describe 'Service Worker script charset' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker script charset', :every_host_local do
   include PollUntil
 
   let(:app) {
@@ -38,14 +40,6 @@ RSpec.describe 'Service Worker script charset' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'decodes a served script by its Content-Type charset, parsed or inserted, and refuses one nosniff fails' do
     session = simulated_session(app)

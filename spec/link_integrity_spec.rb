@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'digest'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A link's `integrity` is its request's integrity metadata (HTML "create link options from element"), whatever the
 # link's type, and a response that does not match it is a network error (Fetch "main fetch", SRI "does response match
@@ -102,9 +103,7 @@ RSpec.describe 'link integrity' do
       });
     JS
     page = '<!DOCTYPE html><meta charset=utf-8><body><p>p</p><script>navigator.serviceWorker.register("/sw.js"); setInterval(() => {}, 50);</script>'
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    begin
+    every_host_local do   # Service Workers are modeled only in a universal-server context
       s = simulated_session(lambda {|env|
         env['PATH_INFO'] == '/sw.js' ? [200, {'content-type' => 'text/javascript'}, [worker]] : [200, {'content-type' => 'text/html'}, [page]]
       }).tap {|session| session.visit '/' }
@@ -117,8 +116,6 @@ RSpec.describe 'link integrity' do
       JS
       expect(poll_until { s.evaluate_script('window.result') }).to eq('load')
       expect(s.evaluate_script("getComputedStyle(document.querySelector('p')).color")).to eq('rgb(255, 0, 0)')
-    ensure
-      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
     end
   end
 

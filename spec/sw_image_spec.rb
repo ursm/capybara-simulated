@@ -3,10 +3,13 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # An image a controlling service worker answers loads from its response's bytes — a network response passed on, and one
 # whose body is a stream the worker made (its chunks drained, then decoded) — its request carrying an image's `Accept`.
-RSpec.describe 'a service worker image' do
+# (…every host served in-process, which a service worker's job is scheduled under alone: browser.rb `sw_schedule_job`'s
+# `all_hosts_local?`)
+RSpec.describe 'a service worker image', :every_host_local do
   include PollUntil
 
   png = File.binread(File.expand_path('wpt/common/square.png', __dir__))
@@ -47,16 +50,6 @@ RSpec.describe 'a service worker image' do
       end
     }
   }
-
-  # (…every host served in-process, which a service worker's job is scheduled under alone: browser.rb `sw_schedule_job`'s
-  # `all_hosts_local?`)
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   # …and an image and an SVG `<use>` of the same URL are two resources of two types — two requests, two entries — not the
   # one the page's memory cache served the second (Blink keys its memory cache by type): an image after a use of its URL

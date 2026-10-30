@@ -5,13 +5,15 @@ require 'rack'
 require 'json'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # ServiceWorker, ServiceWorkerRegistration, ServiceWorkerContainer and NavigationPreloadManager, generated from their
 # IDL: made by the platform alone, their state in slots — the client's objects and the service worker's own view of
 # itself and its registration alike, which are the same interfaces' objects. A service worker posting to itself gets
 # the message, from its own ServiceWorker; a registration with no active worker yet has no navigation preload to enable
 # (an InvalidStateError, Service Workers §3.5), and a header value has no leading or trailing whitespace (Fetch).
-RSpec.describe 'Service Worker bindings' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker bindings', :every_host_local do
   let(:app) {
     Rack::Builder.new {
       run lambda {|env|
@@ -115,14 +117,6 @@ RSpec.describe 'Service Worker bindings' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'is what their IDL says, on both sides' do
     session = simulated_session(app)

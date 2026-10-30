@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # A reload's request is made by the document it reloads where the page asks for it (`location.reload()`: HTML "apply
 # the history step", no source snapshot given — the navigable's active document's is its fetch client), its
@@ -10,15 +11,6 @@ require_relative 'support/https_app_host'
 # form led to too, one of an opaque origin cross-site (Chrome, measured 2026-10-30) — and by none where the user does
 # (the driver's `refresh`): `none`, as a visit is, a re-post's Origin the one it was first sent with.
 RSpec.describe 'the request a reload makes', :https do
-  # (…every host the app's while the session is made, which keeps the setting it was made with)
-  def every_host_local
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    yield
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
-
   let(:seen) { [] }
   let(:session) {
     seen = self.seen

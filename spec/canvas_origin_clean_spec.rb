@@ -2,6 +2,7 @@
 
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A canvas's origin-clean flag (HTML §4.12.5.1.2) is cleared by drawing a source that is not origin-clean, and nothing
 # sets it again: not `restore()`, not `reset()` ("reset the rendering context to its default state" has no step for it),
@@ -80,9 +81,8 @@ RSpec.describe 'canvas origin-clean flag' do
   # …and the origin it is judged by is the drawing document's: an about:blank one's its creator's however deep — a frame
   # of another origin's, so that origin's image draws clean there — and a sandboxed one's opaque, so even its own host's
   # video taints.
-  it 'is judged by the origin the document has' do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin's frame served in-process
+  # (…the other origin's frame served in-process)
+  it 'is judged by the origin the document has', :every_host_local do
     video = File.binread(File.expand_path('wpt/media/2x2-green.webm', __dir__))
     probe = <<~JS
       const report = (what, c) => { try { c.toDataURL(); parent.postMessage([what, 'clean'], '*'); } catch (e) { parent.postMessage([what, e.name], '*'); } };
@@ -133,8 +133,6 @@ RSpec.describe 'canvas origin-clean flag' do
       document.body.append(a, b);
     JS
     expect(got).to eq('blank' => 'clean', 'sandboxed' => 'SecurityError')
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 end
 

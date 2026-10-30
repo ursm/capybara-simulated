@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A worker's global is its kind's global scope (HTML §10.2.1), generated from the IDL: its prototype chain
 # DedicatedWorkerGlobalScope's → WorkerGlobalScope's (WindowOrWorkerGlobalScope's members there) → EventTarget's, no
@@ -80,9 +81,8 @@ RSpec.describe 'Worker global scope' do
     ])
   end
 
-  it "makes a service worker's ServiceWorker one object, the one its registration holds" do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
+  # (…service Workers are modeled only in a universal-server context)
+  it "makes a service worker's ServiceWorker one object, the one its registration holds", :every_host_local do
     session.visit '/'
     got = session.evaluate_async_script(<<~JS)
       const done = arguments[0];
@@ -90,8 +90,6 @@ RSpec.describe 'Worker global scope' do
       navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then((r) => r.active.postMessage('?'));
     JS
     expect(got).to eq([['parsed', '/sw.js'], [true, 'installing', true], [true, 'activating', true]])
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 
   it "names a worker by WorkerOptions' name, a DOMString" do

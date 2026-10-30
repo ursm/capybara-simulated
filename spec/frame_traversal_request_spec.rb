@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/https_app_host'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A frame's traversal to an entry whose document is gone fetches the entry's URL as a navigation of the frame does (HTML
 # "apply the history step": the document re-made by "create navigation params by fetching"): its request a user's — no
@@ -63,15 +64,7 @@ RSpec.describe 'a frame traversal request' do
     expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('/f1')
   end
 
-  context 'with every host the app' do
-    around do |example|
-      prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-      ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-      example.run
-    ensure
-      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-    end
-
+  context 'with every host the app', :every_host_local do
     it "re-posts with the origin the entry's request was first sent with" do
       posts = []
       hits  = []

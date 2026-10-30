@@ -3,12 +3,14 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A version's lifecycle step tells every realm of each worker's new state in turn (Service Workers "Update Worker
 # State", a task per realm): a realm that first makes its ServiceWorker of a worker in a `statechange` listener of
 # another one in the same step makes it in the state before, and sees its own `statechange` after — a waiting worker
 # retired as a newer one is installed, its redundant listener taking the registration's new waiting worker.
-RSpec.describe 'Service Worker lifecycle order' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker lifecycle order', :every_host_local do
   include PollUntil
 
   let(:app) {
@@ -23,14 +25,6 @@ RSpec.describe 'Service Worker lifecycle order' do
       end
     }
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it "fires a statechange for a worker a listener of another's in the same step first sees" do
     session = simulated_session(app)

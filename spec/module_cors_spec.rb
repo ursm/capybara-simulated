@@ -4,21 +4,15 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
 require_relative 'support/https_app_host'
+require_relative 'support/every_host_local'
 
 # A module script's fetch is a CORS request (HTML "fetch a single module script"): its Fetch Metadata mode `cors`, and a
 # module of another origin whose response no `Access-Control-Allow-Origin` allows no module — its script's `error` — as
 # one that allows it loads; with the credentials mode its `crossorigin` says, a `*` allowing no credentialed one; and a
 # body cached for one origin's request answering no other's.
-RSpec.describe 'a module script', :https do
+# (…the other origin served in-process)
+RSpec.describe 'a module script', :https, :every_host_local do
   include PollUntil
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   let(:modes) { {} }
   let(:cookies) { {} }

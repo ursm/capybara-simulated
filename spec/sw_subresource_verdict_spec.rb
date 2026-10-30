@@ -4,12 +4,14 @@ require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A subresource a controlling service worker answers uses the answer where Fetch allows it and its consumer takes its
 # status — the engine's one verdict (subresource_judge.rs `judge`): a `<link rel=prefetch>` loads whatever the status,
 # the worker's or the network's it lets the request through to (HTML: a success where it is no network error — Chrome
 # errs on a 404), an `<audio>` errs on a 404 and on an answer of no media data (a 304), and plays a 200.
-RSpec.describe 'Service Worker subresource verdict' do
+# (…service Workers are modeled only in a universal-server context)
+RSpec.describe 'Service Worker subresource verdict', :every_host_local do
   include PollUntil
 
   let(:hits) { [] }
@@ -62,14 +64,6 @@ RSpec.describe 'Service Worker subresource verdict' do
       }
     }.to_app
   }
-
-  around do |example|
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    example.run
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
-  end
 
   it 'loads a prefetch whatever its status, and errors an audio a 404 or an empty 304 answers' do
     session = simulated_session(app)

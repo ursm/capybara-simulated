@@ -4,6 +4,7 @@ require 'capybara/simulated'
 require 'digest'
 require_relative 'support/session_teardown'
 require_relative 'support/poll_until'
+require_relative 'support/every_host_local'
 
 # A document's map of preloaded resources (HTML `rel=preload`, preload_map.rs): a preload's response is kept for the
 # first fetch that matches it — its URL, destination, mode and credentials mode — which takes it before any service
@@ -259,9 +260,7 @@ RSpec.describe 'map of preloaded resources' do
       </script>
     HTML
     served = []
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # Service Workers are modeled only in a universal-server context
-    begin
+    every_host_local do   # Service Workers are modeled only in a universal-server context
       s = simulated_session(preload_app(served, page, worker)).tap {|session| session.visit '/' }
       expect(poll_until { s.evaluate_script("navigator.serviceWorker.controller?.state === 'activated'") }).to be true
       s.execute_script(<<~'JS')
@@ -284,8 +283,6 @@ RSpec.describe 'map of preloaded resources' do
       expect([poll_until { s.evaluate_script('window.seen') }, s.evaluate_script('img.naturalWidth > 0'), served]).to eq([
         ['image?pre', 'style', 'script'], true, ['i.png?from-worker', 's.css', 'a.js']
       ])
-    ensure
-      ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
     end
   end
 end

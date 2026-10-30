@@ -3,6 +3,7 @@ require 'digest'
 require 'base64'
 require 'cgi'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A classic script's response is refused before it runs — its `error` event, no run — where Fetch's main fetch makes it
 # a network error (script.rs `script_response_refused`): a MIME type no script is (`image/*` and the like), one that is
@@ -89,9 +90,8 @@ RSpec.describe 'script response checks' do
   # An opaque response is the one Fetch made — a no-cors request any hop of which left the document's origin (a
   # redirect's response tainting stays opaque) — whatever origin the script's URL is of: a same-origin URL redirected to
   # another origin fails its integrity, a CORS one there does not, and a cross-origin URL redirected back stays opaque.
-  it 'fails the integrity of an opaque response, whatever origin its URL is of' do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+  # (…the other origin served in-process)
+  it 'fails the integrity of an opaque response, whatever origin its URL is of', :every_host_local do
     sha  = "sha256-#{Base64.strict_encode64(Digest::SHA256.digest(BODY))}"
     page = <<~HTML
       <!DOCTYPE html><meta charset=utf-8>
@@ -111,7 +111,5 @@ RSpec.describe 'script response checks' do
     end
     s = simulated_session(app).tap {|session| session.visit '/' }
     expect(s.evaluate_script('[ran, failed.slice().sort()]')).to eq([%w[cors], %w[away back]])
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 end

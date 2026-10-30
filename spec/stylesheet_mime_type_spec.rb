@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'rack'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A fetched style sheet is one only where it is served as `text/css` — HTML "process the linked resource" for
 # `rel=stylesheet`, and CSS Cascade's `@import` — unless the document is in quirks mode and the sheet is same-origin,
@@ -57,11 +58,8 @@ RSpec.describe 'a stylesheet served as something other than CSS' do
 
   # (…a CORS-same-origin one: one another origin's URL redirected back to the document's is no such response — HTML's
   # "the resource is CORS-same-origin", a no-cors response tainted by the hop — whatever its final URL says)
-  it 'applies none another origin redirected to it, in a quirks-mode document' do
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'   # the other origin served in-process
+  # (…the other origin served in-process)
+  it 'applies none another origin redirected to it, in a quirks-mode document', :every_host_local do
     expect(outcome(doctype: '', type: 'text/plain', back: true)).to eq(['error', 'block', 'inline', nil, nil])
-  ensure
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
   end
 end
