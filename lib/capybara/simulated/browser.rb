@@ -11200,8 +11200,9 @@ module Capybara
             # measured — and its base URL that document's: the page's own where the page navigates itself, else the
             # initiator's URL (its base URL not known here — a gap); its referrer the request's, under the initiator's
             # policy. A window's initial about:blank is no navigation's — a `noopener` one's origin a new opaque one, a
-            # pop-up's its creator's: HTML "window open steps")
-            if initiator && @session_history.active(0)
+            # pop-up's its creator's: HTML "window open steps" — and an opaque initiator's (a sandboxed document's: its seed
+            # `cross-site`, `opaque_initiator`) one of no tuple origin, a new opaque one here where HTML has that one)
+            if initiator && @session_history.active(0) && site_seed != 'cross-site'
               own  = initiator == @current_url
               base = own ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s
               inherit_creator(origin: url_origin(initiator).to_s, base: base)

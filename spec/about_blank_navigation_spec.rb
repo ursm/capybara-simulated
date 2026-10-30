@@ -10,8 +10,10 @@ require_relative 'support/session_teardown'
 RSpec.describe 'a navigation to about:blank' do
   let(:session) {
     simulated_session(lambda {|env|
-      policy = Rack::Request.new(env).params['policy']
-      page   = "<!DOCTYPE html><meta name=referrer content=#{policy}><base href=/sub/><body>page"
+      req = Rack::Request.new(env)
+      next [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts'}, ['<!DOCTYPE html>boxed']] if req.path == '/boxed'
+
+      page = "<!DOCTYPE html><meta name=referrer content=#{req.params['policy']}><base href=/sub/><body>page"
       [200, {'content-type' => 'text/html'}, [page]]
     })
   }
@@ -21,6 +23,14 @@ RSpec.describe 'a navigation to about:blank' do
     session.execute_script("location.href = 'about:blank'")
     session.evaluate_script('1')
     session.evaluate_script('[location.href, origin, document.baseURI, document.referrer]')
+  end
+
+  # (…an opaque initiator's — a sandboxed page's — of no tuple origin)
+  it 'is of an opaque origin where its initiator is' do
+    session.visit '/boxed'
+    session.execute_script("location.href = 'about:blank'")
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[location.href, origin]')).to eq(%w[about:blank null])
   end
 
   it "is of its initiator's origin and base URL, referred under its policy" do
