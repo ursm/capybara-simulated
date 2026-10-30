@@ -8,9 +8,9 @@ require_relative 'support/session_teardown'
 # browser keeps `Cache-Control: immutable` responses across navigations and tests alike (the
 # URL is content-addressable, so a kept entry can't shadow a later test's response); anything
 # else is dropped at reset so test-local server state reaches the app on the next visit.
-RSpec.describe Capybara::Simulated::AssetCache do
+RSpec.describe Capybara::Simulated::Native::HttpCache do
   def store(cache, url, cache_control)
-    cache.store(url, 200, {'content-type' => 'application/javascript', 'cache-control' => cache_control}, 'body')
+    cache.store(url, 200, {'content-type' => 'application/javascript', 'cache-control' => cache_control}, 'body', nil)
   end
 
   it 'keeps immutable entries across a reset and drops the rest' do
@@ -33,27 +33,27 @@ RSpec.describe Capybara::Simulated::AssetCache do
   # at all, an ETag revalidated as it was given)
   it 'reads Array fields as one' do
     cache = described_class.new
-    cache.store('http://app/n', 200, {'cache-control' => ['no-store'], 'etag' => '"x"'}, 'body')
+    cache.store('http://app/n', 200, {'cache-control' => ['no-store'], 'etag' => '"x"'}, 'body', nil)
     expect(cache.lookup('http://app/n')).to be_nil
-    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => ['"v1"'], 'content-length' => '4'}, 'body')
+    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => ['"v1"'], 'content-length' => '4'}, 'body', nil)
     entry = cache.lookup('http://app/e')
-    expect(cache.revalidation_headers(entry)).to eq('If-None-Match' => '"v1"')
+    expect(entry.revalidation_headers).to eq('If-None-Match' => '"v1"')
   end
 
   # (…and a 304 updating the stored fields with the ones it carries — a rotated ETag what the next revalidation sends —
   # but for those describing a content it carries none of, and the driver's own: RFC 9111 §3.2, §4.3.4)
   it 'updates what is stored from a 304' do
     cache = described_class.new
-    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => '"v1"', 'content-length' => '4', 'set-cookie' => 'a=1'}, 'body')
+    cache.store('http://app/e', 200, {'cache-control' => 'no-cache', 'etag' => '"v1"', 'content-length' => '4', 'set-cookie' => 'a=1'}, 'body', nil)
     entry = cache.lookup('http://app/e')
     before = entry.headers
     cache.refresh('http://app/e', entry, {'etag' => '"v2"', 'content-length' => '0', 'x-csim-status-text' => 'Not Modified', 'set-cookie' => 'b=2'})
-    expect(cache.revalidation_headers(entry)).to eq('If-None-Match' => '"v2"')
-    expect(entry.headers.to_h.slice('content-length', 'x-csim-status-text', 'set-cookie')).to eq('content-length' => '4')
-    expect([entry.no_cache, before['etag']]).to eq([true, '"v1"'])
+    expect(entry.revalidation_headers).to eq('If-None-Match' => '"v2"')
+    expect(entry.headers.slice('content-length', 'x-csim-status-text', 'set-cookie')).to eq('content-length' => '4')
+    expect([entry.no_cache?, before['etag']]).to eq([true, '"v1"'])
     # (…a new Date shortening an Expires; and a 304 that forbids storing it dropping the entry)
     now = Time.now
-    cache.store('http://app/x', 200, {'date' => (now - 50).httpdate, 'expires' => (now + 10).httpdate}, 'body')
+    cache.store('http://app/x', 200, {'date' => (now - 50).httpdate, 'expires' => (now + 10).httpdate}, 'body', nil)
     expiring = cache.lookup('http://app/x')
     cache.refresh('http://app/x', expiring, {'date' => now.httpdate})
     expect(expiring.fresh?(now + 30)).to be(false)
@@ -66,9 +66,9 @@ RSpec.describe Capybara::Simulated::AssetCache do
   it 'counts the age a response came with, the first max-age, and an invalid Expires as stale' do
     cache = described_class.new
     now   = Time.now
-    cache.store('http://app/aged', 200, {'cache-control' => 'max-age=60', 'age' => '50'}, 'body')
-    cache.store('http://app/twice', 200, {'cache-control' => 'max-age=60, max-age=1'}, 'body')
-    cache.store('http://app/expired', 200, {'expires' => '0', 'etag' => '"e"'}, 'body')
+    cache.store('http://app/aged', 200, {'cache-control' => 'max-age=60', 'age' => '50'}, 'body', nil)
+    cache.store('http://app/twice', 200, {'cache-control' => 'max-age=60, max-age=1'}, 'body', nil)
+    cache.store('http://app/expired', 200, {'expires' => '0', 'etag' => '"e"'}, 'body', nil)
     expect(cache.lookup('http://app/aged').fresh?(now + 20)).to be(false)
     expect(cache.lookup('http://app/aged').fresh?(now + 5)).to be(true)
     expect(cache.lookup('http://app/twice').fresh?(now + 30)).to be(true)

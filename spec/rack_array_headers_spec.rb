@@ -6,7 +6,7 @@ require_relative 'support/poll_until'
 
 # A Rack 3 app may give a header as an Array of its fields; the driver's own reads of a response's headers — CORS's,
 # a preflight's, a download's, the response's type, the HTTP cache's, Basic authentication's — take them combined with
-# ", " as a browser builds the header list (AssetCache.combined, Browser#header_text), where they had read the Array's
+# ", " as a browser builds the header list (http_cache.rs `combine`, Browser#header_text), where they had read the Array's
 # `inspect` or its first field; and a Location of more than one field is none to follow.
 RSpec.describe 'a response header given as an Array' do
   it 'is read as its fields combined, by CORS and a preflight' do

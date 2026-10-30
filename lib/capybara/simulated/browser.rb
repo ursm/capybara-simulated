@@ -15,7 +15,6 @@ require 'thread'
 require 'time'
 require 'uri'
 require 'zlib'
-require_relative 'asset_cache'
 require_relative 'errors'
 require_relative 'stack_resolver'
 require_relative 'trace'
@@ -58,7 +57,7 @@ module Capybara
       # on every visit (Redmine baseline: ~6× more requests than
       # selenium). Honors `Cache-Control` / `Expires` / `ETag` /
       # `Last-Modified` per RFC 9111.
-      @@asset_cache = AssetCache.new
+      @@asset_cache = Native::HttpCache.new
 
       # Opt-in: capture each request's author header names verbatim on the Rack env
       # (`csim.raw_request_headers`) so the WPT .py-handler harness can replay them with
@@ -3725,9 +3724,7 @@ module Capybara
         body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                                     client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
-        entry = @@asset_cache.lookup(url)
-        fresh_until = entry && entry.fresh? && entry.max_age ? entry.stored_at + entry.max_age : nil
-        [body, fresh_until]
+        [body, @@asset_cache.lookup(url)&.fresh_until]
       end
 
       # Cross-visit cache of external asset bodies (classic `<script src>` bundles
@@ -3852,7 +3849,7 @@ module Capybara
         shared_key = "#{memo_key} #{client_origin_of(client)}"
         @@asset_src_lock.synchronize do
           if (e = @@asset_src[shared_key])
-            if e[1].nil? || Time.now < e[1]
+            if e[1].nil? || Time.now.to_f < e[1]
               Thread.current[:csim_asset_meta] = e[2]
               return [e[0], e[2], e[3]]
             end
@@ -9347,8 +9344,9 @@ module Capybara
           method      = plan.request_method
           target      = plan.target
           # The stored response for the hop's URL, the plan's to judge (the HTTP cache keeps it; http_cache.rs its policy).
-          cache_entry = @@asset_cache.lookup(target)
-          stored      = cache_entry && [cache_entry.status.to_i, cache_entry.fresh?, location_fields(cache_entry.headers)]
+          cache_entry   = @@asset_cache.lookup(target)
+          cache_headers = cache_entry&.headers
+          stored        = cache_entry && [cache_entry.status, cache_entry.fresh?, location_fields(cache_headers)]
           step, *args = plan.begin_hop(stored, Process.clock_gettime(Process::CLOCK_MONOTONIC))
           case step
           when 'error'
@@ -9357,15 +9355,15 @@ module Capybara
             return nil
           when 'serve_cache'
             # Cached asset — log headers/type/size but skip the (boring) body.
-            trace_network(method, target, cache_entry.status, headers, body, cache_entry.headers, nil, t0, false)
-            out = response_hash(cache_entry.status, cache_entry.headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded)
+            trace_network(method, target, cache_entry.status, headers, body, cache_headers, nil, t0, false)
+            out = response_hash(cache_entry.status, cache_headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded)
             return tainted_response(out, args[0])
           when 'cache_follow'
             # (…a redirect the cache answered followed through it, to the next hop the cache may answer too)
-            trace_network(method, args[0], cache_entry.status, headers, body, cache_entry.headers, nil, t0, true)
+            trace_network(method, args[0], cache_entry.status, headers, body, cache_headers, nil, t0, true)
             next
           when 'opaque_redirect_cached'
-            return opaque_redirect_hash(target, cache_entry.status, cache_entry.headers, cache_entry.body)
+            return opaque_redirect_hash(target, cache_entry.status, cache_headers, cache_entry.body)
           end
           (method, target, hop_headers, drop_length, hop_referer, cookie_context, authorization, origin_value, sec_fetch,
            revalidate), preflight = args
@@ -9375,7 +9373,7 @@ module Capybara
           # is POST or PUT — send-entity-body-none)
           env.delete('CONTENT_LENGTH') if drop_length
           apply_request_headers(env, hop_headers.to_h) unless hop_headers.empty?
-          apply_request_headers(env, @@asset_cache.revalidation_headers(cache_entry)) if revalidate
+          apply_request_headers(env, cache_entry.revalidation_headers) if revalidate
           # Fetch "fetch" step 12: a request whose header list has no `Accept` carries its destination's — an image's
           # image types, a sheet's CSS, and `*/*` for every other (a script's, a media resource's, a worker's, a
           # beacon's) — not the document navigation's apply_default_request_env falls back to. (A fetch()'s, an XHR's,
@@ -9424,15 +9422,16 @@ module Capybara
           store_set_cookies(resp_headers, target, cookie_context)
           case step
           when 'revalidated'
-            trace_network(method, target, cache_entry.status, hop_headers, body, cache_entry.headers, nil, t0, false)
+            trace_network(method, target, cache_entry.status, hop_headers, body, cache_headers, nil, t0, false)
             resp_body.close if resp_body.respond_to?(:close)
             @@asset_cache.refresh(target, cache_entry, resp_headers)
+            cache_headers = cache_entry.headers
             # The cache stores the RAW response headers, so a cross-origin cached entry must
             # be re-filtered through the CORS exposed-header set on the way back to script —
             # a 304 revalidation must not leak headers the original cross-origin fetch hid.
             expose, tainted = args
-            cached_headers = expose.nil? ? cache_entry.headers : cors_exposed_headers(cache_entry.headers, expose)
-            out = response_hash(cache_entry.status, cached_headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'validated', raw_headers: cache_entry.headers, encoded: cache_entry.encoded)
+            cached_headers = expose.nil? ? cache_headers : cors_exposed_headers(cache_headers, expose)
+            out = response_hash(cache_entry.status, cached_headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'validated', raw_headers: cache_headers, encoded: cache_entry.encoded)
             return tainted_response(out, tainted)
           when 'error'
             message, store_redirect = args
@@ -9440,7 +9439,7 @@ module Capybara
             # it before the redirect is handled)
             unless store_redirect.nil?
               trace_network(method, target, status, hop_headers, body, resp_headers, nil, t0, true)
-              @@asset_cache.store(target, status, resp_headers, '') if store_redirect
+              @@asset_cache.store(target, status.to_i, resp_headers, '', nil) if store_redirect
             end
             resp_body.close if resp_body.respond_to?(:close)
             raise StandardError, message if message
@@ -9457,7 +9456,7 @@ module Capybara
             # cacheable 3xx with freshness) BEFORE following it, so a later only-if-cached / force-cache request can follow
             # the chain from the cache (request-cache "uses cached … redirects").
             trace_network(method, target, status, hop_headers, body, resp_headers, nil, t0, true)
-            @@asset_cache.store(target, status, resp_headers, '') if store_redirect
+            @@asset_cache.store(target, status.to_i, resp_headers, '', nil) if store_redirect
             body = nil if to_get
             resp_body.close if resp_body.respond_to?(:close)
             next
@@ -9488,7 +9487,7 @@ module Capybara
           exposed_headers = expose.nil? ? resp_headers : cors_exposed_headers(resp_headers, expose)
           exposed_headers = exposed_headers.merge('X-Csim-Server-Delay-Ms' => total_delay.to_s) if total_delay.positive?
           trace_network(method, target, status, hop_headers, body, resp_headers, body_str, t0, false)
-          @@asset_cache.store(target, status, resp_headers, body_str, encoded: encoded_size) if store && !cut_short
+          @@asset_cache.store(target, status.to_i, resp_headers, body_str, encoded_size) if store && !cut_short
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed headers, empty URL (cors-basic
           # "Opaque filter").
           if kind == 'opaque'
@@ -12054,7 +12053,7 @@ module Capybara
         return [status, headers, body] if headers.any? {|k, _| k.to_s.casecmp?('transfer-encoding') }
 
         fields         = headers.filter_map {|k, v| v if k.to_s.casecmp?('content-length') }
-        framed, length = Native.message_length(fields.empty? ? nil : AssetCache.combined(fields.flatten))
+        framed, length = Native.message_length(fields.empty? ? nil : Native.combined_field(fields.flatten))
         unless framed
           body.close if body.respond_to?(:close)
           return nil
@@ -12219,10 +12218,10 @@ module Capybara
         nil
       end
 
-      # …a header's value as script reads it: its fields combined (AssetCache.combined: each without the HTTP whitespace
+      # …a header's value as script reads it: its fields combined (http_cache.rs `combine`: each without the HTTP whitespace
       # around it), each byte the code point it is.
       def header_text(value)
-        AssetCache.combined(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
+        Native.combined_field(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
       end
       # …and a response's Content-Security-Policy as script reads it — its headers' fields joined, none where it has none.
       def response_csp(headers)

@@ -292,6 +292,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_response_ok", magnus::function!(event_source_state::response_ok_for_ruby, 2))?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
+    http_cache::define(native, ruby)?;
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
     // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).
     fetch_plan::define(native, ruby)?;
@@ -315,10 +316,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("http_auth_new", magnus::function!(http_auth::new_for_ruby, 0))?;
     native.define_module_function("http_auth_clear", magnus::function!(http_auth::clear_for_ruby, 1))?;
     // The HTTP cache's policy (http_cache.rs): what is stored, for how long, and what a 304 updates.
-    native.define_module_function("http_cache_storable", magnus::function!(http_cache::storable_for_ruby, 3))?;
-    native.define_module_function("http_cache_refreshed", magnus::function!(http_cache::refreshed_for_ruby, 3))?;
-    native.define_module_function("http_cache_fresh", magnus::function!(http_cache::fresh, 4))?;
-    native.define_module_function("http_cache_unrefreshed", magnus::function!(http_cache::unrefreshed_for_ruby, 1))?;
     native.define_module_function("cookie_jar_clear", magnus::function!(cookie_jar::clear_for_ruby, 1))?;
     native.define_module_function("cookie_context", magnus::function!(cookie_jar::context_for_ruby, 3))?;
     native.define_module_function("document_cookie_context", magnus::function!(cookie_jar::document_context_for_ruby, 1))?;

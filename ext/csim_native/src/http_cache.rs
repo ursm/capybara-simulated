@@ -1,7 +1,13 @@
-// The HTTP cache's policy (RFC 9111) for the host's fetches: whether a response may be stored and for how long it is
-// fresh, and what a 304 that revalidates a stored one makes of it. The host
-// keeps the stored responses (their bodies never cross); these say what it does with them. A private cache's view — this
-// is a browser's — but for `private`, which the host's cache, shared across the test sessions of a process, does not store.
+// The HTTP cache (RFC 9111) of the host's fetches: its policy — whether a response may be stored and for how long it is
+// fresh, and what a 304 that revalidates a stored one makes of it — and its store (`HttpCache`), the responses it keeps.
+// A private cache's view — this is a browser's — but for `private`, which this cache, shared across the test sessions of
+// a process, does not store.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, RwLock};
+
+use magnus::encoding::{EncodingCapable, Index};
+use magnus::{prelude::*, Error, RArray, RHash, RString, Ruby, Value};
 
 use crate::civil::{civil_from_days, days_from_civil};
 
@@ -177,36 +183,270 @@ pub(crate) fn unrefreshed(name: &str) -> bool {
     matches!(name, "content-encoding" | "content-length" | "content-range" | "transfer-encoding" | "set-cookie") || name.starts_with("x-csim-")
 }
 
-// — for the host —
-// (…each field a byte string, or nil)
-fn text(v: Option<magnus::RString>) -> Option<String> {
-    v.map(|s| String::from_utf8_lossy(&crate::fetch_rules::ruby_bytes(s)).into_owned())
+// — the store —
+
+// The fields a stored response's policy reads, by name (`Fields`).
+const POLICY_FIELDS: [&str; 7] = ["cache-control", "expires", "date", "last-modified", "etag", "vary", "age"];
+// The responses it keeps at most: a long app suite mints fresh content-addressed URLs per example (Discourse's per-test
+// themes and colour schemes), and an immutable one outlives every reset, so a full store starts again empty.
+const MAX_ENTRIES: usize = 4096;
+
+// A stored response's header fields — each name lowercased, its field lines combined as one value (`combine`) — and what
+// it is kept with: when it was stored, the policy its fields give (`Policy`).
+struct Kept {
+    headers: Vec<(String, Vec<u8>)>,
+    stored_at: f64,
+    policy: Policy,
 }
-// `storable` and `refreshed` over a response's Cache-Control, Expires, Date, Last-Modified, ETag, Vary and Age (each a
-// byte string, or nil): nil, or [max_age (nil none), no_cache, immutable].
-type FieldValues = (Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>, Option<magnus::RString>);
-fn with_fields(values: FieldValues, rule: impl FnOnce(&Fields<'_>) -> Option<Policy>) -> Option<(Option<f64>, bool, bool)> {
-    let (cache_control, expires, date, last_modified, etag, vary, age) = values;
-    let [cache_control, expires, date, last_modified, etag, vary, age] = [cache_control, expires, date, last_modified, etag, vary, age].map(text);
-    let f = Fields {
-        cache_control: cache_control.as_deref(),
-        expires: expires.as_deref(),
-        date: date.as_deref(),
-        last_modified: last_modified.as_deref(),
-        etag: etag.as_deref(),
-        vary: vary.as_deref(),
-        age: age.as_deref(),
+
+impl Kept {
+    fn field(&self, name: &str) -> Option<&[u8]> {
+        self.headers.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_slice())
+    }
+    // …the fields its policy reads.
+    fn policy_of(headers: &[(String, Vec<u8>)], rule: impl FnOnce(&Fields<'_>) -> Option<Policy>) -> Option<Policy> {
+        let [cache_control, expires, date, last_modified, etag, vary, age] =
+            POLICY_FIELDS.map(|name| headers.iter().find(|(k, _)| k == name).map(|(_, v)| String::from_utf8_lossy(v).into_owned()));
+        rule(&Fields {
+            cache_control: cache_control.as_deref(),
+            expires: expires.as_deref(),
+            date: date.as_deref(),
+            last_modified: last_modified.as_deref(),
+            etag: etag.as_deref(),
+            vary: vary.as_deref(),
+            age: age.as_deref(),
+        })
+    }
+}
+
+// A stored response: its status, its body — decoded, as the page reads it, in the encoding it was given in — the size
+// that body had on the wire (what a hit's Resource Timing entry reports as `encodedBodySize`), and what it is kept with,
+// which a 304 replaces whole (`refresh`) so a thread reading it reads one of them.
+struct Stored {
+    status: u32,
+    body: Vec<u8>,
+    encoding: Index,
+    encoded: Option<u64>,
+    kept: RwLock<Arc<Kept>>,
+}
+
+impl Stored {
+    fn kept(&self) -> Arc<Kept> {
+        self.kept.read().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+}
+
+// A header value as one: each of its fields — a Rack 3 app may give an Array of them — without the HTTP whitespace
+// around it, as an HTTP stack reads a field (Chrome and Firefox: ` 5 ` is `5`), combined with ", " as an HTTP response's
+// header list combines them — as bytes, whatever encoding each is tagged with; None for none.
+pub(crate) fn combine(value: Value) -> Result<Option<Vec<u8>>, Error> {
+    if value.is_nil() {
+        return Ok(None);
+    }
+    let fields: Vec<Value> = match RArray::from_value(value) {
+        Some(list) => list.into_iter().collect(),
+        None => vec![value],
     };
-    rule(&f).map(|p| (p.max_age, p.no_cache, p.immutable))
+    let mut out = Vec::new();
+    for (i, field) in fields.into_iter().enumerate() {
+        if i > 0 {
+            out.extend_from_slice(b", ");
+        }
+        let text: RString = field.funcall("to_s", ())?;
+        let bytes = crate::fetch_rules::ruby_bytes(text);
+        let start = bytes.iter().position(|b| !matches!(b, b'\t' | b' ')).unwrap_or(bytes.len());
+        let end = bytes.iter().rposition(|b| !matches!(b, b'\t' | b' ')).map_or(start, |i| i + 1);
+        out.extend_from_slice(&bytes[start..end]);
+    }
+    Ok(Some(out))
 }
-pub(crate) fn storable_for_ruby(status: u32, fields: FieldValues, now: f64) -> Option<(Option<f64>, bool, bool)> {
-    with_fields(fields, |f| storable(status, f, now))
+// Native.combined_field(value) -> `combine`'s, a binary String (nil for none).
+pub(crate) fn combined_field_for_ruby(ruby: &Ruby, value: Value) -> Result<Option<RString>, Error> {
+    Ok(combine(value)?.map(|v| ruby.str_from_slice(&v)))
 }
-pub(crate) fn refreshed_for_ruby(status: u32, fields: FieldValues, now: f64) -> Option<(Option<f64>, bool, bool)> {
-    with_fields(fields, |f| refreshed(status, f, now))
+
+// A header map's fields, by `combine`, each name lowercased (a Rack 2 app's may be mixed-case).
+fn header_fields(headers: RHash) -> Result<Vec<(String, Vec<u8>)>, Error> {
+    let mut out: Vec<(String, Vec<u8>)> = Vec::new();
+    headers.foreach(|k: Value, v: Value| {
+        if let Some(value) = combine(v)? {
+            let name = k.funcall::<_, _, RString>("to_s", ())?.to_string()?.to_ascii_lowercase();
+            match out.iter_mut().find(|(n, _)| *n == name) {
+                Some(slot) => slot.1 = value,
+                None => out.push((name, value)),
+            }
+        }
+        Ok(magnus::r_hash::ForEach::Continue)
+    })?;
+    Ok(out)
 }
-pub(crate) fn unrefreshed_for_ruby(name: String) -> bool {
-    unrefreshed(&name)
+
+fn now() -> f64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+}
+
+// The host's HTTP cache: the responses `rack_fetch` stored, by URL — process-wide, GET-only, shared by every thread that
+// fetches (an image load, a keepalive fetch, the page's own).
+#[magnus::wrap(class = "Capybara::Simulated::Native::HttpCache", free_immediately)]
+pub(crate) struct HttpCache {
+    entries: Mutex<HashMap<String, Arc<Stored>>>,
+}
+
+// One of its stored responses, as the host has it from a `lookup`: the one it was then, a later `store` of its URL
+// another — a `refresh` of it this one's.
+#[magnus::wrap(class = "Capybara::Simulated::Native::HttpCache::Entry", free_immediately)]
+pub(crate) struct Entry(Arc<Stored>);
+
+impl HttpCache {
+    fn new() -> Self {
+        HttpCache { entries: Mutex::default() }
+    }
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, Arc<Stored>>> {
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+    // #lookup(url) -> its stored response, or nil.
+    fn lookup(&self, url: String) -> Option<Entry> {
+        self.lock().get(&url).cloned().map(Entry)
+    }
+    // #clear: every response gone.
+    fn clear(&self) {
+        self.lock().clear();
+    }
+    // #clear_volatile: a test's reset — the responses marked `immutable` kept (declared not to change for their
+    // freshness lifetime, so a kept one cannot shadow a later test's response, as a browser keeps them across
+    // navigations), every other dropped, so test-local server state reaches the app on the next visit.
+    fn clear_volatile(&self) {
+        self.lock().retain(|_, e| e.kept().policy.immutable);
+    }
+    // #store(url, status, headers, body, encoded) -> whether it was stored: the response `rack_fetch` got for `url`, its
+    // cookies not kept (they were set as it came, and a replay is no response that sets them), where its fields allow it
+    // (`storable`); `encoded` its body's size on the wire.
+    fn store(&self, url: String, status: u32, headers: RHash, body: RString, encoded: Option<u64>) -> Result<bool, Error> {
+        let mut headers = header_fields(headers)?;
+        headers.retain(|(k, _)| k != "set-cookie");
+        let stored_at = now();
+        let Some(policy) = Kept::policy_of(&headers, |f| storable(status, f, stored_at)) else { return Ok(false) };
+        let stored = Stored {
+            status,
+            body: crate::fetch_rules::ruby_bytes(body),
+            encoding: body.enc_get(),
+            encoded,
+            kept: RwLock::new(Arc::new(Kept { headers, stored_at, policy })),
+        };
+        let mut entries = self.lock();
+        if entries.len() >= MAX_ENTRIES && !entries.contains_key(&url) {
+            entries.clear();
+        }
+        entries.insert(url, Arc::new(stored));
+        Ok(true)
+    }
+    // #refresh(url, entry, headers) -> entry: RFC 9111 §4.3.4 — a 304 that revalidates the response stored for `url`
+    // refreshes it without replacing its body: its header fields updated with the ones the 304 carries — a rotated ETag
+    // or Last-Modified what the next revalidation sends — but for those it does not update (`unrefreshed`), and its
+    // freshness, no-cache and immutability read again off the fields as they now are (a bare 304 keeps the stored
+    // Cache-Control, a new Date shortens an Expires). Where they now forbid storing it — `no-store`, `private`, a Vary it
+    // cannot honour — it is dropped, though this request is still answered from it.
+    fn refresh(&self, url: String, entry: &Entry, headers: RHash) -> Result<(), Error> {
+        let mut merged = entry.0.kept().headers.clone();
+        for (name, value) in header_fields(headers)? {
+            if unrefreshed(&name) {
+                continue;
+            }
+            match merged.iter_mut().find(|(n, _)| *n == name) {
+                Some(slot) => slot.1 = value,
+                None => merged.push((name, value)),
+            }
+        }
+        let stored_at = now();
+        let policy = Kept::policy_of(&merged, |f| refreshed(entry.0.status, f, stored_at));
+        let dropped = policy.is_none();
+        let policy = policy.unwrap_or(Policy { max_age: None, no_cache: false, immutable: false });
+        *entry.0.kept.write().unwrap_or_else(PoisonError::into_inner) = Arc::new(Kept { headers: merged, stored_at, policy });
+        if dropped {
+            let mut entries = self.lock();
+            if entries.get(&url).is_some_and(|e| Arc::ptr_eq(e, &entry.0)) {
+                entries.remove(&url);
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Entry {
+    // #status / #encoded / #body: its status, its body's size on the wire (nil, its size), its body.
+    fn status(&self) -> u32 {
+        self.0.status
+    }
+    fn encoded(&self) -> Option<u64> {
+        self.0.encoded
+    }
+    fn body(ruby: &Ruby, rb_self: &Self) -> RString {
+        let body = ruby.str_from_slice(&rb_self.0.body);
+        let _ = body.enc_associate(rb_self.0.encoding);
+        body
+    }
+    // #headers -> its header fields as they stand, a Hash of lowercase name => binary String.
+    fn headers(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
+        let kept = rb_self.0.kept();
+        let hash = ruby.hash_new_capa(kept.headers.len());
+        for (name, value) in &kept.headers {
+            hash.aset(name.as_str(), ruby.str_from_slice(value))?;
+        }
+        Ok(hash)
+    }
+    // #fresh?(now = the time) -> whether it is fresh then (`fresh`): `now` a Time.
+    fn is_fresh(&self, args: &[Value]) -> Result<bool, Error> {
+        let args = magnus::scan_args::scan_args::<(), (Option<Value>,), (), (), (), ()>(args)?;
+        let at = match args.optional.0 {
+            Some(time) => time.funcall::<_, _, f64>("to_f", ())?,
+            None => now(),
+        };
+        let kept = self.0.kept();
+        Ok(fresh(kept.stored_at, kept.policy.max_age, kept.policy.no_cache, at))
+    }
+    // #no_cache? -> whether every use revalidates it.
+    fn no_cache(&self) -> bool {
+        self.0.kept().policy.no_cache
+    }
+    // #fresh_until -> the time (seconds since the epoch) it stays fresh until — nil for one with no lifetime, or stale.
+    fn fresh_until(&self) -> Option<f64> {
+        let kept = self.0.kept();
+        let max_age = kept.policy.max_age?;
+        (!kept.policy.no_cache && max_age > 0.0 && fresh(kept.stored_at, Some(max_age), false, now())).then(|| kept.stored_at + max_age)
+    }
+    // #revalidation_headers -> the conditional request header fields a revalidation of it sends: its validators.
+    fn revalidation_headers(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
+        let kept = rb_self.0.kept();
+        let hash = ruby.hash_new();
+        for (field, header) in [("etag", "If-None-Match"), ("last-modified", "If-Modified-Since")] {
+            if let Some(v) = kept.field(field) {
+                hash.aset(header, ruby.str_from_slice(v))?;
+            }
+        }
+        Ok(hash)
+    }
+}
+
+pub(crate) fn define(native: magnus::RModule, ruby: &Ruby) -> Result<(), Error> {
+    use magnus::{function, method, Module, Object};
+    native.define_module_function("combined_field", function!(combined_field_for_ruby, 1))?;
+    let class = native.define_class("HttpCache", ruby.class_object())?;
+    class.define_singleton_method("new", function!(HttpCache::new, 0))?;
+    class.define_method("lookup", method!(HttpCache::lookup, 1))?;
+    class.define_method("clear", method!(HttpCache::clear, 0))?;
+    class.define_method("clear_volatile", method!(HttpCache::clear_volatile, 0))?;
+    class.define_method("store", method!(HttpCache::store, 5))?;
+    class.define_method("refresh", method!(HttpCache::refresh, 3))?;
+    let entry = class.define_class("Entry", ruby.class_object())?;
+    entry.define_method("status", method!(Entry::status, 0))?;
+    entry.define_method("encoded", method!(Entry::encoded, 0))?;
+    entry.define_method("body", method!(Entry::body, 0))?;
+    entry.define_method("headers", method!(Entry::headers, 0))?;
+    entry.define_method("fresh?", method!(Entry::is_fresh, -1))?;
+    entry.define_method("no_cache?", method!(Entry::no_cache, 0))?;
+    entry.define_method("fresh_until", method!(Entry::fresh_until, 0))?;
+    entry.define_method("revalidation_headers", method!(Entry::revalidation_headers, 0))?;
+    Ok(())
 }
 
 #[cfg(test)]
