@@ -4017,9 +4017,13 @@ module Capybara
         Native.event_stream_close(parser) if parser
         # (…the body let go however the stream ended — an app's, which may hold a thread or a connection of its own for
         # it; and the socket of the hop under way where it is a transport's)
-        socket = Thread.current[:csim_event_stream_socket]
+        socket   = Thread.current[:csim_event_stream_socket]
+        app_body = Thread.current[:csim_event_stream_app_body]
         begin
           body.close if body.respond_to?(:close)
+          # (…the app's own, where a cancel came before its response reached the reader: framing it, it is the app's to
+          # let go of still)
+          app_body.close if body.nil? && app_body.respond_to?(:close)
           socket.close if socket && !socket.closed?
         rescue StandardError
           # (…closed already, the hop's socket by its body)
@@ -12033,7 +12037,10 @@ module Capybara
         remote = (transport ? transport.(url, env) : net_http_fetch(url, env, method: method, body: body)) unless url_is_local?(url)
         return nil if remote == :network_error
 
-        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?))) or return nil
+        response = framed_response(method, *(remote || app_call(env, deferring: !transport.nil?)))
+        # (…the app's body the caller's own from here, which a cancel while it was framed left to the reader: app_call)
+        Thread.current[:csim_event_stream_app_body] = nil if transport
+        return nil unless response
         status, headers, body = response
         [status, utf8_tagged_headers(headers), body]
       end
@@ -12049,6 +12056,9 @@ module Capybara
         Thread.handle_interrupt(EventSourceCancelled => :never) {
           response = @app.call(env)
           response[2].close if Thread.pending_interrupt?(EventSourceCancelled) && response[2].respond_to?(:close)
+          # (…and kept where the reader finds it, which a cancel before the response reaches it — while it is framed —
+          # would otherwise leave open)
+          Thread.current[:csim_event_stream_app_body] = response[2]
           response
         }
       end

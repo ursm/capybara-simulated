@@ -32,6 +32,19 @@ RSpec.describe 'an EventSource to the app' do
     end
   }
 
+  # A stream of a given length whose body is slow to give it, read whole as its response is framed.
+  EventSourceFramedBody = Struct.new(:reading, :closed) {
+    def each
+      yield 'data: '
+      reading << true
+      sleep 2
+      yield "x\n\n"
+    end
+
+    def close = closed << true
+  }
+
+  let(:reading) { Queue.new }
   let(:release) { Queue.new }
   let(:closed) { Queue.new }
 
@@ -45,6 +58,8 @@ RSpec.describe 'an EventSource to the app' do
         sent = env['HTTP_LAST_EVENT_ID']
         body = sent ? "data: b #{sent}\n\n" : "id: 7\nretry: 50\ndata: a\n\n"
         [200, {'content-type' => 'text/event-stream'}, [body]]
+      when '/framed'
+        [200, {'content-type' => 'text/event-stream', 'content-length' => '9'}, EventSourceFramedBody.new(reading, closed)]
       when '/slow-close'
         [200, {'content-type' => 'text/event-stream'}, EventSourceSlowCloseBody.new(closed)]
       when '/slow'
@@ -109,6 +124,13 @@ RSpec.describe 'an EventSource to the app' do
     session.execute_script("new EventSource('/slow-close')")
     expect(closed.pop(timeout: 10)).to be(true)
     expect { session.reset! }.not_to raise_error
+  end
+
+  it "lets go of the app's body of a source closed while its response is framed" do
+    session.execute_script("window.es = new EventSource('/framed')")
+    expect(reading.pop(timeout: 10)).to be(true)
+    session.execute_script('es.close()')
+    expect(closed.pop(timeout: 10)).to be(true)
   end
 
   it "delivers a worker's events into the worker, and closes its stream as the worker ends" do
