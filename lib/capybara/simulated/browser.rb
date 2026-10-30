@@ -375,9 +375,10 @@ module Capybara
         @websocket_queue_head = nil   # one-slot buffer for an event hold_for_ws_close parked ahead of the queue
         # In-flight `ws.close()` handshakes: hold the virtual clock until the reader surfaces the
         # server's echoed close frame (a `__close` event) so a test awaiting `onclose` can't have
-        # its virtual-timeout outrun that real off-thread reply. Counted in ws_close, cleared as
-        # deliver_websocket_events delivers each terminal event. See hold_for_ws_close.
-        @ws_close_pending       = 0
+        # its virtual-timeout outrun that real off-thread reply. The sockets whose close is in flight, by id: added in
+        # ws_close, removed as deliver_websocket_events delivers each one's terminal event — and as a navigation of the
+        # page drops its document's sockets, those of the windows it keeps still held. See hold_for_ws_close.
+        @ws_closing             = Set.new
         @ws_close_wait_deadline = nil
         # All frame writes (the reader thread's pong replies + the main thread's
         # send/close) go through one socket; serialise them so two threads can't
@@ -1931,10 +1932,27 @@ module Capybara
       # select_option). Without this hop the planned submission (navigation_plan.rs)
       # is never taken and the form never actually navigates / POSTs.
       def consume_pending_form_submit
+        consume_window_form_submits
         pending = @runtime.call('__csimTakePendingFormSubmit')
         return unless pending.is_a?(Hash)
         # (…the main document's plan, which a frame's submission is routed past: its form submitted as that document's)
         in_top_context { submit_form_spec(pending) }
+      end
+      # …and those a script planned in the windows `window.open` made in this isolate — each in its own realm's plan, as
+      # its location's are (`consume_pending_window_nav`): `form.submit()`, `requestSubmit()`, a timer's — submitted as
+      # that window's document's.
+      private def consume_window_form_submits
+        return if @runtime.window_realm_meta.empty?
+
+        @runtime.window_realm_meta.keys.each do |realm|
+          next unless @runtime.frame_realm_alive?(realm)
+
+          pending = @runtime.realm_call(realm, '__csimTakePendingFormSubmit')
+          next unless pending.is_a?(Hash)
+
+          invalidate_find_cache
+          from_document(realm) { submit_form_in_realm(realm, pending) }
+        end
       end
 
       # Pin the URL the page is at as a user action BEGINS — the FIRST line of
@@ -3158,10 +3176,10 @@ module Capybara
         # fire") outrun it. Block briefly on the WS queue (GVL released, like settle) so the reader
         # runs, deliver at the current instant WITHOUT advancing time, then keep pumping. Bounded by
         # a deadline so a peer that never replies (→ EOF 1006) can't wedge the drain.
-        if @ws_close_pending.positive? && (held = hold_for_ws_close(turns))
+        if !@ws_closing.empty? && (held = hold_for_ws_close(turns))
           return held
         end
-        @ws_close_wait_deadline = nil unless @ws_close_pending.positive?
+        @ws_close_wait_deadline = nil if @ws_closing.empty?
 
         # Same interlude for a pending SW message swack / broadcast ack — but WITHOUT holding
         # the clock. Its reply is the same kind of cross-isolate transfer completed on the worker
@@ -4388,7 +4406,7 @@ module Capybara
         ws_write_frame(sock, 0x8, payload) rescue nil
         # A close handshake is now in flight — hold the clock until the reader's `__close` lands
         # (bounded by the deadline in hold_for_ws_close if the peer never replies → EOF 1006).
-        @ws_close_pending += 1 if hold
+        @ws_closing << id.to_i if hold
         nil
       end
 
@@ -4396,7 +4414,7 @@ module Capybara
       # landed yet. Counting the latter keeps every advance path (settle, tick_real_time, and
       # crucially horizon_fast_forward_step, which would otherwise jump straight to a test's pending
       # timeout timer) from racing past the close handshake before hold_for_ws_close delivers it.
-      def websocket_pending? = !@websocket_queue_head.nil? || !@websocket_queue.empty? || @ws_close_pending.positive?
+      def websocket_pending? = !@websocket_queue_head.nil? || !@websocket_queue.empty? || !@ws_closing.empty?
 
       # A live reader thread = an open WS connection whose server may still surface an echo / push /
       # close frame off-thread — pending async work the JS event-loop probe can't see. The event-loop
@@ -4435,10 +4453,9 @@ module Capybara
           realm = @websocket_lock.synchronize { @websocket_realms[event[:id]] }.to_i
           @runtime.realm_call(realm, '__csim_deliverWebSocketEvents', [event]) if realm.zero? || @runtime.frame_realm_alive?(realm)
         end
-        # A terminal event (`__close` / `__error`) completes a close handshake — release the clock
-        # hold. Clamp: a server-INITIATED close arrives without a matching ws_close increment.
-        terminals = events.count {|e| e[:type] == '__close' || e[:type] == '__error' }
-        @ws_close_pending = [@ws_close_pending - terminals, 0].max if terminals.positive?
+        # A terminal event (`__close` / `__error`) completes its socket's close handshake — release the clock hold (a
+        # server-INITIATED close's none: no ws_close held it).
+        events.each {|e| @ws_closing.delete(e[:id]) if e[:type] == '__close' || e[:type] == '__error' }
         events.size
       end
 
@@ -4468,14 +4485,15 @@ module Capybara
       end
 
       # (…but those of the sockets of `kept` realms, the windows a navigation of the page leaves — whose close handshakes
-      # in flight hold the clock no more, the count not kept by socket)
+      # in flight hold the clock still)
       private def forget_window_websocket_events(kept = [])
         events = kept.empty? ? [] : [@websocket_queue_head, *drain_queue(@websocket_queue)].compact
         @websocket_queue.clear
-        @websocket_queue_head   = nil
-        @ws_close_pending       = 0
-        @ws_close_wait_deadline = nil
-        events.each {|e| @websocket_queue << e if kept.include?(@websocket_lock.synchronize { @websocket_realms[e[:id]] }) }
+        @websocket_queue_head = nil
+        kept_socket = ->(id) { kept.include?(@websocket_lock.synchronize { @websocket_realms[id] }) }
+        events.each {|e| @websocket_queue << e if kept_socket.call(e[:id]) }
+        @ws_closing.select! {|id| kept_socket.call(id) }
+        @ws_close_wait_deadline = nil if @ws_closing.empty?
       end
 
       # The sockets of a client that went away — a worker that ended, or the window's document a navigation replaced:

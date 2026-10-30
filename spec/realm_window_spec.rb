@@ -202,6 +202,21 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     end
   end
 
+  # (…a submission its script plans — `form.submit()`, `requestSubmit()` — as a click's: its own realm's plan, taken as
+  # the task ends)
+  it 'submits a form its script submits, by submit() and by requestSubmit()' do
+    popup = open_popup
+    session.within_window(popup) do
+      session.visit('/form')
+      session.execute_script('document.forms[0].submit()')
+      expect(session).to have_css('#posted', text: 'POST q=own')
+      session.visit('/form')
+      session.execute_script('setTimeout(() => document.forms[0].requestSubmit(), 10)')
+      expect(session).to have_css('#posted', text: 'POST q=own')
+    end
+    expect(session).to have_css('#main')
+  end
+
   it 'takes a form its opener submits into it by its name' do
     session.execute_script(<<~JS)
       window.w = window.open('', 'named');

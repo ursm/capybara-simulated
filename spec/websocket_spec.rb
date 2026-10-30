@@ -210,6 +210,28 @@ RSpec.describe 'WebSocket' do
     end
   end
 
+  # …and a pop-up's close handshake in flight as its opener navigates still holds the clock until the server's reply:
+  # its `close` event the echoed code, and the socket the only one the driver still waits on.
+  it 'holds the clock for a pop-up\'s close in flight across a navigation of its opener' do
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      w.eval(`
+        window.closedWith = null;
+        window.ws = new WebSocket('ws://' + opener.location.host + '/cable');
+        ws.onclose = (e) => { closedWith = e.code; };
+      `);
+    JS
+    poll_until { session.evaluate_script('w.ws.readyState === 1') }
+    session.execute_script('w.ws.close(1000)')
+    session.visit('/blank')
+    closing = session.driver.browser.instance_variable_get(:@ws_closing)
+    expect(closing.size).to eq(1)   # (the page's own was dropped with its document; the pop-up's still held)
+    session.within_window(session.windows.last) do
+      expect(poll_until { session.evaluate_script('closedWith') }).to eq(1000)
+    end
+    expect(closing).to be_empty
+  end
+
   # What a buffer source is is its internal slots', whatever a page puts on the object or its prototype (a shadowing
   # `byteLength`, a replaced `slice`).
   it 'sends a buffer source by its slots' do
