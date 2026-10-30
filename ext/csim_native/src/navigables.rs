@@ -401,8 +401,7 @@ impl RealmArena {
         !self.navigables.newly_lost.is_empty()
     }
     // The realms whose documents are the active documents of the child navigables of realm `cid`'s document — the
-    // containers in it — and, the page's, the windows its script opened: in the order they were made (realm ids only
-    // grow), what its event loop steps with its own.
+    // containers in it — in the order they were made (realm ids only grow).
     pub(crate) fn child_realms(&self, cid: i32) -> Vec<i32> {
         let mut realms: Vec<i32> = self
             .navigables
@@ -420,6 +419,7 @@ impl RealmArena {
         let mut realms = self.child_realms(cid);
         if cid == 0 {
             realms.extend(&self.navigables.windows);
+            realms.sort_unstable();
         }
         realms
     }

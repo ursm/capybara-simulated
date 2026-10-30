@@ -215,4 +215,30 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       expect(session).to have_css('#posted', text: 'POST q=opener')
     end
   end
+
+  # HTML "create and initialize a Document object": a navigation of its initial about:blank to a document of its origin
+  # keeps its Window — what its opener set on it, its listeners — but nothing of the document it replaces; one whose
+  # document was opened (`document.open()`) is no initial about:blank, and keeps none.
+  it 'keeps the Window of its initial about:blank for a document of its origin, and nothing of that document' do
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      w.kept = 'kept';
+      w.addEventListener('load', () => { w.loads = (w.loads || 0) + 1; });
+      w.document.addEventListener('click', () => { w.clicked = true; });
+      w.document.designMode = 'on';
+      w.location = '/second';
+    JS
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    session.execute_script("w.document.body.click()")
+    expect(session.evaluate_script('[w.kept, w.loads, w.clicked, w.document.designMode]')).to eq(['kept', 1, nil, 'off'])
+  end
+
+  it 'makes a Window of its own for a window whose document was opened' do
+    popup = open_popup
+    session.execute_script("window.popup.kept = 'kept'; window.popup.location = '/second'")
+    session.within_window(popup) do
+      expect(session).to have_css('#second')
+      expect(session.evaluate_script('window.kept')).to be_nil
+    end
+  end
 end

@@ -10284,30 +10284,10 @@ module Capybara
         # window's navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the
         # document it replaces was, HTML's reload reusing its document state's referrer; any other scheme no document it
         # loads here: one of a blob: URL's resolved as it began, above)
-        if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i) && by_user
+        # (…the user's, no document its initiator, a new opaque origin's with no referrer)
+        if body.nil? && url.match?(ABOUT_BLANK)
           body, ctype = '', 'text/html'
-        elsif body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
-          body, ctype = '', 'text/html'
-          doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
-          if kind == 'reload'
-            referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
-            policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
-          elsif kind == 'traverse'
-            referrer = referred
-          else
-            # (…under the policy it navigated under, else the initiator's own)
-            source, own = realm_referrer_initiator(initiator) if source.nil?
-            policy        = own if policy.to_s.empty?
-            referrer      = source && Native.request_referrer(policy, source, url)
-          end
-          made = {
-            doc_origin:      doc_origin,
-            location_origin: location_origin,
-            sandbox:         sandbox,
-            about_base:      @runtime.realm_direct_call(initiator, '__csimBaseURL'),
-            referrer:        referrer,
-            referrer_policy: policy
-          }
+          made = window_about_blank(realm_id, kind, initiator, source, policy, referred, url) unless by_user
         end
         # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to)
         return if body.nil? && top_level_data_refused?(url)
@@ -10317,7 +10297,7 @@ module Capybara
         end
         # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept)
         new_id =
-          if kind == 'location' && @runtime.window_realm_meta.dig(realm_id, :initial) && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp])
+          if kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp])
             @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
           else
             made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
@@ -10328,6 +10308,31 @@ module Capybara
         @runtime.window_realm_meta[new_id][:response] = response || [200, {}]
         retarget_scope(realm_id, new_id)
         new_id
+      end
+      # …what an about:blank document a navigation of window realm `realm_id` makes is of: the initiator's origins and
+      # base URL, the window's navigable's sandboxing, and its referrer — a reload's the document's it replaces, a
+      # traversal's its entry's (`referred`), else the initiator's under the policy it navigated under (`source`, `policy`).
+      private def window_about_blank(realm_id, kind, initiator, source, policy, referred, url)
+        doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
+        case kind
+        when 'reload'
+          referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
+          policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
+        when 'traverse'
+          referrer = referred
+        else
+          source, own = realm_referrer_initiator(initiator) if source.nil?
+          policy      = own if policy.to_s.empty?
+          referrer    = source && Native.request_referrer(policy, source, url)
+        end
+        {
+          doc_origin:      doc_origin,
+          location_origin: location_origin,
+          sandbox:         sandbox,
+          about_base:      @runtime.realm_direct_call(initiator, '__csimBaseURL'),
+          referrer:        referrer,
+          referrer_policy: policy
+        }
       end
       # The page's reload its `location.reload()` planned (navigation_plan.rs `planReload`), taken after the call returns:
       # running it inside the V8 call would rebuild the Context under it, which V8 terminates with a
@@ -10704,7 +10709,7 @@ module Capybara
         # navigates it: `navigate_window_realm`)
         window = to == :window ? route[:window] : (realm_id if to == :self && @runtime.window_realm_meta.key?(realm_id))
         if window
-          return navigate_window_realm(window, 'location', [url, false, realm_id, *initiator, activated, nil], post: post)
+          return navigate_window_realm(window, 'location', [url, spec['replace'] == true && to == :self, realm_id, *initiator, activated, nil], post: post)
         end
 
         case to
