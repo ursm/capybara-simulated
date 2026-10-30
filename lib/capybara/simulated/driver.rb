@@ -461,12 +461,14 @@ module Capybara
         }
       end
       # HTML "familiar with", between top-level windows: `from`'s document of `target`'s document's origin, or `target` an
-      # auxiliary browsing context whose opener `from` is familiar with.
+      # auxiliary browsing context whose opener `from` is familiar with — none once its page disowned it (Chrome and
+      # Firefox measured: a window that set `opener = null` is found by no name its opener's cross-origin page gives).
+      # (…`from`'s page's document judged, a frame's that targets by name too — a gap)
       private def familiar_with?(from, target, depth = 0)
         origin = from.document_origin
         return true if from.equal?(target) || (origin && origin == target.document_origin)
 
-        opener = window_browser(opener_handle_of(target).to_s) if depth < 8
+        opener = window_browser(opener_handle_of(target).to_s) if depth < 8 && !target.opener_disowned?
         !opener.nil? && familiar_with?(from, opener, depth + 1)
       end
 
@@ -512,8 +514,8 @@ module Capybara
         # top-level window is the blob's own partition (so the blob still loads), but
         # the opener relationship is severed.
         opener = false if opener && url.to_s.start_with?('blob:') && source && cross_partition_blob?(url, source)
-        # A `<form target>` keeps its opener by default (unlike a `target=_blank`
-        # LINK, which is noopener) — resolve the opener handle from the source.
+        # A window opened with its opener (`opener`: a hyperlink's or a form's whose noopener HTML "get an element's
+        # noopener" leaves unset — `rel=opener`, a named target) — resolve the opener handle from the source.
         opener_handle ||= handle_for(source) if opener && source
         if (existing = named_window(name, source))
           return existing[:handle] if refused

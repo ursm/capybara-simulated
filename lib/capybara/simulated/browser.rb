@@ -2171,6 +2171,8 @@ module Capybara
         url, _, opaque = request_client(0)
         opaque ? nil : url_origin(url)
       end
+      # …and whether its page disowned its opener (`window.opener = null`): its opener browsing context null since.
+      def opener_disowned? = @runtime.realm_direct_call(0, '__csimOpenerDisowned') == true
       def window_name=(name)
         @session_history.name = name.to_s
       end
@@ -11305,7 +11307,7 @@ module Capybara
       # as Chrome and Firefox leave it)
       private def clear_navigable_name(leaving_origin, origin)
         return if leaving_origin == :initial || (leaving_origin && leaving_origin == origin)
-        return if opener_handle && !@runtime.realm_direct_call(0, '__csimOpenerDisowned')
+        return if opener_handle && !opener_disowned?
 
         @session_history.clear_name
       end

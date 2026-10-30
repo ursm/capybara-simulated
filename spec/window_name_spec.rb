@@ -115,6 +115,16 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     expect(session).to have_no_text('hit')
   end
 
+  # (…nor through an opener the window disowned: `window.opener = null` makes it no auxiliary one the page is familiar
+  # with — Chrome and Firefox measured a new window)
+  it 'is found by none of a cross-origin page once it disowned its opener' do
+    session.visit 'http://a.test/'
+    popup = session.window_opened_by { session.execute_script("window.open('http://b.test/next', 'xp')") }
+    session.within_window(popup) { session.execute_script('window.opener = null') }
+    session.execute_script("window.open('http://b.test/again', 'xp')")
+    session.within_window(popup) { expect(session).to have_no_text('again') }
+  end
+
   # (…and the name a page gives its window is the one another's `window.open` finds it by, not the one it opened with)
   it 'is found by the name its page gave it' do
     session.visit 'http://a.test/'
