@@ -358,7 +358,7 @@ impl Jar {
     fn retrieve(&mut self, url: &str, context: u32, now: f64) -> String {
         self.cookies.retain(|c| c.expiry.is_none_or(|e| e > now));
         let Some((host, path)) = host_and_path(url) else { return String::new() };
-        let (http, secure_channel, cross_site, lax_ok) =
+        let (http, secure_channel, cross_site, lax_retrieve) =
             (context & HTTP != 0, context & SECURE != 0, context & CROSS_SITE != 0, context & LAX_RETRIEVE != 0);
         let mut found: Vec<&Cookie> = self
             .cookies
@@ -370,7 +370,7 @@ impl Jar {
             .filter(|c| !cross_site || match c.same_site {
                 SameSite::None => true,
                 SameSite::Strict => false,
-                SameSite::Lax | SameSite::Default => lax_ok,
+                SameSite::Lax | SameSite::Default => lax_retrieve,
             })
             .collect();
         found.sort_by(|a, b| b.path.len().cmp(&a.path.len()).then(a.creation.cmp(&b.creation)));

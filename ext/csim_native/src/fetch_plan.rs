@@ -340,9 +340,10 @@ impl FetchPlan {
         let upper = st.chain.method.to_ascii_uppercase();
         let drop_length = st.chain.body_empty && upper != "POST" && upper != "PUT";
         let referer = st.chain.referer();
-        let (cross_origin, send_cookies, origin, sec, cookies) = plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone());
+        let (cross_origin, origin, sec, cookies) = plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone());
         st.referer = referer.clone();
         st.cross_origin = cross_origin;
+        let send_cookies = cookies.is_some();
         st.send_cookies = send_cookies;
         st.answered = false;
         // (…an authentication entry sent ahead of a challenge, where the request includes credentials, sent no

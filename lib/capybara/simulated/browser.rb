@@ -4182,7 +4182,8 @@ module Capybara
         key      = SecureRandom.base64(16)
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
-        apply_default_request_env(env, referer: client)
+        # (…its cookies a same-site request's: a handshake is not yet judged by its client's site for cookies)
+        apply_default_request_env(env, referer: client, cookie_context: same_site_cookie_context(target))
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
@@ -4565,22 +4566,22 @@ module Capybara
             write_io
           }
         }
-        Thread.current[:csim_fetch_env]            = nil
-        Thread.current[:csim_fetch_cookie_context] = nil
-        # (…a CORS request as an XHR's is, by its client)
-        resp = rack_fetch_request(request, body, env_extras: env_extras)
-        # (…nil, a network error, as `rack_fetch` answers one)
-        return resp unless hijacked
-        # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is)
-        env = Thread.current[:csim_fetch_env] || {}
-        requested = resolve_against_current(request['url'].to_s).to_s
-        query = env['QUERY_STRING'].to_s
-        # (…as text: an env's values may be BINARY-tagged, and a binary string crosses to the page as bytes)
-        answered = env.empty? ? requested : RuntimeShared.utf8_text(env_request_url(env) + (query.empty? ? '' : "?#{query}"))
-        # (…the request's own where no redirect led elsewhere — an env keeps no empty query's `?`)
-        answered = requested if answered == requested.chomp('?')
-        @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, cookie_context: Thread.current[:csim_fetch_cookie_context], realm: request['clientRealm'].to_i}
-        {'handle' => id}
+        begin
+          # (…a CORS request as an XHR's is, by its client)
+          resp = rack_fetch_request(request, body, env_extras: env_extras)
+          # (…nil, a network error, as `rack_fetch` answers one)
+          return resp unless hijacked
+
+          # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is, and
+          # stored in its cookie context)
+          requested = resolve_against_current(request['url'].to_s).to_s
+          answered  = Thread.current[:csim_fetch_target] || requested
+          @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, cookie_context: Thread.current[:csim_fetch_cookie_context], realm: request['clientRealm'].to_i}
+          {'handle' => id}
+        ensure
+          Thread.current[:csim_fetch_target]         = nil
+          Thread.current[:csim_fetch_cookie_context] = nil
+        end
       end
 
       def rack_fetch_async_abort(id)
@@ -6433,14 +6434,16 @@ module Capybara
           initiator:       origin_url,
           origin_null:     opaque.fetch(:origin_null, false),
           site_seed:       opaque[:site_seed],
-          ancestors:       container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true)
+          ancestors:       container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true),
+          # (…a window's navigation, by the same machinery, a top-level navigable's)
+          top_level:       dest.to_s == 'document'
         })
         # The navigation's reserved client id (`event.resultingClientId`): every hop of the
         # chain carries the SAME id — re-minted when a hop crosses origins (a reserved client
         # is origin-bound) — and the committed document's realm adopts the final one.
         rid = mint_resulting_client_id
         loop do
-          meth, target, _, ref_source, ref_policy, site_seed, site, origin_null, cookie_cross = fetch.begin_hop
+          meth, target, _, ref_source, ref_policy, site_seed, site, origin_null, cookie_cross, cookies = fetch.begin_hop
           resp_body = nil
           # A service worker only controls a client whose EVERY ancestor is a secure
           # context: an httpS frame anywhere under an http document loads from the
@@ -6453,7 +6456,7 @@ module Capybara
           if (secure_ancestors || !target.start_with?('https://')) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy, site_seed: site_seed,
-                                                          origin_null: origin_null, resulting_client_id: rid, cookie_cross_site: cookie_cross))
+                                                          origin_null: origin_null, resulting_client_id: rid, cookie_cross_site: cookie_cross, cookie_context: cookies))
             return nil if sw['networkError']
 
             status  = (sw['status'] || 200).to_i
@@ -6471,7 +6474,7 @@ module Capybara
               body:              req_body.empty? ? nil : req_body,
               content_type:      req_ct,
               dest:              dest,
-              cookie_cross_site: cookie_cross,
+              cookie_context:    cookies,
               user_activated:    user_activated
             ) or return nil
             status, headers, resp_body = response
@@ -6562,6 +6565,7 @@ module Capybara
         origin_null: false,
         dest: 'iframe',
         cookie_cross_site: false,
+        cookie_context: nil,
         resulting_client_id: nil,
         origin_url: referrer_source
       )
@@ -6588,9 +6592,9 @@ module Capybara
             site_seed,
             origin_null,
             nav_preload_state(preload_scope)['headerValue'],
-            dest:              dest,
-            cookie_cross_site: cookie_cross_site,
-            origin_url:        origin_url
+            dest:           dest,
+            cookie_context: cookie_context,
+            origin_url:     origin_url
           )
         end
         # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
@@ -9368,9 +9372,9 @@ module Capybara
           end
           if env_extras
             env.merge!(env_extras)
-            # (…and the env it went with and its cookie context, where the caller asked something of the request's: a
-            # hijacked fetch's URL, and the context its later response is stored in)
-            Thread.current[:csim_fetch_env]            = env
+            # (…and the hop's URL and cookie context, where the caller asked something of the request's: a hijacked
+            # fetch's, which its later response is of and stored in)
+            Thread.current[:csim_fetch_target]         = target
             Thread.current[:csim_fetch_cookie_context] = cookie_context
           end
           response = dispatch_rack_or_http(target, env, method: method, body: body, transport: transport) or return nil
@@ -10489,12 +10493,12 @@ module Capybara
         })
         rid = mint_resulting_client_id
         loop do
-          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross = fetch.begin_hop
+          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross, cookies = fetch.begin_hop
           resp_body = nil
           if (!target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
              (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy,
-                                                          site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, resulting_client_id: rid))
+                                                          site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, cookie_context: cookies, resulting_client_id: rid))
             return commit_frame_error_document(realm_id, target, entry: entry) if sw['networkError']
 
             status, headers, document = sw['status'].to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
@@ -10509,7 +10513,7 @@ module Capybara
               origin_null:       tainted,
               body:              req_body.empty? ? nil : req_body,
               content_type:      content_type,
-              cookie_cross_site: cookie_cross,
+              cookie_context:    cookies,
               user_activated:    user_activated
             ) or return commit_frame_error_document(realm_id, target, entry: entry)
             status, headers, resp_body = response
@@ -11153,7 +11157,8 @@ module Capybara
           referrer_policy: referrer_policy.to_s,
           initiator:       initiator,
           origin:          origin,
-          site_seed:       site_seed
+          site_seed:       site_seed,
+          top_level:       true
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
@@ -11212,13 +11217,13 @@ module Capybara
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
           loop do
-            meth, target, _, ref_source, ref_policy, seed, site, tainted, = fetch.begin_hop
+            meth, target, _, ref_source, ref_policy, seed, site, tainted, _, cookies = fetch.begin_hop
             @current_referer = fetch.referrer.to_s
             hop_body = req_body.to_s.empty? ? nil : req_body
             resp_body = nil
             if (sw = any_window_sw_navigation_fetch(target, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
                                                             dest: 'document', referrer_source: ref_source, origin_url: origin || initiator, referrer_policy: ref_policy,
-                                                            site_seed: seed, origin_null: tainted))
+                                                            site_seed: seed, origin_null: tainted, cookie_context: cookies))
               return commit_error_document(target) if sw['networkError']
 
               status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
@@ -11234,6 +11239,7 @@ module Capybara
                 body:            hop_body,
                 content_type:    content_type,
                 dest:            'document',
+                cookie_context:  cookies,
                 user_activated:  user_activated
               ) or return commit_error_document(target)
               status, headers, resp_body = response
@@ -11749,9 +11755,10 @@ module Capybara
         env
       end
 
-      # (…its cookies by `cookie_context`, the engine's for the request (fetch_hop.rs: nil, none), where the caller has one;
-      # else by its Fetch metadata — the requests not yet judged by the engine: a navigation's, a handshake's)
-      def apply_default_request_env(env, referer:, force: true, cookie_context: COOKIES_BY_METADATA)
+      # The headers every request the host sends carries — its user agent, its client's address, a test's sticky headers,
+      # an `Accept`, its `Referer` — and its cookies, as `cookie_context` lets the jar give them (the engine's for the
+      # request: fetch_hop.rs, navigation_fetch.rs; nil, none).
+      def apply_default_request_env(env, referer:, cookie_context:, force: true)
         # `Rack::MockRequest.env_for` populates `SERVER_NAME` /
         # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
         # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
@@ -11776,30 +11783,8 @@ module Capybara
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
         referrer = Native.referrer_url(referer)
         env['HTTP_REFERER'] = referrer if referrer
-        return attach_cookies(env, env_request_url(env), cookie_context) unless cookie_context.equal?(COOKIES_BY_METADATA)
-
-        # Attach the TARGET host's cookies (not the document's) — SERVER_NAME is the
-        # request's host — so a cross-origin request carries the right jar or none.
-        # SameSite context from the request's own Fetch metadata (set by
-        # navigation_request_headers before cookies attach).
-        # `csim.cookie_cross_site` is the ANCESTOR-CHAIN verdict (RFC 6265bis "site for
-        # cookies"): a navigation into a frame with a cross-site ancestor is cross-site
-        # for cookies even when its initiator is same-origin — while Sec-Fetch-Site
-        # stays initiator-based. Cookie-only, never a header.
-        cross_site = env['HTTP_SEC_FETCH_SITE'] == 'cross-site' || env['csim.cookie_cross_site'] == true
-        # The Lax exception is TOP-LEVEL navigations only (dest 'document'): a cross-site
-        # iframe GET is mode navigate too, but Chrome's Lax-by-default blocks it there.
-        lax_ok     = env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document' && env['REQUEST_METHOD'] == 'GET'
-        ck = cookie_header_for(env_request_url(env), secure: env_secure_channel?(env),
-                                                     cross_site: cross_site, lax_ok: lax_ok)
-        if ck.empty?
-          env.delete('HTTP_COOKIE')
-        else
-          env['HTTP_COOKIE'] = ck
-        end
+        attach_cookies(env, env_request_url(env), cookie_context)
       end
-      COOKIES_BY_METADATA = Object.new.freeze
-      private_constant :COOKIES_BY_METADATA
 
       # A request's `Cookie`, as its cookie context lets the jar give it (cookie_jar.rs) — none for nil, a request that
       # includes no credentials.
@@ -11811,6 +11796,9 @@ module Capybara
           env['HTTP_COOKIE'] = cookies
         end
       end
+      # …and the context of a request no client's site for cookies judges: same-site, over a secure channel where `url`
+      # is potentially trustworthy.
+      def same_site_cookie_context(url) = COOKIE_HTTP | (potentially_trustworthy_url?(url) ? COOKIE_SECURE : 0)
 
       # Referer / Origin / Fetch-Metadata for a NAVIGATION request (a document load — form
       # submit, location set, link activation). Unlike a fetch/XHR (which carries a per-request
@@ -11824,16 +11812,14 @@ module Capybara
       # and a form POST's Origin becomes the opaque 'null' once any hop has crossed origin.
       # (…`origin_url` the URL whose origin a POST's Origin is — the initiating document's — where it is not the referrer
       # source's: an about:blank document's, which its creator's origin is)
-      def navigation_request_headers(env, method:, initiator_url:, target:, dest:, referrer_policy: nil, user_activated: false, site_override: nil, origin_null: false,
-                                     origin_url: initiator_url)
-        # Fetch metadata FIRST: apply_default_request_env's SameSite cookie gate reads
-        # the request's own Sec-Fetch-Site/Mode/Dest, so they must be on the env before
-        # cookies attach.
+      # (…its cookies by `cookie_context`, its navigation's)
+      def navigation_request_headers(env, method:, initiator_url:, target:, dest:, cookie_context:, referrer_policy: nil, user_activated: false, site_override: nil,
+                                     origin_null: false, origin_url: initiator_url)
         env['HTTP_SEC_FETCH_SITE'] = site_override || Native.fetch_site(nil, initiator_url, target)
         env['HTTP_SEC_FETCH_MODE'] = 'navigate'
         env['HTTP_SEC_FETCH_DEST'] = dest.to_s
         env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
-        apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, initiator_url, target))
+        apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, initiator_url, target), cookie_context: cookie_context)
         # Origin is appended to every non-GET/HEAD request (a form POST carries it; a GET navigation
         # does not). From a KNOWN initiating document it's that document's origin serialization, or
         # the literal 'null' when that origin is opaque (an about:blank / data: frame) or has been
@@ -11877,9 +11863,9 @@ module Capybara
       # Build + dispatch a navigation request (a document's load, a frame's or the page's) — the shared core of every
       # navigation's hop and of the navigation-preload request, so all of them send the SAME Referer / Origin /
       # Fetch-Metadata (dest `dest`) and can't silently diverge. `site` is the caller's already-widened Sec-Fetch-Site
-      # (threaded across the redirect chain it owns); `cookie_cross_site` whether its cookies are cross-site by the
-      # documents above the frame it navigates (RFC 6265bis "site for cookies": a frame's folds its ANCESTOR chain, a
-      # top-level navigation's none); `extra_headers` carries any request-specific CGI header (the preload marker).
+      # (threaded across the redirect chain it owns); `cookie_context` the context its cookies are sent and its
+      # response's stored in, its navigation's (navigation_fetch.rs `begin_hop`; nil, none); `extra_headers` carries any
+      # request-specific CGI header (the preload marker).
       # Returns [status, headers, resp_body], its status an Integer, or nil for a network error — the caller handles
       # redirects / the document / the preload wire.
       def dispatch_navigation_request(
@@ -11893,13 +11879,12 @@ module Capybara
         content_type: nil,
         extra_headers: nil,
         dest: 'iframe',
-        cookie_cross_site: false,
+        cookie_context: nil,
         origin_url: referrer_source,
         user_activated: false
       )
         # (…a body's length sent with it alone — a POST's, an empty one's `0` — a GET's none: Fetch "HTTP-network fetch")
         env = body ? rack_env_for(url, method: method, input: body) : rack_env_for(url, method: method)
-        env['csim.cookie_cross_site'] = true if cookie_cross_site
         if content_type
           env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
           env['CONTENT_LENGTH'] = body.to_s.bytesize.to_s
@@ -11914,12 +11899,13 @@ module Capybara
           site_override:   site,
           origin_null:     origin_null,
           origin_url:      origin_url,
-          user_activated:  user_activated
+          user_activated:  user_activated,
+          cookie_context:  cookie_context
         )
         extra_headers&.each {|k, v| env[k] = v }
         response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil
         status, headers, resp_body = response
-        merge_set_cookie(headers, url, env)
+        store_set_cookies(headers, url, cookie_context)
         [status.to_i, headers, resp_body]
       end
 
@@ -11939,21 +11925,21 @@ module Capybara
         origin_null,
         header_value,
         dest: 'iframe',
-        cookie_cross_site: false,
+        cookie_context: nil,
         origin_url: referrer_source
       )
         site = Native.fetch_site(site_seed, origin_url, url)
         response = dispatch_navigation_request(
           url,
-          method:            'GET',
-          referrer_source:   referrer_source,
-          origin_url:        origin_url,
-          referrer_policy:   referrer_policy,
-          site:              site,
-          origin_null:       origin_null,
-          dest:              dest,
-          cookie_cross_site: cookie_cross_site,
-          extra_headers:     {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
+          method:          'GET',
+          referrer_source: referrer_source,
+          origin_url:      origin_url,
+          referrer_policy: referrer_policy,
+          site:            site,
+          origin_null:     origin_null,
+          dest:            dest,
+          cookie_context:  cookie_context,
+          extra_headers:   {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
         ) or return PRELOAD_NETWORK_ERROR
         status, headers, resp_body = response
         cut_short = resp_body.is_a?(CutShortBody)
@@ -12201,23 +12187,18 @@ module Capybara
         Native.potentially_trustworthy_origin(parse_url(url.to_s)&.fetch(:origin).to_s)
       end
 
-      # A response's Set-Cookie fields stored for `url` — one cookie each (Rack 2 joins them with a newline, Rack 3 gives
-      # an Array; splitting first keeps the second of two, Rails' session cookie beside `remember_user_token`) — for the
-      # request `env` made, whose site for cookies (the one its cookies were sent by, where a fetch worked it out:
-      # `csim.cookie_site`; else its Fetch metadata's) says whether it was cross-site, and whether a top-level navigation
-      # (no metadata: same-site).
-      def merge_set_cookie(headers, url, env = nil)
+      # A WebSocket handshake's Set-Cookie fields stored for `url`, as a same-site response's: a handshake is not yet
+      # judged by its client's site for cookies.
+      def merge_set_cookie(headers, url)
+        return if header_field(headers, 'set-cookie').to_s.empty?
+
         url = document_cookie_url unless cookie_host(url)
-        site       = env && (env['csim.cookie_site'] || env['HTTP_SEC_FETCH_SITE'])
-        cross_site = !env.nil? && (site == 'cross-site' || env['csim.cookie_cross_site'] == true)
-        top_level  = !env.nil? && (env['csim.cookie_top_level'] == true ||
-                                   (env['HTTP_SEC_FETCH_MODE'] == 'navigate' && env['HTTP_SEC_FETCH_DEST'] == 'document'))
-        context    = COOKIE_HTTP | (potentially_trustworthy_url?(url) ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) |
-                     (top_level ? COOKIE_TOP_LEVEL_NAV : 0)
-        store_set_cookies(headers, url, context)
+        store_set_cookies(headers, url, same_site_cookie_context(url))
       end
 
-      # …stored in `context`, the engine's for the request that got the response (fetch_hop.rs) — none for nil, a request
+      # A response's Set-Cookie fields — one cookie each (Rack 2 joins them with a newline, Rack 3 gives an Array;
+      # splitting first keeps the second of two, Rails' session cookie beside `remember_user_token`) — stored for `url`
+      # in `context`, the engine's for the request that got the response (fetch_hop.rs) — none for nil, a request
       # that included no credentials (Fetch "HTTP-network fetch": a response's cookies are stored only where it did).
       def store_set_cookies(headers, url, context)
         return unless context
@@ -12225,7 +12206,9 @@ module Capybara
         sc = header_field(headers, 'set-cookie')
         return if sc.nil? || sc.empty?
 
-        (sc.is_a?(Array) ? sc : sc.split("\n")).each {|line| Native.cookie_jar_set(@cookie_jar, url.to_s, line.to_s, context, cookie_now) }
+        (sc.is_a?(Array) ? sc : sc.split("\n")).each do |line|
+          Native.cookie_jar_set(@cookie_jar, url.to_s, line.to_s, context, cookie_now)
+        end
       end
 
       # Header names/values are BYTE sequences (RFC 9110), and script reads them
@@ -12334,14 +12317,12 @@ module Capybara
         # The preflight's Referer is the request's referrer under its referrer policy —
         # the SAME value the actual request sends (computed by the caller), not the raw
         # document URL (cors-preflight-referrer).
-        apply_default_request_env(env, referer: referer, force: false)
+        # (…and no cookies: a CORS-preflight is always uncredentialed, even where the request that follows is)
+        apply_default_request_env(env, referer: referer, force: false, cookie_context: nil)
         # A CORS-preflight is a fetch, so it carries fetch's default `Accept: */*` (NOT
         # the navigation Accept apply_default_request_env sets) — some handlers reject a
         # preflight whose Accept isn't */* (preflight.py).
         env['HTTP_ACCEPT'] = '*/*'
-        # A CORS-preflight is always uncredentialed — it carries no cookies, even when the
-        # actual request that follows is credentialed.
-        env.delete('HTTP_COOKIE')
         env['HTTP_ORIGIN'] = req_origin
         # Access-Control-Request-Method carries the request's (already-normalized) method
         # VERBATIM — `patch` stays `patch`, matching the byte-case-sensitive grant check.

@@ -11,6 +11,15 @@ require_relative 'support/poll_until'
 RSpec.describe 'the cookie store' do
   include PollUntil
 
+  # (…every host the app's while the session is made, which keeps the setting it was made with)
+  def every_host_local
+    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
+    yield
+  ensure
+    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+  end
+
   let(:seen) { [] }
   let(:app) {
     seen = self.seen
@@ -94,10 +103,7 @@ RSpec.describe 'the cookie store' do
       end
     }
     # (…every host the app's, so the cross-site frame is built as the page loads)
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    s = simulated_session(app)
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    s = every_host_local { simulated_session(app) }
     s.visit 'http://a.test/set'
     s.visit 'http://b.test/set'
     2.times { s.visit 'http://a.test/top' }
@@ -114,7 +120,7 @@ RSpec.describe 'the cookie store' do
   # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a
   # same-site, cross-origin fetch() of the default credentials mode (`same-origin`) leaves the jar as it was, where one
   # of `include` (that the response allows) stores them.
-  it "stores no cookie a fetch() that included no credentials was answered with" do
+  it 'stores no cookie a fetch() that included no credentials was answered with' do
     seen = []
     app = lambda {|env|
       req = Rack::Request.new(env)
@@ -126,10 +132,7 @@ RSpec.describe 'the cookie store' do
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
       end
     }
-    prev = ENV['CSIM_LOCAL_ALL_HOSTS']
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = '1'
-    s = simulated_session(app)
-    ENV['CSIM_LOCAL_ALL_HOSTS'] = prev
+    s = every_host_local { simulated_session(app) }
     s.visit 'http://www.example.com/'
     s.evaluate_async_script(<<~JS)
       const done = arguments[arguments.length - 1];
