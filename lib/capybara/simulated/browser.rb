@@ -1043,7 +1043,7 @@ module Capybara
       # between-actions app cases (Avo actions_spec:464); no action-path flake has surfaced there.
       def timer_wait_elapsed?
         @pre_tick_armed &&
-          @timers_active &&
+          (@timers_active || background_timers_pending?) &&
           (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_tick_ts) >= FIND_PRE_TICK_MIN_S
       end
 
@@ -1134,17 +1134,12 @@ module Capybara
       # …its others, none in a session of one window (the common one, which pays a Driver predicate).
       private def background_windows = @driver.respond_to?(:several_windows?) && @driver.several_windows? ? session_windows.drop(1) : []
 
-      # Whether another window of the session has a timer to run within a wait's reach — Capybara's default wait, of
-      # its own clock, which each poll of this one advances (`step_background_windows`): what that window does as it
-      # fires is what a wait may be for (an OAuth or payment pop-up reporting back to its opener), where one further off
-      # (a keep-alive) would make every negative matcher wait out the idle gate for nothing (`polling?`).
-      def background_timers_pending? = background_windows.any?(&:timer_due_within_wait?)
-      def timer_due_within_wait?
-        return false unless @timers_active
-
-        delay = @runtime.next_timer_delay_ms
-        delay >= 0 && delay <= Capybara.default_max_wait_time.to_f * 1000
-      end
+      # Whether another window of the session has timers to run, which each poll of this one steps
+      # (`step_background_windows`): what that window does as they fire is what a wait may be for (an OAuth or payment
+      # pop-up reporting back to its opener) — waited on under the idle gate this window's own timers are (`polling?`),
+      # one whose timers change nothing (a keep-alive) read idle as this window's do.
+      def background_timers_pending? = background_windows.any?(&:timers_active?)
+      def timers_active? = @timers_active == true
       # …and the settle generation of every window a poll steps, which the idle gate of `polling?` reads: one whose
       # timers change nothing reads idle, as this one's do.
       private def polled_settle_gen = background_windows.sum(@runtime.settle_gen, &:settle_gen)
