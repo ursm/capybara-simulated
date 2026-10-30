@@ -839,6 +839,7 @@ module Capybara
       def init_realm(c)
         c.call('__csimSetBrowsingContextGroup', @browser.browsing_context_group, "w#{@browser.object_id}")
         c.call('__csimSetSessionHistory', @browser.session_history_id)
+        c.call('__csimSetTraversable', @browser.traversable.id)
         c.call('__csimInitRealm', @cross_origin_isolated == true)
         c.call('__csimSetUserAgent', @browser.default_user_agent) if @browser.default_user_agent
       end

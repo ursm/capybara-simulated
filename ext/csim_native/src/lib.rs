@@ -101,6 +101,7 @@ mod response_state;
 mod search_params;
 mod select_options;
 mod session_history;
+mod traversables;
 mod fetch_chain;
 mod navigation_fetch;
 mod worker_script_fetch;
@@ -293,6 +294,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
     http_cache::define(native, ruby)?;
+    traversables::define(native, ruby)?;
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
     // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).
     fetch_plan::define(native, ruby)?;

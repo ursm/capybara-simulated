@@ -208,6 +208,7 @@ module Capybara
         # The page's joint session history, its frames' with it, and what a replay of each entry sends and restores
         # (session_history.rs) — made before the runtime, whose realms are told it.
         @session_history              = Native::SessionHistory.new
+        @traversable                  = Native::Traversable.new
         @runtime                      = V8Runtime.new(self)
         # The wall-sync escape hatch, cached at construction (CLAUDE.md rule 3 — the env is fixed
         # for the session).
@@ -2165,14 +2166,9 @@ module Capybara
       # …and its target name (`window.name`), its active document state's (session_history.rs `State::name`): a new window
       # named as it opens, the one a name finds.
       def window_name = @session_history.name
-      # …and the origin of its document — none for an opaque one, never the same as another's — which another window's
-      # familiarity with it is judged by (Driver#familiar_with?).
-      def document_origin
-        url, _, opaque = request_client(0)
-        opaque ? nil : url_origin(url)
-      end
-      # …and whether its page disowned its opener (`window.opener = null`): its opener browsing context null since.
-      def opener_disowned? = @runtime.realm_direct_call(0, '__csimOpenerDisowned') == true
+      # …and its top-level traversable (traversables.rs): the window that opened it, whether its page disowned it, whether
+      # it closed, the origin of its active document — what another window's familiarity with it is judged by.
+      attr_reader :traversable
       def window_name=(name)
         @session_history.name = name.to_s
       end
@@ -11297,7 +11293,8 @@ module Capybara
       private def leaving_document_origin
         return @creator&.fetch(:origin) || :initial unless @session_history.active(0)
 
-        document_origin
+        url, _, opaque = request_client(0)
+        opaque ? nil : url_origin(url)
       end
       # HTML "finalize a cross-document navigation": the target name of the document state a top-level navigation made
       # (`window.name` of its document: session_history.rs) cleared where that document's origin (`origin`, none an opaque
@@ -11307,7 +11304,7 @@ module Capybara
       # as Chrome and Firefox leave it)
       private def clear_navigable_name(leaving_origin, origin)
         return if leaving_origin == :initial || (leaving_origin && leaving_origin == origin)
-        return if opener_handle && !opener_disowned?
+        return if opener_handle && !@traversable.disowned?
 
         @session_history.clear_name
       end

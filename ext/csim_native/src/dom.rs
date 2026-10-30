@@ -3180,6 +3180,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::idb::install(scope, ns, context_id);
     crate::wasm::install(scope);
     crate::session_history::install(scope, ns, context_id);
+    crate::traversables::install(scope, ns, context_id);
     crate::agents::install(scope, ns, context_id);
     crate::idb_databases::install(scope, ns, context_id);
     crate::web_locks::install(scope, ns, context_id);
