@@ -112,6 +112,7 @@ module Capybara
         '__csimWindowRefGet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_get(a[0], a[1], a[2]) } },
         '__csimWindowRefSet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_set(a[0], a[1], a[2], a[3]); nil } },
         '__csimWindowRefCall'        => ->(b, *a) { b.reaching_another_window { b.window_ref_call(a[0], a[1], a[2], a[3]) } },
+        '__csimWindowRefHas'         => ->(b, *a) { b.reaching_another_window { b.window_ref_has(a[0], a[1], a[2]) } },
         '__csimWindowRefDelete'      => ->(b, *a) { b.reaching_another_window { b.window_ref_delete(a[0], a[1], a[2]) } },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         '__csimWindowSetLocation'    => ->(b, *a) { b.reaching_another_window { b.set_window_location(a[0], a[1], user_activated: a[2] == true, replace: a[3] == true); nil } },

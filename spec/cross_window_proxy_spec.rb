@@ -81,6 +81,11 @@ RSpec.describe 'a WindowProxy of another isolate\'s window' do
       expect(read('[delete w.answer, typeof w.answer]')).to eq([true, 'undefined'])
     end
 
+    it 'carries undefined as itself, both ways' do
+      expect(read("(w.v = undefined, [typeof w.v, 'v' in w])")).to eq(['undefined', true])
+      expect(read("(w.eval('window.argc = (...a) => a.length + \":\" + a.map(String)'), w.argc(undefined, undefined))")).to eq('2:undefined,undefined')
+    end
+
     # (…Chrome and Firefox measured)
     it 'has this window its opener' do
       expect(read('w.opener === window')).to be(true)
@@ -106,6 +111,9 @@ RSpec.describe 'a WindowProxy of another isolate\'s window' do
       expect(read('w.addEventListener')).to eq('SecurityError')
       expect(read('(w.onload = () => {}, "set")')).to eq('SecurityError')
       expect(read('w.__csimDocumentHtml')).to eq('SecurityError')
+      # (…nor the load the driver fires at it, which a page could forge, trusted, or reopen its handlers by)
+      expect(read('w.__csimFireLoad')).to eq('SecurityError')
+      expect(read('w.__csimAwaitLoad')).to eq('SecurityError')
     end
 
     # (…[[HasProperty]] by [[GetOwnProperty]], HTML's: Chrome and Firefox measured)

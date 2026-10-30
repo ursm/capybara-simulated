@@ -362,11 +362,13 @@ module WptRunner
   # any other; else the query's first `sub(…)`, `html` where it says none (`?pipe=sub`), whatever the file is.
   MARKUP_EXTENSIONS = %w[.html .htm .xht .xhtml .xml .svg].freeze
   def substitution_escape(req_path, query)
-    return MARKUP_EXTENSIONS.include?(File.extname(req_path.to_s)) ? 'html' : 'none' if File.basename(req_path.to_s).include?('.sub.')
-
-    sub = query['pipe'].to_s.split('|').map(&:strip).find {|fn| fn.match?(/\Asub(\(|\z)/) }
-    arg = sub.to_s[/\Asub\(\s*(\w*)\s*\)/, 1].to_s
-    arg.empty? ? 'html' : arg
+    if File.basename(req_path.to_s).include?('.sub.')
+      MARKUP_EXTENSIONS.include?(File.extname(req_path.to_s)) ? 'html' : 'none'
+    else
+      sub = query['pipe'].to_s.split('|').map(&:strip).find {|fn| fn.match?(/\Asub(\(|\z)/) }
+      arg = sub.to_s[/\Asub\(\s*(\w*)\s*\)/, 1].to_s
+      arg.empty? ? 'html' : arg
+    end
   end
 
   # (…`headers` the request's Rack env, whose headers `{{headers[name]}}` names)

@@ -7259,7 +7259,8 @@ module Capybara
       def window_ref_get(handle, id, prop)         = (@driver.respond_to?(:window_ref_get) ? @driver.window_ref_get(handle.to_s, id, prop.to_s) : nil)
       def window_ref_set(handle, id, prop, value)  = (@driver.window_ref_set(handle.to_s, id, prop.to_s, value) if @driver.respond_to?(:window_ref_set))
       def window_ref_call(handle, id, method, args) = (@driver.respond_to?(:window_ref_call) ? @driver.window_ref_call(handle.to_s, id, method.to_s, args) : nil)
-      def window_ref_delete(handle, id, prop)      = (@driver.respond_to?(:window_ref_delete) ? @driver.window_ref_delete(handle.to_s, id, prop.to_s) : false)
+      def window_ref_has(handle, id, prop)         = (@driver.respond_to?(:window_ref_has) ? @driver.window_ref_has(handle.to_s, id, prop.to_s) : false)
+      def window_ref_delete(handle, id, prop)      =(@driver.respond_to?(:window_ref_delete) ? @driver.window_ref_delete(handle.to_s, id, prop.to_s) : false)
       # A call of this window's script into another window's (a `__csimWindow*` host fn whose target runs script): its
       # VM on the stack meanwhile, waiting on it (`script_waiting?`) — what another window's script that call runs may
       # reach back into, and plan a navigation of this one by, which must not rebuild this one's Context under it.
@@ -7290,7 +7291,8 @@ module Capybara
         drain_pending_after_remote_ref
         result
       end
-      def remote_ref_delete(id, prop) = @runtime.call('__csimRemoteRefDelete', id, prop.to_s) == true
+      def remote_ref_has(id, prop)    = @runtime.call('__csimRemoteRefHas', id, prop.to_s) == true
+      def remote_ref_delete(id, prop) =@runtime.call('__csimRemoteRefDelete', id, prop.to_s) == true
       # Drain every deferred action a cross-isolate operation may have queued in this
       # window: form submission, plain navigation, same-document history traversal
       # (history.back/forward/go — restores the previous entry + fires load), and
