@@ -53,9 +53,8 @@ pub(crate) type Hop = (bool, Option<String>, Option<(&'static str, String, Strin
 
 pub(crate) struct FetchHops {
     client: Client,
-    // The chain's widest Sec-Fetch-Site so far, none before its first hop, and its redirect-taint.
+    // The chain's widest Sec-Fetch-Site so far, none before its first hop.
     sec_site: RefCell<Option<&'static str>>,
-    taint: RefCell<RedirectTaint>,
 }
 
 impl Client {
@@ -150,7 +149,7 @@ impl FetchHops {
             reissued,
             cross_site_frame: f.cross_site_frame,
         };
-        FetchHops { client, sec_site: RefCell::default(), taint: RefCell::default() }
+        FetchHops { client, sec_site: RefCell::default() }
     }
 
     // #seed(site): the chain's Sec-Fetch-Site so far — a worker's re-fetch of a navigation its network hops widened.
@@ -158,11 +157,11 @@ impl FetchHops {
         *self.sec_site.borrow_mut() = site.as_deref().map(static_site);
     }
 
-    // #hop(target, method, origin, policy) -> [cross-origin CORS hop, Origin (nil none), Sec-Fetch
+    // #hop(target, method, origin, policy, taint) -> [cross-origin CORS hop, Origin (nil none), Sec-Fetch
     // ([site, mode, dest, user]; nil none), cookie context (nil where it includes no credentials: no `Cookie` sent, no
     // `Set-Cookie` stored)] for the hop to `target` of a request of `method` whose origin is `origin` ('null' tainted)
-    // under referrer policy `policy`.
-    pub(crate) fn hop(&self, target: String, method: String, origin: Option<String>, policy: Option<String>) -> Hop {
+    // under referrer policy `policy`, its redirect-taint `taint` (the chain's, fetch_chain.rs).
+    pub(crate) fn hop(&self, target: String, method: String, origin: Option<String>, policy: Option<String>, taint: RedirectTaint) -> Hop {
         let c = &self.client;
         let tainted = origin.as_deref() == Some("null");
         let target_origin = http_origin(&target);
@@ -196,29 +195,20 @@ impl FetchHops {
         // Lax one. (Fetch's "parse and store response `Set-Cookie` headers" allows a SameSite one only where the same-site
         // mode is "strict-or-less", which its step 3 makes no top-level GET's: a top-level navigation stores one however
         // cross-site, as RFC 6265bis §5.7 has it and browsers do.)
-        let tainted = self.taint(&target);
         let top_level = c.of_mode("navigate") && c.nav_dest.as_deref() == Some("document");
         let lax = top_level && method.eq_ignore_ascii_case("GET");
         let cookies = send_cookies.then(|| {
             let secure = target_origin.as_deref().is_some_and(crate::url_ops::potentially_trustworthy);
-            crate::cookie_jar::request_context(secure, c.cross_site(&target) || tainted, lax, top_level)
+            crate::cookie_jar::request_context(secure, c.cross_site(&target) || taint.cross_site(), lax, top_level)
         });
         (cross_origin, origin_value, sec, cookies)
     }
 
     // #cached(target): a hop the HTTP cache answered — a redirect it followed from the cache — is in the chain all the
-    // same: its URL widens the Sec-Fetch-Site latch and the redirect-taint as a network hop's does.
+    // same: its URL widens the Sec-Fetch-Site latch as a network hop's does (and the chain's redirect-taint, as the
+    // chain follows it).
     pub(crate) fn cached(&self, target: String) {
         self.client.advance(&mut self.sec_site.borrow_mut(), &target);
-        self.taint(&target);
-    }
-    // (…the redirect-taint moved on by a hop to `target`, of the request's origin — a mode-less load's its client's —
-    // whether it is cross-site now)
-    fn taint(&self, target: &str) -> bool {
-        let c = &self.client;
-        let mut taint = self.taint.borrow_mut();
-        taint.push(c.origin.as_deref().or(c.client_origin.as_deref()), target);
-        taint.cross_site()
     }
 }
 
@@ -259,7 +249,7 @@ mod tests {
         }
     }
     fn hops(client: Client) -> FetchHops {
-        FetchHops { client, sec_site: RefCell::default(), taint: RefCell::default() }
+        FetchHops { client, sec_site: RefCell::default() }
     }
 
     // (…whether a hop's cookie context is cross-site, None for a hop that includes no credentials)
@@ -270,27 +260,29 @@ mod tests {
     #[test]
     fn a_hop_carries_its_origin_cookies_and_metadata() {
         let h = hops(client(Some("cors")));
-        let hop = h.hop("http://b.test/x".into(), "GET".into(), Some("http://a.test".into()), None);
+        let hop = h.hop("http://b.test/x".into(), "GET".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
         assert!(hop.0 && hop.3.is_none());
         assert_eq!(hop.1.as_deref(), Some("http://a.test"));
         assert_eq!(hop.2.map(|s| (s.0, s.1, s.2)), Some(("cross-site", "cors".to_owned(), "empty".to_owned())));
         // (…a hop back home keeps the chain's widest site, and a tainted origin is cross-origin everywhere)
-        let hop = h.hop("http://a.test/y".into(), "GET".into(), Some("null".into()), None);
+        let hop = h.hop("http://a.test/y".into(), "GET".into(), Some("null".into()), None, RedirectTaint::SameOrigin);
         assert!(hop.0 && hop.3.is_none());
         assert_eq!(hop.1.as_deref(), Some("null"));
         assert_eq!(hop.2.map(|s| s.0), Some("cross-site"));
         // (…a same-origin GET carries no Origin; a POST does)
         let home = hops(client(Some("cors")));
-        assert_eq!(home.hop("http://a.test/y".into(), "GET".into(), Some("http://a.test".into()), None).1, None);
-        assert_eq!(home.hop("http://a.test/y".into(), "POST".into(), Some("http://a.test".into()), None).1.as_deref(), Some("http://a.test"));
+        assert_eq!(home.hop("http://a.test/y".into(), "GET".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin).1, None);
+        assert_eq!(home.hop("http://a.test/y".into(), "POST".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin).1.as_deref(), Some("http://a.test"));
         // (…a same-site → cross-site → same-site chain cross-site for cookies from its cross-site hop on: the hop back
-        // home by its redirect-taint, as Fetch's "determine the same-site mode" has it — Sec-Fetch-Site the chain's
-        // widest too; credentials included for all)
+        // home by the chain's redirect-taint, as Fetch's "determine the same-site mode" has it — Sec-Fetch-Site the
+        // chain's widest too; credentials included for all)
         let chain = hops(Client { credentials: "include".to_owned(), ..client(Some("cors")) });
+        let taints = [RedirectTaint::SameOrigin, RedirectTaint::SameOrigin, RedirectTaint::CrossSite];
         let sites: Vec<(Option<bool>, Option<&str>)> = ["http://a.test/1", "http://b.test/2", "http://a.test/3"]
             .iter()
-            .map(|t| {
-                let hop = chain.hop((*t).into(), "GET".into(), Some("http://a.test".into()), None);
+            .zip(taints)
+            .map(|(t, taint)| {
+                let hop = chain.hop((*t).into(), "GET".into(), Some("http://a.test".into()), None, taint);
                 (cross(&hop), hop.2.map(|s| s.0))
             })
             .collect();
@@ -301,78 +293,71 @@ mod tests {
     fn a_mode_less_load_is_judged_by_every_document_above_it() {
         // (…no metadata for a load that names no destination; cookies sent, as no document origin bars them)
         let plain = hops(client(None));
-        let hop = plain.hop("http://a.test/img".into(), "GET".into(), None, None);
+        let hop = plain.hop("http://a.test/img".into(), "GET".into(), None, None, RedirectTaint::SameOrigin);
         assert!(!hop.0 && hop.1.is_none() && hop.2.is_none());
         assert_eq!(hop.3, Some(HTTP));
         let framed = hops(Client { ancestors: vec![Some("http://top.test/".into())], ..client(None) });
-        assert_eq!(cross(&framed.hop("http://a.test/img".into(), "GET".into(), None, None)), Some(true));
+        assert_eq!(cross(&framed.hop("http://a.test/img".into(), "GET".into(), None, None, RedirectTaint::SameOrigin)), Some(true));
         let under = hops(Client { top_document: Some("http://top.test/".into()), ..client(None) });
-        assert_eq!(cross(&under.hop("http://a.test/img".into(), "GET".into(), None, None)), Some(true));
+        assert_eq!(cross(&under.hop("http://a.test/img".into(), "GET".into(), None, None, RedirectTaint::SameOrigin)), Some(true));
         // (…a worker's by the site it was made with — of none, cross-site everywhere)
         let worker = hops(Client { worker_site: Some(Some("http://a.test".into())), ..client(None) });
-        assert_eq!(cross(&worker.hop("http://a.test/w".into(), "GET".into(), None, None)), Some(false));
+        assert_eq!(cross(&worker.hop("http://a.test/w".into(), "GET".into(), None, None, RedirectTaint::SameOrigin)), Some(false));
         let siteless = hops(Client { worker_site: Some(None), ..client(None) });
-        assert_eq!(cross(&siteless.hop("http://a.test/w".into(), "GET".into(), None, None)), Some(true));
+        assert_eq!(cross(&siteless.hop("http://a.test/w".into(), "GET".into(), None, None, RedirectTaint::SameOrigin)), Some(true));
     }
 
     #[test]
     fn a_navigation_keeps_lax_cookies_at_the_top_level_alone() {
         // (…a navigation's credentials mode `include`, as Fetch makes one)
         let nav = Client { nav_dest: Some("document".into()), navigation: true, user_activated: true, credentials: "include".to_owned(), ..client(Some("navigate")) };
-        let hop = hops(nav).hop("http://b.test/".into(), "GET".into(), Some("http://a.test".into()), None);
+        let hop = hops(nav).hop("http://b.test/".into(), "GET".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
         assert_eq!(hop.2.map(|s| (s.2, s.3)), Some(("document".to_owned(), true)));
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(LAX_RETRIEVE | TOP_LEVEL_NAV));
         // (…a POST's response may set a SameSite cookie, its request retrieves no Lax one)
         let post = Client { nav_dest: Some("document".into()), navigation: true, ..client(Some("navigate")) };
-        let hop = hops(post).hop("http://a.test/".into(), "POST".into(), Some("http://a.test".into()), None);
+        let hop = hops(post).hop("http://a.test/".into(), "POST".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(TOP_LEVEL_NAV));
         // (…a frame's navigation none of either, cross-site where the frame has a cross-site ancestor; a re-issued
         // top-level one the navigation judged cross-site retrieving a Lax cookie all the same)
         let framed = Client { nav_dest: Some("iframe".into()), cross_site_frame: true, ..client(Some("navigate")) };
-        let hop = hops(framed).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None);
+        let hop = hops(framed).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
         assert_eq!(cross(&hop), Some(true));
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(0));
         let reissued = Client { nav_dest: Some("document".into()), reissued: Some(true), ..client(Some("navigate")) };
-        let hop = hops(reissued).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None);
+        let hop = hops(reissued).hop("http://a.test/".into(), "GET".into(), Some("http://a.test".into()), None, RedirectTaint::SameOrigin);
         assert_eq!(cross(&hop), Some(true));
         assert_eq!(hop.3.map(|c| c & (LAX_RETRIEVE | TOP_LEVEL_NAV)), Some(LAX_RETRIEVE | TOP_LEVEL_NAV));
     }
 
     #[test]
     fn a_chain_seeds_reissues_and_caches_its_sec_fetch_site() {
-        // (…a seed the chain's widest site so far, a cached hop in the chain too — and in its redirect-taint)
+        // (…a seed the chain's widest site so far, a cached hop in the chain too)
         let seeded = hops(client(Some("no-cors")));
         seeded.seed(Some("same-site".into()));
-        assert_eq!(seeded.hop("http://a.test/x".into(), "GET".into(), None, None).2.map(|s| s.0), Some("same-site"));
+        assert_eq!(seeded.hop("http://a.test/x".into(), "GET".into(), None, None, RedirectTaint::SameOrigin).2.map(|s| s.0), Some("same-site"));
         let cached = hops(client(Some("no-cors")));
         cached.cached("http://b.test/r".into());
-        let hop = cached.hop("http://a.test/x".into(), "GET".into(), None, None);
+        let hop = cached.hop("http://a.test/x".into(), "GET".into(), None, None, RedirectTaint::CrossSite);
         assert_eq!((cross(&hop), hop.2.map(|s| s.0)), (Some(true), Some("cross-site")));
-        // (…a chain that leaves the request's site from its own untainted: a client of b's going b→b→a, cross-site at a
-        // by its client alone)
-        let b = |s: &str| Some(s.to_owned());
-        let away = hops(Client { credentials: "include".to_owned(), origin: b("http://b.test"), doc_origin: None, client_origin: b("http://b.test"), cookie_client: b("http://b.test/page"), ..client(Some("no-cors")) });
-        assert_eq!(cross(&away.hop("http://b.test/1".into(), "GET".into(), None, None)), Some(false));
-        assert_eq!(cross(&away.hop("http://b.test/2".into(), "GET".into(), None, None)), Some(false));
-        assert_eq!(cross(&away.hop("http://a.test/3".into(), "GET".into(), None, None)), Some(true));
         // (…a re-issued navigation's cookies the navigation's verdict on the hop, not the chain's nor its client's)
         let reissued = hops(Client { reissued: Some(false), nav_dest: Some("document".into()), ..client(Some("navigate")) });
         reissued.seed(Some("cross-site".into()));
-        let hop = reissued.hop("http://a.test/x".into(), "GET".into(), None, None);
+        let hop = reissued.hop("http://a.test/x".into(), "GET".into(), None, None, RedirectTaint::SameOrigin);
         assert_eq!((cross(&hop), hop.2.map(|s| s.0)), (Some(false), Some("cross-site")));
         // (…an opaque-origin client's request cross-site wherever it goes)
         let opaque = hops(Client { client_origin: Some("null".into()), ..client(Some("cors")) });
-        assert_eq!(opaque.hop("http://a.test/x".into(), "GET".into(), None, None).2.map(|s| s.0), Some("cross-site"));
+        assert_eq!(opaque.hop("http://a.test/x".into(), "GET".into(), None, None, RedirectTaint::SameOrigin).2.map(|s| s.0), Some("cross-site"));
         // (…a frame with a cross-site ancestor cross-site at every hop)
         let frame = hops(Client { cross_site_frame: true, ..client(None) });
-        assert_eq!(cross(&frame.hop("http://a.test/x".into(), "GET".into(), None, None)), Some(true));
-        assert_eq!(cross(&frame.hop("http://a.test/y".into(), "GET".into(), None, None)), Some(true));
+        assert_eq!(cross(&frame.hop("http://a.test/x".into(), "GET".into(), None, None, RedirectTaint::SameOrigin)), Some(true));
+        assert_eq!(cross(&frame.hop("http://a.test/y".into(), "GET".into(), None, None, RedirectTaint::SameOrigin)), Some(true));
     }
 
     #[test]
     fn a_no_cors_post_sends_its_origin_as_its_policy_lets_it() {
         let h = hops(client(Some("no-cors")));
-        let origin = |policy: &str, target: &str| h.hop(target.into(), "POST".into(), Some("https://a.test".into()), Some(policy.into())).1;
+        let origin = |policy: &str, target: &str| h.hop(target.into(), "POST".into(), Some("https://a.test".into()), Some(policy.into()), RedirectTaint::SameOrigin).1;
         assert_eq!(origin("", "https://a.test/x").as_deref(), Some("https://a.test"));
         assert_eq!(origin("same-origin", "https://b.test/x").as_deref(), Some("null"));
         assert_eq!(origin("", "http://a.test/x").as_deref(), Some("null"));

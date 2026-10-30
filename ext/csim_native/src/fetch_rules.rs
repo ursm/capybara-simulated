@@ -3,6 +3,8 @@
 // WebSocket (header-rules.js, headers.js, websocket.js) and the host's CORS and port checks (browser.rb) all ask, so no
 // two answers to "is `accept-language: x\x01` safelisted?" drift apart.
 
+use crate::referrer::RedirectTaint;
+
 // A header name or value as bytes: a byte string's code units (one past U+00FF none of them, as no byte string has one).
 fn bytes(units: &[u16]) -> Vec<u8> {
     units.iter().map(|&u| u8::try_from(u).unwrap_or(0xFF)).collect()
@@ -149,24 +151,23 @@ pub(crate) fn request_body_header(name: &[u8]) -> bool {
 }
 // A request a redirect response is followed for (Fetch "HTTP-redirect fetch"): its method, its current URL, whether its
 // mode is "cors", its origin serialized ('' where it has none), whether its response tainting is "cors" — a CORS-mode
-// request whose chain has been at another origin than its own — and whether its origin is tainted already.
+// request whose chain has been at another origin than its own — and its redirect-taint so far.
 pub(crate) struct Redirecting<'a> {
     pub(crate) method: &'a [u8],
     pub(crate) current: &'a str,
     pub(crate) cors_mode: bool,
     pub(crate) origin: &'a str,
     pub(crate) tainting_cors: bool,
-    pub(crate) tainted_origin: bool,
+    pub(crate) taint: RedirectTaint,
 }
 // The request after it: at `url`, a bodyless GET where `to_get` (step 12), its `Authorization` gone where `drop_authorization`
-// (step 13: the redirect leaves its current URL's origin), its origin tainted — serialized "null" — where `tainted_origin`:
-// its redirect-taint no longer "same-origin", a URL of its list off another origin than its own led on to yet another
-// ("serializing a request origin").
+// (step 13: the redirect leaves its current URL's origin), and its redirect-taint with `url` in its URL list
+// (referrer.rs `RedirectTaint`: its origin serialized "null" past "same-origin", its cookies cross-site at "cross-site").
 pub(crate) struct Redirect {
     pub(crate) url: String,
     pub(crate) to_get: bool,
     pub(crate) drop_authorization: bool,
-    pub(crate) tainted_origin: bool,
+    pub(crate) taint: RedirectTaint,
 }
 pub(crate) enum Redirected {
     // No `Location`: the redirect response answers the request (step 3, a null location URL).
@@ -202,11 +203,10 @@ pub(crate) fn follow_redirect(r: &Redirecting<'_>, status: u32, response_url: &s
     if to.port().parse::<u32>().is_ok_and(bad_port) {
         return Redirected::Fail(format!("a redirect to a blocked port: {}", to.href()));
     }
-    let tainted_origin = !r.origin.is_empty() && crate::referrer::redirect_taints(r.tainted_origin, r.origin, r.current, to.href());
     Redirected::Follow(Redirect {
         to_get: redirect_to_get(status, r.method),
         drop_authorization: to.origin() != from.origin(),
-        tainted_origin,
+        taint: r.taint.step(r.origin, r.current, to.href()),
         url: to.href().to_owned(),
     })
 }
@@ -223,8 +223,8 @@ pub(crate) struct InterceptedHop<'a> {
     pub(crate) request_origin: &'a str,
     // Whether the chain has been at another origin than the request's before this hop.
     pub(crate) crossed: bool,
-    // Whether a redirect before this hop tainted the request's origin.
-    pub(crate) tainted: bool,
+    // The request's redirect-taint before this hop.
+    pub(crate) taint: RedirectTaint,
     // How many redirects the chain has followed to reach this hop.
     pub(crate) hops: u32,
 }
@@ -271,7 +271,7 @@ pub(crate) fn intercepted_hop(hop: &InterceptedHop<'_>, response: &WorkerRespons
         cors_mode: hop.mode == "cors",
         origin: hop.request_origin,
         tainting_cors: hop.mode == "cors" && crossed,
-        tainted_origin: hop.tainted,
+        taint: hop.taint,
     };
     // (…a synthetic response has no URL to anchor a relative location against, which is a network error:
     // `Response.redirect()` absolutizes at creation, so it always carries one)
@@ -507,9 +507,10 @@ fn cors_safelisted_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     rv.set_bool(cors_safelisted_method(&method));
 }
 // __dom.interceptedHop(mode, redirectMode, url, method, requestOrigin, crossed, hops, status, type, responseUrl, redirected,
-// location, tainted) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits] to follow (bits: 1 the
-// request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin, 8 its origin tainted), or a network
-// error's message.
+// location, taint, site) -> `intercepted_hop`: 0 to answer, 1 for an opaque redirect, [nextUrl, bits, taint, site] to
+// follow (bits: 1 the request a bodyless GET, 2 its Authorization dropped, 4 its chain at another origin; `taint` its
+// redirect-taint by name, `RedirectTaint::name`; `site` the Sec-Fetch-Site its chain has latched with this hop's URL, `site`
+// that before it — null none — which a network leg after it seeds), or a network error's message.
 fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let [mode, redirect_mode, url, request_origin, response_type, response_url] = [0, 1, 2, 4, 8, 9].map(|k| args.get(k).to_rust_string_lossy(scope));
     let method = byte_string(scope, args.get(3));
@@ -521,7 +522,7 @@ fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         method: &method,
         request_origin: &request_origin,
         crossed: args.get(5).is_true(),
-        tainted: args.get(12).is_true(),
+        taint: RedirectTaint::named((!args.get(12).is_null_or_undefined()).then(|| args.get(12).to_rust_string_lossy(scope)).as_deref()),
         hops: args.get(6).uint32_value(scope).unwrap_or(0),
     };
     let response = WorkerResponse {
@@ -535,9 +536,14 @@ fn intercepted_hop_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
         HopOutcome::Answer => rv.set_int32(0),
         HopOutcome::OpaqueRedirect => rv.set_int32(1),
         HopOutcome::Follow(r, crossed) => {
+            // (…the Sec-Fetch-Site latch with this hop's URL in it, measured from the request's origin)
+            let seed = (!args.get(13).is_null_or_undefined()).then(|| args.get(13).to_rust_string_lossy(scope));
+            let site = crate::referrer::wider_site(seed.as_deref(), crate::referrer::fetch_site(&request_origin, &url));
             let next = v8::String::new(scope, &r.url).unwrap();
-            let bits = v8::Integer::new(scope, r.to_get as i32 | (r.drop_authorization as i32) << 1 | (crossed as i32) << 2 | (r.tainted_origin as i32) << 3);
-            rv.set(v8::Array::new_with_elements(scope, &[next.into(), bits.into()]).into());
+            let bits = v8::Integer::new(scope, r.to_get as i32 | (r.drop_authorization as i32) << 1 | (crossed as i32) << 2);
+            let taint = v8::String::new(scope, r.taint.name()).unwrap();
+            let site = v8::String::new(scope, site).unwrap();
+            rv.set(v8::Array::new_with_elements(scope, &[next.into(), bits.into(), taint.into(), site.into()]).into());
         }
         HopOutcome::Fail(message) => rv.set(v8::String::new(scope, &message).unwrap().into()),
     }
@@ -760,7 +766,7 @@ mod tests {
             method: b"POST",
             request_origin: "http://a.test",
             crossed: false,
-            tainted: false,
+            taint: RedirectTaint::SameOrigin,
             hops,
         };
         let response = |status, location, url| WorkerResponse { status, response_type: "basic", url, redirected: false, location };
@@ -786,10 +792,10 @@ mod tests {
         // (…a hop off another origin than the request's led on to yet another taints its origin, and a tainted one stays so)
         let away = InterceptedHop { url: "http://b.test/x", crossed: true, ..hop("follow", "no-cors", 1) };
         let to_c = response(302, Some("http://c.test/"), "http://b.test/x");
-        assert!(matches!(intercepted_hop(&away, &to_c), HopOutcome::Follow(Redirect { tainted_origin: true, .. }, true)));
-        assert!(matches!(intercepted_hop(&hop("follow", "no-cors", 0), &r302), HopOutcome::Follow(Redirect { tainted_origin: false, .. }, false)));
-        let tainted = InterceptedHop { tainted: true, ..hop("follow", "no-cors", 0) };
-        assert!(matches!(intercepted_hop(&tainted, &r302), HopOutcome::Follow(Redirect { tainted_origin: true, .. }, false)));
+        assert!(matches!(intercepted_hop(&away, &to_c), HopOutcome::Follow(Redirect { taint: RedirectTaint::CrossSite, .. }, true)));
+        assert!(matches!(intercepted_hop(&hop("follow", "no-cors", 0), &r302), HopOutcome::Follow(Redirect { taint: RedirectTaint::SameOrigin, .. }, false)));
+        let tainted = InterceptedHop { taint: RedirectTaint::SameSite, ..hop("follow", "no-cors", 0) };
+        assert!(matches!(intercepted_hop(&tainted, &r302), HopOutcome::Follow(Redirect { taint: RedirectTaint::SameSite, .. }, false)));
         let fragment = InterceptedHop { url: "http://a.test/x#f", ..hop("follow", "cors", 0) };
         assert!(matches!(intercepted_hop(&fragment, &r302), HopOutcome::Follow(ref next, _) if next.url == "http://a.test/y#f"));
         assert!(matches!(
@@ -800,7 +806,10 @@ mod tests {
 
     #[test]
     fn a_redirect_follows_the_fetch_steps() {
-        let request = |current, cors_mode, tainting_cors, tainted_origin| Redirecting { method: b"GET", current, cors_mode, origin: "http://a.test", tainting_cors, tainted_origin };
+        let request = |current, cors_mode, tainting_cors, tainted: bool| {
+            let taint = if tainted { RedirectTaint::SameSite } else { RedirectTaint::SameOrigin };
+            Redirecting { method: b"GET", current, cors_mode, origin: "http://a.test", tainting_cors, taint }
+        };
         let follow = |r: &Redirecting<'_>, status, to: &str| match follow_redirect(r, status, r.current, Some(to)) {
             Redirected::Follow(step) => Some(step),
             _ => None,
@@ -826,7 +835,7 @@ mod tests {
         assert_eq!(steps(&at_b, 301, "http://u:p@a.test/"), Some((false, true)));
         // (…the origin tainted by a redirect off another origin than the request's, whatever its mode; the first hop
         // away keeps it, and a tainted one stays so)
-        let tainted = |r: &Redirecting<'_>, to| follow(r, 301, to).is_some_and(|s| s.tainted_origin);
+        let tainted = |r: &Redirecting<'_>, to| follow(r, 301, to).is_some_and(|s| s.taint.origin_tainted());
         assert!(!tainted(&at_a, "http://b.test/"));
         assert!(tainted(&at_b, "http://c.test/"));
         assert!(tainted(&at_b, "http://a.test/"));

@@ -892,7 +892,7 @@ module Capybara
           user_activated == true,
           referrer,
           referrer_policy,
-          source&.navigation_initiator(initiator_realm.to_i),
+          plan_initiator(browser, source, initiator_realm),
           blob&.fetch(:bytes),
           blob&.fetch(:type)
         )
@@ -921,8 +921,16 @@ module Capybara
           user_activated == true,
           referrer,
           referrer_policy,
-          source&.navigation_initiator(initiator_realm.to_i)
+          plan_initiator(browser, source, initiator_realm)
         )
+      end
+      # The document a plan of `browser`'s navigation was begun by (Browser#navigation_initiator): `source`'s realm
+      # `initiator_realm`'s — where no window is named, the page of the window that opened `browser`, which a plan is never
+      # left without while there is one: no plan is a user's address bar's.
+      private def plan_initiator(browser, source, initiator_realm)
+        return source.navigation_initiator(initiator_realm.to_i) if source
+
+        window_browser(opener_handle_of(browser))&.navigation_initiator(0)
       end
 
       # A blob: document loaded into window `target` from the blob a navigation another window planned of it resolved

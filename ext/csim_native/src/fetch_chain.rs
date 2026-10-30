@@ -1,11 +1,13 @@
 // A request as a chain of hops carries it (Fetch "main fetch" → "HTTP-redirect fetch"): its method, its URL, its header
-// list, whether its body is gone, the origin its hops send (`null` once a redirect tainted it), its referrer source and
-// policy, whether it has been redirected and how many times it has been dispatched — and the two steps every chain takes
+// list, whether its body is gone, the origin its hops send (`null` once a redirect tainted it), its redirect-taint
+// (referrer.rs `RedirectTaint`), its referrer source and policy, whether it has been redirected and how many times it has
+// been dispatched — and the two steps every chain takes
 // whatever fetches it: the Referer a hop sends (its policy over the source the previous hop left), and a redirect
 // followed (the request moved on to the Location: its method and body, its `Authorization`, its origin). A subresource
 // fetch's plan (fetch_plan.rs) and a navigation's both carry one.
 
 use crate::fetch_rules::{follow_redirect, request_body_header, Redirected, Redirecting};
+use crate::referrer::RedirectTaint;
 
 pub(crate) type Headers = Vec<(Vec<u8>, Vec<u8>)>;
 
@@ -18,6 +20,7 @@ pub(crate) struct RequestChain {
     pub(crate) headers: Headers,
     pub(crate) body_empty: bool,
     pub(crate) effective_origin: Option<String>,
+    pub(crate) taint: RedirectTaint,
     pub(crate) ref_policy: Option<String>,
     pub(crate) ref_source: Option<String>,
     pub(crate) redirected: bool,
@@ -82,7 +85,7 @@ impl RequestChain {
             cors_mode: judged.cors,
             origin: judged.origin,
             tainting_cors: judged.tainting_cors,
-            tainted_origin: self.effective_origin.as_deref() == Some("null"),
+            taint: self.taint,
         };
         let step = match follow_redirect(&request, status, &self.target, location.as_deref()) {
             Redirected::Answer => return Followed::Answer,
@@ -91,7 +94,8 @@ impl RequestChain {
         };
         let from = std::mem::replace(&mut self.target, step.url);
         self.redirected = true;
-        if step.tainted_origin {
+        self.taint = step.taint;
+        if step.taint.origin_tainted() {
             self.effective_origin = Some("null".to_owned());
         }
         if step.drop_authorization {
@@ -126,6 +130,7 @@ mod tests {
             headers: vec![(b"Content-Type".to_vec(), b"text/plain".to_vec()), (b"Authorization".to_vec(), b"Basic x".to_vec())],
             body_empty: false,
             effective_origin: Some("http://a.test".to_owned()),
+            taint: RedirectTaint::default(),
             ref_policy: None,
             ref_source: Some("http://a.test/page".to_owned()),
             redirected: false,

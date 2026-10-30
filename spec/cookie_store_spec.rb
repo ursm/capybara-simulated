@@ -244,6 +244,102 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq('/echo-open' => ['s=1; l=1', 'same-origin'], '/echo-set' => ['l=1', 'cross-site'])
   end
 
+  # Fetch's "determine the same-site mode" step 4, "If request's client's has cross-site ancestor is true, then return
+  # 'unset-or-less'", reads a navigation's INITIATOR (its client the initiating document's environment): a form's POST
+  # to the top from a frame of a's under b's page sends no SameSite cookie, where the same frame under a's page sends
+  # them all. (A top-level GET never reaches step 4 — step 3 returns first.) Chrome 156 and Firefox 159 both send the
+  # Strict and the Lax cookie there (measured 2026-10-31: a form's POST into a new window from a's frame under b's page);
+  # Fetch's text is explicit, and the spec wins.
+  it "judges a navigation's POST by whether its initiator has a cross-site ancestor" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'    then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/top'    then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="https://a.test/poster"></iframe>']]
+      when '/poster' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><form method="post" action="https://a.test/echo" target="_top"><button>go</button></form>']]
+      else
+        seen << [req.request_method, env['HTTP_COOKIE'].to_s]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    %w[a b].each do |host|
+      s.visit "https://#{host}.test/top"
+      s.within_frame(0) { s.click_button 'go' }
+      poll_until { seen.size == %w[a b].index(host) + 1 }
+    end
+    expect(seen).to eq([['POST', 's=1; l=1'], ['POST', '']])
+  end
+
+  # A chain a service worker redirects keeps its redirect-taint into the network leg after it: a page of a's fetch() of
+  # b's URL, which its worker answers with a redirect back to a, reaches a cross-site — no SameSite cookie, Sec-Fetch-Site
+  # `cross-site` — as the same chain the network made would (Fetch's redirect-taint walks the whole URL list).
+  it "keeps the redirect-taint of a chain a service worker redirected" do
+    seen   = {}
+    worker = <<~JS
+      self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+      self.addEventListener('fetch', e => {
+        if (new URL(e.request.url).pathname === '/bounce') e.respondWith(Response.redirect('https://a.test/echo-sw', 302));
+      });
+    JS
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/page'  then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
+      else
+        seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']] if req.path.start_with?('/echo')
+        [200, {'content-type' => 'text/plain'}, ['ok']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://a.test/page'
+    s.execute_script(<<~JS)
+      navigator.serviceWorker.register('/sw.js').then(async reg => {
+        await navigator.serviceWorker.ready;
+        while (!navigator.serviceWorker.controller) await new Promise(res => setTimeout(res, 10));
+        await fetch('https://a.test/echo-direct', {credentials: 'include'});
+        await fetch('https://b.test/bounce', {mode: 'no-cors', credentials: 'include'});
+      });
+    JS
+    poll_until { s.evaluate_script('1') && seen.key?('/echo-sw') }
+    expect(seen).to eq('/echo-direct' => ['s=1; l=1', 'same-origin'], '/echo-sw' => ['', 'cross-site'])
+  end
+
+  # A hyperlink's download is the top-level navigation whose response it is: judged by the document whose link it is —
+  # a frame of b's under a's page, cross-site to a, the Lax cookie alone — its redirects followed to the file.
+  it 'downloads as the frame whose link it is, through its redirects' do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/top'   then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="https://b.test/links"></iframe>']]
+      when '/links' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><a href="https://a.test/moved" download>d</a>']]
+      when '/moved' then [302, {'location' => 'https://a.test/file'}, ['']]
+      else
+        seen << [req.path, env['HTTP_COOKIE'].to_s]
+        [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename="got.txt"'}, ['file']]
+      end
+    }
+    Dir.mktmpdir do |dir|
+      prev = ENV['CSIM_DOWNLOADS_DIR']
+      ENV['CSIM_DOWNLOADS_DIR'] = dir
+      s = every_host_local { simulated_session(app) }
+      s.visit 'https://a.test/set'
+      s.visit 'https://a.test/top'
+      s.within_frame(0) { s.click_link 'd' }
+      poll_until { File.exist?(File.join(dir, 'got.txt')) }
+      expect([seen, File.read(File.join(dir, 'got.txt'))]).to eq([[['/file', 'l=1']], 'file'])
+    ensure
+      ENV['CSIM_DOWNLOADS_DIR'] = prev
+    end
+  end
+
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
   # document it reloads was reached by a same-site request — a page a cross-site link led to sends its Strict cookies
   # on no reload of the user's — where the page's own `location.reload()` is judged by its document's site, as any of

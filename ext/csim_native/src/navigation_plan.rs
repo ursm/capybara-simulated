@@ -91,7 +91,8 @@ pub(crate) fn next_planned() -> u64 {
 pub(crate) struct NavigationPlan {
     navigation: Option<Navigation>,
     submission: Option<Submission>,
-    download: Option<(String, String)>,
+    // (…a download's URL and file name, and the realm whose document's hyperlink planned it, its request's initiator)
+    download: Option<(String, String, i32)>,
     // (…its own: a location navigation, a reload, a frame's submission to it)
     own: Own,
     // What the plan was as the host began running the tasks due before a navigation of the document — kept apart while
@@ -323,11 +324,12 @@ fn plan_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     plan(scope, &args).submission = Some(Submission(request));
 }
 
-// __dom.planDownload(url, filename): a hyperlink's download planned.
+// __dom.planDownload(url, filename): a hyperlink's download planned, by the calling realm's document.
 fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let filename = args.get(1).to_rust_string_lossy(scope);
-    plan(scope, &args).download = Some((url, filename));
+    let cid = realm_id(scope, &args);
+    plan(scope, &args).download = Some((url, filename, cid));
 }
 
 // __dom.supersedePlanned(pageOnly): a navigation of the top-level document planned elsewhere (a traversal making its
@@ -383,12 +385,14 @@ fn take_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Local::new(scope, request));
 }
 
-// __dom.takeDownload() -> [url, filename] of the download planned, which the realm plans no more, or null.
+// __dom.takeDownload() -> [url, filename, realm] of the download planned — `realm` the one whose document planned it —
+// which the realm plans no more, or null.
 fn take_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
-    let Some((url, filename)) = plan(scope, &args).download.take() else { return };
+    let Some((url, filename, realm)) = plan(scope, &args).download.take() else { return };
     let (Some(url), Some(filename)) = (v8::String::new(scope, &url), v8::String::new(scope, &filename)) else { return };
-    rv.set(v8::Array::new_with_elements(scope, &[url.into(), filename.into()]).into());
+    let realm = v8::Integer::new(scope, realm);
+    rv.set(v8::Array::new_with_elements(scope, &[url.into(), filename.into(), realm.into()]).into());
 }
 
 // __dom.planLocation(url, replace, initiatorRealm, policy, activated, blob): the calling realm's document's own

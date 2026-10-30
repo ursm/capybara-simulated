@@ -13,6 +13,7 @@ use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RMod
 use crate::fetch_chain::{Followed, Headers, Judged, RequestChain};
 use crate::fetch_hop::{ClientFacts, FetchHops};
 use crate::fetch_rules::{bad_port, redirect_status};
+use crate::referrer::RedirectTaint;
 // Request cache modes that never read the store, and those that serve a stored response however stale.
 const SKIP_READ: [&str; 2] = ["no-store", "reload"];
 const SERVE_STALE: [&str; 2] = ["force-cache", "only-if-cached"];
@@ -115,7 +116,9 @@ impl FetchPlan {
     // the host's description, by name: `method`, `url` (resolved), `headers` (pairs), `body_empty`, `redirect`, `mode`
     // (nil a mode-less internal load's), `credentials`, `referrer_policy`, `referrer` (nil its client's URL, '' none),
     // `cache`, `initiator` (a worker re-issuing a navigation: the request's origin whatever its mode), `site_seed`,
-    // `origin_null`, `client_url`, `client_origin`, `ancestors`, `cookie_cross_site`, `navigation_cross_site`, `nav_dest`,
+    // `origin_null`, `redirect_taint` (the redirect-taint its URL list has so far, a network leg's after a service worker
+    // answered a hop with a redirect: referrer.rs `RedirectTaint::name`, nil none), `client_url`, `client_origin`,
+    // `ancestors`, `cookie_cross_site`, `navigation_cross_site`, `nav_dest`,
     // `navigation`, `dest`, `user_activated`, `top_url` (the page's document's URL), `worker` ([its site for cookies], nil
     // for none), `ua_headers` (the names of headers the user agent set itself that no CORS-preflight asks about, nil for
     // none); `sessions` [preflight cache, authentication entries].
@@ -218,6 +221,7 @@ impl FetchPlan {
                     headers,
                     body_empty: flag("body_empty")?,
                     effective_origin: if flag("origin_null")? { Some("null".to_owned()) } else { origin },
+                    taint: RedirectTaint::named(text("redirect_taint")?.as_deref()),
                     ref_policy: text("referrer_policy")?,
                     ref_source,
                     redirected: false,
@@ -341,7 +345,8 @@ impl FetchPlan {
         let upper = st.chain.method.to_ascii_uppercase();
         let drop_length = st.chain.body_empty && upper != "POST" && upper != "PUT";
         let referer = st.chain.referer();
-        let (cross_origin, origin, sec, cookies) = plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone());
+        let (cross_origin, origin, sec, cookies) =
+            plan.hops.hop(st.chain.target.clone(), st.chain.method.clone(), st.chain.effective_origin.clone(), st.chain.ref_policy.clone(), st.chain.taint);
         st.referer = referer.clone();
         st.cross_origin = cross_origin;
         let send_cookies = cookies.is_some();
@@ -503,7 +508,9 @@ impl FetchPlan {
     // Fetch "HTTP-redirect fetch" (fetch_chain.rs `follow`), the request judged as this fetch's mode has it.
     fn follow(&self, st: &mut State, status: u32, locations: RArray) -> Result<Followed, Error> {
         let locations = locations.into_iter().map(|l| magnus::RString::try_convert(l).map(crate::fetch_rules::ruby_bytes)).collect::<Result<Vec<_>, _>>()?;
-        let judged = Judged { cors: self.cors, origin: self.origin.as_deref().unwrap_or(""), tainting_cors: self.cors && st.crossed };
+        // (…a mode-less load's origin its client's, for the redirect-taint: Fetch has every request one)
+        let origin = self.origin.as_deref().or(self.client_origin.as_deref()).unwrap_or("");
+        let judged = Judged { cors: self.cors, origin, tainting_cors: self.cors && st.crossed };
         Ok(st.chain.follow(status, &locations, &judged))
     }
 }

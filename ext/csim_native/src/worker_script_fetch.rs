@@ -11,7 +11,7 @@ use std::cell::RefCell;
 use magnus::{function, method, prelude::*, Error, RArray, RModule, RString, Ruby, TryConvert};
 
 use crate::fetch_chain::{Followed, Judged, RequestChain, MAX_REDIRECTS};
-use crate::referrer::http_origin;
+use crate::referrer::{http_origin, RedirectTaint};
 
 struct Hops {
     chain: RequestChain,
@@ -61,6 +61,7 @@ impl WorkerScriptFetch {
                     headers: Vec::new(),
                     body_empty: true,
                     effective_origin: None,
+                    taint: RedirectTaint::default(),
                     ref_policy: None,
                     ref_source: None,
                     redirected: false,

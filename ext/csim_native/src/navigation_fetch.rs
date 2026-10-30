@@ -19,9 +19,11 @@ struct Nav {
     chain: RequestChain,
     // The URL Sec-Fetch-Site and its cookies' site measure from (its initiating document's — an about:blank one's
     // creator's), none for one no document began (a user's); whether that document's origin is opaque — of no site,
-    // cross-site to every URL; the Sec-Fetch-Site latched over the hops so far.
+    // cross-site to every URL — and whether it has a cross-site ancestor (HTML "has cross-site ancestor": the request's
+    // client's, Fetch's step 4 reads); the Sec-Fetch-Site latched over the hops so far.
     initiator: Option<String>,
     initiator_opaque: bool,
+    initiator_cross_site_ancestor: bool,
     site: Option<&'static str>,
     // The documents above the navigable it navigates — the one its container is in, and that one's up to the top — by
     // which its cookies are cross-site; none for a navigation no such document's site judges.
@@ -32,8 +34,6 @@ struct Nav {
     // A reload through a user interface element's: whether the request the document it reloads was reached by was
     // cross-site, which its every hop is then (RFC 6265bis §5.2) — none for any other navigation.
     reloaded_cross: Option<bool>,
-    // Its redirect-taint over the hops so far (referrer.rs `RedirectTaint`).
-    taint: RedirectTaint,
     // Whether its last hop's cookies were cross-site, which the document its response makes was reached by.
     cross: bool,
 }
@@ -41,23 +41,37 @@ struct Nav {
 impl Nav {
     // The hop's cookie context, and whether a document above the navigable is cross-site to its URL — by Fetch's
     // "determine the same-site mode": cross-site ("unset-or-less") where the hop's URL is cross-site to the initiator's
-    // origin (step 2, `initiator_cross_site`), where a document above the navigable is (step 4's "has cross-site
-    // ancestor", read of the frame it navigates), or where the chain's redirect-taint is "cross-site" (step 5). Step 3,
-    // "If request's method is 'GET' and request's destination is 'document', then return 'lax-or-less'", read as it
-    // stands would withhold the Strict cookie from every top-level GET, a same-site one's too, which no browser does
-    // (Chrome and Firefox both send it): a top-level GET keeps Strict where steps 2 and 5 leave it same-site, and is Lax
-    // (`LAX_RETRIEVE`) where they do not — so a→b→a's top-level GET back to a is Lax, as Firefox 159 makes it (Chrome
-    // 156 sends Strict; measured 2026-10-31). A reload through a user interface element's where the request it reloads
-    // was, never otherwise (RFC 6265bis §5.2). Its response stores a SameSite cookie however cross-site where it is a
-    // top-level navigation's (`TOP_LEVEL_NAV`: RFC 6265bis §5.7, as browsers do) — Fetch's "parse and store response
-    // `Set-Cookie` headers" would allow one only at "strict-or-less", which step 3 makes no top-level GET's.
+    // origin (step 2, `initiator_cross_site`), where "request's client's has cross-site ancestor is true" (step 4: the
+    // INITIATOR's, as the client of a navigation is its initiating document's environment), or where the chain's
+    // redirect-taint is "cross-site" (step 5).
+    // - Step 3, "If request's method is 'GET' and request's destination is 'document', then return 'lax-or-less'", read as
+    //   it stands would withhold the Strict cookie from every top-level GET, a same-site one's too, which no browser does
+    //   (Chrome and Firefox both send it): a top-level GET keeps Strict where steps 2 and 5 leave it same-site, and is Lax
+    //   (`LAX_RETRIEVE`) where they do not — so a→b→a's top-level GET back to a is Lax, as Firefox 159 makes it (Chrome
+    //   156 sends Strict; measured 2026-10-31) — and step 4, which it returns before, it never reads.
+    // - Step 4 makes a top-level POST from a frame of a's under b's page cross-site, its Strict and Lax cookies withheld,
+    //   though Chrome 156 and Firefox 159 both send them (measured 2026-10-31: a form's POST into a new window); Fetch's
+    //   text is explicit, and the spec wins.
+    // - A frame's navigation is cross-site where a document above the frame it navigates is (`frame_cross`): not Fetch's
+    //   step 4, which reads the initiator's, but the cookie layer's — the Lax exception is a top-level navigation's alone,
+    //   and the WPT double-nested-frame tests expect a frame under a cross-site one judged so whoever navigates it.
+    // A reload through a user interface element's where the request it reloads was, never otherwise (RFC 6265bis §5.2).
+    // Its response stores a SameSite cookie however cross-site where it is a top-level navigation's (`TOP_LEVEL_NAV`: RFC
+    // 6265bis §5.7, as browsers do) — Fetch's "parse and store response `Set-Cookie` headers" would allow one only at
+    // "strict-or-less", which step 3 makes no top-level GET's.
     fn cookies(&self) -> (bool, u32) {
         let target = &self.chain.target;
         let frame_cross = self.ancestors.as_ref().is_some_and(|a| a.iter().any(|u| cross_site_for_cookies(u.as_deref(), target)));
-        let cross = self.reloaded_cross.unwrap_or_else(|| frame_cross || self.initiator_cross_site(target) || self.taint.cross_site());
-        let secure = http_origin(target).as_deref().is_some_and(crate::url_ops::potentially_trustworthy);
         let safe = self.chain.method == "GET";
-        (frame_cross, request_context(secure, cross, self.top_level && safe, self.top_level))
+        let top_level_get = self.top_level && safe;
+        let cross = self.reloaded_cross.unwrap_or_else(|| {
+            frame_cross
+                || self.initiator_cross_site(target)
+                || (!top_level_get && self.initiator_cross_site_ancestor)
+                || self.chain.taint.cross_site()
+        });
+        let secure = http_origin(target).as_deref().is_some_and(crate::url_ops::potentially_trustworthy);
+        (frame_cross, request_context(secure, cross, top_level_get, self.top_level))
     }
     // Whether `target` is cross-site to the initiator: by its origin — an opaque one's to every URL — not by the site for
     // cookies of the documents above it (RFC 6265bis §5.2.1), as Fetch's "determine the same-site mode" judges a
@@ -72,7 +86,8 @@ impl Nav {
 
 #[magnus::wrap(class = "Capybara::Simulated::Native::NavigationFetch", free_immediately)]
 pub(crate) struct NavigationFetch {
-    // The origin its request is of (its initiator's), which a redirect is judged against.
+    // The origin its request is of (its initiator's, `null` an opaque one's; '' none, a user's), which a redirect is judged
+    // against and its redirect-taint walked with (fetch_chain.rs).
     origin: String,
     st: RefCell<Nav>,
 }
@@ -85,7 +100,9 @@ impl NavigationFetch {
     // (the referrer source, nil none), `referrer_policy`, `initiator` (the URL Sec-Fetch-Site and the request's origin are
     // of, nil none), `origin` (the request's origin serialized, where it is not its initiator's — a re-post's, the one it
     // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
-    // origin `null`, its site cross-site), `ancestors` (the document origins above the navigable its cookies are judged by
+    // origin `null`, its site cross-site), `initiator_cross_site_ancestor` (whether the initiating document has a
+    // cross-site ancestor: referrer.rs `requestClient`), `ancestors` (the document origins above the navigable its cookies
+    // are judged by
     // — nil none, each nil for one not known), `top_level` (whether it navigates a top-level navigable),
     // `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it reloads was
     // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation).
@@ -96,10 +113,12 @@ impl NavigationFetch {
         let origin = text("origin")?.filter(|o| !o.is_empty()).or_else(|| initiator.as_deref().and_then(http_origin));
         let initiator_opaque = get("origin_null")?.to_bool();
         let opaque = initiator_opaque || origin.as_deref() == Some("null");
+        // (…the origin a redirect judges it by and its redirect-taint is walked with: an opaque initiator's `null`)
+        let judged_origin = if initiator_opaque { "null".to_owned() } else { origin.clone().unwrap_or_default() };
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
         Ok(NavigationFetch {
-            origin: origin.clone().unwrap_or_default(),
+            origin: judged_origin,
             st: RefCell::new(Nav {
                 chain: RequestChain {
                     method: text("method")?.filter(|m| !m.is_empty()).map_or_else(|| "GET".to_owned(), |m| m.to_ascii_uppercase()),
@@ -107,6 +126,7 @@ impl NavigationFetch {
                     headers: Vec::new(),
                     body_empty: get("body_empty")?.to_bool(),
                     effective_origin: if opaque { Some("null".to_owned()) } else { origin },
+                    taint: RedirectTaint::default(),
                     ref_policy: text("referrer_policy")?,
                     ref_source: text("referrer")?.filter(|u| !u.is_empty()),
                     redirected: false,
@@ -114,11 +134,11 @@ impl NavigationFetch {
                 },
                 initiator,
                 initiator_opaque,
+                initiator_cross_site_ancestor: get("initiator_cross_site_ancestor")?.to_bool(),
                 site: initiator_opaque.then_some("cross-site"),
                 ancestors,
                 top_level: get("top_level")?.to_bool(),
                 reloaded_cross: Option::<bool>::try_convert(get("reloaded_cross_site")?)?,
-                taint: RedirectTaint::default(),
                 cross: false,
             }),
         })
@@ -134,10 +154,6 @@ impl NavigationFetch {
         st.chain.dispatch();
         let target = st.chain.target.clone();
         let hop_site = wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), &target));
-        // (…the request's origin, which taints it — `null` an opaque initiator's, none for a navigation no document began,
-        // a user's)
-        let origin = if st.initiator_opaque { "null" } else { rb_self.origin.as_str() };
-        st.taint.push(Some(origin).filter(|o| !o.is_empty()), &target);
         let (frame_cross, cookies) = st.cookies();
         st.cross = cookies & crate::cookie_jar::CROSS_SITE != 0;
         ruby.ary_from_iter([
@@ -237,6 +253,7 @@ mod tests {
                 headers: Vec::new(),
                 body_empty: false,
                 effective_origin: http_origin(initiator),
+                taint: RedirectTaint::default(),
                 ref_policy: None,
                 ref_source: Some(initiator.to_owned()),
                 redirected: false,
@@ -244,11 +261,11 @@ mod tests {
             },
             initiator: Some(initiator.to_owned()),
             initiator_opaque: false,
+            initiator_cross_site_ancestor: false,
             site: None,
             ancestors: Some(vec![Some("http://a.test/top".to_owned())]),
             top_level: false,
             reloaded_cross: None,
-            taint: RedirectTaint::default(),
             cross: false,
         }
     }
@@ -296,17 +313,15 @@ mod tests {
         // (…a → b → a, top-level: its redirect-taint "cross-site" at home — Fetch's "determine the same-site mode", the
         // Lax cookie alone, as Firefox 159 sends it (measured 2026-10-31) — and Sec-Fetch-Site the chain's widest)
         let mut st = Nav { ancestors: None, top_level: true, ..nav("GET", "http://b.test/r", "http://a.test/page") };
-        st.taint.push(Some("http://a.test"), "http://b.test/r");
         assert_eq!(st.cookies().1 & (CROSS_SITE | LAX_RETRIEVE), CROSS_SITE | LAX_RETRIEVE);
         let judged = Judged { cors: false, origin: "http://a.test", tainting_cors: false };
         st.site = Some(wider_site(st.site, fetch_site("http://a.test/page", &st.chain.target)));
         assert!(matches!(st.chain.follow(302, &[b"http://a.test/home".to_vec()], &judged), Followed::Follow(..)));
-        st.taint.push(Some("http://a.test"), "http://a.test/home");
+        assert_eq!(st.chain.taint, RedirectTaint::CrossSite);
         assert_eq!(st.cookies().1 & (CROSS_SITE | LAX_RETRIEVE), CROSS_SITE | LAX_RETRIEVE);
         assert_eq!(wider_site(st.site, fetch_site("http://a.test/page", &st.chain.target)), "cross-site");
         // (…a → a: no taint, the Strict cookie kept by a top-level GET, step 3 notwithstanding)
-        let mut home = Nav { ancestors: None, top_level: true, ..nav("GET", "http://a.test/x", "http://a.test/page") };
-        home.taint.push(Some("http://a.test"), "http://a.test/x");
+        let home = Nav { ancestors: None, top_level: true, ..nav("GET", "http://a.test/x", "http://a.test/page") };
         assert_eq!(home.cookies().1 & (CROSS_SITE | LAX_RETRIEVE), LAX_RETRIEVE);
     }
 
@@ -322,6 +337,11 @@ mod tests {
         assert!(!cross("http://sub.a.test/page", false, "http://a.test/x"));
         assert!(cross("http://b.test/page", false, "http://a.test/x"));
         assert!(cross("http://a.test/page", true, "http://a.test/x"));
+        // (…an initiator with a cross-site ancestor: a top-level POST cross-site, a top-level GET not — step 3 first)
+        let post = Nav { ancestors: None, top_level: true, initiator_cross_site_ancestor: true, ..nav("POST", "http://a.test/x", "http://a.test/page") };
+        assert_eq!(post.cookies().1 & CROSS_SITE, CROSS_SITE);
+        let get = Nav { ancestors: None, top_level: true, initiator_cross_site_ancestor: true, ..nav("GET", "http://a.test/x", "http://a.test/page") };
+        assert_eq!(get.cookies().1 & CROSS_SITE, 0);
         // (…a frame's navigation cross-site by the documents above the frame, however same-site its initiator)
         assert_eq!(nav("GET", "http://b.test/f", "http://b.test/page").cookies().1 & CROSS_SITE, CROSS_SITE);
     }

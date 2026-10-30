@@ -137,39 +137,58 @@ pub(crate) fn fetch_site_for_ruby(seed: Option<String>, initiator: Option<String
     wider_site(seed.as_deref(), fetch_site(initiator.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""))).to_owned()
 }
 
-// Whether a request's redirect-taint is "cross-site" (Fetch "redirect-taint", which "determine the same-site mode"
-// reads: "If request's redirect-taint is 'cross-site', then return 'unset-or-less'"), kept as its URL list grows hop by
-// hop: once a URL is "not same site with lastURL's origin and request's origin is not same site with lastURL's origin"
-// — a hop away from a URL of another site than the request's own, as a→b→a's back to a is. (The "same-site" level the
-// Origin header reads is `redirect_taints`'.)
-#[derive(Default)]
-pub(crate) struct RedirectTaint {
-    last: Option<String>,
-    cross_site: bool,
+// A request's redirect-taint (Fetch "redirect-taint"), walked once as its URL list grows hop by hop: "same-site" once a
+// URL "is not same origin with lastURL's origin and request's origin is not same origin with lastURL's origin" — which
+// serializes its origin `null` ("serializing a request origin") — and "cross-site" once one "is not same site with
+// lastURL's origin and request's origin is not same site with lastURL's origin", which "determine the same-site mode"
+// reads ("If request's redirect-taint is 'cross-site', then return 'unset-or-less'"): a→b→a's hop back to a.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum RedirectTaint {
+    #[default]
+    SameOrigin,
+    SameSite,
+    CrossSite,
 }
 impl RedirectTaint {
-    // …moved on by `url`, the URL list's next, of a request whose origin is `origin` (its serialization; `null` an
-    // opaque one, same site with none) — none for a request no document began, a user's, which no hop taints.
-    pub(crate) fn push(&mut self, origin: Option<&str>, url: &str) {
-        let same_site = |a: &str, b: &str| matches!(fetch_site(a, b), "same-origin" | "same-site");
-        if let (Some(origin), Some(last)) = (origin, self.last.as_deref()) {
-            self.cross_site |= !same_site(last, url) && !same_site(origin, last);
+    // …moved on by a hop from `last` to `url` of a request whose origin is `origin` (serialized: `null` an opaque one,
+    // same origin and same site with none; '' none — a request no document began, a user's, which no hop taints).
+    pub(crate) fn step(self, origin: &str, last: &str, url: &str) -> Self {
+        if origin.is_empty() {
+            return self;
         }
-        self.last = Some(url.to_owned());
+        let (hop, home) = (fetch_site(last, url), fetch_site(origin, last));
+        let same_site = |site: &str| matches!(site, "same-origin" | "same-site");
+        let taint = if !same_site(hop) && !same_site(home) {
+            RedirectTaint::CrossSite
+        } else if hop != "same-origin" && home != "same-origin" {
+            RedirectTaint::SameSite
+        } else {
+            RedirectTaint::SameOrigin
+        };
+        self.max(taint)
     }
-    pub(crate) fn cross_site(&self) -> bool {
-        self.cross_site
+    // …the level its wire name names ("same-origin", "same-site", "cross-site"; none, or any other, the first).
+    pub(crate) fn named(name: Option<&str>) -> Self {
+        match name {
+            Some("cross-site") => RedirectTaint::CrossSite,
+            Some("same-site") => RedirectTaint::SameSite,
+            _ => RedirectTaint::SameOrigin,
+        }
     }
-}
-
-// Whether a request whose origin is the one of `initiator` — 'null' already where `tainted` — has it opaque once it
-// follows a redirect from `current` to `location` (Fetch "HTTP-redirect fetch" step 13): where the redirect crosses
-// origin from a URL already off the request's origin. The first hop away keeps it.
-pub(crate) fn redirect_taints(tainted: bool, initiator: &str, current: &str, location: &str) -> bool {
-    tainted || (http_origin(current) != http_origin(location) && http_origin(initiator) != http_origin(current))
-}
-pub(crate) fn redirect_taints_for_ruby(tainted: bool, initiator: Option<String>, current: Option<String>, location: Option<String>) -> bool {
-    redirect_taints(tainted, initiator.as_deref().unwrap_or(""), current.as_deref().unwrap_or(""), location.as_deref().unwrap_or(""))
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            RedirectTaint::SameOrigin => "same-origin",
+            RedirectTaint::SameSite => "same-site",
+            RedirectTaint::CrossSite => "cross-site",
+        }
+    }
+    // Whether its origin serializes `null`, and whether it is cross-site for cookies.
+    pub(crate) fn origin_tainted(self) -> bool {
+        self != RedirectTaint::SameOrigin
+    }
+    pub(crate) fn cross_site(self) -> bool {
+        self == RedirectTaint::CrossSite
+    }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -243,14 +262,16 @@ pub(crate) fn navigation_referrer(arena: &mut RealmArena, r: i32, policy: &str) 
     (source, policy.to_owned())
 }
 
-// __dom.requestClient(realm, elementPolicy, opaque) -> [url, policy, opaque, realm, source]: the client a subresource
-// request of realm `realm`'s document — the calling realm's for undefined — is made as (Fetch "client"): the URL its
-// site and origin are judged by (`creator_url`), the policy it refers by — the element's (`elementPolicy`), else its
-// document's; `no-referrer` for one of an opaque origin, which no element lifts — whether that origin is opaque, the
-// realm it is, and the URL it refers by (`referrer_source`). A realm gone answers the page's URLs, and is still the
-// realm the request is of: one of no document known, cross-site for cookies (its `ancestorDocuments` entry None).
-// `opaque` a boolean where the bindings tell it (an image's load, which names the policy its document had as the
-// element was inserted): the URL alone is the realm's then, and the document's policy only a srcdoc one's container's.
+// __dom.requestClient(realm, elementPolicy, opaque) -> [url, policy, opaque, realm, source, crossSiteAncestor]: the client
+// a subresource request of realm `realm`'s document — the calling realm's for undefined — is made as (Fetch "client"):
+// the URL its site and origin are judged by (`creator_url`), the policy it refers by — the element's (`elementPolicy`),
+// else its document's; `no-referrer` for one of an opaque origin, which no element lifts — whether that origin is
+// opaque, the realm it is, the URL it refers by (`referrer_source`), and its "has cross-site ancestor"
+// (`has_cross_site_ancestor`, which Fetch's "determine the same-site mode" reads of a request's client). A realm gone
+// answers the page's URLs, and is still the realm the request is of: one of no document known, cross-site for cookies
+// (its `ancestorDocuments` entry None). `opaque` a boolean where the bindings tell it (an image's load, which names the
+// policy its document had as the element was inserted): the URL alone is the realm's then, and the document's policy
+// only a srcdoc one's container's.
 fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = if args.get(0).is_undefined() { crate::dom::realm_id(scope, &args) } else { args.get(0).int32_value(scope).unwrap_or(0) };
     let element_policy = args.get(1).to_rust_string_lossy(scope);
@@ -269,6 +290,7 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         Some(opaque) => (opaque, doc.url.clone(), ""),
     };
     let url = creator_url(arena, doc.realm, if told.is_none() { source.clone() } else { doc.url });
+    let cross_site_ancestor = has_cross_site_ancestor(&document_chain(arena, doc.realm, true));
     let policy = if opaque { "no-referrer" } else if element_policy.is_empty() { policy } else { element_policy.as_str() };
     let items = [
         v8::String::new(scope, &url).unwrap().into(),
@@ -276,8 +298,18 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         v8::Boolean::new(scope, opaque).into(),
         v8::Integer::new(scope, r).into(),
         v8::String::new(scope, &source).unwrap().into(),
+        v8::Boolean::new(scope, cross_site_ancestor).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// HTML "has cross-site ancestor" of a document whose origin is the first of `documents` and its ancestors' the rest
+// (`document_chain`): one of them is not same site with the one below it — an opaque one (`null`) same site with none,
+// one not known with none either.
+fn has_cross_site_ancestor(documents: &[Option<String>]) -> bool {
+    documents.windows(2).any(|pair| match (pair[0].as_deref(), pair[1].as_deref()) {
+        (Some(child), Some(parent)) => !matches!(fetch_site(parent, child), "same-origin" | "same-site"),
+        _ => true,
+    })
 }
 
 // The origin of realm `r`'s document, serialized — an about:blank or srcdoc one's its creator's, an opaque one's
@@ -370,26 +402,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_redirect_taints_a_request_cross_site_off_its_own_site() {
-        let taint = |origin: &str, urls: &[&str]| {
-            let mut t = RedirectTaint::default();
-            for url in urls {
-                t.push(Some(origin), url);
-            }
-            t.cross_site()
-        };
-        // (…a→b untainted, a→b→a tainted; a request of b's going b→b→a untainted; b→a of a's tainted, its first URL off its
-        // site; `null` tainted by any cross-site step; a user's, of no origin, never)
-        assert!(!taint("http://a.test", &["http://a.test/1", "http://b.test/2"]));
-        assert!(taint("http://a.test", &["http://a.test/1", "http://b.test/2", "http://a.test/3"]));
-        assert!(!taint("http://b.test", &["http://b.test/1", "http://b.test/2", "http://a.test/3"]));
-        assert!(taint("http://a.test", &["http://b.test/1", "http://a.test/2"]));
-        assert!(taint("null", &["http://a.test/1", "http://b.test/2"]));
-        let mut user = RedirectTaint::default();
-        for url in ["http://a.test/1", "http://b.test/2", "http://a.test/3"] {
-            user.push(None, url);
-        }
-        assert!(!user.cross_site());
+    fn a_document_has_a_cross_site_ancestor_where_one_above_it_is_of_another_site() {
+        let chain = |origins: &[&str]| has_cross_site_ancestor(&origins.iter().map(|o| (!o.is_empty()).then(|| (*o).to_owned())).collect::<Vec<_>>());
+        assert!(!chain(&["http://a.test"]));
+        assert!(!chain(&["http://x.a.test", "http://a.test"]));
+        assert!(chain(&["http://a.test", "http://b.test"]));
+        // (…a→b→a: the middle frame is the one; an opaque document, or one not known, is of no site)
+        assert!(chain(&["http://a.test", "http://b.test", "http://a.test"]));
+        assert!(chain(&["null", "http://a.test"]));
+        assert!(chain(&["http://a.test", ""]));
+    }
+
+    #[test]
+    fn a_redirect_taints_a_request_off_its_own_origin_and_site() {
+        let taint = |origin: &str, urls: &[&str]| urls.windows(2).fold(RedirectTaint::SameOrigin, |t, w| t.step(origin, w[0], w[1]));
+        // (…a→b untainted, a→b→a cross-site; a request of b's going b→b→a untainted; b→a of a's cross-site, its first URL
+        // off its site; `null` tainted by any cross-origin step; a user's, of no origin, never)
+        assert_eq!(taint("http://a.test", &["http://a.test/1", "http://b.test/2"]), RedirectTaint::SameOrigin);
+        assert_eq!(taint("http://a.test", &["http://a.test/1", "http://b.test/2", "http://a.test/3"]), RedirectTaint::CrossSite);
+        assert_eq!(taint("http://b.test", &["http://b.test/1", "http://b.test/2", "http://a.test/3"]), RedirectTaint::SameOrigin);
+        assert_eq!(taint("http://a.test", &["http://b.test/1", "http://a.test/2"]), RedirectTaint::CrossSite);
+        assert_eq!(taint("null", &["http://a.test/1", "http://b.test/2"]), RedirectTaint::CrossSite);
+        assert_eq!(taint("", &["http://a.test/1", "http://b.test/2", "http://a.test/3"]), RedirectTaint::SameOrigin);
+        // (…same-site: a hop to another origin from a URL off the request's origin, its site kept; the level only rises)
+        assert_eq!(taint("https://a.test", &["https://a.test/r", "https://b.test/"]), RedirectTaint::SameOrigin);
+        assert_eq!(taint("https://a.test", &["https://x.a.test/r", "https://y.a.test/s"]), RedirectTaint::SameSite);
+        assert_eq!(taint("https://a.test", &["https://b.test/r", "https://b.test/s"]), RedirectTaint::SameOrigin);
+        assert_eq!(RedirectTaint::CrossSite.step("https://a.test", "https://a.test/r", "https://a.test/s"), RedirectTaint::CrossSite);
     }
 
     #[test]
@@ -447,11 +486,4 @@ mod tests {
         assert_eq!(wider_site(Some("same-site"), "cross-site"), "cross-site");
     }
 
-    #[test]
-    fn an_origin_taints_on_a_cross_origin_hop_from_off_its_origin() {
-        assert!(!redirect_taints(false, "https://a.test/", "https://a.test/r", "https://b.test/"));
-        assert!(redirect_taints(false, "https://a.test/", "https://b.test/r", "https://c.test/"));
-        assert!(!redirect_taints(false, "https://a.test/", "https://b.test/r", "https://b.test/s"));
-        assert!(redirect_taints(true, "https://a.test/", "https://a.test/r", "https://a.test/s"));
-    }
 }
