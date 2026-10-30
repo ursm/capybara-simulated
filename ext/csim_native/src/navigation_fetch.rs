@@ -48,7 +48,9 @@ impl Nav {
     // (Chrome and Firefox both send it): a top-level GET keeps Strict where steps 2 and 5 leave it same-site, and is Lax
     // (`LAX_RETRIEVE`) where they do not — so a→b→a's top-level GET back to a is Lax, as Firefox 159 makes it (Chrome
     // 156 sends Strict; measured 2026-10-31). A reload through a user interface element's where the request it reloads
-    // was, never otherwise (RFC 6265bis §5.2).
+    // was, never otherwise (RFC 6265bis §5.2). Its response stores a SameSite cookie however cross-site where it is a
+    // top-level navigation's (`TOP_LEVEL_NAV`: RFC 6265bis §5.7, as browsers do) — Fetch's "parse and store response
+    // `Set-Cookie` headers" would allow one only at "strict-or-less", which step 3 makes no top-level GET's.
     fn cookies(&self) -> (bool, u32) {
         let target = &self.chain.target;
         let frame_cross = self.ancestors.as_ref().is_some_and(|a| a.iter().any(|u| cross_site_for_cookies(u.as_deref(), target)));
@@ -132,8 +134,10 @@ impl NavigationFetch {
         st.chain.dispatch();
         let target = st.chain.target.clone();
         let hop_site = wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), &target));
-        // (…the request's origin, which taints it — none for a navigation no document began, a user's)
-        st.taint.push(Some(rb_self.origin.as_str()).filter(|o| !o.is_empty()), &target);
+        // (…the request's origin, which taints it — `null` an opaque initiator's, none for a navigation no document began,
+        // a user's)
+        let origin = if st.initiator_opaque { "null" } else { rb_self.origin.as_str() };
+        st.taint.push(Some(origin).filter(|o| !o.is_empty()), &target);
         let (frame_cross, cookies) = st.cookies();
         st.cross = cookies & crate::cookie_jar::CROSS_SITE != 0;
         ruby.ary_from_iter([

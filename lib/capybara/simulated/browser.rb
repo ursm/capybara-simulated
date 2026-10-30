@@ -621,8 +621,9 @@ module Capybara
       # Address-bar navigation: no Referer, and relative paths resolve
       # against the host root (not the current page's directory).
       # `initiator:` is the document that caused this top-level navigation (the
-      # OPENER for a window.open'd window) — its site the navigation's
-      # Sec-Fetch-Site and its cookies' SameSite gate measure from. A plain
+      # one whose script planned another window's: Browser#navigation_initiator) —
+      # its site the navigation's Sec-Fetch-Site and its cookies' SameSite gate
+      # measure from. A plain
       # driver-initiated visit has none (address-bar semantics, site 'none').
       # (…`user_activated` its source snapshot's transient activation: true for one no document began — the address bar's,
       # HTML's source snapshot params of no source document — and a window's opener's as it opened it otherwise; `replace`
@@ -3494,12 +3495,37 @@ module Capybara
       # A top-level navigation's POST of `body` (`navigate`'s: `navigate_top_level`): its origin the initiating
       # document's — 'null' where that is opaque (`origin_null`), none where the initiator is unknown — or, re-posted from
       # its session history entry, the one it was first sent with (`origin`: the document state's initiator origin).
-      def navigate_post(url, body, content_type, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url,
-                        replace: false, origin_null: false, origin: nil, user_activated: false, reloaded_cross_site: nil)
+      def navigate_post(
+        url,
+        body,
+        content_type,
+        from_history: false,
+        is_reload: false,
+        referer: @current_url,
+        referrer_policy: nil,
+        initiator: @current_url,
+        replace: false,
+        origin_null: false,
+        origin: nil,
+        user_activated: false,
+        reloaded_cross_site: nil
+      )
         origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
-        navigate_top_level(url, body, content_type, referer: referer, referrer_policy: referrer_policy, from_history: from_history, is_reload: is_reload, initiator: initiator,
-                                                    origin_null: origin_null, replace: replace, origin: origin, user_activated: user_activated,
-                                                    reloaded_cross_site: reloaded_cross_site)
+        navigate_top_level(
+          url,
+          body,
+          content_type,
+          referer:             referer,
+          referrer_policy:     referrer_policy,
+          from_history:        from_history,
+          is_reload:           is_reload,
+          initiator:           initiator,
+          origin_null:         origin_null,
+          replace:             replace,
+          origin:              origin,
+          user_activated:      user_activated,
+          reloaded_cross_site: reloaded_cross_site
+        )
       end
 
       # Spawn a background thread that will call into the host Rack app, registered
@@ -6601,7 +6627,7 @@ module Capybara
         # it — by that one, under the policy it navigates under (a link's `rel` / `referrerpolicy`: `link_policy`), else
         # its own: Chrome — the container's attribute none of its)
         source_realm = container_realm
-        if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_alive?(initiator_realm.to_i))
+        if initiator_realm && (initiator_realm.to_i.zero? || @runtime.frame_realm_present?(initiator_realm.to_i))
           initiator, referrer_policy = realm_referrer_initiator(initiator_realm.to_i)
           referrer_policy = link_policy unless link_policy.to_s.empty?
           source_realm = initiator_realm
@@ -10963,7 +10989,7 @@ module Capybara
         commit: {}
       )
         invalidate_find_cache
-        opaque      = initiator ? opaque_initiator(initiator)[:origin_null] : false
+        opaque      = initiator ? opaque_initiator(initiator)[:origin_null] == true : false
         origin_null = true if opaque
         source, referrer_policy = referrer
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
@@ -11441,10 +11467,14 @@ module Capybara
       end
       # What a navigation the document of realm `realm` initiates carries of its origin (navigation_fetch.rs): whether it
       # is opaque (a sandboxed document's: its Origin `null`, of no site — cross-site to every URL, for Fetch Metadata and
-      # cookies alike) — the page's for a realm gone since (`initiating_realm`).
-      private def opaque_initiator(realm) = {origin_null: document_origin_opaque?(initiating_realm(realm)) == true}
+      # cookies alike) — none for a realm gone since, as `initiating_url` has no URL of it: the two of one document.
+      private def opaque_initiator(realm)
+        realm = realm.to_i
+        realm.zero? || @runtime.frame_realm_present?(realm) ? {origin_null: document_origin_opaque?(realm) == true} : {}
+      end
       # …realm `realm` where its document is still there — loaded or loading — else the page's, whose script began the
-      # navigation as the source snapshot names it: a plan is never left an address bar's, of no initiator.
+      # navigation as the source snapshot names it: another window's plan is never left an address bar's, of no
+      # initiator (`navigation_initiator`).
       private def initiating_realm(realm)
         realm = realm.to_i
         realm.zero? || @runtime.frame_realm_present?(realm) ? realm : 0
@@ -11585,19 +11615,43 @@ module Capybara
       # (…`reloaded_cross_site` a reload through a user interface element's: whether the request the document it reloads was
       # reached by was cross-site, its cookies judged by that — nil for any other navigation)
       # (…`origin_null` where the initiating document's origin is opaque: `opaque_initiator`)
-      def navigate(url, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, origin_null: false,
-                   replace: false, blob: nil, user_activated: false, reloaded_cross_site: nil)
-        navigate_top_level(url, nil, nil, referer: referer, referrer_policy: referrer_policy, from_history: from_history, is_reload: is_reload, initiator: initiator,
-                                          origin_null: origin_null, replace: replace, blob: blob, user_activated: user_activated,
-                                          reloaded_cross_site: reloaded_cross_site)
+      def navigate(
+        url,
+        referer: @current_url,
+        referrer_policy: nil,
+        from_history: false,
+        is_reload: false,
+        initiator: @current_url,
+        origin_null: false,
+        replace: false,
+        blob: nil,
+        user_activated: false,
+        reloaded_cross_site: nil
+      )
+        navigate_top_level(
+          url,
+          nil,
+          nil,
+          referer:             referer,
+          referrer_policy:     referrer_policy,
+          from_history:        from_history,
+          is_reload:           is_reload,
+          initiator:           initiator,
+          origin_null:         origin_null,
+          replace:             replace,
+          blob:                blob,
+          user_activated:      user_activated,
+          reloaded_cross_site: reloaded_cross_site
+        )
       end
       # …the navigation itself, hop by hop (navigation_fetch.rs): its Referer the initiating document's URL — `referer` —
       # under that document's referrer policy, the policy its `<meta name="referrer">` sets (the default where none does)
       # read before the page goes, determined anew at each redirect hop as Fetch's main fetch does, a redirect's
       # `Referrer-Policy` the next hop's; a driver's visit sends none on any hop. Sec-Fetch-Site is the initiator's
       # relation to each hop, widened across the chain — an opaque initiator's (`origin_null`) cross-site to every URL —
-      # and its cookies cross-site by the hop's URL alone (RFC 6265bis-14); no initiator (a visit, the address bar) is
-      # 'none', its cookies same-site. A controlled hop goes to the controlling SW's fetch event first
+      # and its cookies judged by Fetch's "determine the same-site mode" (navigation_fetch.rs `Nav::cookies`: the
+      # initiator's origin and the chain's redirect-taint); no initiator (a visit, the address bar) is 'none', its cookies
+      # same-site. A controlled hop goes to the controlling SW's fetch event first
       # (mode 'navigate', dest 'document') — the registration in ANY window's Browser (they're profile-wide:
       # Driver#sw_navigation_fetch) — respondWith serving the document, a network error failing it, none falling through
       # to the network. Its redirects followed, an SW's as the network's: a POST's 307 / 308 re-POSTing, the others

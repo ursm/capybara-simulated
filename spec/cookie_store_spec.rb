@@ -189,13 +189,13 @@ RSpec.describe 'the cookie store' do
   # …and a navigation another window's script planned (session_history.rs `Planned`) by its initiator alike: a
   # sandboxed page's — of an opaque origin, of no site — cross-site to its own host, its Strict cookie not sent and its
   # Sec-Fetch-Site `cross-site`, a GET's as a POST's.
-  it "judges a navigation a sandboxed page planned of another window as of no site" do
+  it 'judges a navigation a sandboxed page planned of another window as of no site' do
     seen = {}
     app = lambda {|env|
       req = Rack::Request.new(env)
       case req.path
       when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
-      when '/boxed' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts allow-popups'}, ['<!DOCTYPE html>boxed']]
+      when '/boxed' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts allow-popups allow-forms'}, ['<!DOCTYPE html>boxed']]
       else
         seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']]
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
@@ -207,7 +207,14 @@ RSpec.describe 'the cookie store' do
     s.visit 'https://a.test/boxed'
     popup = s.window_opened_by { s.execute_script("open('https://a.test/planned', 'w')") }
     s.within_window(popup) { poll_until { seen.key?('/planned') } }
-    expect(seen).to eq('/mine' => ['s=1; l=1', 'none'], '/planned' => ['l=1', 'cross-site'])
+    # (…a POST, a form's into the window by its name: of no SameSite cookie at all, no Lax exception for it)
+    s.execute_script(<<~JS)
+      const form = Object.assign(document.createElement('form'), {method: 'post', action: 'https://a.test/planned-post', target: 'w'})
+      document.body.append(form)
+      form.submit()
+    JS
+    s.within_window(popup) { poll_until { seen.key?('/planned-post') } }
+    expect(seen).to eq('/mine' => ['s=1; l=1', 'none'], '/planned' => ['l=1', 'cross-site'], '/planned-post' => ['', 'cross-site'])
   end
 
   # …and by the document that planned it, the frame whose script ran `window.open` or set `w.location` — not its window's

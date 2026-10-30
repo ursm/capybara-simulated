@@ -59,8 +59,8 @@ pub(crate) struct FetchHops {
 }
 
 impl Client {
-    // Whether a hop to `target` is cross-site for cookies (RFC 6265bis §5.2), by its URL alone and never by the URLs the
-    // chain went through before it: a re-issued navigation's as the navigation judged the hop, any other request's where
+    // Whether a hop to `target` is cross-site for cookies (RFC 6265bis §5.2) by its URL alone — the chain's redirect-taint
+    // is `FetchHops::taint`'s: a re-issued navigation's as the navigation judged the hop, any other request's where
     // it navigates a frame with a cross-site ancestor, or its client — a request of none same-site — or any document the
     // request is judged by is cross-site to the target.
     fn cross_site(&self, target: &str) -> bool {
@@ -193,7 +193,9 @@ impl FetchHops {
         // its response's `Set-Cookie` stored, only then): over a secure channel where the target's origin is
         // potentially trustworthy, cross-site as the hop's URL is (`Client::cross_site`) or as the chain's redirect-taint
         // is, and a top-level navigation's — a re-issued one's — which may set a SameSite cookie, and by a GET retrieve a
-        // Lax one.
+        // Lax one. (Fetch's "parse and store response `Set-Cookie` headers" allows a SameSite one only where the same-site
+        // mode is "strict-or-less", which its step 3 makes no top-level GET's: a top-level navigation stores one however
+        // cross-site, as RFC 6265bis §5.7 has it and browsers do.)
         let tainted = self.taint(&target);
         let top_level = c.of_mode("navigate") && c.nav_dest.as_deref() == Some("document");
         let lax = top_level && method.eq_ignore_ascii_case("GET");
@@ -346,11 +348,13 @@ mod tests {
         cached.cached("http://b.test/r".into());
         let hop = cached.hop("http://a.test/x".into(), "GET".into(), None, None);
         assert_eq!((cross(&hop), hop.2.map(|s| s.0)), (Some(true), Some("cross-site")));
-        // (…a chain that leaves the request's site from its own untainted: a→b, and b→b→a's hop to a from b's client)
-        let away = hops(Client { credentials: "include".to_owned(), ..client(Some("no-cors")) });
-        assert_eq!(cross(&away.hop("http://a.test/1".into(), "GET".into(), None, None)), Some(false));
-        let hop = away.hop("http://sub.a.test/2".into(), "GET".into(), None, None);
-        assert_eq!(cross(&hop), Some(false));
+        // (…a chain that leaves the request's site from its own untainted: a client of b's going b→b→a, cross-site at a
+        // by its client alone)
+        let b = |s: &str| Some(s.to_owned());
+        let away = hops(Client { credentials: "include".to_owned(), origin: b("http://b.test"), doc_origin: None, client_origin: b("http://b.test"), cookie_client: b("http://b.test/page"), ..client(Some("no-cors")) });
+        assert_eq!(cross(&away.hop("http://b.test/1".into(), "GET".into(), None, None)), Some(false));
+        assert_eq!(cross(&away.hop("http://b.test/2".into(), "GET".into(), None, None)), Some(false));
+        assert_eq!(cross(&away.hop("http://a.test/3".into(), "GET".into(), None, None)), Some(true));
         // (…a re-issued navigation's cookies the navigation's verdict on the hop, not the chain's nor its client's)
         let reissued = hops(Client { reissued: Some(false), nav_dest: Some("document".into()), ..client(Some("navigate")) });
         reissued.seed(Some("cross-site".into()));

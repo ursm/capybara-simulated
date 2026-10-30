@@ -554,10 +554,17 @@ module Capybara
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
           # one is made)
           activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
+          plan = {
+            source:          source,
+            initiator_realm: activation_realm,
+            referrer:        referrer,
+            referrer_policy: referrer_policy,
+            user_activated:  activated
+          }
           if post
-            post_window(existing[:window], url, post, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+            post_window(existing[:window], url, post, **plan)
           else
-            navigate_window(existing[:window], url, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+            navigate_window(existing[:window], url, **plan)
           end
           return existing[:handle]
         end
@@ -608,11 +615,20 @@ module Capybara
         aux.open_initial_document(about_blank ? url.to_s : 'about:blank')
         if about_blank || url.to_s.empty?
           aux.traversable.opened_at_initial
-        elsif post
-          post_window(aux, url, post, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
         else
-          blob = {bytes: blob_snapshot['bytes'], type: blob_snapshot['type'].to_s} if blob_snapshot.is_a?(Hash) && blob_snapshot['bytes']
-          navigate_window(aux, url, source: source, initiator_realm: activation_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated, blob: blob)
+          plan = {
+            source:          source,
+            initiator_realm: activation_realm,
+            referrer:        referrer,
+            referrer_policy: referrer_policy,
+            user_activated:  activated
+          }
+          if post
+            post_window(aux, url, post, **plan)
+          else
+            blob = {bytes: blob_snapshot['bytes'], type: blob_snapshot['type'].to_s} if blob_snapshot.is_a?(Hash) && blob_snapshot['bytes']
+            navigate_window(aux, url, blob: blob, **plan)
+          end
         end
         handle
       end
@@ -661,8 +677,15 @@ module Capybara
         # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
         # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
         if (existing = named_window(name.to_s, opener_browser))
-          navigate_window(existing[:window], resolved, source: opener_browser, initiator_realm: opener_realm_id, referrer: referrer, referrer_policy: referrer_policy,
-                                                        user_activated: opener_browser.source_activated?(opener_realm_id))
+          navigate_window(
+            existing[:window],
+            resolved,
+            source:          opener_browser,
+            initiator_realm: opener_realm_id,
+            referrer:        referrer,
+            referrer_policy: referrer_policy,
+            user_activated:  opener_browser.source_activated?(opener_realm_id)
+          )
           return existing[:handle]
         end
         # A window opened at about:blank → a realm in the opener's isolate (shared heap); the

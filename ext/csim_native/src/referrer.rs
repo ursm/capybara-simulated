@@ -370,6 +370,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_redirect_taints_a_request_cross_site_off_its_own_site() {
+        let taint = |origin: &str, urls: &[&str]| {
+            let mut t = RedirectTaint::default();
+            for url in urls {
+                t.push(Some(origin), url);
+            }
+            t.cross_site()
+        };
+        // (…a→b untainted, a→b→a tainted; a request of b's going b→b→a untainted; b→a of a's tainted, its first URL off its
+        // site; `null` tainted by any cross-site step; a user's, of no origin, never)
+        assert!(!taint("http://a.test", &["http://a.test/1", "http://b.test/2"]));
+        assert!(taint("http://a.test", &["http://a.test/1", "http://b.test/2", "http://a.test/3"]));
+        assert!(!taint("http://b.test", &["http://b.test/1", "http://b.test/2", "http://a.test/3"]));
+        assert!(taint("http://a.test", &["http://b.test/1", "http://a.test/2"]));
+        assert!(taint("null", &["http://a.test/1", "http://b.test/2"]));
+        let mut user = RedirectTaint::default();
+        for url in ["http://a.test/1", "http://b.test/2", "http://a.test/3"] {
+            user.push(None, url);
+        }
+        assert!(!user.cross_site());
+    }
+
+    #[test]
     fn a_referrer_is_the_source_stripped_as_its_policy_says() {
         let page = "https://user:pw@a.test/p?q#frag";
         assert_eq!(request_referrer("unsafe-url", page, "http://b.test/").as_deref(), Some("https://a.test/p?q"));
