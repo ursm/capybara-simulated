@@ -6656,8 +6656,11 @@ module Capybara
       # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
+      # (…`initiator_document` the initiating document as another isolate's Browser describes it — Browser#navigation_initiator:
+      # its URL, opacity and cross-site ancestor — where no realm of this isolate is it, its Referer `referrer_source`)
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false)
+                                 referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false,
+                                 initiator_document: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6688,8 +6691,8 @@ module Capybara
         end
         # (…its site and its Origin that document's — an about:blank one's its creator's, an opaque one's cross-site and
         # `null` (`initiating_url`, `initiating_document`) — its referrer source the Referer's alone)
-        origin_url = (source_realm && initiating_url(source_realm)) || initiator
-        initiating = source_realm ? initiating_document(source_realm) : {}
+        origin_url = (source_realm && initiating_url(source_realm)) || initiator_document&.fetch(:initiator, nil) || initiator
+        initiating = source_realm ? initiating_document(source_realm) : initiator_document.to_h.slice(:origin_null, :initiator_cross_site_ancestor)
         req_body   = body.to_s.b
         req_ct     = content_type
         # The chain's hops (navigation_fetch.rs): each one's request, its Referer narrowed by the one before, its site
@@ -10396,12 +10399,15 @@ module Capybara
       # referrer none; what the app raises raised to the test, as a visit of the page's is) — the window's next document's
       # realm returned, nil where it made none. (…the response it was made of kept as the window's, `status_code`)
       # (…`post` a form's `[body, content type]`, its document's request a POST)
-      def navigate_window_realm(realm_id, kind, plan, by_user: false, post: nil)
+      # (…`initiator_document` the navigating document where it is another isolate's — Browser#navigation_initiator, its
+      # Referer the plan's — for the request's initiator: `frame_navigation_fetch`)
+      def navigate_window_realm(realm_id, kind, plan, by_user: false, post: nil, initiator_document: nil)
         invalidate_find_cache
         case kind
         when 'location'
           url, replace, initiator, source, policy, activated, blob = plan
-          entry = [replace ? 'replace' : 'push']
+          referred = source if initiator_document
+          entry    = [replace ? 'replace' : 'push']
         when 'reload'
           activated, blob = plan
           url   = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
@@ -10410,7 +10416,7 @@ module Capybara
           step, url, referred = plan
           entry = ['step', step]
         end
-        initiator ||= realm_id unless by_user
+        initiator ||= realm_id unless by_user || initiator_document
         made = {}
         body, ctype = nil
         if (blob = host_blob(blob))
@@ -10425,7 +10431,10 @@ module Capybara
         # (…the initiator's document gone since it began it — a frame's form that navigated the frame itself after — by
         # the URL and the policy it referred by as it began it: `source`, `policy`)
         if body.nil? && http_url?(url)
-          by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
+          by   = if kind == 'traverse' || by_user then {}
+                 elsif initiator_document then {initiator_document: initiator_document, referrer_policy: policy}
+                 else {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
+                 end
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
           resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, **by)
           return if resp.nil? || resp['no_document']

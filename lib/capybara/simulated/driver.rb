@@ -883,7 +883,9 @@ module Capybara
       # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
       private def navigate_window(browser, url, source: nil, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
         return if url.nil? || url.to_s.empty? || Browser::DATA_URL.match?(url.to_s)
-        return navigate_realm_window(browser, url, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace) if browser.is_a?(RealmWindow)
+        if browser.is_a?(RealmWindow)
+          return navigate_realm_window(browser, url, source, initiator_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace)
+        end
 
         blob ||= blob_bytes_for(url, source || browser) if url.to_s.start_with?('blob:')
         initiator, referrer, referrer_policy = plan_source(browser, source, initiator_realm, referrer, referrer_policy)
@@ -900,19 +902,22 @@ module Capybara
       end
 
       # …one `window.open` made in a Browser's isolate, by another isolate's document: navigated in its host as its own
-      # location would be — the Referer and policy the caller's — its request the window's own (the caller's document is
-      # no realm of that isolate: its site, which Sec-Fetch-Site compares, the window's — a gap until R13 S6 moves the
-      # caller into the isolate).
-      private def navigate_realm_window(window, url, referrer:, referrer_policy:, user_activated:, replace: false, post: nil)
+      # location would be — the Referer and policy the caller's — its request's initiator the caller's document as its
+      # Browser describes it (`plan_source`: Browser#navigation_initiator of `source`'s realm `initiator_realm`, the
+      # opener's page where none is named), which no realm of that isolate is.
+      private def navigate_realm_window(window, url, source, initiator_realm, referrer:, referrer_policy:, user_activated:, replace: false, post: nil)
         realm = window.realm or return
-        window.host.navigate_window_realm(realm, 'location', [url.to_s, replace, realm, referrer, referrer_policy, user_activated == true, nil], post: post)
+        initiator, referrer, referrer_policy = plan_source(window, source, initiator_realm, referrer, referrer_policy)
+        plan = [url.to_s, replace, nil, referrer, referrer_policy, user_activated == true, nil]
+        window.host.navigate_window_realm(realm, 'location', plan, post: post, initiator_document: initiator || {})
       end
 
       # …a form's submission to it by its name, with a POST resource (HTML "navigate", `documentResource` a POST resource:
       # its encoded body and content type, from the form's document's origin — the initiator's), planned likewise.
       private def post_window(browser, url, post, source:, initiator_realm:, referrer:, referrer_policy:, user_activated:)
         if browser.is_a?(RealmWindow)
-          return navigate_realm_window(browser, url, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, post: [post[:body].to_s, post[:content_type].to_s])
+          post = [post[:body].to_s, post[:content_type].to_s]
+          return navigate_realm_window(browser, url, source, initiator_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, post: post)
         end
 
         initiator, referrer, referrer_policy = plan_source(browser, source, initiator_realm, referrer, referrer_policy)

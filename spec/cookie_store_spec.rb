@@ -368,6 +368,38 @@ RSpec.describe 'the cookie store' do
     end
   end
 
+  # …and a window `window.open` made in its opener's isolate (a realm window) is navigated by the document that asked
+  # alike: a link of a frame of b's under a's page that targets it by its name is cross-site to a — the Lax cookie alone,
+  # Sec-Fetch-Site `cross-site` — and a form of that frame's posted into it sends no SameSite cookie; neither is the
+  # window's own document's (a's), same-origin.
+  it "judges a realm window's navigation by the document that asked for it" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/top'   then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="https://b.test/asker"></iframe>']]
+      when '/asker'
+        [200, {'content-type' => 'text/html'}, [
+          '<!DOCTYPE html><a href="https://a.test/echo-get" target="w">go</a>' \
+          '<form method="post" action="https://a.test/echo-post" target="w"><button>post</button></form>'
+        ]]
+      else
+        seen << [req.request_method, req.path, env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>echo</title>']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://a.test/top'
+    popup = s.window_opened_by { s.execute_script("open('', 'w')") }
+    s.within_frame(0) { s.click_link 'go' }
+    s.within_window(popup) { poll_until { seen.size == 1 } }
+    s.within_frame(0) { s.click_button 'post' }
+    s.within_window(popup) { poll_until { seen.size == 2 } }
+    expect(seen).to eq([['GET', '/echo-get', 'l=1', 'cross-site'], ['POST', '/echo-post', '', 'cross-site']])
+  end
+
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
   # document it reloads was reached by a same-site request — a page a cross-site link led to sends its Strict cookies
   # on no reload of the user's — where the page's own `location.reload()` is judged by its document's site, as any of
