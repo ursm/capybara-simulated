@@ -156,7 +156,7 @@ fn form_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
         let arena = &crate::dom::dom(scope).arena;
         submitter.and_then(|id| arena.get(id)?.plain_attr_units("formtarget")).or_else(|| arena.get(form)?.plain_attr_units("target"))
     };
-    let target = own_target.or_else(|| crate::url_ops::node_base_target(scope, form));
+    let target = own_target.or_else(|| crate::url_ops::node_base_target(scope, form)).map(crate::url_ops::sanitized_target);
     let arena = &crate::dom::dom(scope).arena;
     let Some(f) = arena.get(form) else { return };
     let s = submitter.and_then(|id| arena.get(id));

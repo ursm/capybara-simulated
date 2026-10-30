@@ -2162,6 +2162,12 @@ module Capybara
       attr_reader :browsing_context_group
       # …and the number its session history goes by (session_history.rs `HISTORIES`), which its realms read.
       def session_history_id = @session_history.id
+      # …and its target name (`window.name`), its active document state's (session_history.rs `State::name`): a new window
+      # named as it opens, the one a name finds.
+      def window_name = @session_history.name
+      def window_name=(name)
+        @session_history.name = name.to_s
+      end
       def inherit_browsing_context_group(opener)
         @browsing_context_group = opener.browsing_context_group
         @runtime.call('__csimSetBrowsingContextGroup', @browsing_context_group, "w#{object_id}")
@@ -11141,6 +11147,9 @@ module Capybara
         flush_outgoing_page_init if !from_history && @timers_active
         # (…a traversal's page asked as its step is applied: `perform_history_traverse`)
         prompt_page_to_unload if !from_history || is_reload
+        # (…the origin of the document it leaves, which one of another origin clears the navigable's name by: none for a
+        # window of no document yet, or of an opaque origin)
+        leaving_origin = leaving_document_origin unless from_history
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
         fetch = Native::NavigationFetch.new({
@@ -11267,6 +11276,7 @@ module Capybara
 
             @current_url = target
             record_response(status, headers)
+            clear_navigable_name(leaving_origin, target) unless from_history
             # Full-reload navigation rebuilds the JS Context from the warm
             # snapshot. Per-visit fresh VM avoids partial-reset drift
             # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
@@ -11280,6 +11290,26 @@ module Capybara
           # flushed is still live and still means what its timers asked for.
           restore_flushed_nav_intents
         end
+      end
+      # The origin of the page's document a navigation leaves — a window's of none yet its initial about:blank's, its
+      # creator's (`inherit_creator`; one it does not know, a `noopener` window's, kept: `clear_navigable_name`) — none
+      # for one of an opaque origin (never the same as another).
+      private def leaving_document_origin
+        return @creator&.fetch(:origin) || :initial unless window_has_document?
+
+        url, _, opaque = request_client(0)
+        opaque ? nil : url_origin(url)
+      end
+      # HTML "finalize a cross-document navigation": a top-level navigable's target name (`window.name`, its document
+      # state's: session_history.rs) cleared where its new document is of another origin than the one it leaves — unless
+      # it is an auxiliary browsing context whose opener is still there (not disowned: `window.opener = null`). (…a
+      # `noopener` window's first navigation away from its initial about:blank leaving it as it is: that document's origin
+      # its creator's, which such a window does not keep here — a gap)
+      private def clear_navigable_name(leaving_origin, url)
+        return if leaving_origin == :initial || (leaving_origin && leaving_origin == url_origin(url))
+        return if opener_handle && !@runtime.realm_direct_call(0, '__csimOpenerDisowned')
+
+        @session_history.name = ''
       end
       # A navigation's session history entry, pushed (or the current one replaced) as it begins — the history before it
       # kept, for a response that turns out to make no document (`download_in_place`).

@@ -117,7 +117,7 @@ module Capybara
         @client_spaces   = 0
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
-        @aux_windows     = []  # [{handle:, browser:, name:, opener:}, …]
+        @aux_windows     = []  # [{handle:, browser:, opener:}, …]
         # Browsers whose WINDOW closed while they still host an active service-worker
         # registration. A registration is profile-wide state independent of the document
         # that created it (a page registers, closes, and the SW keeps controlling
@@ -445,9 +445,13 @@ module Capybara
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
 
-      # All window entries (primary + aux) as `{handle:, browser:, name:, opener:}`.
+      # All window entries (primary + aux) as `{handle:, browser:, opener:}`.
       private def window_entries
-        [{handle: PRIMARY_HANDLE, browser: @browser, name: '', opener: nil}] + @aux_windows
+        [{handle: PRIMARY_HANDLE, browser: @browser, opener: nil}] + @aux_windows
+      end
+      # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name), none for ''.
+      private def named_window(name)
+        window_entries.find {|w| w[:browser].window_name == name } unless name.empty?
       end
 
       # The Browser backing a handle, or nil if the window is closed/unknown.
@@ -495,7 +499,7 @@ module Capybara
         # A `<form target>` keeps its opener by default (unlike a `target=_blank`
         # LINK, which is noopener) — resolve the opener handle from the source.
         opener_handle ||= handle_for(source) if opener && source
-        if !name.empty? && (existing = @aux_windows.find {|w| w[:name] == name })
+        if (existing = named_window(name))
           return existing[:handle] if refused
 
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
@@ -522,7 +526,8 @@ module Capybara
         # Register BEFORE visiting: the opened document's own boot scripts read
         # `window.opener`, which resolves through this entry — so the entry
         # (with its opener) must exist before `visit` runs those scripts.
-        @aux_windows << {handle: handle, browser: aux, name: name, opener: opener_handle}
+        aux.window_name = name
+        @aux_windows << {handle: handle, browser: aux, opener: opener_handle}
         # (…another window of the session now, which may resolve the URLs the others made before it: their bytes entered in
         # the registry, for its workers' threads to read — Browser#partition_blob)
         ([@browser] + @aux_windows.map {|w| w[:browser] }).each {|b| b.fill_blob_markers unless b.nil? || b.equal?(aux) }
@@ -592,7 +597,7 @@ module Capybara
         end
         # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
         # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
-        if !name.to_s.empty? && (existing = @aux_windows.find {|w| w[:name] == name.to_s })
+        if (existing = named_window(name.to_s))
           navigate_window(existing[:browser], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy,
                                                         user_activated: opener_browser.source_activated?(opener_realm_id))
           return existing[:handle]

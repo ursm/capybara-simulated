@@ -3924,63 +3924,25 @@ html/browsers/the-window-object/window-open-noopener.html:
 - noopener window.open targeting _self
 - noopener window.open targeting _top
 html/browsers/the-window-object/window-open-popup-behavior.html:
-- " (expect tab)"
-- ",noopener (expect tab)"
-- ",noopener,noreferrer,popup (expect tab)"
-- ",noreferrer (expect tab)"
 - ",popup (expect popup)"
-- "[harness] TIMEOUT"
 - location=yes,menubar=yes,scrollbars=yes (expect popup)
-- location=yes,menubar=yes,scrollbars=yes,noopener (expect tab)
-- location=yes,menubar=yes,scrollbars=yes,noopener,noreferrer,popup (expect tab)
-- location=yes,menubar=yes,scrollbars=yes,noreferrer (expect tab)
 - location=yes,menubar=yes,scrollbars=yes,popup (expect popup)
 - location=yes,scrollbars=yes,status=yes (expect popup)
-- location=yes,scrollbars=yes,status=yes,noopener (expect tab)
-- location=yes,scrollbars=yes,status=yes,noopener,noreferrer,popup (expect tab)
-- location=yes,scrollbars=yes,status=yes,noreferrer (expect tab)
 - location=yes,scrollbars=yes,status=yes,popup (expect popup)
 - location=yes,toolbar=yes,menubar=yes (expect popup)
-- location=yes,toolbar=yes,menubar=yes,noopener (expect tab)
-- location=yes,toolbar=yes,menubar=yes,noopener,noreferrer,popup (expect tab)
-- location=yes,toolbar=yes,menubar=yes,noreferrer (expect tab)
 - location=yes,toolbar=yes,menubar=yes,popup (expect popup)
-- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes (expect
-  tab)
-- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,noopener
-  (expect tab)
-- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,noopener,noreferrer,popup
-  (expect tab)
-- location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,noreferrer
-  (expect tab)
 - location=yes,toolbar=yes,menubar=yes,resizable=yes,scrollbars=yes,status=yes,popup
   (expect popup)
 - location=yes,toolbar=yes,status=yes (expect popup)
-- location=yes,toolbar=yes,status=yes,noopener (expect tab)
-- location=yes,toolbar=yes,status=yes,noopener,noreferrer,popup (expect tab)
-- location=yes,toolbar=yes,status=yes,noreferrer (expect tab)
 - location=yes,toolbar=yes,status=yes,popup (expect popup)
 - menubar=yes,resizable=yes,scrollbars=yes (expect popup)
-- menubar=yes,resizable=yes,scrollbars=yes,noopener (expect tab)
-- menubar=yes,resizable=yes,scrollbars=yes,noopener,noreferrer,popup (expect tab)
-- menubar=yes,resizable=yes,scrollbars=yes,noreferrer (expect tab)
 - menubar=yes,resizable=yes,scrollbars=yes,popup (expect popup)
 - resizable=yes,scrollbars=yes,status=yes (expect popup)
-- resizable=yes,scrollbars=yes,status=yes,noopener (expect tab)
-- resizable=yes,scrollbars=yes,status=yes,noopener,noreferrer,popup (expect tab)
-- resizable=yes,scrollbars=yes,status=yes,noreferrer (expect tab)
 - resizable=yes,scrollbars=yes,status=yes,popup (expect popup)
 - toolbar=yes,menubar=yes,resizable=yes (expect popup)
-- toolbar=yes,menubar=yes,resizable=yes,noopener (expect tab)
-- toolbar=yes,menubar=yes,resizable=yes,noopener,noreferrer,popup (expect tab)
-- toolbar=yes,menubar=yes,resizable=yes,noreferrer (expect tab)
 - toolbar=yes,menubar=yes,resizable=yes,popup (expect popup)
 - toolbar=yes,resizable=yes,status=yes (expect popup)
-- toolbar=yes,resizable=yes,status=yes,noopener (expect tab)
-- toolbar=yes,resizable=yes,status=yes,noopener,noreferrer,popup (expect tab)
-- toolbar=yes,resizable=yes,status=yes,noreferrer (expect tab)
 - toolbar=yes,resizable=yes,status=yes,popup (expect popup)
-- undefined (expect tab)
 html/browsers/the-window-object/window-open-windowfeatures-values.html:
 - Test popup, expected interpretation is true
 - Test popup=-1, expected interpretation is true
@@ -4052,48 +4014,16 @@ html/browsers/windows/auxiliary-browsing-contexts/opener-closed.html:
 - An auxiliary browsing context should report `null` for `window.opener` when that
   browsing context is discarded
 - "[harness] TIMEOUT"
-html/browsers/windows/auxiliary-browsing-contexts/opener-multiple.html:
-- An auxiliary browsing context should be able to open another auxiliary browsing
-  context
-html/browsers/windows/auxiliary-browsing-contexts/opener-setter.html:
-- Auxiliary browsing context created via `window.open` and setting `window.opener`
-  to `null` should report `window.opener` `null`
-- Auxiliary browsing context created via `window.open` and setting `window.opener`
-  to `test` should report `test`
-- "[harness] TIMEOUT"
-html/browsers/windows/auxiliary-browsing-contexts/opener.html:
-- Browsing context created with `window.open` should report `window.opener`
-- Newly-created auxiliary browsing context should report `window.opener`
-- "[harness] TIMEOUT"
-html/browsers/windows/browsing-context-names/choose-_parent-003.html:
-- _parent should reuse window.parent context
-html/browsers/windows/browsing-context-names/choose-_top-001.html:
-- Should choose current browsing context for "_top" if current is top
-html/browsers/windows/browsing-context-names/choose-_top-002.html:
-- Should choose top browsing context for "_top" if current is not top
-html/browsers/windows/browsing-context-names/choose-_top-003.html:
-- choosing _top context should be case-insensitive
 html/browsers/windows/browsing-context-names/duplicate-name-order.html:
 - Duplicate name lookup order
 html/browsers/windows/clear-window-name.https.html:
-- Window.name is not reset at the first navigation away from initial about:blank with
-  noopener
-- Window.name is not reset at the first navigation away from initial about:blank with
-  window.opener set to null
-- Window.name is not reset at the first navigation away from loaded initial about:blank
-- Window.name is not reset at the same-origin navigation with window.opener set to
-  null
 - Window.name is not reset if the document.domain is set to the parent domain
-- Window.name is not reset when there is an opener around
-- Window.name is not reset when there is an opener around (cross-origin)
+- Window.name is reset at the first first cross-origin navigation with window.opener
+  set to null
 - "[harness] TIMEOUT"
-- window.name is not reset after navigating to an about:blank page from a non-about:blank
-  page
 html/browsers/windows/consume-user-activation/window-open-multi-global.html:
 - "[harness] TIMEOUT"
 - window.open() and consuming user activation with multiple globals in play
-html/browsers/windows/dangling-markup-window-name.html:
-- Dangling Markup in target is not reset when set by window.open
 html/browsers/windows/document-domain-nested-navigate.window.js:
 - Navigated frame to about:blank and document.domain
 html/browsers/windows/embedded-opener-remove-frame.html:
@@ -4144,8 +4074,6 @@ html/browsers/windows/opener-string.window.js:
 html/browsers/windows/restore-window-name-manual.https.html:
 - "[harness] TIMEOUT"
 - "[harness] no subtests"
-html/browsers/windows/targeting-cross-origin-nested-browsing-contexts.html:
-- Targeting nested browsing contexts
 html/canvas/element/color-type/2d.color.type.u8p3.to.f16srgb.to.u8p3.html:
 - test srgb float16 canvas storing 8-bit display-p3 data accurately
 html/canvas/element/color-type/2d.color.type.u8srgb.to.f16p3.to.u8srgb.html:

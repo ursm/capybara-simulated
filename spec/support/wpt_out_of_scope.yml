@@ -39482,10 +39482,6 @@ html/browsers/the-window-object/window-reuse.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] TIMEOUT"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: synchronously navigating window away from initial about:blank should not reuse
     window
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

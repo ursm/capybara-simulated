@@ -176,12 +176,19 @@ pub(crate) fn node_base_target(scope: &mut v8::PinScope<'_, '_>, id: crate::dom:
     let doc = crate::node_handle::nid_of(scope, doc.into())?;
     crate::dom::dom(scope).arena.base_target(doc)
 }
+// HTML "get an element's target", its last step: a target that holds an ASCII tab or newline and a `<` is `_blank` — the
+// trace of dangling markup (an injected `<a target='…` left unterminated), which would hand the rest of the page to the
+// window it names as its `window.name`.
+pub(crate) fn sanitized_target(target: Vec<u16>) -> Vec<u16> {
+    let whitespace = target.iter().any(|&c| matches!(c, 0x09 | 0x0A | 0x0D));
+    if whitespace && target.contains(&u16::from(b'<')) { "_blank".encode_utf16().collect() } else { target }
+}
 // __dom.elementTarget(nid) -> HTML "get an element's target" of a hyperlink: its `target`, else its node document's base
-// target (`node_base_target`), else ''.
+// target (`node_base_target`), else '' (`sanitized_target`).
 fn element_target_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(id) = crate::dom::nid_arg(scope, &args, 0) else { return rv.set(crate::dom::utf16_value(scope, &[])) };
     let own = crate::dom::dom(scope).arena.get(id).and_then(|n| n.plain_attr_units("target"));
-    let target = own.or_else(|| node_base_target(scope, id)).unwrap_or_default();
+    let target = sanitized_target(own.or_else(|| node_base_target(scope, id)).unwrap_or_default());
     rv.set(crate::dom::utf16_value(scope, &target));
 }
 

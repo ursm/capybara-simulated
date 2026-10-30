@@ -54,7 +54,11 @@ pub(crate) struct Navigables {
     // key: the page's until a window of its takes it, back with the page when that one closes.
     focused_child: HashMap<i32, u32>,
     system_focus: i32,
+    // The target names of the top-level windows `window.open` made in this isolate — the page's is its session history's
+    // (`history`: its number in session_history.rs `HISTORIES`, the host's to say, 0 none), held in its active document
+    // state as HTML has it.
     top_names: HashMap<i32, Vec<u16>>,
+    pub(crate) history: u64,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
     // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made; none closed.
@@ -271,11 +275,12 @@ impl RealmArena {
     // The target name of the navigable realm `cid`'s document is the active document of.
     // A frame's window whose document is no longer its navigable's active one — the frame removed, or navigated since —
     // has none: no name, and none to set.
-    pub(crate) fn window_name(&self, cid: i32) -> &[u16] {
+    pub(crate) fn window_name(&self, cid: i32) -> std::borrow::Cow<'_, [u16]> {
         let nav = &self.navigables;
         match nav.containers.get(&cid) {
-            Some(container) => nav.children.get(container).filter(|c| c.realm == Some(cid)).map_or(&[], |c| &c.name),
-            None => nav.top_names.get(&cid).map_or(&[], Vec::as_slice),
+            Some(container) => nav.children.get(container).filter(|c| c.realm == Some(cid)).map_or(&[][..], |c| &c.name).into(),
+            None if cid == 0 && nav.history != 0 => crate::session_history::name_of(nav.history).unwrap_or_default().into(),
+            None => nav.top_names.get(&cid).map_or(&[][..], Vec::as_slice).into(),
         }
     }
     pub(crate) fn set_window_name(&mut self, cid: i32, name: Vec<u16>) {
@@ -286,6 +291,7 @@ impl RealmArena {
                     child.name = name;
                 }
             }
+            None if cid == 0 && nav.history != 0 => crate::session_history::set_name_of(nav.history, &name),
             None => {
                 nav.top_names.insert(cid, name);
             }
@@ -918,7 +924,7 @@ impl RealmArena {
     }
     // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
     fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
-        if self.window_name(realm) == name {
+        if *self.window_name(realm) == *name {
             return Some(container.map_or(Chosen::TopLevel(realm), |c| Chosen::Frame(Some(realm), c)));
         }
         let doc = *self.navigables.documents.get(&realm)?;
@@ -1107,7 +1113,7 @@ fn parked_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 // __dom.windowName() -> this realm's navigable's target name (`window.name`).
 fn window_name(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let name = crate::dom::realm(scope, cid).window_name(cid).to_vec();
+    let name = crate::dom::realm(scope, cid).window_name(cid).into_owned();
     if let Some(s) = v8::String::new_from_two_byte(scope, &name, v8::NewStringType::Normal) {
         rv.set(s.into());
     }

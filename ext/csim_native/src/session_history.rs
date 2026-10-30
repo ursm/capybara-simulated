@@ -34,14 +34,17 @@ const TEXT_FIELDS: [&str; 4] = ["origin", "referer", "referrer_policy", "referre
 
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
 // and referrer policy its request was sent with (HTML's document state), whether its cookies were cross-site (which a
-// reload through a user interface element is judged by: RFC 6265bis §5.2) — its document's referrer, a frame's, and its
-// classic history API state and its document's persisted form state, serialized (StructuredSerializeForStorage).
+// reload through a user interface element is judged by: RFC 6265bis §5.2), its document state's navigable target name (a
+// top-level one's `window.name`: HTML keeps it there, so a traversal brings it back) — its document's referrer, a
+// frame's, and its classic history API state and its document's persisted form state, serialized
+// (StructuredSerializeForStorage).
 #[derive(Clone, Default)]
 struct Data {
     post: Option<(Arc<[u8]>, Option<String>)>,
     // (…by `TEXT_FIELDS`)
     texts: [Option<String>; 4],
     cross_site: Option<bool>,
+    name: Option<Vec<u16>>,
     state: Option<Arc<[u8]>>,
     form_state: Option<Arc<[u8]>>,
 }
@@ -75,6 +78,9 @@ impl Data {
         if let Some(v) = fields.get(ruby.to_symbol("cross_site")) {
             self.cross_site = Option::<bool>::try_convert(v)?;
         }
+        if let Some(v) = text("name")? {
+            self.name = v.map(|n| n.encode_utf16().collect());
+        }
         if let Some(v) = bytes("state")? {
             self.state = v;
         }
@@ -87,7 +93,7 @@ impl Data {
     // …and, an entry of the same document as `leaving`'s (a pushState's, a fragment navigation's), what it was reached by
     // where `self` names none: the document state the two share (HTML "URL and history update steps", "navigate to a
     // fragment": the new entry's document state the active one's) — its request's referrer and policy, its document's
-    // referrer, whether its cookies were cross-site. (…a POST's body its own entry's alone: a reload of the URL a page
+    // referrer, whether its cookies were cross-site, its navigable target name. (…a POST's body its own entry's alone: a reload of the URL a page
     // pushed is a GET of it)
     fn sharing_document_state(mut self, leaving: &Data) -> Self {
         for (field, theirs) in self.texts.iter_mut().zip(&leaving.texts) {
@@ -96,6 +102,9 @@ impl Data {
             }
         }
         self.cross_site = self.cross_site.or(leaving.cross_site);
+        if self.name.is_none() {
+            self.name.clone_from(&leaving.name);
+        }
         self
     }
 
@@ -119,6 +128,9 @@ impl Data {
         }
         if let Some(v) = self.cross_site {
             hash.aset(ruby.to_symbol("cross_site"), v)?;
+        }
+        if let Some(v) = &self.name {
+            hash.aset(ruby.to_symbol("name"), String::from_utf16_lossy(v))?;
         }
         for (key, field) in [("state", &self.state), ("form_state", &self.form_state)] {
             if let Some(v) = field {
@@ -147,6 +159,9 @@ struct State {
     // current entry the one it was at — by navigable, until a step gives it that entry again or it is navigated.
     // …each with the step it was at as it was held, which the navigables of its document are at with it.
     held: HashMap<u32, (u64, i64)>,
+    // The target name the top-level navigable was made with, before it has a document state of its own to hold it (a
+    // window `window.open` named: HTML "create a new auxiliary browsing context"), which its first one takes.
+    initial_name: Vec<u16>,
 }
 
 #[derive(Default)]
@@ -240,6 +255,24 @@ impl State {
     }
 
     // …and its current entry.
+    // The navigable target name of the top-level navigable's active document state (`window.name`), and — `set_name` —
+    // the one every entry of that document has made `name`: the state they share.
+    fn name(&self, build: u32) -> Vec<u16> {
+        match self.current_entry(TOP, build) {
+            Some(e) => e.data.name.clone().unwrap_or_default(),
+            None => self.initial_name.clone(),
+        }
+    }
+    fn set_name(&mut self, build: u32, name: &[u16]) {
+        let Some(doc) = self.current_entry(TOP, build).map(|e| e.doc) else {
+            self.initial_name = name.to_vec();
+            return;
+        };
+        for entry in self.entries.iter_mut().filter(|e| e.doc == doc) {
+            Arc::make_mut(&mut entry.data).name = Some(name.to_vec());
+        }
+    }
+
     fn current_entry(&self, nav: u32, build: u32) -> Option<&Entry> {
         let (list, step) = self.find(nav, build)?;
         self.current_of(nav, list, step)
@@ -393,9 +426,14 @@ impl Traversable {
         if !replace {
             self.state.clear_forward(build);
         }
+        let initial_name = self.state.initial_name.clone();
         let list = self.state.list_mut(nav, build)?;
         let (doc, data) = match (&leaving, same_document) {
             (Some(e), true) => (e.doc, data.sharing_document_state(&e.data)),
+            // (…a top-level navigable's new document state its navigable target name the active one's: HTML "navigate",
+            // which a navigation to another origin that leaves no opener clears as it finishes — the host's to say)
+            (Some(e), false) if nav == TOP && data.name.is_none() => (fresh_doc, Data { name: e.data.name.clone(), ..data }),
+            (None, _) if nav == TOP && data.name.is_none() => (fresh_doc, Data { name: Some(initial_name), ..data }),
             _ => (fresh_doc, data),
         };
         if replace {
@@ -579,6 +617,17 @@ impl SessionHistory {
         }
         Ok(id.and_then(|id| rb_self.lock().state.entry(id).and_then(|e| e.data.text(&name).map(str::to_owned))))
     }
+    // #name / #name=(name): the top-level navigable's target name (`State::name`), which a new window is opened with and
+    // a navigation to another origin that leaves it no opener clears.
+    fn name(&self) -> String {
+        let t = self.lock();
+        String::from_utf16_lossy(&t.state.name(t.build))
+    }
+    fn set_name(&self, name: String) {
+        let mut t = self.lock();
+        let build = t.build;
+        t.state.set_name(build, &name.encode_utf16().collect::<Vec<_>>());
+    }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
     // (…`fields` read with the history unlocked: a Ruby conversion may run code that reads it)
@@ -709,6 +758,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("entry", method!(SessionHistory::entry, 1))?;
     class.define_method("text", method!(SessionHistory::text, 2))?;
     class.define_method("update", method!(SessionHistory::update, 2))?;
+    class.define_method("name", method!(SessionHistory::name, 0))?;
+    class.define_method("name=", method!(SessionHistory::set_name, 1))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("queue", method!(SessionHistory::queue, 2))?;
@@ -956,6 +1007,27 @@ mod tests {
     }
 
     #[test]
+    fn a_top_level_name_is_its_document_state_s() {
+        let h = history();
+        let name = |h: &SessionHistory| String::from_utf16_lossy(&h.lock().state.name(0));
+        // (…the one a window was made with its first document's; set, every entry of its document's; carried to the next
+        // document; and back with its entry on a traversal)
+        h.set_name("pop".into());
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.push(TOP, TOP, "/a#x".into(), true, Data::default());
+        h.set_name("set".into());
+        assert_eq!(name(&h), "set");
+        let step = h.lock().state.current;
+        h.push(TOP, TOP, "/b".into(), false, Data::default());
+        assert_eq!(name(&h), "set");
+        h.set_name("later".into());
+        h.go_to(step);
+        assert_eq!(name(&h), "set");
+        h.go_to(step - 1);
+        assert_eq!(name(&h), "set");
+    }
+
+    #[test]
     fn a_saved_history_keeps_the_data_it_had() {
         let h = history();
         let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None], ..Default::default() }).unwrap();
@@ -964,6 +1036,20 @@ mod tests {
         assert!(h.restore(0));
         assert_eq!(h.lock().state.entry(a).unwrap().data.text("referer"), Some("/r"));
     }
+}
+
+// The navigable target name of the session history numbered `id`'s top-level navigable (`State::name`), and — `set_name_of`
+// — that one made `name`; none where it is gone.
+pub(crate) fn name_of(id: u64) -> Option<Vec<u16>> {
+    let traversable = histories().1.get(&id)?.upgrade()?;
+    let t = traversable.lock().unwrap_or_else(PoisonError::into_inner);
+    Some(t.state.name(t.build))
+}
+pub(crate) fn set_name_of(id: u64, name: &[u16]) {
+    let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
+    let mut t = traversable.lock().unwrap_or_else(PoisonError::into_inner);
+    let build = t.build;
+    t.state.set_name(build, name);
 }
 
 // The length of the session history numbered `id` (`SessionHistory#length`), none where it is gone.
@@ -982,7 +1068,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 // __dom.setSessionHistory(id) — the session history of the isolate's window (`SessionHistory#id`), the host's to say.
 fn set_session_history(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
-    crate::dom::dom(scope).session_history = id;
+    crate::dom::dom(scope).arena.navigables.history = id;
 }
 
 // Whether realm `realm`'s `history` is its window's session history: a realm of the page's, or of a frame of it — every
@@ -1008,7 +1094,7 @@ fn history_length_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         return crate::clone::throw_dom_exception(scope, message, "SecurityError");
     }
     let of_page = of_page(arena, cid);
-    let id = crate::dom::dom(scope).session_history;
+    let id = arena.navigables.history;
     let length = if of_page { length_of(id).unwrap_or(1) } else { 1 };
     rv.set_uint32(length as u32);
 }
