@@ -1490,14 +1490,17 @@ module Capybara
         end
       end
 
-      # A hyperlink's download (HTML "download the hyperlink") of the document of realm `realm` — the frame whose link it
-      # is — fetched as the top-level navigation whose response it is: hop by hop, its redirects followed, its cookies sent
-      # and its responses' stored as such a navigation's are, by that document (navigation_fetch.rs), its Referer that
-      # document's under the link's referrer policy (`link_policy`, '' none: its `rel=noreferrer` / `referrerpolicy` — as
-      # Firefox 159 follows both and Chrome 156 the attribute, measured 2026-10-31), else the document's.
-      # (…its Fetch Metadata HTML's request's — "destination is the empty string", no `Sec-Fetch-User`, as it is no
-      # navigation request — but Sec-Fetch-Mode `navigate`, as Chrome 156 and Firefox 159 both send it (measured
-      # 2026-10-31; Firefox's Sec-Fetch-Dest `document`), the navigation whose cookies it carries)
+      # A hyperlink's download of the document of realm `realm` — the frame whose link it is — as HTML "download the
+      # hyperlink" makes its request: "a new request whose URL is urlString, client is entry settings object, initiator is
+      # 'download', destination is the empty string" — no navigation request: its mode the default, "no-cors", its
+      # credentials mode the default, "same-origin". So it is fetched as that document's subresource request is
+      # (`rack_fetch`): its redirects followed, its Fetch Metadata Sec-Fetch-Mode `no-cors` and Sec-Fetch-Dest `empty`,
+      # its SameSite cookies judged as a subresource's by Fetch's "determine the same-site mode" — no Lax exception, its
+      # response storing no SameSite cookie of another site — and none of another origin sent or stored at all. Its
+      # Referer the document's under the link's referrer policy (`link_policy`: its `rel=noreferrer` / `referrerpolicy`,
+      # '' none). Chrome 156 and Firefox 159 both make it a navigation instead (measured 2026-10-31: Sec-Fetch-Mode
+      # `navigate`, Sec-Fetch-Dest `empty` / `document`; a cross-site one's Lax cookie sent; Chrome refers through
+      # `rel=noreferrer`); HTML's text is explicit, and the spec wins.
       def download_link(url, filename_hint = '', realm: 0, link_policy: '')
         # (…a `data:` URL's body its own, decoded: no request made of it)
         if url.to_s.match?(/\Adata:/i)
@@ -1505,47 +1508,30 @@ module Capybara
           return save_downloaded_response(url, {'content-type' => mime}, [bytes], hint: filename_hint) if mime
           return
         end
-        source, policy = realm_referrer_initiator(realm)
-        fetch          = Native::NavigationFetch.new({
-          method:          'GET',
-          url:             url.to_s,
-          body_empty:      true,
-          referrer:        source,
-          referrer_policy: link_policy.empty? ? policy.to_s : link_policy,
-          initiator:       initiating_url(realm),
-          top_level:       true,
-          **initiating_document(realm)
-        })
-        loop do
-          _, target, _, ref_source, ref_policy, _, site, _, _, cookie_context = fetch.begin_hop
-          env = rack_env_for(target, method: 'GET')
-          env['HTTP_USER_AGENT']     = @default_user_agent || USER_AGENT
-          env['REMOTE_ADDR']         = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
-          env['HTTP_SEC_FETCH_SITE'] = site
-          env['HTTP_SEC_FETCH_MODE'] = 'navigate'
-          env['HTTP_SEC_FETCH_DEST'] = 'empty'
-          attach_cookies(env, env_request_url(env), cookie_context)
-          # (…its Referer under the document's referrer policy, narrowed at each hop as a redirect's `Referrer-Policy` says)
-          referrer               = Native.request_referrer(ref_policy, ref_source, target)
-          env['HTTP_REFERER']    = referrer if referrer
-          response = dispatch_rack_or_http(target, env) or return
-          status, headers, body = response
-          store_set_cookies(headers, target, cookie_context)
-          if (location = redirect_location(status, headers))
-            body.close if body.respond_to?(:close)
-            command, = fetch.redirect(status.to_i, location.to_s, referrer_policy_header(headers))
-            return unless command == 'follow'
+        client = client_for(realm, link_policy)
+        result = rack_fetch(
+          'GET',
+          url.to_s,
+          '',
+          {},
+          'follow',
+          'no-cors',
+          credentials:     'same-origin',
+          referrer_policy: client[:policy],
+          referrer:        client[:referrer],
+          client_url:      client[:url],
+          client_origin:   client[:origin],
+          client_realm:    client[:realm],
+          dest:            '',
+          body_raw:        true
+        )
+        # (…another origin's an opaque response, whose bytes, status and headers HTML's "handle as a download" saves all the
+        # same: the side channel a host-side consumer reads, `opaque_render`)
+        result = {'status' => result['render_status'], 'headers' => result['render_headers'], 'body_raw' => result['opaque_render'], 'url' => url} if result&.dig('type') == 'opaque'
+        return unless result && result['status'].to_i == 200
 
-            next
-          end
-          unless status.to_i == 200
-            body.close if body.respond_to?(:close)
-            return
-          end
-
-          # (…named by the link's `download` value where its Content-Disposition names nothing)
-          return save_downloaded_response(target, headers, body, hint: filename_hint)
-        end
+        # (…named by the link's `download` value where its Content-Disposition names nothing)
+        save_downloaded_response(result['url'].to_s.empty? ? url : result['url'], result['headers'] || {}, [result['body_raw'].to_s], hint: filename_hint)
       end
 
       # HTML "navigate": a navigation to `url` is one to a fragment of the current document where `url` has a fragment
@@ -9999,8 +9985,9 @@ module Capybara
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed headers, empty URL (cors-basic
           # "Opaque filter").
           if kind == 'opaque'
-            return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size,
-                                                                                    opaque_render_meta: [status, header_text(header_field(resp_headers, 'content-type'))])
+            # (…and, for a host-side consumer of the bytes — a download's, which saves them — its headers too)
+            meta = [status, header_text(header_field(resp_headers, 'content-type')), (stringify(resp_headers) if body_raw)]
+            return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size, opaque_render_meta: meta)
           end
           out = response_hash(status, exposed_headers, body_str, target, plan.redirected?, type: kind, body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
           # (…a document's navigation request's the method its last hop went with, which its session history entry keeps —
@@ -10202,7 +10189,8 @@ module Capybara
         # so the choice is made client-side. The bytes are already in memory (`body_str`).
         out['opaque_render'] = opaque_render.b if opaque_render && !opaque_render.empty?
         # (…and the status and MIME type it hides, for a consumer that checks them — a worker-imported script's)
-        out['render_status'], out['render_ct'] = opaque_render_meta if opaque_render_meta
+        out['render_status'], out['render_ct'], render_headers = opaque_render_meta if opaque_render_meta
+        out['render_headers'] = render_headers if render_headers
         out
       end
 
