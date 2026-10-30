@@ -117,6 +117,29 @@ RSpec.describe 'the cookie store' do
     expect(seen.reject {|_, c| c.empty? }).to eq([])
   end
 
+  # RFC 6265bis-14 §5.2: a request is same-site where its current URL is same site with its client's site for cookies —
+  # the redirect chain is not considered (its draft -08 rule withdrawn in -14, A.14: httpwg/http-extensions#2750; Chrome
+  # and Firefox backed it out as not web-compatible) — so a user's navigation through another site and back home is a
+  # same-site request at home, its Strict cookies sent.
+  it 'sends a navigation redirected through another site back home its Strict cookies' do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/away' then [302, {'location' => 'http://b.test/back'}, ['']]
+      when '/back' then [302, {'location' => 'http://a.test/home'}, ['']]
+      else
+        seen << env['HTTP_COOKIE'].to_s
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'http://a.test/set'
+    s.visit 'http://a.test/away'
+    expect(seen).to eq(['s=1; l=1'])
+  end
+
   # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a
   # same-site, cross-origin fetch() of the default credentials mode (`same-origin`) leaves the jar as it was, where one
   # of `include` (that the response allows) stores them.

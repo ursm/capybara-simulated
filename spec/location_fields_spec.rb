@@ -10,7 +10,9 @@ RSpec.describe 'a response with two Location fields' do
   let(:session) {
     simulated_session(lambda {|env|
       case env['PATH_INFO']
-      when '/two' then [302, {'content-type' => 'text/html', 'location' => "/a\n/b"}, ['<!DOCTYPE html><body>stayed']]
+      when '/two'
+        locations = "/a\n/b"
+        [302, {'content-type' => 'text/html', 'location' => locations}, ['<!DOCTYPE html><body>stayed']]
       when '/a', '/b' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body>went #{env['PATH_INFO']}"]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
       end

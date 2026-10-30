@@ -4574,9 +4574,8 @@ module Capybara
 
           # (…of the hop that hijacked it — a redirect's target where one came first — whose URL the response is, and
           # stored in its cookie context)
-          requested = resolve_against_current(request['url'].to_s).to_s
-          answered  = Thread.current[:csim_fetch_target] || requested
-          @hijack_fetch_contexts[id] = {url: answered, redirected: answered != requested, cookie_context: Thread.current[:csim_fetch_cookie_context], realm: request['clientRealm'].to_i}
+          answered, redirected = Thread.current[:csim_fetch_target] || [resolve_against_current(request['url'].to_s).to_s, false]
+          @hijack_fetch_contexts[id] = {url: answered, redirected: redirected, cookie_context: Thread.current[:csim_fetch_cookie_context], realm: request['clientRealm'].to_i}
           {'handle' => id}
         ensure
           Thread.current[:csim_fetch_target]         = nil
@@ -6563,9 +6562,9 @@ module Capybara
         content_type: nil,
         site_seed: nil,
         origin_null: false,
+        cookie_context:,
         dest: 'iframe',
         cookie_cross_site: false,
-        cookie_context: nil,
         resulting_client_id: nil,
         origin_url: referrer_source
       )
@@ -6582,8 +6581,8 @@ module Capybara
         # respondWith was never called, and main fetch goes on to the network; the preload response is no
         # fall-through's.
         # `dest` distinguishes a TOP-LEVEL navigation ('document') from a frame's ('iframe'):
-        # the preload request must report the navigation's own Sec-Fetch-Dest — the SameSite
-        # Lax cookie gate only applies to a top-level document GET.
+        # the preload request must report the navigation's own Sec-Fetch-Dest; its cookies are
+        # the navigation hop's (`cookie_context`).
         preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(preload_scope)
           navigation_preload_response(
             url,
@@ -9372,9 +9371,9 @@ module Capybara
           end
           if env_extras
             env.merge!(env_extras)
-            # (…and the hop's URL and cookie context, where the caller asked something of the request's: a hijacked
-            # fetch's, which its later response is of and stored in)
-            Thread.current[:csim_fetch_target]         = target
+            # (…and the hop's URL — whether a redirect led to it — and cookie context, where the caller asked something
+            # of the request's: a hijacked fetch's, which its later response is of and stored in)
+            Thread.current[:csim_fetch_target]         = [target, plan.redirected?]
             Thread.current[:csim_fetch_cookie_context] = cookie_context
           end
           response = dispatch_rack_or_http(target, env, method: method, body: body, transport: transport) or return nil
@@ -10815,8 +10814,8 @@ module Capybara
       # The `Cookie` request-header value for a request to `url`: the cookies the store retrieves for it (RFC 6265bis
       # §5.8.3) — its host's and those of a domain it domain-matches, whose path its path matches. `secure:` is the
       # transport of the request being built — a Secure cookie is omitted from any other (§5.4 step 1); REQUIRED so a
-      # new caller can't silently fail open. `cross_site:` is the request's site relationship (from its own
-      # Sec-Fetch-Site metadata): a SameSite=Strict cookie is withheld from any cross-site request; Lax — and the
+      # new caller can't silently fail open. `cross_site:` is the request's site relationship (`document.cookie`'s: its
+      # frame's ancestors'): a SameSite=Strict cookie is withheld from any cross-site request; Lax — and the
       # unspecified default, which Chrome treats as Lax — additionally rides a cross-site TOP-LEVEL GET navigation
       # (`lax_ok:`); only SameSite=None crosses freely. `http: false` is `document.cookie`'s, which no HttpOnly cookie
       # is read through. The bytes the cookies' values are, as the server sent them.
@@ -11878,8 +11877,8 @@ module Capybara
         body: nil,
         content_type: nil,
         extra_headers: nil,
+        cookie_context:,
         dest: 'iframe',
-        cookie_context: nil,
         origin_url: referrer_source,
         user_activated: false
       )
@@ -11924,8 +11923,8 @@ module Capybara
         site_seed,
         origin_null,
         header_value,
+        cookie_context:,
         dest: 'iframe',
-        cookie_context: nil,
         origin_url: referrer_source
       )
         site = Native.fetch_site(site_seed, origin_url, url)
