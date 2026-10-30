@@ -27,17 +27,24 @@ struct Nav {
     // Whether it navigates a top-level navigable, whose request may retrieve a Lax cookie by a safe method and whose
     // response may set a SameSite one however cross-site.
     top_level: bool,
+    // A reload through a user interface element's: whether the request the document it reloads was reached by was
+    // cross-site, which its every hop is then (RFC 6265bis §5.2) — none for any other navigation.
+    reloaded_cross: Option<bool>,
+    // Whether its last hop's cookies were cross-site, which the document its response makes was reached by.
+    cross: bool,
 }
 
 impl Nav {
     // The hop's cookie context, and whether the documents above the navigable are cross-site to its URL: cross-site where
-    // they are, or where the site Sec-Fetch-Site latched so far (`hop_site`) is.
+    // they are, or where the site Sec-Fetch-Site latched so far (`hop_site`) is — a reload through a user interface
+    // element's where the request it reloads was.
     fn cookies(&self, hop_site: &str) -> (bool, u32) {
         let target = &self.chain.target;
         let frame_cross = self.ancestors.as_ref().is_some_and(|a| a.iter().any(|u| cross_site_for_cookies(u.as_deref(), target)));
+        let cross = self.reloaded_cross.unwrap_or(hop_site == "cross-site" || frame_cross);
         let secure = http_origin(target).as_deref().is_some_and(crate::url_ops::potentially_trustworthy);
         let safe = self.chain.method == "GET";
-        (frame_cross, request_context(secure, hop_site == "cross-site" || frame_cross, self.top_level && safe, self.top_level))
+        (frame_cross, request_context(secure, cross, self.top_level && safe, self.top_level))
     }
 }
 
@@ -67,7 +74,8 @@ impl NavigationFetch {
     // was first sent with: the document state's initiator origin — nil none), `origin_null` (an opaque initiator's: its
     // origin `null`, its site cross-site), `site_seed` (a latch carried in, nil none), `ancestors` (the document origins its
     // cookies are judged by — nil none, each nil for one not known), `top_level` (whether it navigates a top-level
-    // navigable).
+    // navigable), `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it
+    // reloads was reached by was cross-site, `#cross_site?` that one's — nil for any other navigation).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -94,6 +102,8 @@ impl NavigationFetch {
                 site: text("site_seed")?.as_deref().map(static_site),
                 ancestors,
                 top_level: get("top_level")?.to_bool(),
+                reloaded_cross: Option::<bool>::try_convert(get("reloaded_cross_site")?)?,
+                cross: false,
             }),
         })
     }
@@ -109,6 +119,7 @@ impl NavigationFetch {
         let target = st.chain.target.clone();
         let hop_site = wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), &target));
         let (frame_cross, cookies) = st.cookies(hop_site);
+        st.cross = cookies & crate::cookie_jar::CROSS_SITE != 0;
         ruby.ary_from_iter([
             st.chain.method.clone().into_value_with(ruby),
             target.into_value_with(ruby),
@@ -161,8 +172,9 @@ impl NavigationFetch {
         Ok(out)
     }
 
-    // #target / #request_method / #redirected? / #referrer: the request as it stands, and the Referer its last hop sent
-    // — the referrer of the document its response makes.
+    // #target / #request_method / #redirected? / #referrer / #cross_site?: the request as it stands, the Referer its last
+    // hop sent — the referrer of the document its response makes — and whether that hop's cookies were cross-site: the
+    // request the document was reached by, which a reload of it through a user interface element is judged by.
     fn target(&self) -> String {
         self.st.borrow().chain.target.clone()
     }
@@ -175,6 +187,9 @@ impl NavigationFetch {
     fn referrer(&self) -> Option<String> {
         self.st.borrow().chain.referer()
     }
+    fn cross_site(&self) -> bool {
+        self.st.borrow().cross
+    }
 }
 
 pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
@@ -185,6 +200,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("target", method!(NavigationFetch::target, 0))?;
     class.define_method("request_method", method!(NavigationFetch::request_method, 0))?;
     class.define_method("redirected?", method!(NavigationFetch::redirected, 0))?;
+    class.define_method("cross_site?", method!(NavigationFetch::cross_site, 0))?;
     class.define_method("referrer", method!(NavigationFetch::referrer, 0))?;
     Ok(())
 }
@@ -210,6 +226,8 @@ mod tests {
             site: None,
             ancestors: Some(vec![Some("http://a.test/top".to_owned())]),
             top_level: false,
+            reloaded_cross: None,
+            cross: false,
         }
     }
 
@@ -240,5 +258,10 @@ mod tests {
         assert_eq!(top.cookies("cross-site").1 & (CROSS_SITE | LAX_RETRIEVE | TOP_LEVEL_NAV), CROSS_SITE | LAX_RETRIEVE | TOP_LEVEL_NAV);
         let post = Nav { ancestors: None, top_level: true, ..nav("POST", "http://a.test/", "http://a.test/page") };
         assert_eq!(post.cookies("same-origin").1 & (CROSS_SITE | LAX_RETRIEVE | TOP_LEVEL_NAV), TOP_LEVEL_NAV);
+        // (…a reload through a user interface element's by the request it reloads, whatever its own site)
+        let reload = Nav { reloaded_cross: Some(true), ..top };
+        assert_eq!(reload.cookies("none").1 & CROSS_SITE, CROSS_SITE);
+        let reload = Nav { reloaded_cross: Some(false), ..reload };
+        assert_eq!(reload.cookies("cross-site").1 & CROSS_SITE, 0);
     }
 }

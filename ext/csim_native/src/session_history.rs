@@ -33,13 +33,15 @@ struct Entry {
 const TEXT_FIELDS: [&str; 4] = ["origin", "referer", "referrer_policy", "referrer"];
 
 // What a replay of an entry sends and restores: how it was reached — a POST's body and content type, the origin, Referer
-// and referrer policy its request was sent with (HTML's document state) — its document's referrer, a frame's, and its
+// and referrer policy its request was sent with (HTML's document state), whether its cookies were cross-site (which a
+// reload through a user interface element is judged by: RFC 6265bis §5.2) — its document's referrer, a frame's, and its
 // classic history API state and its document's persisted form state, serialized (StructuredSerializeForStorage).
 #[derive(Clone, Default)]
 struct Data {
     post: Option<(Arc<[u8]>, Option<String>)>,
     // (…by `TEXT_FIELDS`)
     texts: [Option<String>; 4],
+    cross_site: Option<bool>,
     state: Option<Arc<[u8]>>,
     form_state: Option<Arc<[u8]>>,
 }
@@ -70,6 +72,9 @@ impl Data {
                 *field = v;
             }
         }
+        if let Some(v) = fields.get(ruby.to_symbol("cross_site")) {
+            self.cross_site = Option::<bool>::try_convert(v)?;
+        }
         if let Some(v) = bytes("state")? {
             self.state = v;
         }
@@ -96,6 +101,9 @@ impl Data {
             if let Some(v) = self.text(key) {
                 hash.aset(ruby.to_symbol(key), v)?;
             }
+        }
+        if let Some(v) = self.cross_site {
+            hash.aset(ruby.to_symbol("cross_site"), v)?;
         }
         for (key, field) in [("state", &self.state), ("form_state", &self.form_state)] {
             if let Some(v) = field {

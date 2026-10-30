@@ -140,6 +140,34 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq(['s=1; l=1'])
   end
 
+  # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
+  # document it reloads was reached by a same-site request — a page a cross-site link led to sends its Strict cookies
+  # on no reload of the user's — where the page's own `location.reload()` is judged by its document's site, as any of
+  # its navigations.
+  it "judges a reload of the user's as the request its document was reached by" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => 's=1; SameSite=Strict; Path=/'}, ['set']]
+      when '/link' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><a href="http://a.test/home">go</a>']]
+      else
+        seen << [req.path, env['HTTP_COOKIE'].to_s]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'http://a.test/set'
+    s.visit 'http://b.test/link'
+    s.click_link 'go'
+    s.refresh
+    s.execute_script('location.reload()')
+    s.evaluate_script('1')
+    s.visit 'http://a.test/mine'
+    s.refresh
+    expect(seen).to eq([['/home', ''], ['/home', ''], ['/home', 's=1'], ['/mine', 's=1'], ['/mine', 's=1']])
+  end
+
   # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a
   # same-site, cross-origin fetch() of the default credentials mode (`same-origin`) leaves the jar as it was, where one
   # of `include` (that the response allows) stores them.
