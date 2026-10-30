@@ -11044,16 +11044,19 @@ module Capybara
         commit: {}
       )
         invalidate_find_cache
-        initiating  = initiating_document(initiator || realm_id)
+        # (…a traversal's made by no document — a user's, as the page's is: `replay_history_entry` — so the document the
+        # frame is at gives it no opaque origin nor a cross-site ancestor; the entry's `origin_null` its re-post's Origin
+        # alone)
+        initiating  = is_history && !is_reload ? {} : initiating_document(initiator || realm_id)
         opaque      = initiating[:origin_null] == true
         origin_null = true if opaque
         source, referrer_policy = referrer
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
         # (`initiating_url`), its Referer the referrer source's — not the top document `current_browsing_context_url`
-        # returns for a non-entered frame. (…a traversal's a user's, of no initiator — Sec-Fetch-Site `none`, as the page's
-        # is: `replay_history_entry` — its origin the frame document's all the same; a re-post's Origin `null` where its
-        # entry was first sent with an opaque one, its site and cookies its initiator's all the same, and an opaque
-        # initiator's request of no site, cross-site to every URL)
+        # returns for a non-entered frame. (…a traversal's a user's, of no initiator — Sec-Fetch-Site `none` — its origin
+        # the frame document's all the same; a re-post's Origin `null` where its entry was first sent with an opaque one,
+        # its site and cookies its initiator's all the same, and an opaque initiator's request of no site, cross-site to
+        # every URL)
         origin_url ||= initiating_url(initiator || realm_id) || source
         req_body = body.to_s.b
         fetch = Native::NavigationFetch.new({

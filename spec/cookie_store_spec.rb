@@ -466,6 +466,31 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq([['/home', ''], ['/pushed', ''], ['/pushed', ''], ['/fail', ''], ['/fail', '']])
   end
 
+  # A user's traversal of a frame is made by no document of its: not by the sandboxed one the frame is at, of an opaque
+  # origin — so it is no cross-site request for its cookies, nor for Fetch Metadata, which reads it as the user's
+  # (Sec-Fetch-Site `none`).
+  it "judges a user's traversal of a sandboxed frame as made by no document" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set' then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/', 'n=1; SameSite=None; Secure; Path=/']}, ['set']]
+      when '/top' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe sandbox="allow-scripts" src="/f1"></iframe>']]
+      else
+        seen << [req.path, env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']]
+        [200, {'content-type' => 'text/html', 'cache-control' => 'no-store'}, ['<!DOCTYPE html><a href="/f2">go</a>']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://a.test/top'
+    s.within_frame(0) { s.click_link 'go' }
+    poll_until { seen.size == 2 }
+    s.go_back
+    poll_until { seen.size == 3 }
+    expect(seen.last).to eq(['/f1', 's=1; l=1; n=1', 'none'])
+  end
+
   # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a
   # same-site, cross-origin fetch() of the default credentials mode (`same-origin`) leaves the jar as it was, where one
   # of `include` (that the response allows) stores them.
