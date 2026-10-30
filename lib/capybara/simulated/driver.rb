@@ -4,6 +4,7 @@ require 'capybara/driver/base'
 require 'capybara/server/animation_disabler'
 require 'weakref'
 require_relative 'browser'
+require_relative 'realm_window'
 require_relative 'node'
 
 module Capybara
@@ -117,7 +118,10 @@ module Capybara
         @client_spaces   = 0
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
-        @aux_windows     = []  # [{handle:, browser:, opener:}, …]
+        # The session's other windows, `{handle:, window:, opener:}` each: a window a Browser of its own hosts — its own
+        # isolate, a browsing context group of its own or a pop-up of another's — or one `window.open` made in a Browser's
+        # isolate (RealmWindow), addressed in its host.
+        @aux_windows     = []
         # Browsers whose WINDOW closed while they still host an active service-worker
         # registration. A registration is profile-wide state independent of the document
         # that created it (a page registers, closes, and the SW keeps controlling
@@ -184,7 +188,7 @@ module Capybara
         return @browser unless @active_handle
 
         w = @aux_windows.find {|win| win[:handle] == @active_handle }
-        w[:browser] if w && !w[:browser].discard_due?
+        w[:window] if w && !w[:window].discard_due?
       end
 
       def needs_server?       = false
@@ -288,7 +292,7 @@ module Capybara
       def run_event_loop_frame(frame_ms)
         reap_closed_windows
         # (…the primary's where the active window closed: no command of the test's, which alone are refused then)
-        current = active_browser || @browser
+        current = host_of(active_browser || @browser)
         state = current.run_event_loop_frame(frame_ms)
         # Iterate a SNAPSHOT: a window's drain can open or close windows mid-loop (a
         # popup spawning another). Re-check each window is still open before stepping
@@ -312,11 +316,7 @@ module Capybara
       # caller distinguishing "waiting on a worker thread" from other async channels
       # (the wpt_runner's clock-hold) sees a popup-hosted worker/SW round trip too,
       # not just the active window's.
-      def worker_drive_pending?
-        current = active_browser || @browser
-        return true if current.worker_drive_pending?
-        @aux_windows.any? {|w| !w[:browser].equal?(current) && w[:browser].worker_drive_pending? }
-      end
+      def worker_drive_pending? = window_browsers.any?(&:worker_drive_pending?)
 
       # Fold an aux window's frame state into the running aggregate: any window that
       # progressed / has a queued rAF / has an async channel in flight keeps the
@@ -367,8 +367,7 @@ module Capybara
       # not interleave with a still-running background request on the same raw
       # socket — `reset!`'s drain alone runs after those hooks.
       def drain_background_requests
-        @aux_windows.each {|w| w[:browser].drain_app_request_threads rescue nil }
-        browser.drain_app_request_threads
+        window_browsers.each {|b| b.drain_app_request_threads rescue nil }
       end
 
       # Dispose every auxiliary window and return focus to the primary — a fresh
@@ -381,7 +380,7 @@ module Capybara
       # out of `reset!` so a caller can drop windows WITHOUT resetting the primary's
       # page state (the WPT runner rebuilds the primary itself, per file, via visit).
       def reset_windows!
-        @aux_windows.each {|w| w[:browser].dispose rescue nil }
+        @aux_windows.each {|w| w[:window].dispose rescue nil if w[:window].is_a?(Browser) }
         @aux_windows.clear
         @sw_parked.each {|b| b.dispose rescue nil }
         @sw_parked.clear
@@ -417,9 +416,12 @@ module Capybara
       # Whether the session has a window besides the primary (Browser#background_windows) — the common session's none.
       def several_windows? = !@aux_windows.empty?
 
-      # The session's windows' browsers: the primary's, then each auxiliary window's — none whose close ran, which waits
-      # only to be discarded (`reap_closed_windows`).
-      def window_browsers = window_entries.map {|w| w[:browser] }
+      # The session's windows' browsers — the primary's, then each auxiliary window's own — the isolates whose event loops
+      # step every window (a window `window.open` made in one its host's): none whose close ran, which waits only to be
+      # discarded (`reap_closed_windows`).
+      def window_browsers = window_entries.filter_map {|w| w[:window] if w[:window].is_a?(Browser) }
+      # …the one whose event loop window `window` is stepped by: its own, or its host's.
+      private def host_of(window) = window.is_a?(RealmWindow) ? window.host : window
 
       # Has this driver been permanently dropped? (A `reset!` between examples does NOT set this —
       # that rebuilds the page on a live runtime.)
@@ -463,10 +465,10 @@ module Capybara
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
 
-      # All window entries (primary + aux) as `{handle:, browser:, opener:}`.
+      # All window entries (primary + aux) as `{handle:, window:, opener:}`.
       # (…none whose close ran: no window of the session reaches it, its opener's `opener` of it none — Browser#close_steps)
       private def window_entries
-        [{handle: PRIMARY_HANDLE, browser: @browser, opener: nil}] + @aux_windows.reject {|w| w[:browser].discard_due? }
+        [{handle: PRIMARY_HANDLE, window: @browser, opener: nil}] + @aux_windows.reject {|w| w[:window].discard_due? }
       end
       # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name) in `from`'s browsing
       # context group, that `from` is familiar with — HTML "find a navigable by target name" searches the group's set,
@@ -477,8 +479,8 @@ module Capybara
         return if name.empty? || from.nil?
 
         window_entries.find {|w|
-          target = w[:browser]
-          target.window_name == name && !target.closing? && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
+          target = w[:window]
+          target.is_a?(Browser) && target.window_name == name && !target.closing? && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
         }
       end
       # HTML "familiar with", between top-level windows (session_history.rs `familiar`): `from`'s document of `target`'s
@@ -488,8 +490,9 @@ module Capybara
       private def familiar_with?(from, target) = from.traversable.familiar_with?(target.traversable)
 
       # The Browser backing a handle, or nil if the window is closed/unknown.
+      # (…a window `window.open` made in a Browser's isolate its RealmWindow)
       def window_browser(handle)
-        window_entries.find {|w| w[:handle] == handle }&.fetch(:browser)
+        window_entries.find {|w| w[:handle] == handle }&.fetch(:window)
       end
 
       # Same, but for the operations that ADDRESS a window rather than probe for one: a closed or
@@ -536,9 +539,9 @@ module Capybara
           # one is made)
           activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
           if post
-            post_window(existing[:browser], url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+            post_window(existing[:window], url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           else
-            navigate_window(existing[:browser], url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
+            navigate_window(existing[:window], url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           end
           return existing[:handle]
         end
@@ -560,10 +563,10 @@ module Capybara
           aux.traversable.opener = opener_browser.traversable
         end
         aux.traversable.by_web_content = by_script
-        @aux_windows << {handle: handle, browser: aux, opener: opener_handle}
+        @aux_windows << {handle: handle, window: aux, opener: opener_handle}
         # (…another window of the session now, which may resolve the URLs the others made before it: their bytes entered in
         # the registry, for its workers' threads to read — Browser#partition_blob)
-        ([@browser] + @aux_windows.map {|w| w[:browser] }).each {|b| b.fill_blob_markers unless b.nil? || b.equal?(aux) }
+        window_browsers.each {|b| b.fill_blob_markers unless b.equal?(aux) }
         # (…in its opener's browsing context group, where it has one: its about:blank, cross-origin isolated as it is)
         if opener_handle && source
           aux.inherit_cross_origin_isolation(source)
@@ -594,6 +597,15 @@ module Capybara
         handle
       end
 
+      # A window `window.open` made in `host`'s isolate, its first document's realm `realm` — the key it is known by after
+      # (RealmWindow) — a window of the session from now on, with a handle of its own.
+      private def add_realm_window(host, realm)
+        window = RealmWindow.new(host, realm)
+        window.window_handle = "csim-window-#{@next_window_seq += 1}"
+        @aux_windows << {handle: window.window_handle, window: window, opener: handle_for(host)}
+        window
+      end
+
       # ── JS-facing window routing (called via Browser host fns) ──────
       # Each window is a separate Browser/VM, so a cross-window reference is a
       # proxy that forwards here; the Driver routes to the target Browser.
@@ -622,7 +634,7 @@ module Capybara
         # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
         # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
         if (existing = named_window(name.to_s, opener_browser))
-          navigate_window(existing[:browser], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy,
+          navigate_window(existing[:window], resolved, source: opener_browser, referrer: referrer, referrer_policy: referrer_policy,
                                                         user_activated: opener_browser.source_activated?(opener_realm_id))
           return existing[:handle]
         end
@@ -632,6 +644,7 @@ module Capybara
         # id wires the popup's window.opener. Falls through to the separate-VM aux path
         # (cross-origin, or a URL we don't yet realm-load).
         if (rid = opener_browser.open_window_realm(resolved, name: name, opener_realm_id: opener_realm_id, about_base: about_base, creator_url: referrer))
+          add_realm_window(opener_browser, rid)
           return rid
         end
         open_aux_window(
@@ -650,11 +663,11 @@ module Capybara
       # The Browser whose window's registry is number `window` — the window a blob URL's
       # maker is in — among the open, the primary and the parked ones.
       private def browser_of_blob_window(window)
-        ([@browser] + @aux_windows.map {|w| w[:browser] } + @sw_parked).find {|b| b&.blob_window == window }
+        (window_browsers + @sw_parked).find {|b| b.blob_window == window }
       end
       # Whether a window of this session other than `browser`'s is open (Browser#blob_shared?).
       def other_windows?(browser)
-        ([@browser] + @aux_windows.map {|w| w[:browser] }).any? {|b| b && !b.equal?(browser) }
+        window_browsers.any? {|b| !b.equal?(browser) }
       end
 
       # Is this blob: URL in a different storage partition than `accessor`'s top-level
@@ -718,9 +731,8 @@ module Capybara
         # token collision. (Same-isolate opaque peers are reached in-VM / via enqueue_broadcast; an
         # inherited-origin blob worker via its own inbox — neither goes through this cross-window path.)
         return if origin.to_s.start_with?('opaque:')
-        window_entries.each do |w|
-          next if w[:browser].equal?(source_browser)
-          w[:browser].enqueue_broadcast(name, data, nil, origin)
+        window_browsers.each do |b|
+          b.enqueue_broadcast(name, data, nil, origin) unless b.equal?(source_browser)
         end
       end
 
@@ -729,9 +741,8 @@ module Capybara
       # each target's every realm, whose documents of another key let it go (storage.js).
       # sessionStorage is per-context and never reaches this path.
       def storage_broadcast(source_browser, kind, key, old, new, url, area)
-        window_entries.each do |w|
-          next if w[:browser].equal?(source_browser)
-          w[:browser].enqueue_storage_event(kind, key, old, new, url, area, nil)
+        window_browsers.each do |b|
+          b.enqueue_storage_event(kind, key, old, new, url, area, nil) unless b.equal?(source_browser)
         end
       end
 
@@ -864,7 +875,12 @@ module Capybara
         return if h == PRIMARY_HANDLE
 
         w = @aux_windows.find {|win| win[:handle] == h } or return
-        w[:browser].fire_document_teardown unless w[:browser].discard_due?
+        window = w[:window]
+        if window.is_a?(RealmWindow)
+          window.close!
+        elsif !window.discard_due?
+          window.fire_document_teardown
+        end
         discard_window(w)
       end
 
@@ -875,13 +891,19 @@ module Capybara
       # closes (a justified gap where its history has one entry: CLAUDE.md).
       def script_close_window(source, handle)
         w = @aux_windows.find {|win| win[:handle] == handle } or return
-        w[:browser].traversable.ask_close(source.traversable)
+        w[:window].traversable.ask_close(source.traversable)
       end
 
       # Discard the windows whose close ran (Browser#discard_due?) — as the driver is between calls, none of their own
       # on the stack (Browser#window_busy?).
+      # (…a window `window.open` made in a Browser's isolate whose script asked to close it, its close a task of its host's
+      # event loop due now, run first: Browser#run_due_tasks)
       private def reap_closed_windows
-        @aux_windows.select {|w| w[:browser].discard_due? && !w[:browser].window_busy? }.each do |w|
+        @aux_windows.each do |w|
+          window = w[:window]
+          window.host.run_due_tasks if window.is_a?(RealmWindow) && window.closing? && !window.discard_due?
+        end
+        @aux_windows.select {|w| w[:window].discard_due? && !w[:window].window_busy? }.each do |w|
           discard_window(w)
         end
       end
@@ -892,7 +914,9 @@ module Capybara
       # as in a real profile), and the browser kept alive.
       private def discard_window(w)
         @aux_windows.delete(w)
-        b = w[:browser]
+        b = w[:window]
+        return b.discard! if b.is_a?(RealmWindow)
+
         if b.sw_registrations_active?
           b.park_for_service_workers!
           retire_shadowed_parked(b)
@@ -936,7 +960,7 @@ module Capybara
       # (uncontrolled → load from the network).
       def sw_navigation_fetch(url, **kw)
         sweep_dead_parked
-        owner = ([@browser] + @aux_windows.map {|w| w[:browser] } + @sw_parked.reverse).find {|b|
+        owner = (window_browsers + @sw_parked.reverse).find {|b|
           b.sw_controls_navigation?(url)
         }
         return nil unless owner

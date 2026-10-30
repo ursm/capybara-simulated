@@ -1238,9 +1238,13 @@ module Capybara
         client_id: nil,
         refresh: nil,
         sandbox: nil,
-        entry: nil
+        entry: nil,
+        viewport: nil
       )
         realm = seed_realm_bridge(ctx.create_context)
+        # (…its viewport the window's — the one it was made with, a navigation's the document's before it had — which its
+        # document loads at: viewport.rs)
+        realm.eval_void("globalThis.__dom.viewportSet(#{viewport[0].to_i}, #{viewport[1].to_i}, true);") if viewport
         # Mark it a top-level window realm: its location's navigations planned in its own realm's plan, which the host
         # takes for it (`consume_pending_window_nav`), as the page's are its own. That a script may close it, and the
         # realm that opened it (its `window.opener`), are the engine's (`setSteppedWindow` below), by the window's key:

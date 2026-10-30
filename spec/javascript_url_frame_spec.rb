@@ -92,7 +92,8 @@ RSpec.describe 'a javascript: URL' do
     s.find('#l').click
     s.has_css?('#none', wait: 0.3)
     title = s.within_window(s.windows.last) { poll_until { (t = s.evaluate_script('document.title')) == '[named][link]' && t } }
-    expect([s.windows.size, title]).to eq([2, '[named][link]'])
+    # (…the page's, `w1`'s and `nm`'s: the windows it opened, each a window of the session)
+    expect([s.windows.size, title]).to eq([3, '[named][link]'])
   end
 
   # …and a throw in it reported as the document's, at line 1, column 1 where it carries no location of its own (Chrome:

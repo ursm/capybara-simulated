@@ -293,6 +293,7 @@ module Capybara
         @find_cache_kind              = nil
         @find_cache_arg               = nil
         @find_cache_ctx               = nil
+        @find_cache_realm             = nil
         @find_cache_value             = nil
         @document_handle              = 0
         # `within_frame` state. `@current_realm_id` is the V8 context id of the
@@ -302,6 +303,9 @@ module Capybara
         # this realm. nil is the steady state, so the routing is one nil-check.
         @current_realm_id             = nil
         @frame_stack                  = []
+        # …and the top-level traversable they are rooted in: the page (nil), or a window `window.open` made in this isolate
+        # whose realm the driver addresses (`in_window`, RealmWindow) — `switch_to_frame(:top)` back to its document.
+        @top_realm_id                 = nil
         @frame_scope_resets           = 0
         @last_tick_ts                 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         # The first find of a navigation observes the current DOM without a pre-tick (see
@@ -657,7 +661,7 @@ module Capybara
         end
       end
 
-      def resolve_visit_url(url)
+      def resolve_visit_url(url, current = @current_url)
         s = url.to_s
         # `about:blank` (and other authority-less schemes) have no `//`, so the
         # `scheme://` test below would treat them as relative paths and prepend
@@ -669,7 +673,7 @@ module Capybara
           # root. An opaque or host-less current URL (e.g. `about:blank` in a
           # freshly-opened window) can't yield an origin — fall back to the
           # default host so a subsequent relative `visit` still resolves.
-          current   = parse_url(@current_url.to_s)
+          current   = parse_url(current.to_s)
           host_root = current && !current[:host].empty? ? url_root(current) : @default_host.sub(/\/+$/, '')
           s = "/#{s}" unless s.start_with?('/')
           s = "#{host_root}#{s}"
@@ -854,7 +858,7 @@ module Capybara
         case target
         when :parent
           @frame_stack.pop
-          @current_realm_id = @frame_stack.last && @frame_stack.last[:realm_id]
+          @current_realm_id = @frame_stack.last&.fetch(:realm_id) || @top_realm_id
         when :top
           reset_frame_scope
         else
@@ -880,9 +884,33 @@ module Capybara
       # page (re)build (which disposes all frame realms) — anything that
       # invalidates the active `within_frame` scope.
       def reset_frame_scope
-        @current_realm_id = nil
+        @current_realm_id = @top_realm_id
         @frame_stack.clear
         @frame_scope_resets += 1
+      end
+
+      # `yield`ed with the driver's commands addressing `window`, a window `window.open` made in this isolate (RealmWindow)
+      # — its document's realm the root of their scope, the frames it entered its own (`RealmWindow#frame_stack`) — and the
+      # scope back as it was after: the page's, or another window's this one was called in. (Its document replaced as they
+      # ran, the scope follows it: `retarget_scope`.)
+      def in_window(window)
+        realm = window.realm or raise Capybara::WindowError, "Window #{window.window_handle} is closed; switch to another window"
+        saved = [@top_realm_id, @current_realm_id, @frame_stack]
+        @top_realm_id     = realm
+        @frame_stack      = window.frame_stack
+        @current_realm_id = @frame_stack.last&.fetch(:realm_id) || realm
+        begin
+          yield
+        ensure
+          window.frame_stack = @frame_stack
+          @top_realm_id, @current_realm_id, @frame_stack = saved
+        end
+      end
+      # The window realm `from` replaced by `to`, its next document's (`reload_window_realm`): the scope rooted in it, or
+      # at it, following it.
+      private def retarget_scope(from, to)
+        @top_realm_id     = to if @top_realm_id == from
+        @current_realm_id = to if @current_realm_id == from
       end
 
       # `yield`ed as the main document's, whichever frame a `within_frame` has entered — a step of its own that the
@@ -891,14 +919,18 @@ module Capybara
       def in_top_context
         return yield if @current_realm_id.nil? && @frame_stack.empty?
 
-        realm, stack, resets = @current_realm_id, @frame_stack.dup, @frame_scope_resets
+        top, realm, stack, resets = @top_realm_id, @current_realm_id, @frame_stack.dup, @frame_scope_resets
+        @top_realm_id = nil
         reset_frame_scope
         begin
           yield
         ensure
+          @top_realm_id = top
           if @frame_scope_resets == resets + 1
             @current_realm_id = realm
             @frame_stack.replace(stack)
+          else
+            @current_realm_id = @frame_stack.last&.fetch(:realm_id) || top
           end
         end
       end
@@ -1171,18 +1203,21 @@ module Capybara
       # element to appear or disappear; if no DOM-mutating event has
       # happened since the last call (no timer fired, no click / set /
       # navigate), the result is guaranteed identical and we can skip
-      # the V8 round-trip + the XPath evaluation.
+      # the V8 round-trip + the XPath evaluation. (…in the realm it was found in: the page's, a frame's, a window's this
+      # isolate's page opened — `in_window` — whose handles are its own)
       def cached_find(kind, arg, ctx)
         if !@find_cache_dirty &&
-           @find_cache_kind == kind &&
-           @find_cache_ctx  == ctx &&
-           @find_cache_arg  == arg
+           @find_cache_kind  == kind &&
+           @find_cache_ctx   == ctx &&
+           @find_cache_arg   == arg &&
+           @find_cache_realm == @current_realm_id
           return @find_cache_value
         end
         result = yield
         @find_cache_kind  = kind
         @find_cache_arg   = arg
         @find_cache_ctx   = ctx
+        @find_cache_realm = @current_realm_id
         @find_cache_value = result
         @find_cache_dirty = false
         result
@@ -7275,9 +7310,72 @@ module Capybara
         consume_user_activation(opener_realm_id)
         @runtime.create_window_realm(
           '', '', 'text/html',
-          window_name: name, opener_id: opener_realm_id, about_base: about_base, referrer: creator_url,
-          referrer_policy: inherited_referrer_policy(opener_realm_id)
+          window_name:     name,
+          opener_id:       opener_realm_id,
+          about_base:      about_base,
+          referrer:        creator_url,
+          referrer_policy: inherited_referrer_policy(opener_realm_id),
+          viewport:        screen_size
         )
+      end
+
+      # ── The windows `window.open` made in this isolate, as the driver addresses them (RealmWindow) ──
+      # The realm of the document window `key` shows now — the one its first document's was, a navigation's after each
+      # (v8_runtime.rb `window_realm_meta`) — none for one gone: closed by a script or the user, its realm
+      # discarded with its page's (`dispose_frame_realms`).
+      def window_realm(key)
+        realm = window_realm_made(key)
+        realm unless realm.nil? || window_realm_state(realm) == 2
+      end
+      def window_realm?(key) = !window_realm(key).nil?
+      # …whether it is closing (a script's `close()` asked, its close a task to come), or gone (window.js
+      # `__csimWindowState`).
+      def window_realm_closing?(key) = (realm = window_realm_made(key)).nil? || window_realm_state(realm).positive?
+      private def window_realm_made(key) = @runtime.window_realm_meta.find {|_, meta| meta[:window_key] == key }&.first
+      private def window_realm_state(realm) = @runtime.realm_call(realm, '__csimWindowState').to_i
+      # Its URL, its title, its target name: its document's, its browsing context's.
+      def window_realm_url(realm)   = @runtime.realm_call(realm, '__csimLocationHref').to_s
+      def window_realm_title(realm) = @runtime.realm_call(realm, '__csimDocumentTitle').to_s
+      def window_realm_name(realm)  = @runtime.realm_call(realm, '__csimWindowName').to_s
+      # The user's navigation of it (Capybara's `visit` in it): a new document at `url`, no document its initiator.
+      def visit_window_realm(realm, url)
+        navigate_window_realm(realm, 'location', [url.to_s, false, nil, nil, nil, true, nil], by_user: true)
+        settle
+      end
+      # …and its reload (Capybara's `refresh`).
+      def refresh_window_realm(realm)
+        navigate_window_realm(realm, 'reload', [true, nil], by_user: true)
+        settle
+      end
+      # …and a traversal of its session history (`go_back` / `go_forward`), applied as the task it queues runs.
+      def traverse_window_realm(realm, delta)
+        invalidate_find_cache
+        @runtime.realm_call(realm, '__csimTraverseHistory', delta.to_i)
+        settle
+        drain_task_intents
+      end
+      # …and its viewport (`resize_to`), its resize steps run: as the page's (`set_viewport`), in its realm.
+      def window_realm_viewport(realm) = @runtime.realm_call(realm, '__csimViewportSize').map(&:to_i)
+      def set_window_realm_viewport(realm, w, h)
+        invalidate_find_cache
+        @runtime.realm_call(realm, '__csimSetViewport', w.to_i, h.to_i)
+        @runtime.realm_call(realm, '__csimRebuildCascade')
+        @runtime.realm_call(realm, '__csimResizeSteps')
+        nil
+      end
+      # …and its close by the user (Capybara's `Window#close`): its document unloaded and its browsing context discarded
+      # at once (window.js `__csimCloseWindowNow`), then its realms — its document's, its frames' — let go of.
+      def close_window_realm(key)
+        realm = window_realm_made(key) or return
+        invalidate_find_cache
+        @runtime.realm_call(realm, '__csimCloseWindowNow')
+        discard_window_realm(key)
+      end
+      # …and, closed by a script whose task discarded it, let go of: its realms disposed (none while a script of this
+      # isolate's is on the stack — the driver's between calls, `window_busy?`).
+      def discard_window_realm(key)
+        realm = window_realm_made(key) or return
+        @runtime.dispose_frame_realm_tree(realm)
       end
 
       # HTML "rules for choosing a navigable": a new top-level traversable made consumes the user activation of the
@@ -7567,6 +7665,17 @@ module Capybara
           end
           n
         }
+      end
+
+      # The tasks of this isolate due now run, with what they leave to do — the close of a window `window.open` made in it
+      # that its script asked for, its own task (window.js `close`), which the driver takes as it is between calls
+      # (Driver#reap_closed_windows) as it takes another isolate's (`take_window_tasks_in_background`).
+      def run_due_tasks
+        return if window_busy?
+
+        r = @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+        @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+        drain_task_intents
       end
 
       # The messages another window's script posted to this one (session_history.rs `traversablePost`), each a task of its
@@ -10104,85 +10213,93 @@ module Capybara
       def consume_pending_window_nav
         return if @runtime.window_realm_meta.empty?
 
-        @runtime.call('__csimTakeWindowNavigations').each do |realm_id, kind, *plan|
-          invalidate_find_cache
-          case kind
-          when 'location'
-            url, replace, initiator, source, policy, activated, blob = plan
-            entry = [replace ? 'replace' : 'push']
-          when 'reload'
-            activated, blob = plan
-            url   = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
-            entry = ['reload']
-          when 'traverse'
-            step, url, referred = plan
-            entry = ['step', step]
-          end
-          initiator ||= realm_id
-          made = {}
-          body, ctype = nil
-          if (blob = host_blob(blob))
-            body  = document_payload(blob[:bytes])
-            ctype = blob[:type].to_s.empty? ? 'text/html' : blob[:type]
-          end
-          # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
-          # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
-          # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
-          # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
-          # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
-          if body.nil? && http_url?(url)
-            by   = kind == 'traverse' ? {} : {initiator_realm: initiator, link_policy: policy}
-            resp = frame_navigation_fetch(url, referred, dest: 'document', download_realm: initiator, user_activated: activated, **by)
-            next if resp.nil? || resp['no_document']
-
-            headers = resp['headers'] || {}
-            body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
-            made = {
-              csp:             response_csp(headers),
-              referrer:        resp['referrer'],
-              referrer_policy: referrer_policy_header(headers),
-              client_id:       resp['resulting_client_id'],
-              refresh:         refresh_header(headers)
-            }
-          end
-          # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
-          # Chrome measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the
-          # window's navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the
-          # document it replaces was, HTML's reload reusing its document state's referrer; any other scheme no document it
-          # loads here: one of a blob: URL's resolved as it began, above)
-          if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
-            body, ctype = '', 'text/html'
-            doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
-            if kind == 'reload'
-              referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
-              policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
-            elsif kind == 'traverse'
-              referrer = referred
-            else
-              # (…under the policy it navigated under, else the initiator's own)
-              source, own = realm_referrer_initiator(initiator) if source.nil?
-              policy        = own if policy.to_s.empty?
-              referrer      = source && Native.request_referrer(policy, source, url)
-            end
-            made = {
-              doc_origin:      doc_origin,
-              location_origin: location_origin,
-              sandbox:         sandbox,
-              about_base:      @runtime.realm_direct_call(initiator, '__csimBaseURL'),
-              referrer:        referrer,
-              referrer_policy: policy
-            }
-          end
-          # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to)
-          next if body.nil? && top_level_data_refused?(url)
-          if body.nil?
-            log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
-            next
-          end
-          @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
-        rescue StandardError => e
-          log_console('warn', "window realm self-navigation failed: #{e.message}")
+        @runtime.call('__csimTakeWindowNavigations').each {|realm_id, kind, *plan| navigate_window_realm(realm_id, kind, plan) }
+      end
+      # …one of them — or the driver's own, the user's (`by_user`: Capybara's `visit` / `refresh` in the window, which no
+      # document initiates — its request's `Sec-Fetch-Site: none`) — the window's next document's realm returned, nil where
+      # it made none.
+      def navigate_window_realm(realm_id, kind, plan, by_user: false)
+        invalidate_find_cache
+        case kind
+        when 'location'
+          url, replace, initiator, source, policy, activated, blob = plan
+          entry = [replace ? 'replace' : 'push']
+        when 'reload'
+          activated, blob = plan
+          url   = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+          entry = ['reload']
+        when 'traverse'
+          step, url, referred = plan
+          entry = ['step', step]
         end
+        initiator ||= realm_id
+        made = {}
+        body, ctype = nil
+        if (blob = host_blob(blob))
+          body  = document_payload(blob[:bytes])
+          ctype = blob[:type].to_s.empty? ? 'text/html' : blob[:type]
+        end
+        # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
+        # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
+        # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
+        # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
+        # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
+        if body.nil? && http_url?(url)
+          by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy}
+          resp = frame_navigation_fetch(url, referred, dest: 'document', download_realm: initiator, user_activated: activated, **by)
+          return if resp.nil? || resp['no_document']
+
+          headers = resp['headers'] || {}
+          body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
+          made = {
+            csp:             response_csp(headers),
+            referrer:        resp['referrer'],
+            referrer_policy: referrer_policy_header(headers),
+            client_id:       resp['resulting_client_id'],
+            refresh:         refresh_header(headers)
+          }
+        end
+        # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
+        # Chrome measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the
+        # window's navigable is, referred by the initiator as its policy says (Chrome: its origin) — a reload as the
+        # document it replaces was, HTML's reload reusing its document state's referrer; any other scheme no document it
+        # loads here: one of a blob: URL's resolved as it began, above)
+        if body.nil? && url.match?(/\Aabout:blank(?:[?#]|\z)/i)
+          body, ctype = '', 'text/html'
+          doc_origin, location_origin, sandbox = @runtime.realm_direct_call(0, '__csimNavigationOrigins', initiator, realm_id)
+          if kind == 'reload'
+            referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
+            policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
+          elsif kind == 'traverse'
+            referrer = referred
+          else
+            # (…under the policy it navigated under, else the initiator's own)
+            source, own = realm_referrer_initiator(initiator) if source.nil?
+            policy        = own if policy.to_s.empty?
+            referrer      = source && Native.request_referrer(policy, source, url)
+          end
+          made = {
+            doc_origin:      doc_origin,
+            location_origin: location_origin,
+            sandbox:         sandbox,
+            about_base:      @runtime.realm_direct_call(initiator, '__csimBaseURL'),
+            referrer:        referrer,
+            referrer_policy: policy
+          }
+        end
+        # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to)
+        return if body.nil? && top_level_data_refused?(url)
+        if body.nil?
+          log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
+          return
+        end
+        made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
+        new_id = @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
+        retarget_scope(realm_id, new_id) if new_id
+        new_id
+      rescue StandardError => e
+        log_console('warn', "window realm self-navigation failed: #{e.message}")
+        nil
       end
       # The page's reload its `location.reload()` planned (navigation_plan.rs `planReload`), taken after the call returns:
       # running it inside the V8 call would rebuild the Context under it, which V8 terminates with a
