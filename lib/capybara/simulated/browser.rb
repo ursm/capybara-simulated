@@ -1137,13 +1137,11 @@ module Capybara
       # Whether another window of the session has timers to run, which each poll of this one steps
       # (`step_background_windows`): what that window does as they fire is what a wait may be for (an OAuth or payment
       # pop-up reporting back to its opener) — waited on under the idle gate this window's own timers are (`polling?`),
-      # one whose timers change nothing (a keep-alive) read idle as this window's do.
+      # keyed on THIS window's settle generation alone: no matcher of its sees another window's document, and what
+      # crosses to it from one (a message, a storage event) changes this one's as it is delivered — a pop-up's clock
+      # redrawing its own DOM keeps no failing matcher here waiting out its wait.
       def background_timers_pending? = background_windows.any?(&:timers_active?)
       def timers_active? = @timers_active == true
-      # …and the settle generation of every window a poll steps, which the idle gate of `polling?` reads: one whose
-      # timers change nothing reads idle, as this one's do.
-      private def polled_settle_gen = background_windows.sum(@runtime.settle_gen, &:settle_gen)
-      def settle_gen = @runtime.settle_gen
 
       # A poll's advance of `ms` run in the session's other windows too (`step_in_background`): every window's event loop
       # runs as the active one's is polled, as `Driver#run_event_loop_frame` steps them all a frame.
@@ -2871,8 +2869,8 @@ module Capybara
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
         # worker's forever `setInterval` (a heartbeat) cannot make every negative matcher wait out its whole timeout.
-        if @timers_active || worker_timers_pending? || (background = background_timers_pending?)
-          gen = background ? polled_settle_gen : @runtime.settle_gen
+        if @timers_active || worker_timers_pending? || background_timers_pending?
+          gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
             @last_polled_gen = gen
             @idle_settle_polls = 0

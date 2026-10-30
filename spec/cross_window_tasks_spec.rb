@@ -25,7 +25,9 @@ RSpec.describe 'a task one window asks of another' do
       '/authorizes' => "setTimeout(() => { opener.postMessage('authorized', '*'); close(); }, Number(location.search.slice(1)) || 600);",
       # (…a pop-up whose interval counts in its opener's title, and one whose only timer is a keep-alive far off)
       '/ticks' => "let n = 0; setInterval(() => { opener.document.title = 'tick ' + (++n); }, 50);",
-      '/idles' => 'setTimeout(() => {}, 30000);'
+      '/idles' => 'setTimeout(() => {}, 30000);',
+      # (…a page whose clock redraws its own document every second)
+      '/clock' => "addEventListener('DOMContentLoaded', () => { const p = document.body.appendChild(document.createElement('p')); setInterval(() => { p.textContent = String(Date.now()); }, 1000); });"
     }
   }
   let(:hits) { Hash.new(0) }
@@ -127,6 +129,19 @@ RSpec.describe 'a task one window asks of another' do
   it "advances a pop-up's interval as a wait polls its opener" do
     open_window('/ticks')
     expect(session).to have_title('tick 10', wait: 2)
+  end
+
+  # (…the idle gate of a wait the active window's own: a background window redrawing its own document, which no matcher
+  # here sees, keeps none of them waiting out its wait)
+  it 'keeps no failing matcher waiting on a background window redrawing its own document' do
+    session.visit 'http://a.test/clock'
+    open_window('/logs')
+    session.within_window(session.windows.last) do
+      2.times { session.has_css?('#missing', wait: 3) }
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(session.has_css?('#missing', wait: 3)).to be(false)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
+    end
   end
 
   # (…by the elapsed-time throttle a read of the page's own timers is under: an `all(…).map` of attribute reads walks no
