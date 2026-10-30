@@ -1131,6 +1131,34 @@ module Capybara
 
       # The session's windows: this one first, then its others.
       private def session_windows = @driver.respond_to?(:window_browsers) ? [self, *@driver.window_browsers.reject {|b| b.equal?(self) }] : [self]
+      # …its others, none in a session of one window (the common one, which pays a Driver predicate).
+      private def background_windows = @driver.respond_to?(:several_windows?) && @driver.several_windows? ? session_windows.drop(1) : []
+
+      # Whether another window of the session has timers to run, which no poll of its own runs while this one is the
+      # active window (`step_background_windows`).
+      def background_timers_pending? = background_windows.any?(&:timers_active?)
+      def timers_active? = @timers_active == true
+
+      # A poll's advance of `ms` run in the session's other windows too (`step_in_background`): every window's event loop
+      # runs as the active one's is polled, as `Driver#run_event_loop_frame` steps them all a frame.
+      private def step_background_windows(ms)
+        background_windows.each {|b| b.step_in_background(ms) }
+      end
+
+      # …this window's, one not the active window: its timers due within `ms`, what was asked of it, what they leave to
+      # do — none while it is busy, nor from within it (`taking_window_tasks`), which the session's windows' steps may
+      # reach again.
+      def step_in_background(ms)
+        return if window_busy? || !(@timers_active || async_io_pending?)
+
+        taking_window_tasks do
+          r = @runtime.run_loop_step(ms)
+          @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+          drain_async_channels
+          take_window_tasks!
+          drain_task_intents unless discard_due?
+        end
+      end
 
       # Single-slot cache for the most recent find_xpath / find_css /
       # find_first_css result. Capybara's `synchronize` retry loop
@@ -2837,7 +2865,7 @@ module Capybara
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
         # worker's forever `setInterval` (a heartbeat) cannot make every negative matcher wait out its whole timeout.
-        if @timers_active || worker_timers_pending?
+        if @timers_active || worker_timers_pending? || background_timers_pending?
           gen = @runtime.settle_gen
           if @last_polled_gen.nil? || gen != @last_polled_gen
             @last_polled_gen = gen
@@ -2867,7 +2895,7 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || async_io_pending?
+        return unless @timers_active || async_io_pending? || background_timers_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -2927,6 +2955,9 @@ module Capybara
               @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
             end
           end
+          # …and the session's other windows the same advance, whose event loops run with this one's (an OAuth or payment
+          # pop-up whose timer reports back to its opener as a wait polls the opener)
+          step_background_windows(effective_step.positive? ? effective_step : POLL_TICK_STEP_MS)
           # Pull any pending Worker / EventSource messages into JS
           # state. Without this, `evaluate_script` after kicking off
           # a worker round-trip would see stale state — the inbox
@@ -7413,9 +7444,10 @@ module Capybara
         @history_frozen = was
       end
       # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a traversal's, a reload's
-      # too — "check if unloading is canceled"): `beforeunload` at its document, then at its frames' documents, its unload
-      # counter raised while each runs (dom-nodes.js `promptDocumentToUnload`). The navigation goes on whatever a handler
-      # says — no user here to ask — as one who confirmed the prompt would have it.
+      # too — "check if unloading is canceled"), or its close runs (HTML "definitely close"): `beforeunload` at its
+      # document, then at its frames' documents, its unload counter raised while each runs (dom-nodes.js
+      # `promptDocumentToUnload`). The navigation or the close goes on whatever a handler says: HTML cancels it only where
+      # the user, prompted, declines — none here to ask, the driver one who confirms the prompt.
       def prompt_page_to_unload         = (@runtime.call('__csimPromptToUnload') rescue nil)
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, theirs first — fired as a navigation replaces the page's document
@@ -7519,14 +7551,14 @@ module Capybara
 
       # The navigation of this window another window's script planned (Driver#navigate_window), taken: begun with the
       # source snapshot taken there — the Referer and policy of the document that began it, its URL as the initiator, the
-      # activation it had, its history handling. A blob: one's document loaded from the bytes the URL resolves to in the
-      # session's blob URL store — a network error where none.
+      # activation it had, its history handling. A blob: one's document loaded from the blob its URL resolved to as the
+      # source parsed it — a network error where none.
       private def consume_planned_navigation
-        url, replace, activated, referrer, policy, initiator = @session_history.take_planned
+        url, replace, activated, referrer, policy, initiator, blob_bytes, blob_type = @session_history.take_planned
         return false unless url
 
         if url.start_with?('blob:')
-          fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url)
+          fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url, blob_bytes, blob_type)
         else
           visit(url, referer: referrer, referrer_policy: policy, initiator: initiator, user_activated: activated, replace: replace)
         end
@@ -7574,7 +7606,7 @@ module Capybara
 
         taking_window_tasks {
           n = deliver_posted_messages
-          script_waiting? || @navigating ? n : n + session_windows.drop(1).sum(&:take_window_tasks_in_background)
+          (script_waiting? || @navigating) ? n : n + session_windows.drop(1).sum(&:take_window_tasks_in_background)
         }
       end
 

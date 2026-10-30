@@ -19,7 +19,10 @@ RSpec.describe 'a task one window asks of another' do
       '/closes' => 'window.closeSelf = () => { close(); return closed; };',
       # (…the opener of /closer, which /closer closes as it loads, and which reads its own opener as null after)
       '/opens-closer' => "window.addEventListener('load', () => { window.open('/closer'); });",
-      '/closer' => "window.addEventListener('load', () => { opener.close(); localStorage.setItem('closedAtOnce', String(opener.closed)); });"
+      '/closer' => "window.addEventListener('load', () => { opener.close(); localStorage.setItem('closedAtOnce', String(opener.closed)); });",
+      # (…an OAuth-style pop-up, which reports back to its opener on a timer and closes itself)
+      '/waits' => "addEventListener('message', (e) => { if (e.data === 'authorized') document.body.insertAdjacentHTML('beforeend', '<p id=done>done</p>'); });",
+      '/authorizes' => "setTimeout(() => { opener.postMessage('authorized', '*'); close(); }, 100);"
     }
   }
   let(:hits) { Hash.new(0) }
@@ -97,6 +100,36 @@ RSpec.describe 'a task one window asks of another' do
     expect(read('window.titleAfterPost')).to eq('logs')
     expect(read('w.document.title')).to eq('hi')
     expect(read("localStorage.getItem('log')")).to eq('message:hi:http://a.test:true;')
+  end
+
+  # (…its timers run as a wait polls the opener, every window's event loop with the active one's)
+  it 'runs the timers of a pop-up that is not the active window as a wait polls its opener' do
+    session.visit 'http://a.test/waits'
+    open_window('/authorizes')
+    expect(session).to have_css('#done', wait: 2)
+    expect(session.windows.size).to eq(1)
+  end
+
+  # (…the blob its URL names resolved as the caller's Location parsed it: a revoke after takes none of it back)
+  it "navigates a window to a blob: URL the caller revokes after asking, as the caller's URL resolved it" do
+    open_window('/logs')
+    session.execute_script(<<~JS)
+      const u = URL.createObjectURL(new Blob(['<title>blobdoc</title>'], {type: 'text/html'}));
+      w.location = u;
+      URL.revokeObjectURL(u);
+    JS
+    expect(read('w.document.title')).to eq('blobdoc')
+  end
+
+  # (…the active window closed by its own script: every command a `no_such_window_error` until another is switched to)
+  it 'answers no command at the active window once its own `close()` ran, until another window is switched to' do
+    open_window('/closes')
+    session.switch_to_window(session.windows.last)
+    session.execute_script('closeSelf()')
+    expect { session.evaluate_script('document.title') }.to raise_error(Capybara::WindowError)
+    expect { session.current_url }.to raise_error(Capybara::WindowError)
+    session.switch_to_window(session.windows.first)
+    expect(session.evaluate_script('document.title')).to eq('page')
   end
 
   # (…the navigation the window begins as a task of its own: the asking script still sees the document it had)

@@ -37,18 +37,21 @@ RSpec.describe 'same-isolate window realms' do
       expect(result).to eq([true, false, false, true, true, nil, 42])
     end
 
-    # …closing at once, its close a task of its event loop (HTML "close a top-level traversable"): its document unloaded
-    # after the closing script's task, its browsing context then discarded — no `opener` — and no name finding it meanwhile.
-    it 'closes as a task of its own: unloaded after the closing task, then discarded' do
+    # …closing at once, its close a task of its event loop (HTML "close a top-level traversable"): its document asked
+    # whether it may be unloaded and unloaded after the closing script's task, its browsing context then discarded — no
+    # `opener` — and no name finding it meanwhile. (Chrome: beforeunload with `closed` true, pagehide, unload.)
+    it 'closes as a task of its own: prompted and unloaded after the closing task, then discarded' do
       s.execute_script(<<~JS)
         window.log = [];
         window.w = window.open('', 'nm');
+        w.onbeforeunload = () => log.push('beforeunload:' + w.closed);
         w.onpagehide = () => log.push('pagehide:' + w.closed + ':' + (w.opener === window));
+        w.onunload = () => log.push('unload');
         w.close();
         log.push('closed:' + w.closed);
         window.v = window.open('', 'nm');
       JS
-      expect(s.evaluate_script('[log, w.opener, v === w, v.closed]')).to eq([['closed:true', 'pagehide:true:true'], nil, false, false])
+      expect(s.evaluate_script('[log, w.opener, v === w, v.closed]')).to eq([['closed:true', 'beforeunload:true', 'pagehide:true:true', 'unload'], nil, false, false])
     end
 
     # The window is the same one across a navigation of its own, which replaces its realm: a reference held from before it

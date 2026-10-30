@@ -199,8 +199,13 @@ framework array-iteration compat) forces `length` into
 `getOwnPropertyNames`; and a WindowProxy is a JS Proxy, which cannot commit
 HTML's willful invariant violation (tc39/ecma262#672), so a property defined
 non-configurable through it outlives the navigation that replaces its window
-(`frameWindowProxyFor`, platform-globals.js). List and justify these
-explicitly; don't let them multiply.
+(`frameWindowProxyFor`, platform-globals.js); and the primary window —
+the Capybara session's own — is never script-closable, where HTML makes a
+window whose session history has one entry closable by its script
+(`Driver#script_close_window`): closing it would end the session under the
+test that every later command addresses, for a page that merely called
+`close()` on itself. List and justify
+these explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox

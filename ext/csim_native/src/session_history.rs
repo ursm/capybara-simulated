@@ -191,6 +191,9 @@ struct Traversable {
     disowned: bool,
     closed: bool,
     origin: Option<String>,
+    // Whether web content made it — a script's `window.open`, a link's or a form's target — which makes it
+    // script-closable (HTML "is created by web content"), not the driver's own window.
+    by_web_content: bool,
     // What the script of another window asked of it, which its own event loop takes as tasks (`Asked`).
     asked: Asked,
 }
@@ -224,8 +227,10 @@ struct Posted {
     source: String,
 }
 // A navigation planned: its URL, whether it replaces the active entry, whether the sender had transient activation, the
-// Referer it sends and its policy, and the URL of the document that began it (its initiator, which seeds
-// `Sec-Fetch-Site`). One at a time — a second plan replaces the first, as a navigation begun aborts the ongoing one.
+// Referer it sends and its policy, the URL of the document that began it (its initiator, which seeds `Sec-Fetch-Site`),
+// and a `blob:` URL's blob — its bytes and type — as the sender's Location parsed it (HTML: the URL's blob URL entry,
+// resolved as it is parsed, which a revoke after does not take back). One at a time — a second plan replaces the first,
+// as a navigation begun aborts the ongoing one.
 #[derive(Clone, Debug, PartialEq)]
 struct Planned {
     url: String,
@@ -234,6 +239,7 @@ struct Planned {
     referrer: Option<String>,
     policy: Option<String>,
     initiator: Option<String>,
+    blob: Option<(Vec<u8>, String)>,
 }
 
 static ASKED: AtomicUsize = AtomicUsize::new(0);
@@ -850,8 +856,12 @@ impl SessionHistory {
         t.state = State::new();
         t.saved = Default::default();
         t.queued.clear();
-        (t.opener, t.disowned, t.closed, t.origin) = (None, false, false, None);
+        (t.opener, t.disowned, t.closed, t.origin, t.by_web_content) = (None, false, false, None, false);
         asking(&mut t, |a| *a = Asked::default());
+    }
+    // #by_web_content = whether web content made it (`by_web_content`).
+    fn set_by_web_content(&self, by: bool) {
+        self.lock().by_web_content = by;
     }
     // #opener = traversable: the window that opened it (HTML "create a new auxiliary browsing context").
     fn set_opener(&self, opener: &SessionHistory) {
@@ -872,10 +882,20 @@ impl SessionHistory {
             a.close_due = false;
         });
     }
-    // #ask_close -> whether a `close()` set it closing now — HTML "is closing", the close itself due as a task of its own
-    // (`#take_close`) — false for one closing or closed already. The navigation planned of it goes: the close's task
-    // destroys the traversable before any navigation of it could finish (HTML "destroy a top-level traversable").
-    fn ask_close(&self) -> bool {
+    // #ask_close(source) -> whether the `close()` the script of traversable `source`'s window called of it set it closing
+    // now (HTML's Window `close()`): one script-closable — web content made it, or its session history has one entry —
+    // that `source` is, or is familiar with: HTML "is closing", the close itself due as a task of its own (`#take_close`)
+    // — false for one closing or closed already, or that close() leaves. The navigation planned of it goes: the close's
+    // task destroys the traversable before any navigation of it could finish (HTML "destroy a top-level traversable").
+    // (…"allowed by sandboxing to navigate" the host's to ask, which knows the calling realm)
+    fn ask_close(&self, source: &SessionHistory) -> bool {
+        let script_closable = {
+            let t = self.lock();
+            t.by_web_content || t.state.length() == 1
+        };
+        if !script_closable || source.id != self.id && !familiar(source.id, self.id) {
+            return false;
+        }
         let mut t = self.lock();
         if t.closed || t.asked.closing {
             return false;
@@ -905,21 +925,44 @@ impl SessionHistory {
         let posted = asking(&mut self.lock(), |a| std::mem::take(&mut a.posted));
         posted.into_iter().map(|p| (p.data, p.origin, p.target_origin, p.source)).collect()
     }
-    // #plan_navigation(url, replace, activated, referrer, policy, initiator): a navigation of it another window's script
-    // planned — in place of one planned before; none of one closing or closed, which no navigation of finishes.
-    fn plan_navigation(&self, url: String, replace: bool, activated: bool, referrer: Option<String>, policy: Option<String>, initiator: Option<String>) {
+    // #plan_navigation(url, replace, activated, referrer, policy, initiator, blob_bytes, blob_type): a navigation of it
+    // another window's script planned — in place of one planned before; none of one closing or closed, which no
+    // navigation of finishes.
+    fn plan_navigation(&self, planned: Planned) {
         let mut t = self.lock();
         if t.closed || t.asked.closing {
             return;
         }
-        asking(&mut t, |a| a.planned = Some(Planned { url, replace, activated, referrer, policy, initiator }));
+        asking(&mut t, |a| a.planned = Some(planned));
     }
-    // #take_planned -> [url, replace, activated, referrer, policy, initiator]: the navigation planned of it, taken; nil
-    // for none.
+    #[allow(clippy::too_many_arguments)]
+    fn plan_navigation_for_ruby(
+        &self,
+        url: String,
+        replace: bool,
+        activated: bool,
+        referrer: Option<String>,
+        policy: Option<String>,
+        initiator: Option<String>,
+        blob_bytes: Option<RString>,
+        blob_type: Option<String>,
+    ) {
+        let blob = blob_bytes.map(|b| (crate::fetch_rules::ruby_bytes(b), blob_type.unwrap_or_default()));
+        self.plan_navigation(Planned { url, replace, activated, referrer, policy, initiator, blob });
+    }
+    // #take_planned -> [url, replace, activated, referrer, policy, initiator, blob_bytes, blob_type]: the navigation
+    // planned of it, taken; nil for none.
+    fn take_planned(&self) -> Option<Planned> {
+        asking(&mut self.lock(), |a| a.planned.take())
+    }
     #[allow(clippy::type_complexity)]
-    fn take_planned(&self) -> Option<(String, bool, bool, Option<String>, Option<String>, Option<String>)> {
-        let p = asking(&mut self.lock(), |a| a.planned.take())?;
-        Some((p.url, p.replace, p.activated, p.referrer, p.policy, p.initiator))
+    fn take_planned_for_ruby(
+        ruby: &magnus::Ruby,
+        rb_self: &Self,
+    ) -> Option<(String, bool, bool, Option<String>, Option<String>, Option<String>, Option<RString>, Option<String>)> {
+        let p = rb_self.take_planned()?;
+        let (bytes, kind) = p.blob.map_or((None, None), |(bytes, kind)| (Some(ruby.str_from_slice(&bytes)), Some(kind)));
+        Some((p.url, p.replace, p.activated, p.referrer, p.policy, p.initiator, bytes, kind))
     }
     // #asked? -> whether something asked of it waits to be taken; #posted? -> a message.
     fn is_asked(&self) -> bool {
@@ -960,13 +1003,14 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("opener=", method!(SessionHistory::set_opener, 1))?;
     class.define_method("disowned?", method!(SessionHistory::is_disowned, 0))?;
     class.define_method("close!", method!(SessionHistory::close, 0))?;
-    class.define_method("ask_close", method!(SessionHistory::ask_close, 0))?;
+    class.define_method("ask_close", method!(SessionHistory::ask_close, 1))?;
+    class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("closing?", method!(SessionHistory::is_closing, 0))?;
     class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
     class.define_method("post", method!(SessionHistory::post, 4))?;
     class.define_method("take_posted", method!(SessionHistory::take_posted, 0))?;
-    class.define_method("plan_navigation", method!(SessionHistory::plan_navigation, 6))?;
-    class.define_method("take_planned", method!(SessionHistory::take_planned, 0))?;
+    class.define_method("plan_navigation", method!(SessionHistory::plan_navigation_for_ruby, 8))?;
+    class.define_method("take_planned", method!(SessionHistory::take_planned_for_ruby, 0))?;
     class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
     class.define_method("posted?", method!(SessionHistory::is_posted, 0))?;
     class.define_method("familiar_with?", method!(SessionHistory::is_familiar_with, 1))?;
@@ -1275,27 +1319,51 @@ mod tests {
 
     #[test]
     fn what_another_window_asks_waits_to_be_taken_and_a_close_is_seen_at_once() {
-        let popup = SessionHistory::new();
+        let plan = |url: &str, replace: bool| Planned {
+            url: url.into(),
+            replace,
+            activated: false,
+            referrer: None,
+            policy: None,
+            initiator: None,
+            blob: None,
+        };
+        let (page, popup) = (SessionHistory::new(), SessionHistory::new());
+        popup.lock().by_web_content = true;
         assert!(!popup.is_asked());
         popup.post("m1".into(), "http://a.test".into(), "*".into(), "w0".into());
         popup.post("m2".into(), "http://a.test".into(), "*".into(), "w0".into());
-        popup.plan_navigation("http://a.test/1".into(), false, true, None, None, None);
-        popup.plan_navigation("http://a.test/2".into(), true, false, Some("http://a.test/".into()), None, None);
+        popup.plan_navigation(plan("http://a.test/1", false));
+        popup.plan_navigation(plan("http://a.test/2", true));
         assert!(popup.is_asked() && window_tasks_pending());
         let posted = popup.take_posted();
         assert_eq!(posted.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(), ["m1", "m2"]);
         // (…the later plan in place of the first)
-        assert_eq!(popup.take_planned().map(|p| (p.0, p.1)), Some(("http://a.test/2".into(), true)));
+        assert_eq!(popup.take_planned().map(|p| (p.url, p.replace)), Some(("http://a.test/2".into(), true)));
         assert!(!popup.is_asked());
+        // (…closed by none it is not known to, nor, a window web content did not make of more than one entry, by any)
+        assert!(!popup.ask_close(&page));
         // (…closing as it is asked, the close a task of its own, asked once — the navigation planned before it gone, none
         // planned nor posted after it)
-        popup.plan_navigation("http://a.test/3".into(), false, false, None, None, None);
-        assert!(popup.ask_close() && popup.is_closing() && !popup.ask_close());
-        popup.plan_navigation("http://a.test/4".into(), false, false, None, None, None);
+        popup.plan_navigation(plan("http://a.test/3", false));
+        popup.set_opener(&page);
+        assert!(popup.ask_close(&page) && popup.is_closing() && !popup.ask_close(&page));
+        popup.plan_navigation(plan("http://a.test/4", false));
         popup.post("m3".into(), "http://a.test".into(), "*".into(), "w0".into());
         assert!(popup.take_planned().is_none() && popup.take_posted().is_empty());
         assert!(popup.take_close() && !popup.take_close());
         assert!(!popup.is_asked());
+    }
+
+    #[test]
+    fn a_window_web_content_did_not_make_closes_only_at_its_first_entry() {
+        let page = SessionHistory::new();
+        page.push(TOP, TOP, "http://a.test/".into(), false, Data::default());
+        page.push(TOP, TOP, "http://a.test/2".into(), false, Data::default());
+        assert!(!page.ask_close(&page));
+        let fresh = SessionHistory::new();
+        fresh.push(TOP, TOP, "http://a.test/".into(), false, Data::default());
+        assert!(fresh.ask_close(&fresh));
     }
 
     #[test]
@@ -1477,7 +1545,8 @@ fn traversable_closing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     } else {
         args.get(0).number_value(scope).map_or(0, |n| n as u64)
     };
-    let closing = histories().1.get(&id).and_then(Weak::upgrade).is_none_or(|t| {
+    let traversable = histories().1.get(&id).and_then(Weak::upgrade);
+    let closing = traversable.is_none_or(|t| {
         let t = t.lock().unwrap_or_else(PoisonError::into_inner);
         t.closed || t.asked.closing
     });
