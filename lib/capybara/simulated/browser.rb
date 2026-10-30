@@ -4188,8 +4188,9 @@ module Capybara
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
         # (…its cookies sent, and the handshake's Set-Cookie stored, as its client's site for cookies judges it — a
-        # worker's the site it was made with, a window's realm's document's and its ancestors' (none: 'null', cross-site
-        # to every target), RFC 6265bis "site for cookies")
+        # worker's the site it was made with, a window's realm's: its top-level document's origin's site where every
+        # document down to its own is of it (an about:blank popup's its opener's), else none ('null', cross-site to every
+        # target) — RFC 6265bis §5.2.1)
         judge = if worker
                   worker_cookie_site(worker)
                 elsif client
@@ -4198,16 +4199,20 @@ module Capybara
                   @current_url
                 end
         cookie_context = Native.cookie_context(judge, target, false)
-        apply_default_request_env(env, referer: source, cookie_context: cookie_context)
+        # (…referred by a window's realm as its request's referrer and policy say — a srcdoc frame by its container's
+        # document, an opaque document not at all: document-origin.js `clientReferrerSource` — a worker by its script)
+        referer = client ? Native.request_referrer(client['referrerPolicy'].to_s, client['referrer'].to_s, target) : source
+        apply_default_request_env(env, referer: referer, cookie_context: cookie_context)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
         env['HTTP_SEC_WEBSOCKET_VERSION'] = '13'
         # The opening handshake always carries its client's origin — its realm's document's (an about:blank frame's its
         # creator's), or the worker's (the UA owns this header) — server handlers echo it back (websockets/opening-
-        # handshake origin test). A blob: client's is the origin its URL carries inside; an opaque one goes unsent.
-        client_origin = client ? client['clientOrigin'].to_s : url_origin(source.to_s.delete_prefix('blob:'))
-        env['HTTP_ORIGIN'] = client_origin unless client_origin.nil? || client_origin.empty? || client_origin == 'null'
+        # handshake origin test): Fetch "append a request `Origin` header", a `websocket` mode's whatever it is, an
+        # opaque one's `null`. A blob: client's is the origin its URL carries inside.
+        client_origin = client ? client['clientOrigin'].to_s : (url_origin(source.to_s.delete_prefix('blob:')) || 'null')
+        env['HTTP_ORIGIN'] = client_origin unless client_origin.empty?
         list = Array(protocols).map(&:to_s).reject(&:empty?)
         env['HTTP_SEC_WEBSOCKET_PROTOCOL'] = list.join(', ') unless list.empty?
         env['rack.hijack?']  = true

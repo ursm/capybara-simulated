@@ -29,7 +29,7 @@ RSpec.describe "the cookies of a host's own request" do
         [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
       when '/ws'
         # (…a handshake answered by hand: its 101, a cookie of its own)
-        seen << ["#{req.host} ws", env['HTTP_COOKIE'].to_s, env['HTTP_ORIGIN']]
+        seen << ["#{req.host} ws", env['HTTP_COOKIE'].to_s, env['HTTP_ORIGIN'], env['HTTP_REFERER']]
         accept = Digest::SHA1.base64digest(env['HTTP_SEC_WEBSOCKET_KEY'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
         io = env['rack.hijack'].call
         io.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" \
@@ -61,8 +61,8 @@ RSpec.describe "the cookies of a host's own request" do
     s.visit 'http://b.test/echo'
     # (…the same-site one its document's SameSite cookies, its own stored; the cross-site one none, none stored)
     expect(seen).to contain_exactly(
-      ['a.test ws', 's=1; l=1', 'http://a.test'],
-      ['b.test ws', '', 'http://a.test'],
+      ['a.test ws', 's=1; l=1', 'http://a.test', 'http://a.test/'],
+      ['b.test ws', '', 'http://a.test', 'http://a.test/'],
       ['a.test echo', 's=1; l=1; ws=1'],
       ['b.test echo', 's=1; l=1']
     )
@@ -75,7 +75,29 @@ RSpec.describe "the cookies of a host's own request" do
     s.visit 'http://a.test/set'
     s.visit 'http://a.test/framed'
     s.evaluate_script('1')
-    expect(seen).to eq([['a.test ws', '', 'http://b.test']])
+    expect(seen).to eq([['a.test ws', '', 'http://b.test', 'http://b.test/']])
+  end
+
+  # (…an about:blank popup's by its opener's origin, which it inherits; a srcdoc frame's referred by its container's
+  # document; a sandboxed one's of the opaque origin `null`, referred by none)
+  it 'judges a socket by the document it is of, whatever its URL' do
+    s = every_host_local { simulated_session(app) }
+    s.visit 'http://a.test/set'
+    s.visit 'http://a.test/'
+    s.execute_script(<<~JS)
+      window.open('').eval("new WebSocket('ws://a.test/ws')");
+      const doc = document.body.appendChild(document.createElement('iframe'));
+      doc.srcdoc = "<script>new WebSocket('ws://a.test/ws')<" + "/script>";
+      const boxed = document.body.appendChild(document.createElement('iframe'));
+      boxed.sandbox = 'allow-scripts';
+      boxed.srcdoc = "<script>new WebSocket('ws://a.test/ws')<" + "/script>";
+    JS
+    3.times { s.evaluate_script('1') }
+    expect(seen).to contain_exactly(
+      ['a.test ws', 's=1; l=1', 'http://a.test', nil],
+      ['a.test ws', 's=1; l=1', 'http://a.test', 'http://a.test/'],
+      ['a.test ws', '', 'null', nil]
+    )
   end
 
   it "stores a download's cookies, a navigation's response" do

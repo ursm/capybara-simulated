@@ -60935,7 +60935,8 @@ websockets/back-forward-cache-with-open-websocket-connection-ccns.tentative.wind
 websockets/cookies/cross-origin-cookie-set.html:
 - name: Cookie should be set
   reason: >-
-    The test predates the current draft (CLAUDE.md rule 1 clause 3). Its cookie (`ws_test_cookie_test=test;
+    The test encodes RFC 6265 (2011), which had no SameSite, against the current draft (CLAUDE.md rule 1 clause 3).
+    Its cookie (`ws_test_cookie_test=test;
     Path=/`) names no SameSite and is set by a WebSocket handshake to another site ({{hosts[alt][www]}}); the
     test expects it stored. RFC 6265bis (editor's draft, 2026-10, §5.7 storage) has a cookie with no SameSite
     attribute "set the cookie's same-site-flag to 'Default'", and then, "If the cookie's same-site-flag is not

@@ -256,51 +256,49 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
-// The URL of realm `r`'s document and whether its origin is opaque — None for a realm gone, which no request is judged
-// by: closed rather than open.
-fn known_document(arena: &mut RealmArena, r: i32) -> Option<(String, bool)> {
+// The origin of realm `r`'s document, serialized — an about:blank or srcdoc one's its creator's, an opaque one's
+// "null" — which its requests' cookies are judged by (RFC 6265bis §5.2.1: a document's origin, not its URL); None for a
+// realm gone, which no request is judged by: closed rather than open.
+fn known_document(arena: &mut RealmArena, r: i32) -> Option<String> {
     let arena = arena.enter_known(r)?;
-    Some((arena.location.href().to_owned(), arena.location.origin() == "null"))
+    Some(arena.location.origin().to_owned())
 }
-// Whether a request a document at `url` makes to `target` is cross-site for cookies (RFC 6265bis "site for cookies"): one
-// of no URL known, one of an opaque origin (a `data:` document's, a sandboxed one's `null`: of no site at all), one of
-// another site.
+// Whether a request a document at `url` — its URL or its origin — makes to `target` is cross-site for cookies (RFC
+// 6265bis "site for cookies"): one of none known, one of an opaque origin (a `data:` document's, a sandboxed one's
+// `null`: of no site at all), one of another site.
 pub(crate) fn cross_site_for_cookies(url: Option<&str>, target: &str) -> bool {
     url.is_none_or(|url| url == "null" || url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) || fetch_site(url, target) == "cross-site")
 }
 // …a request of realm `r`'s document: where an ancestor's document is of another site than `target`'s — its own too,
 // `own` — up to its top-level one (a window's: its opener is no ancestor).
 fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str, own: bool) -> bool {
-    if own && cross_site_for_cookies(known_document(arena, r).map(|d| d.0).as_deref(), target) {
+    if own && cross_site_for_cookies(known_document(arena, r).as_deref(), target) {
         return true;
     }
     while let Some(p) = arena.parent_realm(r) {
-        if cross_site_for_cookies(known_document(arena, p).map(|d| d.0).as_deref(), target) {
+        if cross_site_for_cookies(known_document(arena, p).as_deref(), target) {
             return true;
         }
         r = p;
     }
     false
 }
-// The site for cookies of realm `r`'s document (RFC 6265bis): its top-level document's site where every document between
-// is of that site — one of a local URL (about:blank, srcdoc) its creator's — None where one is not, or is of an opaque
-// origin, or is gone.
+// The site for cookies of realm `r`'s document (RFC 6265bis §5.2.1): its top-level document's origin's site where every
+// document between is of that site — each by its origin, an about:blank or srcdoc one's its creator's (an about:blank
+// popup's its opener's) — None where one is not, or is of an opaque origin, or is gone.
 fn site_for_cookies(arena: &mut RealmArena, mut r: i32) -> Option<String> {
-    let mut urls = Vec::new();
-    while let Some(p) = arena.parent_realm(r) {
-        let (url, opaque) = known_document(arena, r)?;
-        if opaque {
-            return None;
+    let mut sites = Vec::new();
+    loop {
+        let origin = known_document(arena, r)?;
+        let site = crate::realm_location::site(&origin)?;
+        match arena.parent_realm(r) {
+            Some(p) => {
+                sites.push(site);
+                r = p;
+            }
+            None => return sites.iter().all(|s| *s == site).then_some(site),
         }
-        urls.push(url);
-        r = p;
     }
-    let site = crate::realm_location::site(&known_document(arena, r)?.0)?;
-    let same = urls.iter().all(|u| {
-        !u.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:"))
-            && (http_origin(u).is_none() || crate::realm_location::site(u).as_deref() == Some(&site))
-    });
-    same.then_some(site)
 }
 // __dom.siteForCookies(realm) -> `site_for_cookies`, undefined for none.
 fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -309,17 +307,17 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         rv.set(v8::String::new(scope, &site).unwrap().into());
     }
 }
-// __dom.ancestorDocuments(realm, own) -> the URLs of the documents of realm `realm`'s ancestors, up to its top-level one
-// (null for one not known) — its own first, `own`: what a request its document makes is cross-site for cookies by,
-// besides its own (`frame_cross_site`); a navigation of a frame in it, by its own too.
+// __dom.ancestorDocuments(realm, own) -> the origins of the documents of realm `realm`'s ancestors (`known_document`),
+// up to its top-level one (null for one not known) — its own first, `own`: what a request its document makes is
+// cross-site for cookies by, besides its own (`frame_cross_site`); a navigation of a frame in it, by its own too.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mut r = args.get(0).int32_value(scope).unwrap_or(0);
     let mut urls = Vec::new();
     if args.get(1).is_true() {
-        urls.push(known_document(&mut dom(scope).arena, r).map(|d| d.0));
+        urls.push(known_document(&mut dom(scope).arena, r));
     }
     while let Some(p) = dom(scope).arena.parent_realm(r) {
-        urls.push(known_document(&mut dom(scope).arena, p).map(|d| d.0));
+        urls.push(known_document(&mut dom(scope).arena, p));
         r = p;
     }
     let items: Vec<v8::Local<'_, v8::Value>> = urls
