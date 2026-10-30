@@ -2648,8 +2648,7 @@ module Capybara
           navigate_post(entry[:url], entry[:body], entry[:content_type], from_history: true, is_reload: is_reload, origin: (entry[:origin] unless by_page),
                                                                          user_activated: user_activated, **made, **referred, **reloaded)
         else
-          navigate(entry[:url], from_history: true, is_reload: is_reload, initiator: made[:initiator], site_seed: made[:site_seed], user_activated: user_activated,
-                                **referred, **reloaded)
+          navigate(entry[:url], from_history: true, is_reload: is_reload, user_activated: user_activated, **made, **referred, **reloaded)
         end
       ensure
         @restoring_history_state = nil
@@ -3493,11 +3492,11 @@ module Capybara
       # A top-level navigation's POST of `body` (`navigate`'s: `navigate_top_level`): its origin the initiating
       # document's — 'null' where that is opaque (`origin_null`), none where the initiator is unknown — or, re-posted from
       # its session history entry, the one it was first sent with (`origin`: the document state's initiator origin).
-      def navigate_post(url, body, content_type, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url, site_seed: nil,
+      def navigate_post(url, body, content_type, from_history: false, is_reload: false, referer: @current_url, referrer_policy: nil, initiator: @current_url,
                         replace: false, origin_null: false, origin: nil, user_activated: false, reloaded_cross_site: nil)
         origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
         navigate_top_level(url, body, content_type, referer: referer, referrer_policy: referrer_policy, from_history: from_history, is_reload: is_reload, initiator: initiator,
-                                                    site_seed: site_seed, replace: replace, origin: origin, user_activated: user_activated, reloaded_cross_site: reloaded_cross_site)
+                                                    origin_null: origin_null, replace: replace, origin: origin, user_activated: user_activated, reloaded_cross_site: reloaded_cross_site)
       end
 
       # Spawn a background thread that will call into the host Rack app, registered
@@ -6611,8 +6610,9 @@ module Capybara
         req_body   = body.to_s.b
         req_ct     = content_type
         # The chain's hops (navigation_fetch.rs): each one's request, its Referer narrowed by the one before, its site
-        # latched, its origin tainted by a redirect — and its cookies cross-site where the document the frame is in, or one
-        # of ITS ancestors, is: RFC 6265bis "site for cookies" — the realm building it, when it says which.
+        # latched, its origin tainted by a redirect — and its cookies cross-site where the hop's URL is to its initiator, or
+        # to the document the frame is in or one of ITS ancestors: RFC 6265bis "site for cookies" — the realm building it,
+        # when it says which.
         fetch = Native::NavigationFetch.new({
           method:          method.to_s,
           url:             url.to_s,
@@ -6621,7 +6621,6 @@ module Capybara
           referrer_policy: referrer_policy.to_s,
           initiator:       origin_url,
           origin_null:     opaque.fetch(:origin_null, false),
-          site_seed:       opaque[:site_seed],
           ancestors:       container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true),
           # (…a window's navigation, by the same machinery, a top-level navigable's)
           top_level:       dest.to_s == 'document'
@@ -6828,10 +6827,12 @@ module Capybara
           initiator:           url_origin(origin_url),
           siteSeed:            site_seed,
           originNull:          origin_null,
-          # The ancestor-chain cookie verdict of the frame this navigation commits into
-          # (RFC 6265bis site-for-cookies). A property of the TARGET FRAME, not the
-          # request: it survives a SW's `new Request(event.request, init)` rewrite —
-          # unlike the initiator, which the copy resets to the SW's own origin.
+          # Whether the navigation's cookies are cross-site whatever its initiator's site
+          # (navigation_fetch.rs `Nav::cookies`): the ancestor-chain verdict of the frame it
+          # commits into (RFC 6265bis site-for-cookies), an opaque initiator's, a user's reload
+          # of a page reached cross-site. A property of the NAVIGATION, not of the request's
+          # client: it survives a SW's `new Request(event.request, init)` rewrite — unlike the
+          # initiator, which the copy resets to the SW's own origin.
           cookieCrossSite:     cookie_cross_site,
           # The navigation's RESERVED client id (`event.resultingClientId`): one per navigation
           # chain, re-minted across a cross-origin redirect hop, adopted by the committed
@@ -10710,7 +10711,7 @@ module Capybara
           blob = host_blob(frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimTakeFrameNavBlob', realm_id, url, is_reload, is_reload))
           return reload_frame_realm_by_id(realm_id, url, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', **commit)
         end
-        navigate_realm_self(realm_id, url, entry.key?(:body) ? entry[:body].to_s : nil, entry[:content_type], is_reload: is_reload, is_history: is_history, site_seed: nil,
+        navigate_realm_self(realm_id, url, entry.key?(:body) ? entry[:body].to_s : nil, entry[:content_type], is_reload: is_reload, is_history: is_history,
                                                                                                    origin_null: origin == 'null', referrer: referrer,
                                                                                                    initiator: is_reload ? realm_id : nil, origin_url: (origin unless origin == 'null'),
                                                                                                    user_activated: false, commit: commit)
@@ -10844,7 +10845,6 @@ module Capybara
         is_reload: false,
         is_history: false,
         record: true,
-        site_seed: nil,
         origin_null: false,
         referrer: nil,
         initiator: nil,
@@ -10855,7 +10855,7 @@ module Capybara
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
           return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
-                                                                  initiator: initiator || @current_realm_id.to_i, site_seed: site_seed, origin_null: origin_null, user_activated: user_activated)
+                                                                  initiator: initiator || @current_realm_id.to_i, origin_null: origin_null, user_activated: user_activated)
         end
         if !is_reload && !is_history
           record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
@@ -10878,7 +10878,7 @@ module Capybara
         return unless @runtime.frame_realm_alive?(realm_id)
         return unless prompt_to_unload_frame(realm_id, parent)
 
-        navigate_realm_self(realm_id, get_url, nil, nil, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null, referrer: referrer,
+        navigate_realm_self(realm_id, get_url, nil, nil, is_reload: is_reload, is_history: is_history, origin_null: origin_null, referrer: referrer,
                                                          initiator: initiator, origin_url: origin_url, user_activated: user_activated)
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
@@ -10894,7 +10894,6 @@ module Capybara
         content_type,
         is_reload: false,
         is_history: false,
-        site_seed: nil,
         origin_null: false,
         referrer: nil,
         initiator: nil,
@@ -10905,14 +10904,14 @@ module Capybara
         entry = @frame_stack.find {|e| e[:realm_id] == realm_id }
         if entry
           return navigate_frame_post(url, body, content_type, entry: entry, referrer: referrer, is_reload: is_reload, is_history: is_history, initiator: initiator || @current_realm_id.to_i,
-                                                              site_seed: site_seed, origin_null: origin_null, user_activated: user_activated)
+                                                              origin_null: origin_null, user_activated: user_activated)
         end
         # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
         # a fresh submission records history.
         record_frame_nav(realm_id, url) if !is_reload && !is_history
         return unless prompt_to_unload_frame(realm_id)
 
-        navigate_realm_self(realm_id, url.to_s, body, content_type, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null, referrer: referrer,
+        navigate_realm_self(realm_id, url.to_s, body, content_type, is_reload: is_reload, is_history: is_history, origin_null: origin_null, referrer: referrer,
                                                                     initiator: initiator, origin_url: origin_url, user_activated: user_activated)
       end
       # …the navigation of a frame — one reached via contentWindow, or an entered one (`entry`), whose scope follows it to
@@ -10931,7 +10930,6 @@ module Capybara
         content_type,
         is_reload:,
         is_history:,
-        site_seed:,
         origin_null:,
         referrer:,
         initiator:,
@@ -10941,12 +10939,13 @@ module Capybara
         commit: {}
       )
         invalidate_find_cache
-        site_seed, origin_null = 'cross-site', true if initiator && document_origin_opaque?(initiator.to_i)
+        origin_null = true if initiator && document_origin_opaque?(initiator.to_i)
         source, referrer_policy = referrer
         # The initiator is the document that navigates the frame — its own by default, its origin `origin_url`'s
         # (`initiating_url`), its Referer the referrer source's — not the top document `current_browsing_context_url`
         # returns for a non-entered frame. (…a traversal's a user's, of no initiator — Sec-Fetch-Site `none`, as the page's
-        # is: `replay_history_entry` — its origin the frame document's all the same)
+        # is: `replay_history_entry` — its origin the one its entry was first sent with, `null` where that was opaque, the
+        # frame document's for none; an opaque initiator's `null`, cross-site to every URL)
         origin_url ||= initiating_url(initiator || realm_id) || source
         req_body = body.to_s.b
         fetch = Native::NavigationFetch.new({
@@ -10956,11 +10955,10 @@ module Capybara
           referrer:        source,
           referrer_policy: referrer_policy.to_s,
           initiator:       (origin_url unless is_history),
-          origin:          (url_origin(origin_url) if is_history),
-          origin_null:     origin_null,
-          site_seed:       site_seed,
+          origin:          ((origin_null ? 'null' : url_origin(origin_url)) if is_history),
+          origin_null:     origin_null && !is_history,
           # (…its cookies cross-site by the frame's ancestors' documents — a property of the frame the document commits
-          # into, so it rides the SW fetch event too: a rewritten request keeps it, the initiator latch doesn't apply)
+          # into, so it rides the SW fetch event too: a rewritten request keeps it)
           ancestors:       @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i)
         })
         rid = mint_resulting_client_id
@@ -11402,7 +11400,7 @@ module Capybara
           if post
             navigate_post(url, *post, referer: source, referrer_policy: policy, initiator: site, replace: replace, user_activated: user_activated, **opaque)
           else
-            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob, site_seed: opaque[:site_seed], user_activated: user_activated)
+            navigate(url, referer: source, referrer_policy: policy, initiator: site, replace: replace, blob: blob, user_activated: user_activated, **opaque)
           end
         end
       end
@@ -11414,8 +11412,9 @@ module Capybara
         realm_creator_url(realm) if realm.zero? || @runtime.frame_realm_alive?(realm)
       end
       # What a navigation the document of realm `realm` initiates carries of its origin where that is opaque (a sandboxed
-      # document's): cross-site to every URL (Fetch Metadata, `site_seed`), its Origin `null` — none for a tuple one's.
-      private def opaque_initiator(realm) = document_origin_opaque?(realm.to_i) ? {site_seed: 'cross-site', origin_null: true} : {}
+      # document's): its Origin `null`, of no site — cross-site to every URL, for Fetch Metadata and cookies alike
+      # (navigation_fetch.rs `origin_null`) — none for a tuple one's.
+      private def opaque_initiator(realm) = document_origin_opaque?(realm.to_i) ? {origin_null: true} : {}
 
       # An entered frame navigated (`entry`), its Referer its initiator's (`referrer`: `current_referrer_initiator`'s
       # shape), its request the navigation one of the document of realm `initiator` — the entered frame's own, by default —
@@ -11431,7 +11430,6 @@ module Capybara
         is_history: false,
         record: true,
         initiator: @current_realm_id.to_i,
-        site_seed: nil,
         origin_null: false,
         user_activated: false
       )
@@ -11452,7 +11450,7 @@ module Capybara
           blob = host_blob(frame_realm_host_call(entry[:parent_realm_id], '__csimTakeFrameNavBlob', entry[:realm_id], url.to_s, is_reload || is_history))
           return reload_current_frame_realm(url.to_s, blob ? blob[:bytes] : '', blob ? blob[:type] : 'text/html', entry: entry)
         end
-        navigate_realm_self(entry[:realm_id], url.to_s, nil, nil, entry: entry, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null,
+        navigate_realm_self(entry[:realm_id], url.to_s, nil, nil, entry: entry, is_reload: is_reload, is_history: is_history, origin_null: origin_null,
                                                                   referrer: referrer, initiator: initiator, origin_url: nil, user_activated: user_activated)
       end
       # …a POST of `body`, its entry recorded but where it re-posts the one it is at.
@@ -11465,14 +11463,13 @@ module Capybara
         is_reload: false,
         is_history: false,
         initiator: @current_realm_id.to_i,
-        site_seed: nil,
         origin_null: false,
         user_activated: false
       )
         return unless entered_frame_navigates?(entry)
 
         record_frame_nav(entry[:realm_id], url) if !is_reload && !is_history
-        navigate_realm_self(entry[:realm_id], url.to_s, body, content_type, entry: entry, is_reload: is_reload, is_history: is_history, site_seed: site_seed, origin_null: origin_null,
+        navigate_realm_self(entry[:realm_id], url.to_s, body, content_type, entry: entry, is_reload: is_reload, is_history: is_history, origin_null: origin_null,
                                                                             referrer: referrer, initiator: initiator, origin_url: nil, user_activated: user_activated)
       end
       # Whether an entered frame's navigation goes ahead: none of a frame whose document is gone — removed by a handler of
@@ -11553,17 +11550,19 @@ module Capybara
       # request carries across its redirects: Fetch's `Sec-Fetch-User`)
       # (…`reloaded_cross_site` a reload through a user interface element's: whether the request the document it reloads was
       # reached by was cross-site, its cookies judged by that — nil for any other navigation)
-      def navigate(url, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, site_seed: nil, replace: false, blob: nil,
-                   user_activated: false, reloaded_cross_site: nil)
+      # (…`origin_null` where the initiating document's origin is opaque: `opaque_initiator`)
+      def navigate(url, referer: @current_url, referrer_policy: nil, from_history: false, is_reload: false, initiator: @current_url, origin_null: false, replace: false,
+                   blob: nil, user_activated: false, reloaded_cross_site: nil)
         navigate_top_level(url, nil, nil, referer: referer, referrer_policy: referrer_policy, from_history: from_history, is_reload: is_reload, initiator: initiator,
-                                          site_seed: site_seed, replace: replace, blob: blob, user_activated: user_activated, reloaded_cross_site: reloaded_cross_site)
+                                          origin_null: origin_null, replace: replace, blob: blob, user_activated: user_activated, reloaded_cross_site: reloaded_cross_site)
       end
       # …the navigation itself, hop by hop (navigation_fetch.rs): its Referer the initiating document's URL — `referer` —
       # under that document's referrer policy, the policy its `<meta name="referrer">` sets (the default where none does)
       # read before the page goes, determined anew at each redirect hop as Fetch's main fetch does, a redirect's
       # `Referrer-Policy` the next hop's; a driver's visit sends none on any hop. Sec-Fetch-Site is the initiator's
-      # relation to each hop, widened across the chain (`site_seed` carried in) — the SameSite cookie gate reads it; no
-      # initiator (a visit, the address bar) is 'none'. A controlled hop goes to the controlling SW's fetch event first
+      # relation to each hop, widened across the chain — an opaque initiator's (`origin_null`) cross-site to every URL —
+      # and its cookies cross-site by the hop's URL alone (RFC 6265bis-14); no initiator (a visit, the address bar) is
+      # 'none', its cookies same-site. A controlled hop goes to the controlling SW's fetch event first
       # (mode 'navigate', dest 'document') — the registration in ANY window's Browser (they're profile-wide:
       # Driver#sw_navigation_fetch) — respondWith serving the document, a network error failing it, none falling through
       # to the network. Its redirects followed, an SW's as the network's: a POST's 307 / 308 re-POSTing, the others
@@ -11578,7 +11577,7 @@ module Capybara
         from_history:,
         is_reload:,
         initiator:,
-        site_seed:,
+        origin_null:,
         replace:,
         user_activated:,
         reloaded_cross_site:,
@@ -11610,7 +11609,7 @@ module Capybara
           referrer_policy:     referrer_policy.to_s,
           initiator:           initiator,
           origin:              origin,
-          site_seed:           site_seed,
+          origin_null:         origin_null,
           top_level:           true,
           reloaded_cross_site: reloaded_cross_site
         })
@@ -11655,9 +11654,9 @@ module Capybara
             # measured — and its base URL that document's: the page's own where the page navigates itself, else the
             # initiator's URL (its base URL not known here — a gap); its referrer the request's, under the initiator's
             # policy — the initiator's, though the window be at its initial about:blank still (that one made with the window,
-            # its creator's: `open_initial_document`) — and an opaque initiator's (a sandboxed document's: its seed
-            # `cross-site`, `opaque_initiator`) one of no tuple origin, a new opaque one here where HTML has that one)
-            if initiator && site_seed != 'cross-site'
+            # its creator's: `open_initial_document`) — and an opaque initiator's (a sandboxed document's: `origin_null`,
+            # `opaque_initiator`) one of no tuple origin, a new opaque one here where HTML has that one)
+            if initiator && !origin_null
               own  = initiator == @current_url
               base = own ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s
               inherit_creator(origin: url_origin(initiator).to_s, base: base)
@@ -11686,7 +11685,7 @@ module Capybara
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
           loop do
-            meth, target, _, ref_source, ref_policy, seed, site, tainted, _, cookies = fetch.begin_hop
+            meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross, cookies = fetch.begin_hop
             @current_referer = fetch.referrer.to_s
             # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
             # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it as
@@ -11698,7 +11697,7 @@ module Capybara
             resp_body = nil
             if (sw = any_window_sw_navigation_fetch(target, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
                                                             dest: 'document', referrer_source: ref_source, origin_url: origin || initiator, referrer_policy: ref_policy,
-                                                            site_seed: seed, origin_null: tainted, cookie_context: cookies))
+                                                            site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, cookie_context: cookies))
               return error_document.(target) if sw['networkError']
 
               status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)

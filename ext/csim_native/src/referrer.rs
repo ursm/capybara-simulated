@@ -307,7 +307,7 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 }
 // __dom.ancestorDocuments(realm, own) -> the origins of the documents of realm `realm`'s ancestors (`known_document`),
 // up to its top-level one (null for one not known) — its own first, `own`: what a request its document makes is
-// cross-site for cookies by (fetch_hop.rs `cookie_site`), besides its client; by its own too where the client is not
+// cross-site for cookies by (fetch_hop.rs `Client::cross_site`), besides its client; by its own too where the client is not
 // the document but the page the host pinned it to (an image's or a video's load), and for a navigation of a frame in it.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mut r = args.get(0).int32_value(scope).unwrap_or(0);

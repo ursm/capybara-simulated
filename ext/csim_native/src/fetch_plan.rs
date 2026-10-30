@@ -190,7 +190,7 @@ impl FetchPlan {
             top_document: text("top_url")?,
             ancestors,
             worker_site,
-            cross_site_frame: flag("cookie_cross_site")?,
+            navigation_cross_site: flag("cookie_cross_site")?,
         });
         hops.seed(text("site_seed")?);
         Ok(Some(FetchPlan {

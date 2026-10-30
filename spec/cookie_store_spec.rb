@@ -71,9 +71,9 @@ RSpec.describe 'the cookie store' do
   end
 
   # A load the host makes for a document — an image's, and a fetch() — is cross-site for cookies where its document is,
-  # or the top-level one, or a `data:` one it is in, and stays so across its redirects, one the HTTP cache answers too:
-  # no Strict or Lax cookie goes (Chrome measured) — a cross-site frame's fetch() back to its own site included, a
-  # keepalive one's and a dedicated worker's it made too, the worker's keepalive one included.
+  # or the top-level one, or a `data:` one it is in, and stays so across its redirects to that site, one the HTTP cache
+  # answers too: no Strict or Lax cookie goes (Chrome measured) — a cross-site frame's fetch() back to its own site
+  # included, a keepalive one's and a dedicated worker's it made too, the worker's keepalive one included.
   it "sends a cross-site document's image loads no SameSite cookie" do
     seen = []
     app = lambda {|env|
@@ -83,13 +83,12 @@ RSpec.describe 'the cookie store' do
       when '/set'   then [200, {'content-type' => 'text/plain', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
       when '/fetcher' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><script>fetch("http://b.test/echo-fetch"); fetch("http://b.test/echo-keepalive", {keepalive: true}); new Worker("/w.js")</script>']]
       when '/w.js'    then [200, {'content-type' => 'text/javascript'}, ['fetch("http://b.test/echo-worker"); fetch("http://b.test/echo-wkeep", {keepalive: true})']]
-      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="http://a.test/echo-frame">']]
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="http://a.test/echo-frame"><img src="http://a.test/r301">']]
       when '/r301'  then [301, {'location' => 'http://a.test/echo-redirect', 'cache-control' => 'max-age=3600'}, ['']]
       when '/top'   then [200, {'content-type' => 'text/html'}, [
         '<!DOCTYPE html><iframe src="http://b.test/frame"></iframe>' \
         '<iframe src="data:text/html,<img src=http://a.test/echo-data>"></iframe>' \
-        '<iframe src="http://b.test/fetcher"></iframe>' \
-        '<img src="http://b.test/r301">'
+        '<iframe src="http://b.test/fetcher"></iframe>'
       ]]
       else [200, {'content-type' => 'image/gif'}, ['GIF89a']]
       end
@@ -109,27 +108,55 @@ RSpec.describe 'the cookie store' do
     expect(seen.reject {|_, c| c.empty? }).to eq([])
   end
 
-  # RFC 6265bis-14 §5.2: a request is same-site where its current URL is same site with its client's site for cookies —
-  # the redirect chain is not considered (its draft -08 rule withdrawn in -14, A.14: httpwg/http-extensions#2750; Chrome
-  # and Firefox backed it out as not web-compatible) — so a user's navigation through another site and back home is a
-  # same-site request at home, its Strict cookies sent.
-  it 'sends a navigation redirected through another site back home its Strict cookies' do
+  # RFC 6265bis-14 §5.2: a request is same-site where "the request's current url's origin is same-site with the
+  # request's client's 'site for cookies'" — the redirect chain is not considered: drafts -08 to -13 also asked that "the
+  # origin of every url in the request's url list is same-site with the request's current url's origin", which -14
+  # removed (A.14, "Remove consideration of same-site redirect chain", httpwg/http-extensions#2750). So a request a page
+  # makes through another site and back to its own is same-site at home, its Strict cookies sent — an image's (one the
+  # HTTP cache's redirect answers too), a fetch()'s, a navigation's, and a user's — while one another site's page makes
+  # there is cross-site: no cookie for its image, the Lax one alone for its top-level navigation. Sec-Fetch-Site, which
+  # Fetch Metadata still judges over the whole URL list, stays `cross-site`. Chrome 156 sends every cookie here as this
+  # does (measured 2026-10-31, over http: an image, a no-cors fetch() and a script's navigation, a→b→a and b→b→a);
+  # Firefox 159 still applies the withdrawn rule — a→b→a no cookie for the image and the fetch(), the Lax one alone for
+  # the navigation — and the current draft wins.
+  it 'judges a request redirected through another site by the URL it reached' do
     seen = []
     app = lambda {|env|
       req = Rack::Request.new(env)
       case req.path
-      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
-      when '/away' then [302, {'location' => 'http://b.test/back'}, ['']]
-      when '/back' then [302, {'location' => 'http://a.test/home'}, ['']]
+      when '/set'    then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/bounce' then [302, {'location' => req.params['to'], 'cache-control' => 'max-age=3600'}, ['']]
+      when '/page'
+        home   = "https://a.test/echo-#{req.host[0]}"
+        bounce = lambda {|kind| "https://b.test/bounce?to=#{Rack::Utils.escape("#{home}-#{kind}")}" }
+        [200, {'content-type' => 'text/html'}, [
+          "<!DOCTYPE html><img src=\"#{bounce.('img')}\"><a href=\"#{bounce.('nav')}\">go</a>" \
+          "<script>fetch(#{bounce.('fetch').to_json}, {mode: 'no-cors', credentials: 'include'})</script>"
+        ]]
       else
-        seen << env['HTTP_COOKIE'].to_s
+        seen << [req.path, env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']] if req.path.start_with?('/echo')
         [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
       end
     }
     s = every_host_local { simulated_session(app) }
-    s.visit 'http://a.test/set'
-    s.visit 'http://a.test/away'
-    expect(seen).to eq(['s=1; l=1'])
+    s.visit 'https://a.test/set'
+    %w[a b].each do |host|
+      2.times do
+        s.visit "https://#{host}.test/page"
+        poll_until { seen.map(&:first).include?("/echo-#{host}-fetch") }
+      end
+      s.click_link 'go'
+    end
+    s.visit 'https://b.test/bounce?to=https://a.test/echo-user'
+    expect(seen.uniq.sort).to eq([
+      ['/echo-a-fetch', 's=1; l=1', 'cross-site'],
+      ['/echo-a-img', 's=1; l=1', 'cross-site'],
+      ['/echo-a-nav', 's=1; l=1', 'cross-site'],
+      ['/echo-b-fetch', '', 'cross-site'],
+      ['/echo-b-img', '', 'cross-site'],
+      ['/echo-b-nav', 'l=1', 'cross-site'],
+      ['/echo-user', 's=1; l=1', 'none']
+    ])
   end
 
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
