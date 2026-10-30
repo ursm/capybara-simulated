@@ -40,6 +40,19 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     expect(name).to eq('fromhide')
   end
 
+  # (…and so for a replace navigation's, whose entry takes the leaving document's away: the next document's name the one
+  # the navigation began with, cleared across origins)
+  it "set in the pagehide of a document a replace navigation leaves is the leaving document's" do
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'orig'; addEventListener('pagehide', () => { window.name = 'fromhide' })")
+    session.execute_script("location.replace('/next')")
+    session.evaluate_script('1')
+    expect(name).to eq('orig')
+    session.execute_script("addEventListener('pagehide', () => { window.name = 'fromhide' }); location.replace('http://b.test/next')")
+    session.evaluate_script('1')
+    expect(name).to eq('')
+  end
+
   # (…about:blank, a window's own and a visit's, a document like any other: of its initiator's origin, an opaque one
   # for a visit's; an error document of an opaque one too)
   it 'is cleared through about:blank and by an error document, as any document of another origin clears it' do
@@ -89,6 +102,17 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     expect(session).to have_text('a.test/')
     expect(session).to have_no_text('hijack')
     expect(session.windows.size).to eq(3)
+  end
+
+  # (…and in it, by a window familiar with it alone: a cross-origin pop-up's naming the page's opens one of its own —
+  # HTML "find a navigable by target name"; Firefox measured a new window)
+  it 'is found by none of its group a window is not familiar with' do
+    session.visit 'http://a.test/'
+    session.execute_script("window.name = 'prim'")
+    popup = session.window_opened_by { session.execute_script("window.open('http://b.test/next', 'pop')") }
+    session.within_window(popup) { session.execute_script("window.open('http://a.test/hit', 'prim')") }
+    expect(session).to have_text('a.test/')
+    expect(session).to have_no_text('hit')
   end
 
   # (…and the name a page gives its window is the one another's `window.open` finds it by, not the one it opened with)

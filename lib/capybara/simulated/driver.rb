@@ -449,12 +449,25 @@ module Capybara
         [{handle: PRIMARY_HANDLE, browser: @browser, opener: nil}] + @aux_windows
       end
       # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name) in `from`'s browsing
-      # context group — HTML "find a navigable by target name" searches its set alone: a `noopener` window's name finds
-      # none of its opener's — none for '' or none `from`.
+      # context group, that `from` is familiar with — HTML "find a navigable by target name" searches the group's set,
+      # skipping those: a `noopener` window's name finds none of its opener's, a cross-origin pop-up's none of the page's
+      # (Chrome and Firefox open a new window) — none for '' or none `from`.
       private def named_window(name, from)
         return if name.empty? || from.nil?
 
-        window_entries.find {|w| w[:browser].window_name == name && w[:browser].browsing_context_group == from.browsing_context_group }
+        window_entries.find {|w|
+          target = w[:browser]
+          target.window_name == name && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
+        }
+      end
+      # HTML "familiar with", between top-level windows: `from`'s document of `target`'s document's origin, or `target` an
+      # auxiliary browsing context whose opener `from` is familiar with.
+      private def familiar_with?(from, target, depth = 0)
+        origin = from.document_origin
+        return true if from.equal?(target) || (origin && origin == target.document_origin)
+
+        opener = window_browser(opener_handle_of(target).to_s) if depth < 8
+        !opener.nil? && familiar_with?(from, opener, depth + 1)
       end
 
       # The Browser backing a handle, or nil if the window is closed/unknown.

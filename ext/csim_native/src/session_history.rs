@@ -164,8 +164,10 @@ struct State {
     initial_name: Vec<u16>,
     // The document state of the document the top-level navigable shows (`show`) — its active one's until a navigation's
     // response commits, though the entry the navigation pushed is current from its start: the one `window.name` reads
-    // and writes, a pagehide's the leaving document's own.
+    // and writes, a pagehide's the leaving document's own — its name held apart (`shown_name`) where a replace navigation
+    // took its entry away, until the next document shows.
     shown: Option<u64>,
+    shown_name: Option<Vec<u16>>,
 }
 
 #[derive(Default)]
@@ -262,6 +264,9 @@ impl State {
     // the one every entry of that document has made `name`: the state they share.
     // (…the shown document's, else the current entry's — none shown yet, or its entries replaced since)
     fn name(&self, build: u32) -> Vec<u16> {
+        if let Some(name) = &self.shown_name {
+            return name.clone();
+        }
         let shown = self.shown.and_then(|doc| self.entries.iter().find(|e| e.doc == doc));
         match shown.or_else(|| self.current_entry(TOP, build)) {
             Some(e) => e.data.name.clone().unwrap_or_default(),
@@ -269,6 +274,10 @@ impl State {
         }
     }
     fn set_name(&mut self, build: u32, name: &[u16]) {
+        if let Some(held) = &mut self.shown_name {
+            *held = name.to_vec();
+            return;
+        }
         let shown = self.shown.filter(|&doc| self.entries.iter().any(|e| e.doc == doc));
         let Some(doc) = shown.or_else(|| self.current_entry(TOP, build).map(|e| e.doc)) else {
             self.initial_name = name.to_vec();
@@ -281,6 +290,7 @@ impl State {
     // The top-level navigable's document committed: the one its current entry is of is the one it shows.
     fn show(&mut self, build: u32) {
         self.shown = self.current_entry(TOP, build).map(|e| e.doc);
+        self.shown_name = None;
     }
 
     // …and its current entry.
@@ -449,6 +459,11 @@ impl Traversable {
         };
         if replace {
             if let Some(old) = leaving {
+                // (…the document it replaces still shown, its name held apart until the next one shows)
+                if nav == TOP && old.doc != doc && self.state.shown == Some(old.doc) {
+                    self.state.shown_name = Some(old.data.name.clone().unwrap_or_default());
+                }
+                let list = self.state.list_mut(nav, build)?;
                 let at = list.iter().position(|e| e.id == old.id)?;
                 list[at] = Entry { id, step: old.step, url: url.to_owned(), doc, data: Arc::new(data) };
                 self.state.collect_docs();
@@ -1054,6 +1069,22 @@ mod tests {
         assert_eq!(name(&h), "set");
         h.go_to(step - 1);
         assert_eq!(name(&h), "set");
+    }
+
+    #[test]
+    fn the_shown_document_keeps_its_name_through_a_replace() {
+        let h = history();
+        let name = |h: &SessionHistory| String::from_utf16_lossy(&h.lock().state.name(0));
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        h.show();
+        h.set_name("orig".into());
+        // (…a replace navigation in flight: the leaving document's pagehide names its own state, not the next one's)
+        h.replace(TOP, TOP, "/b".into(), false, Data::default());
+        h.clear_name();
+        h.set_name("fromhide".into());
+        assert_eq!(name(&h), "fromhide");
+        h.show();
+        assert_eq!(name(&h), "");
     }
 
     #[test]

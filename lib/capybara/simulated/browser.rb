@@ -2165,6 +2165,12 @@ module Capybara
       # …and its target name (`window.name`), its active document state's (session_history.rs `State::name`): a new window
       # named as it opens, the one a name finds.
       def window_name = @session_history.name
+      # …and the origin of its document — none for an opaque one, never the same as another's — which another window's
+      # familiarity with it is judged by (Driver#familiar_with?).
+      def document_origin
+        url, _, opaque = request_client(0)
+        opaque ? nil : url_origin(url)
+      end
       def window_name=(name)
         @session_history.name = name.to_s
       end
@@ -11289,8 +11295,7 @@ module Capybara
       private def leaving_document_origin
         return @creator&.fetch(:origin) || :initial unless @session_history.active(0)
 
-        url, _, opaque = request_client(0)
-        opaque ? nil : url_origin(url)
+        document_origin
       end
       # HTML "finalize a cross-document navigation": the target name of the document state a top-level navigation made
       # (`window.name` of its document: session_history.rs) cleared where that document's origin (`origin`, none an opaque
