@@ -321,6 +321,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("http_cache_unrefreshed", magnus::function!(http_cache::unrefreshed_for_ruby, 1))?;
     native.define_module_function("cookie_jar_clear", magnus::function!(cookie_jar::clear_for_ruby, 1))?;
     native.define_module_function("cookie_context", magnus::function!(cookie_jar::context_for_ruby, 3))?;
+    native.define_module_function("document_cookie_context", magnus::function!(cookie_jar::document_context_for_ruby, 1))?;
     native.define_module_function("cookie_jar_set", magnus::function!(cookie_jar::set_for_ruby, 5))?;
     native.define_module_function("cookie_jar_get", magnus::function!(cookie_jar::get_for_ruby, 4))?;
     // The length a response's body is framed by (headers.rs).

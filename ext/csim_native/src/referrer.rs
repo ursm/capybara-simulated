@@ -151,6 +151,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "requestClient", request_client_op, context_id);
     register(scope, ns, "siteForCookies", site_for_cookies_op, context_id);
     register(scope, ns, "crossSiteForCookies", cross_site_for_cookies_op, context_id);
+    register(scope, ns, "documentCookieContext", document_cookie_context_op, context_id);
     register(scope, ns, "ancestorDocuments", ancestor_documents_op, context_id);
 }
 
@@ -333,6 +334,17 @@ fn cross_site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let target = args.get(1).to_rust_string_lossy(scope);
     let own = args.get(2).is_true();
     rv.set_bool(frame_cross_site(&mut dom(scope).arena, r, &target, own));
+}
+
+// __dom.documentCookieContext(realm, url) -> the context `document.cookie` reads and writes the cookies of `url` in, for
+// the document of realm `realm` (cookie_jar.rs): through no HTTP API, over a secure channel where `url`'s origin is
+// potentially trustworthy, cross-site where a document above its browsing context is (`frame_cross_site`: RFC 6265bis
+// "site for cookies" — no SameSite cookie read or stored there but a None one), never a navigation's.
+fn document_cookie_context_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let r = args.get(0).int32_value(scope).unwrap_or(0);
+    let url = args.get(1).to_rust_string_lossy(scope);
+    let cross = frame_cross_site(&mut dom(scope).arena, r, &url, false);
+    rv.set_uint32(crate::cookie_jar::request_context(crate::cookie_jar::secure_target(&url), cross, false, false) & !crate::cookie_jar::HTTP);
 }
 
 #[cfg(test)]

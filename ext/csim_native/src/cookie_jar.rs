@@ -74,8 +74,17 @@ pub(crate) fn request_context(secure: bool, cross_site: bool, lax_retrieve: bool
 // WebSocket handshake, a download — a top-level navigation's GET (`top_level_get`) retrieving Lax cookies and its
 // response setting SameSite ones.
 pub(crate) fn context_for_ruby(client: Option<String>, target: String, top_level_get: bool) -> u32 {
-    let secure = crate::referrer::http_origin(&target).as_deref().is_some_and(crate::url_ops::potentially_trustworthy);
-    request_context(secure, crate::referrer::cross_site_for_cookies(client.as_deref(), &target), top_level_get, top_level_get)
+    request_context(secure_target(&target), crate::referrer::cross_site_for_cookies(client.as_deref(), &target), top_level_get, top_level_get)
+}
+// …and Capybara::Simulated::Native.document_cookie_context(url) -> the context `document.cookie` reads and writes `url`'s
+// cookies in for a top-level document (referrer.rs `documentCookieContext` a frame's): through no HTTP API, over a secure
+// channel where `url`'s origin is potentially trustworthy.
+pub(crate) fn document_context_for_ruby(url: String) -> u32 {
+    request_context(secure_target(&url), false, false, false) & !HTTP
+}
+// (…whether a request to `target` goes over a secure channel: its origin potentially trustworthy)
+pub(crate) fn secure_target(target: &str) -> bool {
+    crate::referrer::http_origin(target).as_deref().is_some_and(crate::url_ops::potentially_trustworthy)
 }
 
 // A cookie's longest life: 400 days (§5.6.1, §5.6.2).

@@ -10801,36 +10801,8 @@ module Capybara
         "#{env['rack.url_scheme']}://#{env['HTTP_HOST'] || env['SERVER_NAME']}#{env['SCRIPT_NAME']}#{env['PATH_INFO']}"
       end
 
-      # The context a cookie is set or retrieved in, as the session's cookie store (cookie_jar.rs) takes it: through an
-      # HTTP API (not `document.cookie`), over a secure channel, for a cross-site request, one where a Lax cookie goes,
-      # and a top-level navigation's response, which may set a SameSite one.
-      COOKIE_HTTP          = 1
-      COOKIE_SECURE        = 2
-      COOKIE_CROSS_SITE    = 4
-      COOKIE_LAX_RETRIEVE  = 8
-      COOKIE_TOP_LEVEL_NAV = 16
       # (…the time a cookie expires by: the app's clock, which a test may travel)
       def cookie_now = Time.now.to_f * 1000
-
-      # The `Cookie` request-header value for a request to `url`: the cookies the store retrieves for it (RFC 6265bis
-      # §5.8.3) — its host's and those of a domain it domain-matches, whose path its path matches. `secure:` is the
-      # transport of the request being built — a Secure cookie is omitted from any other (§5.4 step 1); REQUIRED so a
-      # new caller can't silently fail open. `cross_site:` is the request's site relationship (`document.cookie`'s: its
-      # frame's ancestors'): a SameSite=Strict cookie is withheld from any cross-site request; Lax — and the
-      # unspecified default, which Chrome treats as Lax — additionally rides a cross-site TOP-LEVEL GET navigation
-      # (`lax_ok:`); only SameSite=None crosses freely. `http: false` is `document.cookie`'s, which no HttpOnly cookie
-      # is read through. The bytes the cookies' values are, as the server sent them.
-      def cookie_header_for(url, secure:, cross_site: false, lax_ok: true, http: true)
-        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (lax_ok ? COOKIE_LAX_RETRIEVE : 0)
-        Native.cookie_jar_get(@cookie_jar, url.to_s, context, cookie_now)
-      end
-
-      # …and a set-cookie-string received for `url`, stored as the store says (§5.7) — a SameSite one not from a
-      # cross-site response but a top-level navigation's (`cross_site:`, `top_level:`).
-      def store_cookie(url, line, secure:, http:, cross_site: false, top_level: false)
-        context = (http ? COOKIE_HTTP : 0) | (secure ? COOKIE_SECURE : 0) | (cross_site ? COOKIE_CROSS_SITE : 0) | (top_level ? COOKIE_TOP_LEVEL_NAV : 0)
-        Native.cookie_jar_set(@cookie_jar, url.to_s, line.to_s, context, cookie_now)
-      end
 
       # Every cookie of the session gone (WebDriver "Delete All Cookies", which the WPT harness's testdriver asks for).
       def delete_all_cookies = Native.cookie_jar_clear(@cookie_jar)
@@ -10856,31 +10828,24 @@ module Capybara
         handle && @driver.window_browser(handle)&.current_url
       end
 
-      # (…its text: HTML's UTF-8 decode of the bytes) — in the browsing context of realm `realm`, cross-site for cookies
-      # where an ancestor's document is (RFC 6265bis "site for cookies": no SameSite cookie read or stored there but a
-      # None one).
-      def document_cookie(url = nil, realm = nil)
-        url = document_cookie_url(url, realm) or return ''
-        cookies = cookie_header_for(
-          url,
-          secure:     potentially_trustworthy_url?(url),
-          http:       false,
-          cross_site: frame_ancestor_cross_site?(realm, url),
-          lax_ok:     false
-        )
-        RuntimeShared.utf8_text(cookies)
+      # (…its text: HTML's UTF-8 decode of the bytes) — in `context`, the one the page's engine gave its document's cookie
+      # URL (referrer.rs `documentCookieContext`: cross-site where a document above its browsing context is), or, where
+      # the host found another URL for it — an about:blank window's opener's, the session's default host's — a top-level
+      # document's, which no ancestor makes cross-site.
+      def document_cookie(url = nil, realm = nil, context = nil)
+        cookie_url = document_cookie_url(url, realm) or return ''
+        RuntimeShared.utf8_text(Native.cookie_jar_get(@cookie_jar, cookie_url, document_cookie_context(cookie_url, url, context), cookie_now))
       end
-      def write_document_cookie(s, url = nil, realm = nil)
+      def write_document_cookie(s, url = nil, realm = nil, context = nil)
         return if s.nil? || s.empty?
 
-        url = document_cookie_url(url, realm) or return
-        store_cookie(
-          url,
-          s,
-          secure:     potentially_trustworthy_url?(url),
-          http:       false,
-          cross_site: frame_ancestor_cross_site?(realm, url)
-        )
+        cookie_url = document_cookie_url(url, realm) or return
+        Native.cookie_jar_set(@cookie_jar, cookie_url, s, document_cookie_context(cookie_url, url, context), cookie_now)
+      end
+      private def document_cookie_context(cookie_url, url, context)
+        return context if context && cookie_url == url
+
+        Native.document_cookie_context(cookie_url)
       end
 
       # Web Storage's sheds for the bindings (storage.js): [localStorage's, sessionStorage's] — the engine keeps their
@@ -11859,10 +11824,6 @@ module Capybara
       # ancestor's, up to its top-level one — a window's opener none of them (referrer.rs `frame_cross_site`).
       private def container_cross_site?(realm_id, target_url)
         @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, true) == true
-      end
-      # …by an ancestor's alone.
-      private def frame_ancestor_cross_site?(realm_id, target_url)
-        realm_id.to_i.positive? && @runtime.realm_direct_call(0, '__csimCrossSiteForCookies', realm_id.to_i, target_url.to_s, false) == true
       end
 
       # Build + dispatch a navigation request (a document's load, a frame's or the page's) — the shared core of every
