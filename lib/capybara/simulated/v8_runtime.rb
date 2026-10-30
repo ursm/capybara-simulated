@@ -488,15 +488,16 @@ module Capybara
       # Navigate a window realm (`win.location = …`): a FRESH realm for the new
       # document, like reload_frame_realm — an in-place `__csimLoadDocument` on an
       # already-loaded realm does NOT re-run inline scripts, but a fresh realm does.
-      # Returns the new realm's context id; `made` what its response gives the document (`create_window_realm`).
-      def reload_window_realm(old_id, url, body, content_type, **made)
+      # Returns the new realm's context id; `made` what its response gives the document (`create_window_realm`), `entry`
+      # its entry of the window's session history.
+      def reload_window_realm(old_id, url, body, content_type, entry:, **made)
         meta = window_realm_meta[old_id] || {}
         # Like reload_frame_realm, a re-navigated window discards its child browsing contexts — dispose
         # the descendant frame realms too, not just old_id, so a popup's iframes don't linger.
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_name: meta[:window_name], window_key: meta[:window_key], retarget_from: old_id,
+          opener_id: meta[:opener_id], window_name: meta[:window_name], window_key: meta[:window_key], retarget_from: old_id, entry: entry,
           **{about_base: meta[:about_base]}.merge(made)
         )
       end
@@ -1213,7 +1214,9 @@ module Capybara
       # makes a same-origin window far cheaper than today's isolate-per-window.
       # (…`retarget_from` the realm whose document this one replaces — its window the same WindowProxy wherever a realm
       # holds one, retargeted before the document's scripts run: `__csimRetargetWindowProxy` — `csp` its response's
-      # Content-Security-Policy, `client_id` the client its navigation reserved)
+      # Content-Security-Policy, `client_id` the client its navigation reserved, `entry` — `[how, step]` — its entry of the
+      # window's session history, that of a navigation's document (history.js `__csimCommitWindowEntry`): none for a new
+      # window's initial about:blank, which has none)
       def create_window_realm(
         url,
         body,
@@ -1230,7 +1233,8 @@ module Capybara
         csp: nil,
         client_id: nil,
         refresh: nil,
-        sandbox: nil
+        sandbox: nil,
+        entry: nil
       )
         realm = seed_realm_bridge(ctx.create_context)
         # Mark it a top-level window realm: its location's navigations planned in its own realm's plan, which the host
@@ -1285,6 +1289,8 @@ module Capybara
         # and window.name through its own navigation.
         window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
+        # (…its window's session history told of it, before its scripts read its `history`)
+        realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer) if entry
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.

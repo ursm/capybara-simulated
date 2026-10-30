@@ -60,7 +60,6 @@ module Capybara
         # history, so a frame's pushState must not be mirrored onto the top document's.
         '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1], a[2]); nil },
         '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1], a[2]); nil },
-        '__historyGo'                => ->(b, *a) { b.plan_history_traverse(a[0], a[1]) },
         '__csimApplyTraversal'       => ->(b, *a) { b.apply_planned_traversal(a[0].to_i); nil },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1], a[2]) },
@@ -116,8 +115,6 @@ module Capybara
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
         # (…a navigation another window begins as a task of its own: planned, its source snapshot this window's realm a[4]'s)
         '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], a[4], user_activated: a[2] == true, replace: a[3] == true); nil },
-        '__csimWindowJavascriptURL'  => ->(b, *a) { b.reaching_another_window { b.run_window_javascript_url(a[0], a[1], a[2]); nil } },
-        '__csimWindowHistoryGo'      => ->(b, *a) { b.reaching_another_window { b.window_history_go(a[0], a[1]) } },
         # (…the window of handle a[0] — '' this one — set closing, its close a task of its own)
         '__csimWindowClose'          => ->(b, *a) { b.close_window_of(a[0]); nil },
         '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },

@@ -62,7 +62,17 @@ struct Own {
     location: Option<Location>,
     reload: Option<Reload>,
     submission: Option<FrameSubmission>,
+    traversal: Option<Traversal>,
     planned: u64,
+}
+
+// A traversal of a window's session history that makes its document again (session_history.rs `applyWindowTraversal`):
+// the step it goes to, and the URL of the entry the window is at there, with the Referer its request sent — the request
+// a traversal makes it with again (HTML "apply the history step": the entry's document state).
+pub(crate) struct Traversal {
+    pub(crate) step: i64,
+    pub(crate) url: String,
+    pub(crate) referrer: Option<String>,
 }
 
 // A reload: whether the document had transient activation as it began, and — one of a document at a `blob:` URL — the
@@ -203,6 +213,10 @@ impl Own {
             self.submission = flushed.submission;
             restored = true;
         }
+        if self.traversal.is_none() && flushed.traversal.is_some() {
+            self.traversal = flushed.traversal;
+            restored = true;
+        }
         if restored {
             self.planned = self.planned.max(flushed.planned);
         }
@@ -215,6 +229,13 @@ impl NavigationPlan {
         self.navigation = None;
         self.submission = None;
         self.own = Own::default();
+    }
+    // A traversal of the document's window that makes its document again planned (`Traversal`): the navigation planned
+    // before it let go — HTML "apply the history step" sets the ongoing navigation to "traversal".
+    pub(crate) fn plan_traversal(&mut self, traversal: Traversal) {
+        self.supersede();
+        self.own.traversal = Some(traversal);
+        self.own.planned = next_planned();
     }
 }
 
@@ -425,14 +446,14 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
 // in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]` and `[realm,
-// "reload", activated, blob]`. A window closed is stepped no more, and plans none the host takes — nor one closing, whose
+// "reload", activated, blob]` — and `[realm, "traverse", step, url, referrer]` (`Traversal`). A window closed is stepped no more, and plans none the host takes — nor one closing, whose
 // navigation the task its close queued aborts (HTML "destroy a top-level traversable"): taken, and let go.
 fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
     for w in windows {
         let own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
-        if (own.location.is_some() || own.reload.is_some()) && !crate::dom::dom(scope).arena.window_closing(w) {
+        if (own.location.is_some() || own.reload.is_some() || own.traversal.is_some()) && !crate::dom::dom(scope).arena.window_closing(w) {
             taken.push((own.planned, w, own));
         }
     }
@@ -440,19 +461,33 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     let mut items = Vec::new();
     for (_, w, own) in taken {
         let realm = v8::Integer::new(scope, w).into();
-        let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload) {
-            (Some(l), _) => [vec![realm, v8::String::new(scope, "location").unwrap().into()], location_items(scope, l)].concat(),
-            (None, Some(r)) => vec![
+        let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload, own.traversal) {
+            (Some(l), ..) => [vec![realm, v8::String::new(scope, "location").unwrap().into()], location_items(scope, l)].concat(),
+            (None, Some(r), _) => vec![
                 realm,
                 v8::String::new(scope, "reload").unwrap().into(),
                 v8::Boolean::new(scope, r.activated).into(),
                 r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
             ],
-            (None, None) => continue,
+            (None, None, Some(t)) => vec![
+                realm,
+                v8::String::new(scope, "traverse").unwrap().into(),
+                v8::Number::new(scope, t.step as f64).into(),
+                v8::String::new(scope, &t.url).unwrap().into(),
+                text_or_null(scope, t.referrer),
+            ],
+            (None, None, None) => continue,
         };
         items.push(v8::Array::new_with_elements(scope, &item).into());
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// A text for the bindings, null for none.
+fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v8::Local<'s, v8::Value> {
+    match text.and_then(|t| v8::String::new(scope, &t)) {
+        Some(s) => s.into(),
+        None => v8::null(scope).into(),
+    }
 }
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
 // more — undefined for none.

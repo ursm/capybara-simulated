@@ -540,10 +540,8 @@ module Capybara
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
           # one is made)
           activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
-          # (…a POST one begun at once, not as a task of its own as a GET one is — a gap, R13 S4)
           if post
-            existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, user_activated: activated,
-                                                                                  **post_initiator(post, source))
+            post_window(existing[:browser], url, post, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           else
             navigate_window(existing[:browser], url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: activated)
           end
@@ -782,32 +780,6 @@ module Capybara
         b = window_browser(handle) or return
         navigate_window(b, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace)
       end
-      # A cross-window `w.location = 'javascript:…'`: evaluated in the target window's document (Browser
-      # `run_javascript_url_from`), by a document of origin `origin`, as HTML navigates to a javascript: URL.
-      def window_run_javascript_url(handle, href, origin) = (b = window_browser(handle)) && b.run_javascript_url_from(href, origin)
-      # A cross-window `w.history.back()/forward()/go(n)`: traverse the target
-      # window's history. The opener's VM is the one executing, so a non-active
-      # target can rebuild eagerly (a gap: HTML queues it as a task, R13 S4); an active target
-      # (e.g. `opener.history.back()` from an aux) defers to avoid tearing down
-      # the running VM mid-call. Returns true when the traversal crossed a
-      # document boundary — the JS proxy then fires the target's deferred `load`
-      # (the same deferral as `navAux`) so the restored page's `window.onload`
-      # runs after the opener's current task. False for a same-document
-      # (pushState) traversal — popstate already fired — or a no-op.
-      def window_history_go(handle, delta)
-        b = window_browser(handle) or return false
-        if b.equal?(active_browser) || b.script_waiting?
-          # `opener.history.back()` targeting the active window — or one whose
-          # script waits on a call into another (Browser#script_waiting?): defer (can't
-          # rebuild the running VM mid-call) and return false — the active
-          # window's load fires through its own navigation path when the pending
-          # traversal drains, NOT via the aux-load deferral the caller would run.
-          b.history_go(delta)
-          false
-        else
-          b.history_go(delta, force: true) == :cross_document
-        end
-      end
       # The handle of the window that opened `browser`'s — none once that one is discarded (HTML's `opener` getter: its
       # opener browsing context's WindowProxy, none for a context gone; WPT opener-closed.html).
       def opener_handle_of(browser)
@@ -839,6 +811,22 @@ module Capybara
           source&.raw_current_url,
           blob&.fetch(:bytes),
           blob&.fetch(:type)
+        )
+      end
+
+      # …a form's submission to it by its name, with a POST resource (HTML "navigate", `documentResource` a POST resource:
+      # its encoded body and content type, from the form's document's origin — `post_initiator`), planned likewise.
+      private def post_window(browser, url, post, source:, referrer:, referrer_policy:, user_activated:)
+        initiator = post_initiator(post, source)
+        browser.traversable.plan_post(
+          url.to_s,
+          post[:body].to_s,
+          post[:content_type].to_s,
+          initiator[:origin_null],
+          user_activated == true,
+          referrer,
+          referrer_policy,
+          initiator[:initiator]
         )
       end
 

@@ -2288,12 +2288,8 @@ module Capybara
       # (session_history.rs), whichever navigable's `history` asked: each navigable whose active entry the step moves
       # traverses to its entry, a same-document one (a pushState's, a fragment's) by its location updated and a
       # `popstate` (HTML "update document for history step application"), another by the entry's document made again
-      # (a navigation from history, a re-POST its POST's).
-      # Returns the traversal kind so a cross-window caller
-      # (`window_history_go`) knows whether to fire the target window's
-      # deferred `load`: `:same_document` (pushState traversal — popstate
-      # already fired, no load), `:cross_document` (full document replay —
-      # load follows), or `nil` (no-op: zero delta / out of range).
+      # (a navigation from history, a re-POST its POST's). `force` where none of the page's script is on the stack: the
+      # driver's own (`go_back`), or the task of one another window asked for (`apply_asked_traversals`).
       def history_go(delta, force: false, realm: 0, token: nil)
         delta = delta.to_i
         return if delta == 0
@@ -2321,19 +2317,15 @@ module Capybara
           # (A traversal the page asked for before the navigation began is its own and goes ahead: its task, which a
           # browser would have run as the script that asked ended, comes due in the flush only because the driver
           # takes the navigation first.)
-          return :same_document if @flushing_outgoing_page && !(token && token <= @flush_traversal_mark.to_i)
+          return if @flushing_outgoing_page && !(token && token <= @flush_traversal_mark.to_i)
           # Pure pushState traversal — no VM rebuild, safe to run
           # inline; the popstate dispatch happens within the current
           # call's JS context.
           @session_history.go_to(step)
           changes.each {|nav, id, _| traverse_same_document(nav, id) }
-          :same_document
         elsif force
-          # Ruby-driven (`page.go_back`), or a non-active window driven by its
-          # opener (`w.history.back()`) — no live JS call on THIS window's
-          # isolate to interrupt, safe to rebuild the Context synchronously.
+          # No live JS call on THIS window's isolate to interrupt, safe to rebuild the Context synchronously.
           perform_history_traverse(delta)
-          :cross_document
         else
           # JS-driven (`history.back()` from a page handler): replaying
           # the history entry synchronously would call `rebuild_ctx`
@@ -2343,30 +2335,34 @@ module Capybara
           # and drain after the call returns — as a location's
           # navigation and a reload are (navigation_plan.rs).
           @pending_history_traverse = delta
-          :cross_document
         end
       end
 
-      # A traversal a page's `history` asked for (history.js `traverse`): appended to the traversable's session history
-      # traversal queue now (session_history.rs `queue`), applied as the task it is runs (`apply_planned_traversal`) — or,
+      # A traversal a page's `history` asked for, appended to the traversable's session history traversal queue as it
+      # asked (session_history.rs `historyTraverse`), applied as the task it is runs (`apply_planned_traversal`) — or,
       # before that, as the driver takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation
-      # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). `[token, delay]`:
-      # the token its task applies it by, and the delay of that task (session_history.rs `queue`).
-      def plan_history_traverse(delta, realm)
-        return [0, 0] if delta.to_i.zero? || !history_of_page?(realm)
-
-        @session_history.queue(delta.to_i, realm.to_i)
-      end
-      # …the traversal of `token` applied, and those queued before it: none where the driver took them already.
+      # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). The traversal of
+      # `token` applied, and those queued before it: none where the driver took them already.
       def apply_planned_traversal(token)
-        @session_history.take_queued(token).each do |t, delta, realm|
-          history_go(delta, realm: realm, token: t)
-        end
+        @session_history.take_queued(token).each {|row| apply_queued_traversal(*row) }
       end
       def apply_planned_traversals
-        @session_history.take_all_queued.each do |t, delta, realm|
-          history_go(delta, realm: realm, token: t)
-        end
+        @session_history.take_all_queued.each {|row| apply_queued_traversal(*row) }
+      end
+      # The traversals another window's script asked for (session_history.rs `traversableTraverse`), each a task of this
+      # window's own — with those its page queued before them, in the order queued — applied now, its page's script not on
+      # the stack. Returns how many.
+      private def apply_asked_traversals
+        rows = @session_history.take_asked
+        rows.each {|row| apply_queued_traversal(*row, force: true) }
+        rows.size
+      end
+      # …one of them: by `delta` (`history_go`), or, another window's `go(0)`, the page's reload, by its own document (HTML
+      # "apply the reload history step").
+      private def apply_queued_traversal(token, delta, realm, asked, force: false)
+        return history_go(delta, force: force, realm: realm, token: token) unless delta.zero?
+
+        from_document(0) { refresh(user_activated: false, through_ui: false) } if asked
       end
       # …those, as the driver takes the navigations the page planned with them — the traversal they make first, its
       # cancelling of the ones it cancels in (HTML "apply the history step") — where one makes a document again (whose
@@ -2459,10 +2455,12 @@ module Capybara
         restore_flushed_nav_intents if flushed
       end
 
-      # The navigations planned for navigable `nav` (0 the page) let go of: a traversal making its document again.
+      # The navigations planned for navigable `nav` (0 the page) let go of: a traversal making its document again — the
+      # page's own, and the one another window planned of it (session_history.rs `Asked`).
       private def cancel_navigations_for(nav)
         if nav.zero?
           @runtime.call('__csimSupersedePlanned')
+          @session_history.take_planned
         elsif (realm = navigable_realm(nav))
           @runtime.call('__csimDropFrameNavigation', realm)
           # (…a form's of its parent's document too, planned in that realm: frame_navigation.rs `planned`)
@@ -7345,14 +7343,6 @@ module Capybara
         referrer, policy = navigation_referrer(realm.to_i)
         @driver.window_set_location(self, handle.to_s, url.to_s, referrer: referrer, referrer_policy: policy, user_activated: user_activated, replace: replace)
       end
-      # …to a javascript: URL `href`, by a document of origin `origin`: evaluated in that window's document.
-      def run_window_javascript_url(handle, href, origin) = (@driver.window_run_javascript_url(handle.to_s, href.to_s, origin.to_s) if @driver.respond_to?(:window_run_javascript_url))
-      # The target side: a javascript: URL another window's document of origin `origin` navigates this one to, evaluated
-      # in this window's document where it is of that origin (url-parse.js `__csimRunJavascriptURLFrom`).
-      def run_javascript_url_from(href, origin)
-        @runtime.call('__csimRunJavascriptURLFrom', href.to_s, origin.to_s)
-      end
-      def window_history_go(handle, delta) = (@driver.respond_to?(:window_history_go) ? @driver.window_history_go(handle.to_s, delta.to_i) : false)
       # `close()` of the window of `handle` — this one's own, '' — by this window's script (Driver#script_close_window).
       def close_window_of(handle)      = (@driver.script_close_window(self, handle.to_s.empty? ? window_handle.to_s : handle.to_s) if @driver.respond_to?(:script_close_window))
       def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
@@ -7492,7 +7482,8 @@ module Capybara
 
       # What another window's script asked of this one, taken as tasks of its own event loop (HTML: a task queued on it by
       # an agent of another isolate): the messages posted to it (`deliver_posted_messages`) — and, while it is not busy, the
-      # close of it, then the navigation planned of it, which a close leaves none of (session_history.rs `ask_close`).
+      # close of it, then the traversals of its session history and the navigation planned of it, which a close leaves
+      # none of (session_history.rs `ask_close`).
       # Taken as this window's own step takes its tasks, or, one not the active window, as the active one's takes them
       # (`take_window_tasks_in_background`); none once its close ran.
       def take_window_tasks
@@ -7509,6 +7500,8 @@ module Capybara
           close_steps
           return n + 1
         end
+        # (…its traversals ahead of its navigation, which one making a document again cancels: `cancel_navigations_for`)
+        n += apply_asked_traversals
         n + (consume_planned_navigation ? 1 : 0)
       end
 
@@ -7553,18 +7546,25 @@ module Capybara
       # Whether its close was asked (HTML "is closing") — or it closed.
       def closing? = @session_history.closing?
 
-      # The navigation of this window another window's script planned (Driver#navigate_window), taken: begun with the
-      # source snapshot taken there — the Referer and policy of the document that began it, its URL as the initiator, the
-      # activation it had, its history handling. A blob: one's document loaded from the blob its URL resolved to as the
-      # source parsed it — a network error where none.
+      # The navigation of this window another window's script planned (Driver#navigate_window, a form's submission to it
+      # by its name, a `javascript:` URL: session_history.rs `Planned`), taken: begun with the source snapshot taken there
+      # — the Referer and policy of the document that began it, its URL as the initiator, the activation it had, its
+      # history handling. A blob: one's document loaded from the blob its URL resolved to as the source parsed it — a
+      # network error where none; a POST one's posted, from the form's document's origin; a javascript: one's source run
+      # in this window's document, which the engine let through only where that is same origin with the initiator's.
       private def consume_planned_navigation
-        url, replace, activated, referrer, policy, initiator, blob_bytes, blob_type = @session_history.take_planned
-        return false unless url
-
-        if url.start_with?('blob:')
-          fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url, blob_bytes, blob_type)
+        planned = @session_history.take_planned or return false
+        url     = planned[:url]
+        made    = {referer: planned[:referrer], referrer_policy: planned[:policy], initiator: planned[:initiator], user_activated: planned[:activated]}
+        if planned[:javascript]
+          @runtime.call('__csimEvaluateJavascriptURL', url)
+        elsif (blob = planned[:blob])
+          fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url, *blob)
+        elsif (post = planned[:post])
+          body, content_type, origin_null = post
+          navigate_post(url, body, content_type, origin_null: origin_null, **made)
         else
-          visit(url, referer: referrer, referrer_policy: policy, initiator: initiator, user_activated: activated, replace: replace)
+          visit(url, replace: planned[:replace], **made)
         end
         true
       end
@@ -10032,7 +10032,11 @@ module Capybara
       # as the page's are (navigation_plan.rs `takeWindowNavigations`: none of a window closed since, HTML "cannot
       # navigate") — taken in the order they were planned, each window's document made again in place: a location's to
       # its URL, by the document that began it (its own where no other did), a `blob:` one's of the blob it began with; a
-      # reload's to the URL its document is at, a `blob:` one's of its blob. (None asked for where no window was opened.)
+      # reload's to the URL its document is at, a `blob:` one's of its blob; a traversal's of its session history to the
+      # URL of the entry it goes to, referred as that entry's document was (session_history.rs `applyWindowTraversal`).
+      # Each one's entry of the window's session history its document's (history.js `__csimCommitWindowEntry`): a
+      # location's after the current one, or in its place; a reload's the current one; a traversal's the one it goes to.
+      # (None asked for where no window was opened.)
       def consume_pending_window_nav
         return if @runtime.window_realm_meta.empty?
 
@@ -10040,10 +10044,15 @@ module Capybara
           invalidate_find_cache
           case kind
           when 'location'
-            url, _replace, initiator, source, policy, activated, blob = plan
+            url, replace, initiator, source, policy, activated, blob = plan
+            entry = [replace ? 'replace' : 'push']
           when 'reload'
             activated, blob = plan
-            url = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+            url   = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+            entry = ['reload']
+          when 'traverse'
+            step, url, referred = plan
+            entry = ['step', step]
           end
           initiator ||= realm_id
           made = {}
@@ -10056,9 +10065,10 @@ module Capybara
           # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
           # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
           # is at; the document it makes of its bytes, its Content-Security-Policy and Referrer-Policy, the Referer it
-          # sent its referrer, its reserved client its own.
+          # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
           if body.nil? && http_url?(url)
-            resp = frame_navigation_fetch(url, nil, dest: 'document', initiator_realm: initiator, link_policy: policy, download_realm: initiator, user_activated: activated)
+            by   = kind == 'traverse' ? {} : {initiator_realm: initiator, link_policy: policy}
+            resp = frame_navigation_fetch(url, referred, dest: 'document', download_realm: initiator, user_activated: activated, **by)
             next if resp.nil? || resp['no_document']
 
             headers = resp['headers'] || {}
@@ -10082,6 +10092,8 @@ module Capybara
             if kind == 'reload'
               referrer = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrer')
               policy   = @runtime.realm_direct_call(realm_id, '__csimDocumentReferrerPolicy')
+            elsif kind == 'traverse'
+              referrer = referred
             else
               # (…under the policy it navigated under, else the initiator's own)
               source, own = realm_referrer_initiator(initiator) if source.nil?
@@ -10103,7 +10115,7 @@ module Capybara
             log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
             next
           end
-          @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, **made)
+          @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
         rescue StandardError => e
           log_console('warn', "window realm self-navigation failed: #{e.message}")
         end
@@ -10954,8 +10966,8 @@ module Capybara
       # make `current_url` report a URL no window is at, which is what an iframe'd SPA does on every navigation — or,
       # `push` not, its current entry's URL and state made the new ones, so a later `location.reload()` refetches the
       # pushState'd URL, not the stale `src`.
-      # A same-isolate window realm (a popup) has no iframe container and so no entry to update —
-      # its handle is 0, and not touching the top history is already the fix there.
+      # (A same-isolate window realm's — a pop-up's — are its own traversable's, which the engine records: session_history.rs
+      # `windowHistoryUpdate`.)
       private def frame_history_state(realm_id, url, state, push:)
         return nil if realm_id.zero? || !(id = frame_history_id(realm_id, create: true))
 

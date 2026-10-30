@@ -76,6 +76,9 @@ pub(crate) struct Navigables {
     // (`discard_window`), their realms lingering inert after.
     opened: HashSet<i32>,
     closed: HashSet<i32>,
+    // …and the session history of each, its own top-level traversable's (session_history.rs), made as it is first
+    // stepped and gone as it is discarded: what its `history` traverses and its `length` counts.
+    window_histories: HashMap<i32, crate::session_history::SessionHistory>,
     // The windows whose page disowned their opener (`opener = null`): theirs is null from then on (HTML "disown its
     // opener"), a window another isolate made included — its realm 0.
     disowned: HashSet<i32>,
@@ -464,6 +467,7 @@ impl RealmArena {
             nav.window_keys.insert(realm, key);
             nav.window_realms.insert(key, realm);
             nav.opened.insert(key);
+            nav.window_histories.entry(key).or_insert_with(crate::session_history::SessionHistory::new);
             if let Some(opener) = opener {
                 nav.openers.insert(key, opener);
             }
@@ -494,9 +498,22 @@ impl RealmArena {
         let nav = &mut self.navigables;
         let Some(&realm) = nav.window_realms.get(&key).filter(|_| nav.closed.contains(&key)) else { return };
         nav.windows.retain(|&w| w != realm);
+        nav.window_histories.remove(&key);
         nav.lost.insert(realm);
         self.note_discarded();
         self.note_linked();
+    }
+    // The session history of the window realm `realm`'s document is of — a window's `window.open` made in this isolate,
+    // or a frame's in its tree — and the realm of the window's document now: none for a realm of the page's tree, nor one
+    // no window's document now (a window navigated away from).
+    pub(crate) fn window_history(&self, realm: i32) -> Option<(&crate::session_history::SessionHistory, i32)> {
+        let top = self.top_level_realm(realm);
+        let nav = &self.navigables;
+        let key = self.window_key(top);
+        if top == 0 || nav.window_realms.get(&key) != Some(&top) || !self.realm_in_tree(realm) {
+            return None;
+        }
+        nav.window_histories.get(&key).map(|h| (h, top))
     }
     pub(crate) fn window_closed(&self, key: i32) -> bool {
         self.navigables.closed.contains(&key)
