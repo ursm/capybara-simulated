@@ -90,7 +90,6 @@ module Capybara
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver
         # forces noopener for a cross-partition blob: target.
         '__csimOpenAuxFromRealm'     => ->(b, *a) { b.reaching_another_window { b.open_aux_from_realm(*a[0, 6]); nil } },
-        '__csimWindowPostMessage'    => ->(b, *a) { b.post_message_to_window(a[0], a[1], a[2], a[3]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
         # BroadcastChannel's multi-realm path: the isolate queues one ordered delivery per channel (broadcast_channels.rs
         # `bcQueue`), the host the other windows' and the workers' (`broadcast_queued`). Only taken where a sibling
@@ -115,11 +114,12 @@ module Capybara
         '__csimWindowRefHas'         => ->(b, *a) { b.reaching_another_window { b.window_ref_has(a[0], a[1], a[2]) } },
         '__csimWindowRefDelete'      => ->(b, *a) { b.reaching_another_window { b.window_ref_delete(a[0], a[1], a[2]) } },
         '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
-        '__csimWindowSetLocation'    => ->(b, *a) { b.reaching_another_window { b.set_window_location(a[0], a[1], user_activated: a[2] == true, replace: a[3] == true); nil } },
+        # (…a navigation another window begins as a task of its own: planned, its source snapshot this window's realm a[4]'s)
+        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], a[4], user_activated: a[2] == true, replace: a[3] == true); nil },
         '__csimWindowJavascriptURL'  => ->(b, *a) { b.reaching_another_window { b.run_window_javascript_url(a[0], a[1], a[2]); nil } },
         '__csimWindowHistoryGo'      => ->(b, *a) { b.reaching_another_window { b.window_history_go(a[0], a[1]) } },
-        '__csimWindowClosed'         => ->(b, *a) { b.window_closed?(a[0]) },
-        '__csimWindowClose'          => ->(b, *a) { b.reaching_another_window { b.close_child_window(a[0]); nil } },
+        # (…the window of handle a[0] — '' this one — set closing, its close a task of its own)
+        '__csimWindowClose'          => ->(b, *a) { b.close_window_of(a[0]); nil },
         '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },
         # Fire an aux window's OWN `load` event (in its VM) — deferred by the
         # opener so a child `window.onload` runs after the opener's current task.

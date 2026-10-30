@@ -28839,10 +28839,6 @@ cookies/third-party-cookies/third-party-cookie-heuristics.tentative.https.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: "[harness] TIMEOUT"
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 cookies/third-party-cookies/third-party-cookies.tentative.https.html:
 - name: '3P embed: Cookies are not accessible via DOM'
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -28857,10 +28853,6 @@ cookies/third-party-cookies/third-party-cookies.tentative.https.html:
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 - name: Cross site embed setting DOM cookies
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

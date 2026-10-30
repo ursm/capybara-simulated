@@ -37,8 +37,6 @@ cookies/attributes/domain.sub.html:
   (after redirect to same-origin page).
 - Empty domain treated as host cookie 1
 - Empty domain treated as host cookie 2
-cookies/attributes/secure-non-secure.html:
-- "[harness] TIMEOUT"
 cookies/domain/domain-attribute-host-with-and-without-leading-period.sub.https.html:
 - Domain=.web-platform.test => Second value available via `document.cookie`
 - Domain=.web-platform.test => Second value sent with same-origin requests.
@@ -2858,59 +2856,12 @@ fetch/metadata/generated/svg-image.https.sub.html:
 - sec-fetch-dest no attributes
 - sec-fetch-storage-access - Cross-site no attributes
 fetch/metadata/generated/window-history.https.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest - history.back
-- sec-fetch-dest - history.forward
-- sec-fetch-mode - history.back
-- sec-fetch-mode - history.forward
 - sec-fetch-site - Cross-site - history.back
 - sec-fetch-site - Cross-site - history.forward
 - sec-fetch-site - Same origin - history.back
 - sec-fetch-site - Same origin - history.forward
 - sec-fetch-site - Same site - history.back
 - sec-fetch-site - Same site - history.forward
-- sec-fetch-storage-access - Cross-site - history.back
-- sec-fetch-storage-access - Cross-site - history.forward
-- sec-fetch-storage-access - Same site - history.back
-- sec-fetch-storage-access - Same site - history.forward
-- sec-fetch-user - history.back
-- sec-fetch-user - history.forward
-fetch/metadata/generated/window-history.sub.html:
-- "[harness] TIMEOUT"
-- sec-fetch-dest - Not sent to non-trustworthy cross-site destination - history.back
-- sec-fetch-dest - Not sent to non-trustworthy cross-site destination - history.forward
-- sec-fetch-dest - Not sent to non-trustworthy same-origin destination - history.back
-- sec-fetch-dest - Not sent to non-trustworthy same-origin destination - history.forward
-- sec-fetch-dest - Not sent to non-trustworthy same-site destination - history.back
-- sec-fetch-dest - Not sent to non-trustworthy same-site destination - history.forward
-- sec-fetch-mode - Not sent to non-trustworthy cross-site destination - history.back
-- sec-fetch-mode - Not sent to non-trustworthy cross-site destination - history.forward
-- sec-fetch-mode - Not sent to non-trustworthy same-origin destination - history.back
-- sec-fetch-mode - Not sent to non-trustworthy same-origin destination - history.forward
-- sec-fetch-mode - Not sent to non-trustworthy same-site destination - history.back
-- sec-fetch-mode - Not sent to non-trustworthy same-site destination - history.forward
-- sec-fetch-site - Not sent to non-trustworthy cross-site destination - history.back
-- sec-fetch-site - Not sent to non-trustworthy cross-site destination - history.forward
-- sec-fetch-site - Not sent to non-trustworthy same-origin destination - history.back
-- sec-fetch-site - Not sent to non-trustworthy same-origin destination - history.forward
-- sec-fetch-site - Not sent to non-trustworthy same-site destination - history.back
-- sec-fetch-site - Not sent to non-trustworthy same-site destination - history.forward
-- sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination -
-  history.back
-- sec-fetch-storage-access - Not sent to non-trustworthy cross-site destination -
-  history.forward
-- sec-fetch-storage-access - Not sent to non-trustworthy same-origin destination -
-  history.back
-- sec-fetch-storage-access - Not sent to non-trustworthy same-origin destination -
-  history.forward
-- sec-fetch-storage-access - Not sent to non-trustworthy same-site destination - history.back
-- sec-fetch-storage-access - Not sent to non-trustworthy same-site destination - history.forward
-- sec-fetch-user - Not sent to non-trustworthy cross-site destination - history.back
-- sec-fetch-user - Not sent to non-trustworthy cross-site destination - history.forward
-- sec-fetch-user - Not sent to non-trustworthy same-origin destination - history.back
-- sec-fetch-user - Not sent to non-trustworthy same-origin destination - history.forward
-- sec-fetch-user - Not sent to non-trustworthy same-site destination - history.back
-- sec-fetch-user - Not sent to non-trustworthy same-site destination - history.forward
 fetch/metadata/generated/window-location.https.sub.html:
 - sec-fetch-user - location.assign with user activation
 - sec-fetch-user - location.href with user activation
@@ -3484,6 +3435,7 @@ html/browsers/origin/cross-origin-objects/window-location-and-location-href-cros
 html/browsers/the-window-object/BarProp.window.js:
 - BarBrop objects of a nested Window
 - BarProp objects of an auxiliary Window
+- "[harness] TIMEOUT"
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-01.html:
 - The window's length must return the number of child browsing contexts(in iframe)
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-02.html:
@@ -3491,10 +3443,6 @@ html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsi
 - Accessing child browsing contexts 3
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-03.html:
 - Indexed child browsing contexts
-html/browsers/the-window-object/close-method.window.js:
-- "[harness] TIMEOUT"
-- window.close() affects name targeting immediately
-- window.close() queues a task to discard, but window.closed knows immediately
 html/browsers/the-window-object/garbage-collection-and-browsing-contexts/discard_iframe_history_1.html:
 - Removing iframe from document removes it from history
 - "[harness] TIMEOUT"
@@ -3523,13 +3471,6 @@ html/browsers/the-window-object/named-access-on-the-window-object/prototype.html
 - Property on Object.prototype.
 html/browsers/the-window-object/named-access-on-the-window-object/window-named-properties.html:
 - constructor
-html/browsers/the-window-object/open-close/close_beforeunload.html:
-- Running beforeunload handler in window.close()
-- "[harness] TIMEOUT"
-html/browsers/the-window-object/open-close/close_noopener_beforeunload.html:
-- "[harness] TIMEOUT"
-- closing noopener window with 1 entry
-- closing noopener window with 2 entries
 html/browsers/the-window-object/open-close/close_script_defer.html:
 - Running defer script in window.close()
 html/browsers/the-window-object/open-close/no_window_open_when_term_nesting_level_nonzero.window.js:
@@ -3756,25 +3697,14 @@ html/browsers/the-window-object/open-close/open-features-tokenization-width-heig
 - '"height==402" should set height of opened window'
 - '"width=401" should set width of opened window'
 - '"width==401" should set width of opened window'
-html/browsers/the-window-object/open-close/script-closable.html:
-- Window created by form with noopener is script-closable
-- Window created by form with opener is script-closable
-- Window created by link with noopener is script-closable
-- Window created by link with opener is script-closable
-- Window created by script with noopener is script-closable
-- Window created by script with opener is script-closable
-- "[harness] TIMEOUT"
 html/browsers/the-window-object/security-window/window-security.https.html:
 - A SecurityError exception must be thrown when window.onmousewheel is accessed from
   a different origin.
 html/browsers/the-window-object/self-et-al.window.js:
-- "[harness] TIMEOUT"
 - iframeWindow.frames before and after removal
 - iframeWindow.globalThis before and after removal
 - popupWindow.frames before, after closing, and after discarding
 - popupWindow.globalThis before, after closing, and after discarding
-- popupWindow.self before, after closing, and after discarding
-- popupWindow.window before, after closing, and after discarding
 html/browsers/the-window-object/window-aliases.html:
 - frames should be the global object
 html/browsers/the-window-object/window-indexed-access-vs-named-access.html:
@@ -3890,10 +3820,6 @@ html/browsers/windows/auxiliary-browsing-contexts/named-lookup-scoped-to-browsin
 - named lookup scoped to browsing context group
 html/browsers/windows/auxiliary-browsing-contexts/no-proactive-swap-when-other-contexts-in-group.html:
 - no proactive browsing context group change when other contexts in group
-html/browsers/windows/auxiliary-browsing-contexts/opener-closed.html:
-- An auxiliary browsing context should report `null` for `window.opener` when that
-  browsing context is discarded
-- "[harness] TIMEOUT"
 html/browsers/windows/browsing-context-names/duplicate-name-order.html:
 - Duplicate name lookup order
 html/browsers/windows/clear-window-name.https.html:

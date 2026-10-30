@@ -559,11 +559,6 @@ module Capybara
         # process-wide too, read by every import that names one — a broadcast's — and dropped the same way)
         @module_tokens        = []
         @transfer_tokens_lock = Mutex.new
-        # Cross-window `postMessage` inbox. Another window's `target.postMessage`
-        # routes through the Driver and lands here; this window drains it into a
-        # `message` event the next time it's active and settles/ticks. Plain
-        # array (same thread — windows aren't background-threaded like workers).
-        @window_inbox         = []
         # Cross-window BroadcastChannel messages from OTHER windows, delivered to
         # this window's matching channels on settle. [{name, data}] (same thread).
         @broadcast_inbox      = []
@@ -1110,7 +1105,7 @@ module Capybara
       def deliver_agent_notices
         return 0 unless Native.agent_notices_pending(@session_partition)
 
-        agent_windows.sum {|b| b.deliver_own_agent_notices(background: !b.equal?(self)) }
+        session_windows.sum {|b| b.deliver_own_agent_notices(background: !b.equal?(self)) }
       end
 
       # …and, for a window that is not the active one, the tasks they queue that are due — a lock granted it, whose
@@ -1130,12 +1125,12 @@ module Capybara
 
       # Whether a registry owes a realm of one of the session's windows a notice another realm's or a worker's call caused
       # (engine-notices.js `deliver`). The session's check first, which costs no V8 call.
-      def agent_notices_pending? = Native.agent_notices_pending(@session_partition) && agent_windows.any? {|b| b.runtime_agent_notices_pending? }
+      def agent_notices_pending? = Native.agent_notices_pending(@session_partition) && session_windows.any? {|b| b.runtime_agent_notices_pending? }
 
       def runtime_agent_notices_pending? = @runtime.call('__csimAgentsPending') == true
 
-      # (…this window first, then the session's others)
-      private def agent_windows = [self, *(@driver&.window_browsers || []).reject {|b| b.equal?(self) }]
+      # The session's windows: this one first, then its others.
+      private def session_windows = @driver.respond_to?(:window_browsers) ? [self, *@driver.window_browsers.reject {|b| b.equal?(self) }] : [self]
 
       # Single-slot cache for the most recent find_xpath / find_css /
       # find_first_css result. Capybara's `synchronize` retry loop
@@ -2953,11 +2948,14 @@ module Capybara
       # long after the click returned), a script the driver ran (`execute_script('form.submit()')` on an idle page, where
       # no step follows to take it), or a synthetic click on an `<a download>` (Avo's action download: file-saver's
       # `saveAs` dispatches one on a fresh anchor with a blob URL). Otherwise what it planned is never taken.
+      # …and what it asked of the session's other windows, which their own tasks take (`deliver_asked_tasks`): a message
+      # it posted, a navigation or a close of one it asked for.
       def drain_task_intents
         drain_pending_navigation
         consume_pending_navigation
         consume_pending_form_submit
         consume_pending_download
+        deliver_asked_tasks
       end
 
       # Backstop on the per-frame quiescence loop — caps the event-loop turns
@@ -3220,7 +3218,7 @@ module Capybara
       # fired-timer signals can't see. Aux-window opens are intentionally excluded:
       # they build a separate Browser, not a hop in a same-page chain.
       private def pending_nav_intent?
-        !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals?
+        !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
       end
       private def pending_navigation_besides_traversals?
         !own_planned.zero?
@@ -3495,7 +3493,6 @@ module Capybara
         reset_hijacked_fetches
         reset_workers
         reset_websockets
-        @window_inbox.clear
         @broadcast_inbox.clear
         # (…the isolate's BroadcastChannel queue goes with the realms the rebuild drops: `forgetRealmObjects`)
         @bc_queued = false
@@ -3545,7 +3542,6 @@ module Capybara
         reset_event_sources
         reset_hijacked_fetches
         reset_websockets
-        @window_inbox.clear
         @broadcast_inbox.clear
         # Dispose the JS runtime/isolate itself — for an auxiliary window this
         # Browser is the isolate's last owner, but dropping the last reference
@@ -7241,15 +7237,6 @@ module Capybara
         false
       end
 
-      # `targetWindow.postMessage(data, targetOrigin)` — route to the target window's
-      # inbox, tagged with this window as the source. `target_origin` gates delivery
-      # on the target side ('*' = any; a '/' was resolved to the sender's origin
-      # JS-side); `sender_origin` becomes the delivered event.origin.
-      def post_message_to_window(target_handle, data, target_origin, sender_origin)
-        return unless @driver.respond_to?(:window_post_message)
-        @driver.window_post_message(self, target_handle.to_s, data, target_origin.to_s, sender_origin.to_s)
-      end
-
       def window_location_of(handle)   = @driver.respond_to?(:window_location)     ? @driver.window_location(handle.to_s).to_s     : ''
       # The number of the top-level traversable the window of `handle` is — its session history's (`traversable`) — nil
       # for a window gone.
@@ -7314,11 +7301,14 @@ module Capybara
         consume_pending_history_traverse
         consume_pending_frame_nav
       end
-      # A Location-object navigation of another window to `url` by this one's script — resolved against its document —
-      # with history handling "replace" where `replace` (its `location.replace()`).
-      def set_window_location(handle, url, user_activated: false, replace: false)
+      # A Location-object navigation of another window to `url` by the script of this one's realm `realm` — resolved
+      # against its document — with history handling "replace" where `replace` (its `location.replace()`): the Referer its
+      # document sends, by its policy.
+      def set_window_location(handle, url, realm, user_activated: false, replace: false)
         return unless @driver.respond_to?(:window_set_location)
-        @driver.window_set_location(self, handle.to_s, url.to_s, user_activated: user_activated, replace: replace)
+
+        referrer, policy = navigation_referrer(realm.to_i)
+        @driver.window_set_location(self, handle.to_s, url.to_s, referrer: referrer, referrer_policy: policy, user_activated: user_activated, replace: replace)
       end
       # …to a javascript: URL `href`, by a document of origin `origin`: evaluated in that window's document.
       def run_window_javascript_url(handle, href, origin) = (@driver.window_run_javascript_url(handle.to_s, href.to_s, origin.to_s) if @driver.respond_to?(:window_run_javascript_url))
@@ -7328,8 +7318,8 @@ module Capybara
         @runtime.call('__csimRunJavascriptURLFrom', href.to_s, origin.to_s)
       end
       def window_history_go(handle, delta) = (@driver.respond_to?(:window_history_go) ? @driver.window_history_go(handle.to_s, delta.to_i) : false)
-      def window_closed?(handle)       = @driver.respond_to?(:window_closed?)      ? @driver.window_closed?(handle.to_s)           : true
-      def close_child_window(handle)   = (@driver.close_window(handle.to_s) if @driver.respond_to?(:close_window))
+      # `close()` of the window of `handle` — this one's own, '' — by this window's script (Driver#script_close_window).
+      def close_window_of(handle)      = (@driver.script_close_window(self, handle.to_s.empty? ? window_handle.to_s : handle.to_s) if @driver.respond_to?(:script_close_window))
       def opener_handle                = @driver.respond_to?(:opener_handle_of)    ? @driver.opener_handle_of(self)                : nil
       # An AUXILIARY window's own `load` is fired by its OPENER, one task after the
       # document boots (platform-globals' `fireAuxLoadSoon`), so that a handler
@@ -7406,6 +7396,14 @@ module Capybara
       rescue StandardError => e
         log_console('warn', "window load failed: #{e.class}: #{e.message}")
       end
+      # …the one its opener fires (Driver#fire_aux_window_load): the load of the document it has now, which the deferral
+      # of its first document's (`defer_window_load`) was waiting for — none still deferred, none due after, whichever
+      # document that is (one its opener navigated it to before this task, where the first loaded none: a 204's).
+      def fire_window_load_for_opener
+        @defer_window_load = false
+        @window_load_due   = false
+        fire_own_window_load(delayable: false)
+      end
       # The session history out of a page's reach while `block` runs a handler of its whose document is on its way out
       # (`history_state` / `history_push` ignore what it asks).
       private def frozen_history
@@ -7425,19 +7423,114 @@ module Capybara
       # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
       def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)
 
-      # Queue a cross-window message for delivery into THIS window's VM (called
-      # by the Driver on the target Browser). Delivered as a `message` event the
-      # next time this window settles / ticks.
-      def enqueue_window_message(data, target_origin, sender_origin, source_handle)
-        @window_inbox << {'data' => data, 'targetOrigin' => target_origin.to_s, 'origin' => sender_origin.to_s,
-                          'sourceHandle' => source_handle.to_s}
-      end
-
-      # Covers both cross-window postMessage AND BroadcastChannel — the two
-      # cross-window event channels share these drain/pending hooks.
+      # Covers cross-window postMessage, BroadcastChannel and `storage` — the cross-window event channels share these
+      # drain/pending hooks — and what another window's script asked of this one or of another window of the session
+      # (`window_asked?`) that can be taken now, which this window's step takes for them (`window_tasks_takeable?`).
       # (…the isolate's BroadcastChannel queue where a post may have filled it since it was last drained: `@bc_queued`)
       def window_message_pending?
-        !@window_inbox.empty? || !@broadcast_inbox.empty? || !@storage_inbox.empty? || @bc_queued
+        !@broadcast_inbox.empty? || !@storage_inbox.empty? || @bc_queued || window_tasks_takeable?
+      end
+      # …of this window, a message, where none is being taken (its close and the navigation planned of it are its
+      # navigation drain's, `drain_pending_navigation_once`: `pending_nav_intent?`); of the session's others, any while
+      # that one is not busy (`take_window_tasks_in_background`).
+      private def window_tasks_takeable?
+        return false unless Native.window_tasks_pending
+
+        (!@taking_window_tasks && @session_history.posted?) || session_windows.drop(1).any? {|b| b.window_asked? && !b.window_busy? }
+      end
+
+      # Whether another window's script asked something of this one — a message posted, a navigation planned, its close
+      # (session_history.rs `Asked`) — that it has yet to take. The process's count first, which takes no lock.
+      def window_asked? = Native.window_tasks_pending && @session_history.asked?
+
+      # A window whose own call is on the stack — its script waiting on a call into another window, a navigation of it in
+      # flight, or a task another window asked of it being taken — which begins no navigation, no close another window
+      # asked of it until that returns, nor is discarded.
+      def window_busy? = script_waiting? || @navigating == true || @taking_window_tasks == true
+      private def taking_window_tasks
+        was, @taking_window_tasks = @taking_window_tasks, true
+        yield
+      ensure
+        @taking_window_tasks = was
+      end
+
+      # What another window's script asked of this one, taken as tasks of its own event loop (HTML: a task queued on it by
+      # an agent of another isolate): the messages posted to it (`deliver_posted_messages`) — and, while it is not busy, the
+      # close of it, then the navigation planned of it, which a close leaves none of (session_history.rs `ask_close`).
+      # Taken as this window's own step takes its tasks, or, one not the active window, as the active one's takes them
+      # (`take_window_tasks_in_background`); none once its close ran.
+      def take_window_tasks
+        return 0 if @taking_window_tasks || !window_asked?
+
+        taking_window_tasks { take_window_tasks! }
+      end
+      private def take_window_tasks!
+        return 0 if discard_due?
+
+        n = deliver_posted_messages
+        return n if script_waiting? || @navigating
+        if @session_history.take_close
+          close_steps
+          return n + 1
+        end
+        n + (consume_planned_navigation ? 1 : 0)
+      end
+
+      # A window not the active one, which no step of its own runs: what was asked of it taken, and the tasks that queues
+      # that are due run (`maxMs: 0`) with what they leave to do, as a background tab's would.
+      def take_window_tasks_in_background
+        return 0 if window_busy? || !window_asked?
+
+        taking_window_tasks {
+          n = take_window_tasks!
+          unless closing?
+            r = @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
+            @find_cache_dirty = true if r['dirtied'] || r['fired'].to_i > 0
+            drain_task_intents
+          end
+          n
+        }
+      end
+
+      # The messages another window's script posted to this one (session_history.rs `traversablePost`), each a task of its
+      # own: a `message` event at its window.
+      private def deliver_posted_messages
+        posted = @session_history.take_posted
+        posted.each do |message|
+          @runtime.call('__csim_deliverWindowMessage', *message)
+        end
+        posted.size
+      end
+
+      # HTML "close a top-level traversable", the task a `close()` queued (Driver#script_close_window): its page asked
+      # whether it may be unloaded, its document unloaded — `pagehide` and `unload`, its frames' with it — and its
+      # traversable closed, none of the session's windows reaching it after (Driver#window_entries), its browser due to be
+      # discarded, which the driver does between calls (Driver#reap_closed_windows), none of this window's on the stack.
+      private def close_steps
+        prompt_page_to_unload
+        fire_document_teardown
+        @session_history.close!
+        @discard_due = true
+      end
+      # Whether its close ran, the window to be discarded.
+      def discard_due? = @discard_due == true
+      # Whether its close was asked (HTML "is closing") — or it closed.
+      def closing? = @session_history.closing?
+
+      # The navigation of this window another window's script planned (Driver#navigate_window), taken: begun with the
+      # source snapshot taken there — the Referer and policy of the document that began it, its URL as the initiator, the
+      # activation it had, its history handling. A blob: one's document loaded from the bytes the URL resolves to in the
+      # session's blob URL store — a network error where none.
+      private def consume_planned_navigation
+        url, replace, activated, referrer, policy, initiator = @session_history.take_planned
+        return false unless url
+
+        if url.start_with?('blob:')
+          fail_blob_document(url) unless @driver.respond_to?(:load_blob_document) && @driver.load_blob_document(self, url)
+        else
+          visit(url, referer: referrer, referrer_policy: policy, initiator: initiator, user_activated: activated, replace: replace)
+        end
+        true
       end
 
       # A BroadcastChannel message queued for delivery to this Browser's channels.
@@ -7471,16 +7564,25 @@ module Capybara
         @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'area' => area.to_s, 'targets' => targets}
       end
 
+      # The messages another window's script posted to this one — the rest of what it asked its navigation drain takes
+      # (`drain_pending_navigation_once`), none of which a settle may run — and what was asked of the session's other
+      # windows, which no step of their own takes while this one is the active window
+      # (`take_window_tasks_in_background`): none while this one's script waits on another window or a navigation of it is
+      # in flight, nor from within a task being taken, which a navigation it runs may reach.
+      private def deliver_asked_tasks
+        return 0 if @taking_window_tasks || !Native.window_tasks_pending
+
+        taking_window_tasks {
+          n = deliver_posted_messages
+          script_waiting? || @navigating ? n : n + session_windows.drop(1).sum(&:take_window_tasks_in_background)
+        }
+      end
+
       # Fire queued cross-window messages (postMessage, BroadcastChannel, `storage`) — each a task of its own: one per
       # host call, whose end runs the microtask checkpoint (kAuto), so a promise reaction that re-arms a listener between
       # two messages sees the second.
       def deliver_window_messages
-        n = 0
-        unless @window_inbox.empty?
-          events = @window_inbox.slice!(0, @window_inbox.length)
-          events.each {|event| @runtime.call('__csim_deliverWindowMessages', [event]) }
-          n += events.size
-        end
+        n = deliver_asked_tasks
         unless @broadcast_inbox.empty?
           # A BroadcastChannel post from another window or a worker reaches this isolate's channels of its name and
           # origin — the posting realm's excepted — as one of this isolate's own does: one queue, in creation order
@@ -9814,13 +9916,6 @@ module Capybara
         body
       end
 
-      # A navigation of the page planned by the driver (another window's `navigate_window`) — the page's own plan
-      # (navigation_plan.rs `planLocation`), as its `location`'s are: taken, as the task ends, by `consume_pending_location`.
-      # (…`user_activated` whether its source document had transient activation as it began; `replace` whether it
-      # replaces the current entry, a `location.replace()`'s)
-      def location_assign(url, user_activated: false, replace: false)
-        @runtime.call('__csimPlanLocation', resolve_against_current(url.to_s), replace, user_activated)
-      end
       # The Referer of a navigation the document of realm `realm` makes, `[url, policy]`: its document's policy, or the one
       # a link sets (`policy`) — which no link lifts for a document of an opaque origin: it refers as none, a step before
       # any policy.
@@ -10727,6 +10822,7 @@ module Capybara
 
       # One pass of the intent drain, without the window-load chaining above.
       def drain_pending_navigation_once
+        take_window_tasks
         apply_planned_traversals_before_navigations
         consume_pending_sw_client_nav
         consume_pending_location

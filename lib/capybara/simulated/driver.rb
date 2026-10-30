@@ -117,7 +117,7 @@ module Capybara
         @client_spaces   = 0
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
-        @aux_windows     = []  # [{handle:, browser:, opener:}, …]
+        @aux_windows     = []  # [{handle:, browser:, opener:, by_script:}, …]
         # Browsers whose WINDOW closed while they still host an active service-worker
         # registration. A registration is profile-wide state independent of the document
         # that created it (a page registers, closes, and the SW keeps controlling
@@ -269,28 +269,32 @@ module Capybara
       # `evaluate_script` would incur per read; the wpt_runner uses it to drain a
       # page to completion at browser cadence.
       #
-      # EVERY live window steps, not just the active one: an auxiliary window is a
-      # separate VM, but the cross-context orchestration the dispatcher framework
-      # builds on (a popup running an executor that polls a shared queue while the
-      # opener waits) needs those background windows to make progress autonomously.
-      # The active window's state leads; each aux window folds its progress / raf /
-      # async / nearest-timer in so the caller keeps pumping while any window works.
+      # EVERY live window steps, not just the active one — the primary too while a
+      # pop-up is the active window: an auxiliary window is a separate VM, but the
+      # cross-context orchestration the dispatcher framework builds on (a popup running
+      # an executor that polls a shared queue while the opener waits) needs those
+      # background windows to make progress autonomously. The active window's state
+      # leads; each other window folds its progress / raf / async / nearest-timer in so
+      # the caller keeps pumping while any window works. The windows a `close()` closed
+      # are discarded after (`reap_closed_windows`), none of theirs on the stack.
       def run_event_loop_frame(frame_ms)
-        state = current_browser.run_event_loop_frame(frame_ms)
+        reap_closed_windows
+        current = current_browser
+        state = current.run_event_loop_frame(frame_ms)
         # Iterate a SNAPSHOT: a window's drain can open or close windows mid-loop (a
-        # popup spawning another, or window.close disposing one). Re-check each window
-        # is still open before stepping it, and isolate a per-window failure so one
-        # dead/half-torn-down VM can't abort the whole frame pump.
-        @aux_windows.dup.each do |w|
-          b = w[:browser]
-          next if b.equal?(current_browser)
-          next unless @aux_windows.include?(w)   # closed earlier this loop → skip
+        # popup spawning another). Re-check each window is still open before stepping
+        # it, and isolate a per-window failure so one dead/half-torn-down VM can't abort
+        # the whole frame pump.
+        window_browsers.each do |b|
+          next if b.equal?(current) || !window_browsers.include?(b)
+
           begin
             state = merge_frame_state(state, b.run_event_loop_frame(frame_ms))
           rescue StandardError
             next
           end
         end
+        reap_closed_windows
         state
       end
 
@@ -400,8 +404,9 @@ module Capybara
         Native.storage_clear(@local_storage)
       end
 
-      # The session's windows' browsers: the primary's, then each auxiliary window's.
-      def window_browsers = [@browser, *@aux_windows.map {|w| w[:browser] }]
+      # The session's windows' browsers: the primary's, then each auxiliary window's — none whose close ran, which waits
+      # only to be discarded (`reap_closed_windows`).
+      def window_browsers = window_entries.map {|w| w[:browser] }
 
       # Has this driver been permanently dropped? (A `reset!` between examples does NOT set this —
       # that rebuilds the page on a live runtime.)
@@ -441,23 +446,26 @@ module Capybara
       PRIMARY_HANDLE = 'csim-window-0'
       def current_window_handle    = @active_handle || PRIMARY_HANDLE
       def window_handles
+        reap_closed_windows
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
 
       # All window entries (primary + aux) as `{handle:, browser:, opener:}`.
+      # (…none whose close ran: no window of the session reaches it, its opener's `opener` of it none — Browser#close_steps)
       private def window_entries
-        [{handle: PRIMARY_HANDLE, browser: @browser, opener: nil}] + @aux_windows
+        [{handle: PRIMARY_HANDLE, browser: @browser, opener: nil}] + @aux_windows.reject {|w| w[:browser].discard_due? }
       end
       # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name) in `from`'s browsing
       # context group, that `from` is familiar with — HTML "find a navigable by target name" searches the group's set,
       # skipping those: a `noopener` window's name finds none of its opener's, a cross-origin pop-up's none of the page's
-      # (Chrome and Firefox open a new window) — none for '' or none `from`.
+      # (Chrome and Firefox open a new window) — none for '' or none `from`. None that is closing: its `close()` takes it
+      # out of every lookup by name at once, its discard a task later (WPT close-method.window.js).
       private def named_window(name, from)
         return if name.empty? || from.nil?
 
         window_entries.find {|w|
           target = w[:browser]
-          target.window_name == name && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
+          target.window_name == name && !target.closing? && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
         }
       end
       # HTML "familiar with", between top-level windows (session_history.rs `familiar`): `from`'s document of `target`'s
@@ -495,8 +503,10 @@ module Capybara
         {initiator: post[:initiator] || source&.raw_current_url, origin_null: post[:origin_null] == true}
       end
 
+      # (…`by_script` whether web content made it — a script's `window.open`, a link's or a form's target — which a script may
+      # close, not the driver's `open_new_window`: HTML "is created by web content")
       def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, defer_load: false, creator: nil, activation_realm: nil,
-                          user_activated: nil)
+                          user_activated: nil, by_script: true)
         name = name.to_s
         # (…a document's to a `data:` URL, which a top-level browsing context refuses one's navigation to — a new window
         # opened at about:blank, a named one left as it is: Browser#top_level_data_refused?)
@@ -517,6 +527,7 @@ module Capybara
           # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
           # one is made)
           activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
+          # (…a POST one begun at once, not as a task of its own as a GET one is — a gap, R13 S4)
           if post
             existing[:browser].navigate_post(url, post[:body], post[:content_type], referer: referrer, referrer_policy: referrer_policy, user_activated: activated,
                                                                                   **post_initiator(post, source))
@@ -543,7 +554,7 @@ module Capybara
         if (opener_browser = window_browser(opener_handle))
           aux.traversable.opener = opener_browser.traversable
         end
-        @aux_windows << {handle: handle, browser: aux, opener: opener_handle}
+        @aux_windows << {handle: handle, browser: aux, opener: opener_handle, by_script: by_script}
         # (…another window of the session now, which may resolve the URLs the others made before it: their bytes entered in
         # the registry, for its workers' threads to read — Browser#partition_blob)
         ([@browser] + @aux_windows.map {|w| w[:browser] }).each {|b| b.fill_blob_markers unless b.nil? || b.equal?(aux) }
@@ -700,15 +711,6 @@ module Capybara
         false
       end
 
-      # `targetWindow.postMessage(data, targetOrigin)` — queue on the target window's
-      # Browser, tagged with the source window's handle. The targetOrigin travels with
-      # the message and gates delivery in the target VM (where its current origin is
-      # known); the sender's origin becomes the delivered event.origin.
-      def window_post_message(source_browser, target_handle, data, target_origin, sender_origin)
-        target = window_browser(target_handle) or return
-        target.enqueue_window_message(data, target_origin, sender_origin, handle_for(source_browser))
-      end
-
       # `BroadcastChannel.postMessage` — deliver to every OTHER window's channels
       # with the same name (same-window delivery is handled in-VM by the sender).
       def broadcast_channel(source_browser, name, data, origin = nil)
@@ -744,7 +746,15 @@ module Capybara
       def window_traversable(handle)     = window_browser(handle)&.traversable&.id
       # Cross-window remote-ref RPC: route a node/object proxy op to the window
       # that owns the ref (handle), executing in that window's VM.
-      def fire_aux_window_load(handle)             = ((b = window_browser(handle)) && b.fire_own_window_load(delayable: false))
+      # (…the window's own load its opener fires — the stand-in for its load, whose real lifecycle is R13 S5's — after the
+      # tasks asked of it before: a navigation its opener planned as `open()` returned is of the document that load is
+      # then of, a close leaves none to fire it at — WPT navigate-to-about-blank-while-initial-load-pending.html. Taken
+      # within the opener's task, its script on the stack: bounded to this stand-in, gone with it.)
+      def fire_aux_window_load(handle)
+        b = window_browser(handle) or return
+        b.take_window_tasks
+        b.fire_window_load_for_opener unless b.discard_due?
+      end
       def window_ref_get(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_get(id, prop) : nil
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
@@ -752,18 +762,18 @@ module Capybara
       def window_ref_delete(handle, id, prop)      = (b = window_browser(handle)) ? b.remote_ref_delete(id, prop) : false
       # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
       # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
-      # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, with history
-      # handling "replace" where `replace`.
-      def window_set_location(source, handle, url, user_activated: false, replace: false)
+      # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, sending `referrer`
+      # by `referrer_policy`, with history handling "replace" where `replace`.
+      def window_set_location(source, handle, url, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
         b = window_browser(handle) or return
-        navigate_window(b, url, source: source, user_activated: user_activated, replace: replace)
+        navigate_window(b, url, source: source, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace)
       end
       # A cross-window `w.location = 'javascript:…'`: evaluated in the target window's document (Browser
       # `run_javascript_url_from`), by a document of origin `origin`, as HTML navigates to a javascript: URL.
       def window_run_javascript_url(handle, href, origin) = (b = window_browser(handle)) && b.run_javascript_url_from(href, origin)
       # A cross-window `w.history.back()/forward()/go(n)`: traverse the target
       # window's history. The opener's VM is the one executing, so a non-active
-      # target can rebuild eagerly (like `navigate_window`); an active target
+      # target can rebuild eagerly (a gap: HTML queues it as a task, R13 S4); an active target
       # (e.g. `opener.history.back()` from an aux) defers to avoid tearing down
       # the running VM mid-call. Returns true when the traversal crossed a
       # document boundary — the JS proxy then fires the target's deferred `load`
@@ -784,56 +794,38 @@ module Capybara
           b.history_go(delta, force: true) == :cross_document
         end
       end
-      def window_closed?(handle)         = window_browser(handle).nil?
+      # The handle of the window that opened `browser`'s — none once that one is discarded (HTML's `opener` getter: its
+      # opener browsing context's WindowProxy, none for a context gone; WPT opener-closed.html).
       def opener_handle_of(browser)
         handle = handle_for(browser)
-        window_entries.find {|w| w[:handle] == handle }&.fetch(:opener)
+        opener = window_entries.find {|w| w[:handle] == handle }&.fetch(:opener)
+        opener if window_browser(opener)
       end
       private def handle_for(browser) = browser.window_handle
 
-      # Navigate an existing window. If it's the window whose JS is currently
-      # executing — a self-targeted `window.open(url, ownName)` or
-      # `someProxyToSelf.location = …` — DEFER via the location-assign queue:
-      # navigating it synchronously (`visit` → `rebuild_ctx`) would dispose the
-      # V8 context mid-call and abort the running handler. A non-active window
-      # can navigate immediately (its VM isn't on the stack) — but one whose script
-      # waits on a call of its into another window (Browser#script_waiting?), which
-      # is on it: deferred likewise, the drain of the call that reached it taking it.
+      # Navigate an existing window, by another window's script (`source`'s): HTML "navigate", whose source snapshot —
+      # the Referer, the initiator (the SETTING window's document, which seeds Sec-Fetch-Site and so the SameSite cookie
+      # gate; raw_ — no re-entrant tick), the activation, the history handling — is taken here, as the script asks, and
+      # whose navigation the window begins as a task of its own event loop (Browser#take_window_tasks): never while the
+      # script that asked is on the stack, nor one of the window's own (its context rebuilt under it).
       # (…`user_activated` whether the navigating document's window had transient activation as it began; `replace` its
       # history handling "replace")
       private def navigate_window(browser, url, source: nil, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
         return if url.nil? || url.to_s.empty? || browser.top_level_data_refused?(url)
-        deferred = browser.equal?(current_browser) || browser.script_waiting?
-        # A blob: navigation loads directly from the opener's blob bytes (not
-        # rack-navigable, cross-isolate). Only when the target isn't the active
-        # window (boot rebuilds its ctx — unsafe mid-call on the running window).
-        # (…one no store resolves a network error, as a new window's is)
-        if url.to_s.start_with?('blob:') && !deferred
-          browser.fail_blob_document(url) unless load_blob_into_window(browser, url, source)
-          return
-        end
-        if deferred
-          browser.location_assign(url, user_activated: user_activated, replace: replace)
-        else
-          # A cross-window navigation's initiator is the SETTING window's document
-          # (seeds Sec-Fetch-Site → the SameSite cookie gate); raw_ — no re-entrant tick.
-          browser.visit(
-            url,
-            referer:         referrer,
-            referrer_policy: referrer_policy,
-            initiator:       source&.raw_current_url,
-            user_activated:  user_activated,
-            replace:         replace
-          )
-        end
+
+        browser.traversable.plan_navigation(url.to_s, replace, user_activated == true, referrer, referrer_policy, source&.raw_current_url)
       end
+
+      # A blob: document loaded into window `target` from the bytes its URL resolves to in the session's blob URL store
+      # (`blob_bytes_for`) — false for none, a revoked URL's — as a navigation another window planned of it begins.
+      def load_blob_document(target, url) = load_blob_into_window(target, url, target)
 
       # Capybara `Session#open_new_window(:tab)` entry point — opens at
       # `about:blank` (so `current_url`/title match a real new tab) and the
       # test then `switch_to_window` + `visit`s the real URL. We don't
       # distinguish `:tab` from `:window` (no window-chrome semantics here).
       def open_new_window(_kind = :tab)
-        open_aux_window('about:blank')
+        open_aux_window('about:blank', by_script: false)
       end
       # Every window has its own viewport, so these address the window the
       # handle names — not the active one. `Capybara::Window#resize_to` on a
@@ -843,28 +835,54 @@ module Capybara
         b = window_browser!(handle)
         [b.viewport_width, b.viewport_height]
       end
+      # Capybara `Window#close`: the window closed now, the driver's own act — its document unloaded first (HTML "close a
+      # browsing context": the teardown events, pagehide+unload, this window and every nested frame, theirs first, fire
+      # while the VM still works — a nested iframe's unload keepalive beacon depends on it). The primary is the session's.
       def close_window(h)
         return if h == PRIMARY_HANDLE
-        @aux_windows.reject! {|w|
-          next false unless w[:handle] == h
-          # HTML "close a browsing context": the teardown events (pagehide+unload,
-          # this window and every nested frame, theirs first) fire while the VM
-          # still works — a nested iframe's unload keepalive beacon depends on it.
-          w[:browser].fire_document_teardown if w[:browser].respond_to?(:fire_document_teardown)
-          if w[:browser].sw_registrations_active?
-            # Still hosting a live service-worker registration — park (see @sw_parked):
-            # tear down the document-scoped machinery, retire older parked browsers
-            # whose scopes this one re-registered (the newest registration for a scope
-            # is THE registration, as in a real profile), and keep the browser alive.
-            w[:browser].park_for_service_workers!
-            retire_shadowed_parked(w[:browser])
-            @sw_parked << w[:browser]
-          else
-            w[:browser].dispose rescue nil
-          end
-          true
-        }
-        @active_handle = nil if @active_handle == h
+
+        w = @aux_windows.find {|win| win[:handle] == h } or return
+        w[:browser].fire_document_teardown unless w[:browser].discard_due?
+        discard_window(w)
+      end
+
+      # `close()` of the window of `handle` by the script of `source`'s window (HTML's Window `close()`): one that is
+      # script-closable — web content made it (`by_script`), or its session history has one entry — and that the
+      # calling window is familiar with (or is) set closing at once, which its `closed` reports, its close a task of its
+      # own event loop (Browser#take_window_tasks) and its discard the driver's after (`reap_closed_windows`). The
+      # primary window is the session's, which no script closes (a gap where its history has one entry).
+      def script_close_window(source, handle)
+        w = @aux_windows.find {|win| win[:handle] == handle } or return
+        target = w[:browser]
+        return unless w[:by_script] || target.traversable.length == 1
+        return unless target.equal?(source) || familiar_with?(source, target)
+
+        target.traversable.ask_close
+      end
+
+      # Discard the windows whose close ran (Browser#discard_due?) — as the driver is between calls, none of their own
+      # on the stack (Browser#window_busy?).
+      private def reap_closed_windows
+        @aux_windows.select {|w| w[:browser].discard_due? && !w[:browser].window_busy? }.each do |w|
+          discard_window(w)
+        end
+      end
+
+      # Discard window `w`'s browser, taking it out of the session's windows: disposed — or, still hosting a live
+      # service-worker registration, parked (see @sw_parked): its document-scoped machinery torn down, older parked
+      # browsers whose scopes this one re-registered retired (the newest registration for a scope is THE registration,
+      # as in a real profile), and the browser kept alive.
+      private def discard_window(w)
+        @aux_windows.delete(w)
+        @active_handle = nil if @active_handle == w[:handle]
+        b = w[:browser]
+        if b.sw_registrations_active?
+          b.park_for_service_workers!
+          retire_shadowed_parked(b)
+          @sw_parked << b
+        else
+          b.dispose rescue nil
+        end
       end
 
       # Dispose parked browsers whose live scopes are ALL re-registered by `newcomer` —
@@ -914,6 +932,7 @@ module Capybara
       end
 
       def switch_to_window(h)
+        reap_closed_windows
         window_browser!(h)   # unknown / already-closed handle → WindowError
         @active_handle = (h == PRIMARY_HANDLE ? nil : h)
       end

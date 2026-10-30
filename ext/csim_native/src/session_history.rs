@@ -14,6 +14,7 @@
 // state kept from before are not (they still count their steps).
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError, Weak};
 
 use magnus::{RHash, RString, Symbol, TryConvert};
@@ -190,6 +191,67 @@ struct Traversable {
     disowned: bool,
     closed: bool,
     origin: Option<String>,
+    // What the script of another window asked of it, which its own event loop takes as tasks (`Asked`).
+    asked: Asked,
+}
+
+// What a window's script in another isolate asked of a top-level traversable — HTML's tasks queued on its event loop by
+// an agent not its own: the messages its `postMessage` posted (HTML "window post message steps", serialized in the
+// sender), the navigation its `location` planned (the source snapshot taken there: the URL resolved against the
+// sender's document, its Referer, its transient activation, history handling), and whether its `close()` asked the
+// traversable to close (HTML "is closing", set as it asks; the close itself a task: `close_due`). Every one of a
+// process's counted in `ASKED`, which the host reads with no lock (`window_tasks_pending`) — a session of one window
+// asks nothing.
+#[derive(Default)]
+struct Asked {
+    posted: Vec<Posted>,
+    planned: Option<Planned>,
+    closing: bool,
+    close_due: bool,
+}
+impl Asked {
+    fn count(&self) -> usize {
+        self.posted.len() + usize::from(self.planned.is_some()) + usize::from(self.close_due)
+    }
+}
+// A message posted: its serialization (workers.js `encodeMessage`), the sender's origin (`event.origin`), the target
+// origin it is for (a `/` resolved to the sender's already), and the window it came from by its host handle.
+#[derive(Clone, Debug, PartialEq)]
+struct Posted {
+    data: String,
+    origin: String,
+    target_origin: String,
+    source: String,
+}
+// A navigation planned: its URL, whether it replaces the active entry, whether the sender had transient activation, the
+// Referer it sends and its policy, and the URL of the document that began it (its initiator, which seeds
+// `Sec-Fetch-Site`). One at a time — a second plan replaces the first, as a navigation begun aborts the ongoing one.
+#[derive(Clone, Debug, PartialEq)]
+struct Planned {
+    url: String,
+    replace: bool,
+    activated: bool,
+    referrer: Option<String>,
+    policy: Option<String>,
+    initiator: Option<String>,
+}
+
+static ASKED: AtomicUsize = AtomicUsize::new(0);
+// The traversable's asks changed by `change`, the process's count kept with them.
+fn asking<R>(t: &mut Traversable, change: impl FnOnce(&mut Asked) -> R) -> R {
+    let before = t.asked.count();
+    let r = change(&mut t.asked);
+    let after = t.asked.count();
+    if after > before {
+        ASKED.fetch_add(after - before, Ordering::Relaxed);
+    } else if before > after {
+        ASKED.fetch_sub(before - after, Ordering::Relaxed);
+    }
+    r
+}
+// Whether a traversable of the process has been asked something it has yet to take (the host's cheap gate).
+pub(crate) fn window_tasks_pending() -> bool {
+    ASKED.load(Ordering::Relaxed) > 0
 }
 
 // A traversal queued: its token, its delta, the realm whose `history` asked for it, and whether it makes a document
@@ -576,6 +638,7 @@ fn histories() -> MutexGuard<'static, (u64, HashMap<u64, Weak<Mutex<Traversable>
 impl Drop for SessionHistory {
     fn drop(&mut self) {
         histories().1.remove(&self.id);
+        asking(&mut self.lock(), |a| *a = Asked::default());
     }
 }
 
@@ -788,6 +851,7 @@ impl SessionHistory {
         t.saved = Default::default();
         t.queued.clear();
         (t.opener, t.disowned, t.closed, t.origin) = (None, false, false, None);
+        asking(&mut t, |a| *a = Asked::default());
     }
     // #opener = traversable: the window that opened it (HTML "create a new auxiliary browsing context").
     fn set_opener(&self, opener: &SessionHistory) {
@@ -797,9 +861,72 @@ impl SessionHistory {
     fn is_disowned(&self) -> bool {
         self.lock().disowned
     }
-    // #close!: it closed (HTML "close a top-level traversable") — or was parked, its page gone.
+    // #close!: it closed (HTML "close a top-level traversable") — or was parked, its page gone: nothing another window
+    // asked of it is taken any more.
     fn close(&self) {
-        self.lock().closed = true;
+        let mut t = self.lock();
+        t.closed = true;
+        asking(&mut t, |a| {
+            a.posted.clear();
+            a.planned = None;
+            a.close_due = false;
+        });
+    }
+    // #ask_close -> whether a `close()` set it closing now — HTML "is closing", the close itself due as a task of its own
+    // (`#take_close`) — false for one closing or closed already. The navigation planned of it goes: the close's task
+    // destroys the traversable before any navigation of it could finish (HTML "destroy a top-level traversable").
+    fn ask_close(&self) -> bool {
+        let mut t = self.lock();
+        if t.closed || t.asked.closing {
+            return false;
+        }
+        asking(&mut t, |a| {
+            a.closing = true;
+            a.close_due = true;
+            a.planned = None;
+        });
+        true
+    }
+    // #closing? -> whether it is closing or closed: its `closed` getter's, from any window.
+    fn is_closing(&self) -> bool {
+        let t = self.lock();
+        t.closed || t.asked.closing
+    }
+    // #take_close -> whether its close is due, taken.
+    fn take_close(&self) -> bool {
+        asking(&mut self.lock(), |a| std::mem::take(&mut a.close_due))
+    }
+    // #post(data, origin, target_origin, source): a message another window's script posted to it.
+    fn post(&self, data: String, origin: String, target_origin: String, source: String) {
+        post_to(&mut self.lock(), Posted { data, origin, target_origin, source });
+    }
+    // #take_posted -> [[data, origin, target_origin, source], …]: the messages posted to it, taken in the order posted.
+    fn take_posted(&self) -> Vec<(String, String, String, String)> {
+        let posted = asking(&mut self.lock(), |a| std::mem::take(&mut a.posted));
+        posted.into_iter().map(|p| (p.data, p.origin, p.target_origin, p.source)).collect()
+    }
+    // #plan_navigation(url, replace, activated, referrer, policy, initiator): a navigation of it another window's script
+    // planned — in place of one planned before; none of one closing or closed, which no navigation of finishes.
+    fn plan_navigation(&self, url: String, replace: bool, activated: bool, referrer: Option<String>, policy: Option<String>, initiator: Option<String>) {
+        let mut t = self.lock();
+        if t.closed || t.asked.closing {
+            return;
+        }
+        asking(&mut t, |a| a.planned = Some(Planned { url, replace, activated, referrer, policy, initiator }));
+    }
+    // #take_planned -> [url, replace, activated, referrer, policy, initiator]: the navigation planned of it, taken; nil
+    // for none.
+    #[allow(clippy::type_complexity)]
+    fn take_planned(&self) -> Option<(String, bool, bool, Option<String>, Option<String>, Option<String>)> {
+        let p = asking(&mut self.lock(), |a| a.planned.take())?;
+        Some((p.url, p.replace, p.activated, p.referrer, p.policy, p.initiator))
+    }
+    // #asked? -> whether something asked of it waits to be taken; #posted? -> a message.
+    fn is_asked(&self) -> bool {
+        self.lock().asked.count() > 0
+    }
+    fn is_posted(&self) -> bool {
+        !self.lock().asked.posted.is_empty()
     }
     // #familiar_with?(other) -> whether it is familiar with `other` (`familiar`).
     fn is_familiar_with(&self, other: &SessionHistory) -> bool {
@@ -814,6 +941,7 @@ pub(crate) fn recordable_for_ruby(url: Option<String>) -> bool {
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
     use magnus::{function, method, Module, Object};
     native.define_module_function("history_recordable_url", function!(recordable_for_ruby, 1))?;
+    native.define_module_function("window_tasks_pending", function!(window_tasks_pending, 0))?;
     let class = native.define_class("SessionHistory", ruby.class_object())?;
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
     class.define_method("id", method!(SessionHistory::id, 0))?;
@@ -832,6 +960,15 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("opener=", method!(SessionHistory::set_opener, 1))?;
     class.define_method("disowned?", method!(SessionHistory::is_disowned, 0))?;
     class.define_method("close!", method!(SessionHistory::close, 0))?;
+    class.define_method("ask_close", method!(SessionHistory::ask_close, 0))?;
+    class.define_method("closing?", method!(SessionHistory::is_closing, 0))?;
+    class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
+    class.define_method("post", method!(SessionHistory::post, 4))?;
+    class.define_method("take_posted", method!(SessionHistory::take_posted, 0))?;
+    class.define_method("plan_navigation", method!(SessionHistory::plan_navigation, 6))?;
+    class.define_method("take_planned", method!(SessionHistory::take_planned, 0))?;
+    class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
+    class.define_method("posted?", method!(SessionHistory::is_posted, 0))?;
     class.define_method("familiar_with?", method!(SessionHistory::is_familiar_with, 1))?;
     class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
@@ -1137,6 +1274,31 @@ mod tests {
     }
 
     #[test]
+    fn what_another_window_asks_waits_to_be_taken_and_a_close_is_seen_at_once() {
+        let popup = SessionHistory::new();
+        assert!(!popup.is_asked());
+        popup.post("m1".into(), "http://a.test".into(), "*".into(), "w0".into());
+        popup.post("m2".into(), "http://a.test".into(), "*".into(), "w0".into());
+        popup.plan_navigation("http://a.test/1".into(), false, true, None, None, None);
+        popup.plan_navigation("http://a.test/2".into(), true, false, Some("http://a.test/".into()), None, None);
+        assert!(popup.is_asked() && window_tasks_pending());
+        let posted = popup.take_posted();
+        assert_eq!(posted.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(), ["m1", "m2"]);
+        // (…the later plan in place of the first)
+        assert_eq!(popup.take_planned().map(|p| (p.0, p.1)), Some(("http://a.test/2".into(), true)));
+        assert!(!popup.is_asked());
+        // (…closing as it is asked, the close a task of its own, asked once — the navigation planned before it gone, none
+        // planned nor posted after it)
+        popup.plan_navigation("http://a.test/3".into(), false, false, None, None, None);
+        assert!(popup.ask_close() && popup.is_closing() && !popup.ask_close());
+        popup.plan_navigation("http://a.test/4".into(), false, false, None, None, None);
+        popup.post("m3".into(), "http://a.test".into(), "*".into(), "w0".into());
+        assert!(popup.take_planned().is_none() && popup.take_posted().is_empty());
+        assert!(popup.take_close() && !popup.take_close());
+        assert!(!popup.is_asked());
+    }
+
+    #[test]
     fn a_document_is_same_origin_with_a_traversable_by_the_key_it_published() {
         let (page, popup) = (SessionHistory::new(), SessionHistory::new());
         assert!(!same_origin_with("http://a.test".into(), page.id, popup.id));
@@ -1218,7 +1380,18 @@ pub(crate) fn length_of(id: u64) -> Option<usize> {
     Some(t.state.length())
 }
 
+// A message posted to a traversable — none to one closing or closed: a task queued after the close's, which destroys
+// the document it would run in first.
+fn post_to(t: &mut Traversable, posted: Posted) {
+    if !t.closed && !t.asked.closing {
+        asking(t, |a| a.posted.push(posted));
+    }
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
+    crate::dom::register(scope, ns, "traversablePost", traversable_post_op, context_id);
+    crate::dom::register(scope, ns, "traversableTakePosted", traversable_take_posted_op, context_id);
+    crate::dom::register(scope, ns, "traversableClosing", traversable_closing_op, context_id);
     crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
@@ -1263,6 +1436,52 @@ fn traversable_same_origin_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let own = arena.navigables.history;
     let key = arena.realm_state_mut(cid).map(|s| s.location.origin_key(cid));
     rv.set_bool(key.is_some_and(|key| same_origin_with(key, own, target)));
+}
+
+// __dom.traversablePost(id, data, targetOrigin, origin, source) — a message the calling realm's script posts to
+// top-level traversable `id`, a window of another isolate (platform-globals.js `csimWindowProxy`): `data` its
+// serialization, `origin` the sender's, `source` the sender's window by its host handle — a task of that window's event
+// loop, which it takes as it steps (`SessionHistory#take_posted`), never one run while the sender's script is.
+fn traversable_post_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    let data = args.get(1).to_rust_string_lossy(scope);
+    let target_origin = args.get(2).to_rust_string_lossy(scope);
+    let origin = args.get(3).to_rust_string_lossy(scope);
+    let source = args.get(4).to_rust_string_lossy(scope);
+    let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
+    post_to(&mut traversable.lock().unwrap_or_else(PoisonError::into_inner), Posted { data, origin, target_origin, source });
+}
+// __dom.traversableTakePosted() -> [data, origin, targetOrigin, source, …]: the messages posted to the isolate's page,
+// taken — for its script to queue each as a task now, ahead of what it queues next (null for none).
+fn traversable_take_posted_op(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = crate::dom::realm(scope, 0).navigables.history;
+    let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return rv.set_null() };
+    let posted = asking(&mut traversable.lock().unwrap_or_else(PoisonError::into_inner), |a| std::mem::take(&mut a.posted));
+    if posted.is_empty() {
+        return rv.set_null();
+    }
+    let mut items: Vec<v8::Local<v8::Value>> = Vec::with_capacity(posted.len() * 4);
+    for p in posted {
+        for text in [p.data, p.origin, p.target_origin, p.source] {
+            let Some(s) = v8::String::new(scope, &text) else { return rv.set_null() };
+            items.push(s.into());
+        }
+    }
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.traversableClosing(id) -> whether top-level traversable `id` — the isolate's page's own, for none — is closing
+// or closed (HTML's `closed` getter: its "is closing", which a `close()` set as it was asked), or gone.
+fn traversable_closing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = if args.get(0).is_undefined() {
+        crate::dom::realm(scope, 0).navigables.history
+    } else {
+        args.get(0).number_value(scope).map_or(0, |n| n as u64)
+    };
+    let closing = histories().1.get(&id).and_then(Weak::upgrade).is_none_or(|t| {
+        let t = t.lock().unwrap_or_else(PoisonError::into_inner);
+        t.closed || t.asked.closing
+    });
+    rv.set_bool(closing);
 }
 
 // __dom.setSessionHistory(id) — the session history of the isolate's window (`SessionHistory#id`), the host's to say.
