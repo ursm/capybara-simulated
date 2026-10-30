@@ -4172,10 +4172,12 @@ module Capybara
       }
       private_constant :WorkerSink
 
-      # (`worker`: the WorkerSink that opens it — none for the window's)
-      def ws_open(url, protocols = nil, worker = nil)
+      # (`worker`: the WorkerSink that opens it — none for a window's, whose `client` its realm describes as a request's:
+      # its id, its URL, its origin — document-origin.js `hostRequest`)
+      def ws_open(url, protocols = nil, worker = nil, client: nil)
         queue    = worker || @websocket_queue
-        client   = worker ? worker.url : @current_url
+        client   = client&.to_h
+        source   = worker ? worker.url : (client ? client['clientUrl'].to_s : @current_url)
         id       = @websocket_lock.synchronize { @websocket_seq += 1 }
         # ws:// → http://, wss:// → https:// for the Rack env; resolve relative
         # against the current document (Action Cable's consumer builds an
@@ -4186,18 +4188,26 @@ module Capybara
         csim_io, app_io = Socket.pair(:UNIX, :STREAM, 0)
         env = rack_env_for(target, method: 'GET')
         # (…its cookies sent, and the handshake's Set-Cookie stored, as its client's site for cookies judges it — a
-        # worker's the site it was made with, the window's its document's, a frame's socket's its window's)
-        cookie_context = Native.cookie_context(worker ? worker_cookie_site(worker) : @current_url, target, false)
-        apply_default_request_env(env, referer: client, cookie_context: cookie_context)
+        # worker's the site it was made with, a window's realm's document's and its ancestors' (none: 'null', cross-site
+        # to every target), RFC 6265bis "site for cookies")
+        judge = if worker
+                  worker_cookie_site(worker)
+                elsif client
+                  site_for_cookies(client['clientRealm'].to_i) || 'null'
+                else
+                  @current_url
+                end
+        cookie_context = Native.cookie_context(judge, target, false)
+        apply_default_request_env(env, referer: source, cookie_context: cookie_context)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
         env['HTTP_SEC_WEBSOCKET_VERSION'] = '13'
-        # The opening handshake always carries its client's origin — the document's, or the worker's (the UA owns this
-        # header) — server handlers echo it back (websockets/opening-handshake origin test). A blob: client's is the
-        # origin its URL carries inside; a data: worker's is opaque, and goes unsent.
-        client_origin = url_origin(client.to_s.delete_prefix('blob:'))
-        env['HTTP_ORIGIN'] = client_origin if client_origin
+        # The opening handshake always carries its client's origin — its realm's document's (an about:blank frame's its
+        # creator's), or the worker's (the UA owns this header) — server handlers echo it back (websockets/opening-
+        # handshake origin test). A blob: client's is the origin its URL carries inside; an opaque one goes unsent.
+        client_origin = client ? client['clientOrigin'].to_s : url_origin(source.to_s.delete_prefix('blob:'))
+        env['HTTP_ORIGIN'] = client_origin unless client_origin.nil? || client_origin.empty? || client_origin == 'null'
         list = Array(protocols).map(&:to_s).reject(&:empty?)
         env['HTTP_SEC_WEBSOCKET_PROTOCOL'] = list.join(', ') unless list.empty?
         env['rack.hijack?']  = true

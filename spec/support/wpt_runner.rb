@@ -919,7 +919,7 @@ module WptRunner
               # wptserve `header(name, value, append)`: a trailing `,True`/`,False` is the
               # APPEND flag, NOT part of the value. Set-Cookie is the only corpus header
               # that appends (a response carries several cookies) — accumulate them as an
-              # Array (merge_set_cookie already handles a multi-value Set-Cookie) so a
+              # Array (store_set_cookies already handles a multi-value Set-Cookie) so a
               # second cookie doesn't clobber the first (cors-cookies / credentials/cookies).
               rest = rest[0...rest.rindex(',')] if rest =~ /,\s*(?:True|False)\s*\z/
               resp_headers[name] = Array(resp_headers[name]) + [rest.strip]

@@ -66,7 +66,11 @@ pub(crate) const TOP_LEVEL_NAV: u32 = 16;
 // The context of a request's cookies through HTTP, its `Cookie` sent and its `Set-Cookie` stored in it: over a secure
 // channel, cross-site, a top-level navigation's safe-method request, a top-level navigation's of any method.
 pub(crate) fn request_context(secure: bool, cross_site: bool, lax_retrieve: bool, top_level_nav: bool) -> u32 {
-    HTTP | if secure { SECURE } else { 0 } | if cross_site { CROSS_SITE } else { 0 } | if lax_retrieve { LAX_RETRIEVE } else { 0 } | if top_level_nav { TOP_LEVEL_NAV } else { 0 }
+    HTTP | document_context(secure, cross_site) | if lax_retrieve { LAX_RETRIEVE } else { 0 } | if top_level_nav { TOP_LEVEL_NAV } else { 0 }
+}
+// …and `document.cookie`'s, through no HTTP API: over a secure channel, cross-site.
+pub(crate) fn document_context(secure: bool, cross_site: bool) -> u32 {
+    (if secure { SECURE } else { 0 }) | if cross_site { CROSS_SITE } else { 0 }
 }
 // Capybara::Simulated::Native.cookie_context(client, target, top_level_get) -> the context of a request to `target`
 // judged by one site for cookies, `client`'s (a document's URL or a worker's site — nil or 'null' for none, cross-site to
@@ -80,7 +84,7 @@ pub(crate) fn context_for_ruby(client: Option<String>, target: String, top_level
 // cookies in for a top-level document (referrer.rs `documentCookieContext` a frame's): through no HTTP API, over a secure
 // channel where `url`'s origin is potentially trustworthy.
 pub(crate) fn document_context_for_ruby(url: String) -> u32 {
-    request_context(secure_target(&url), false, false, false) & !HTTP
+    document_context(secure_target(&url), false)
 }
 // (…whether a request to `target` goes over a secure channel: its origin potentially trustworthy)
 pub(crate) fn secure_target(target: &str) -> bool {

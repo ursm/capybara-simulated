@@ -344,7 +344,7 @@ fn document_cookie_context_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let r = args.get(0).int32_value(scope).unwrap_or(0);
     let url = args.get(1).to_rust_string_lossy(scope);
     let cross = frame_cross_site(&mut dom(scope).arena, r, &url, false);
-    rv.set_uint32(crate::cookie_jar::request_context(crate::cookie_jar::secure_target(&url), cross, false, false) & !crate::cookie_jar::HTTP);
+    rv.set_uint32(crate::cookie_jar::document_context(crate::cookie_jar::secure_target(&url), cross));
 }
 
 #[cfg(test)]

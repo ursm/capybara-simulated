@@ -1895,7 +1895,7 @@ module Capybara
         # An exception the worker's script left unhandled, reported out to its Worker object (workers.js).
         c.attach('__csim_workerReportError', ->(message, filename, lineno, colno) { sw_hooks[:report_error]&.call(message, filename, lineno, colno); nil })
         # …its WebSockets, whose events are its own inbox's (Browser#run_worker) — `__csim_wsSend` is the window's as it is
-        c.attach('__csim_wsOpen',  ->(url, protocols) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
+        c.attach('__csim_wsOpen',  ->(url, protocols, *) { sw_hooks[:ws_open].call(url, protocols) }) if sw_hooks[:ws_open]
         c.attach('__csim_wsClose', ->(id, code, reason) { sw_hooks[:ws_close].call(id, code, reason); nil }) if sw_hooks[:ws_close]
         # …and its EventSources, likewise
         c.attach('__csim_eventSourceOpen',  ->(request) { sw_hooks[:es_open].call(request) }) if sw_hooks[:es_open]
