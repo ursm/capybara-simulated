@@ -327,7 +327,10 @@ RSpec.describe 'the cookie store' do
   end
 
   # A hyperlink's download is the top-level navigation whose response it is: judged by the document whose link it is —
-  # a frame of b's under a's page, cross-site to a, the Lax cookie alone — its redirects followed to the file.
+  # a frame of b's under a's page, cross-site to a, the Lax cookie alone — its redirects followed to the file. Its
+  # Referer is that document's under the link's own referrer policy (`rel=noreferrer` none, as Firefox 159 makes it), and
+  # its Fetch Metadata HTML's download request's — Sec-Fetch-Dest `empty` — but Sec-Fetch-Mode `navigate`, as Chrome 156
+  # and Firefox 159 both send it (measured 2026-10-31), no Sec-Fetch-User.
   it 'downloads as the frame whose link it is, through its redirects' do
     seen = []
     app = lambda {|env|
@@ -335,10 +338,11 @@ RSpec.describe 'the cookie store' do
       case req.path
       when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
       when '/top'   then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="https://b.test/links"></iframe>']]
-      when '/links' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><a href="https://a.test/moved" download>d</a>']]
+      when '/links' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><a href="https://a.test/moved" download>d</a><a href="https://a.test/file?n" rel="noreferrer" download="n.txt">n</a>']]
       when '/moved' then [302, {'location' => 'https://a.test/file'}, ['']]
       else
-        seen << [req.path, env['HTTP_COOKIE'].to_s]
+        fetched = %w[SITE MODE DEST USER].map {|h| env["HTTP_SEC_FETCH_#{h}"] }
+        seen << [req.fullpath, env['HTTP_COOKIE'].to_s, env['HTTP_REFERER'], *fetched]
         [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename="got.txt"'}, ['file']]
       end
     }
@@ -350,7 +354,15 @@ RSpec.describe 'the cookie store' do
       s.visit 'https://a.test/top'
       s.within_frame(0) { s.click_link 'd' }
       poll_until { File.exist?(File.join(dir, 'got.txt')) }
-      expect([seen, File.read(File.join(dir, 'got.txt'))]).to eq([[['/file', 'l=1']], 'file'])
+      s.within_frame(0) { s.click_link 'n' }
+      poll_until { seen.size == 2 }
+      expect([seen, File.read(File.join(dir, 'got.txt'))]).to eq([
+        [
+          ['/file', 'l=1', 'https://b.test/', 'cross-site', 'navigate', 'empty', nil],
+          ['/file?n', 'l=1', nil, 'cross-site', 'navigate', 'empty', nil]
+        ],
+        'file'
+      ])
     ensure
       ENV['CSIM_DOWNLOADS_DIR'] = prev
     end

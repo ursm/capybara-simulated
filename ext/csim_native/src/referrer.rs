@@ -290,7 +290,7 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         Some(opaque) => (opaque, doc.url.clone(), ""),
     };
     let url = creator_url(arena, doc.realm, if told.is_none() { source.clone() } else { doc.url });
-    let cross_site_ancestor = has_cross_site_ancestor(&document_chain(arena, doc.realm, true));
+    let cross_site_ancestor = has_cross_site_ancestor(&document_chain(arena, doc.realm, true, known_origin_key));
     let policy = if opaque { "no-referrer" } else if element_policy.is_empty() { policy } else { element_policy.as_str() };
     let items = [
         v8::String::new(scope, &url).unwrap().into(),
@@ -302,12 +302,13 @@ fn request_client_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// HTML "has cross-site ancestor" of a document whose origin is the first of `documents` and its ancestors' the rest
-// (`document_chain`): one of them is not same site with the one below it — an opaque one (`null`) same site with none,
-// one not known with none either.
+// HTML "has cross-site ancestor" of a document whose origin key is the first of `documents` and its ancestors' the rest
+// (`document_chain` of `known_origin_key`): one of them is not same site with the one below it — an opaque origin same
+// site with itself alone (HTML "same site": two opaque origins are where they are the same origin), which a document
+// that inherited it shares by its key — one not known with none.
 fn has_cross_site_ancestor(documents: &[Option<String>]) -> bool {
     documents.windows(2).any(|pair| match (pair[0].as_deref(), pair[1].as_deref()) {
-        (Some(child), Some(parent)) => !matches!(fetch_site(parent, child), "same-origin" | "same-site"),
+        (Some(child), Some(parent)) => child != parent && !matches!(fetch_site(parent, child), "same-origin" | "same-site"),
         _ => true,
     })
 }
@@ -320,6 +321,13 @@ fn has_cross_site_ancestor(documents: &[Option<String>]) -> bool {
 fn known_document(arena: &mut RealmArena, r: i32) -> Option<String> {
     let arena = arena.enter_known(r)?;
     Some(arena.location.origin().to_owned())
+}
+// …the key realm `r`'s document's origin is matched by (realm_location.rs `origin_key`): a tuple origin's serialization,
+// an opaque one's token — the same in a document that inherited it (an about:blank one's of a sandboxed creator) and in
+// no other; None for a realm gone.
+fn known_origin_key(arena: &mut RealmArena, r: i32) -> Option<String> {
+    let arena = arena.enter_known(r)?;
+    Some(arena.location.origin_key(r))
 }
 // Whether a request a document at `url` — its URL or its origin — makes to `target` is cross-site for cookies (RFC
 // 6265bis "site for cookies"): one of none known, one of an opaque origin (a `data:` document's, a sandboxed one's
@@ -350,17 +358,17 @@ fn chain_site_for_cookies(documents: &[Option<String>]) -> Option<String> {
 // …of realm `r`'s document: each by its origin, an about:blank or srcdoc one's its creator's (an about:blank popup's its
 // opener's) — None where one is gone.
 fn site_for_cookies(arena: &mut RealmArena, r: i32) -> Option<String> {
-    chain_site_for_cookies(&document_chain(arena, r, true))
+    chain_site_for_cookies(&document_chain(arena, r, true, known_document))
 }
-// The origins of the documents of realm `r`'s ancestors (`known_document`), up to its top-level one, None for one not
-// known — its own first, `own`.
-fn document_chain(arena: &mut RealmArena, mut r: i32, own: bool) -> Vec<Option<String>> {
+// What `read` says of the documents of realm `r`'s ancestors (`known_document`'s origin, `known_origin_key`'s key), up
+// to its top-level one, None for one not known — its own first, `own`.
+fn document_chain(arena: &mut RealmArena, mut r: i32, own: bool, read: fn(&mut RealmArena, i32) -> Option<String>) -> Vec<Option<String>> {
     let mut origins = Vec::new();
     if own {
-        origins.push(known_document(arena, r));
+        origins.push(read(arena, r));
     }
     while let Some(p) = arena.parent_realm(r) {
-        origins.push(known_document(arena, p));
+        origins.push(read(arena, p));
         r = p;
     }
     origins
@@ -378,7 +386,7 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // in it.
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let r = args.get(0).int32_value(scope).unwrap_or(0);
-    let origins = document_chain(&mut dom(scope).arena, r, args.get(1).is_true());
+    let origins = document_chain(&mut dom(scope).arena, r, args.get(1).is_true(), known_document);
     let items: Vec<v8::Local<'_, v8::Value>> = origins
         .iter()
         .map(|u| u.as_deref().and_then(|u| v8::String::new(scope, u)).map_or_else(|| v8::null(scope).into(), Into::into))
@@ -407,9 +415,12 @@ mod tests {
         assert!(!chain(&["http://a.test"]));
         assert!(!chain(&["http://x.a.test", "http://a.test"]));
         assert!(chain(&["http://a.test", "http://b.test"]));
-        // (…a→b→a: the middle frame is the one; an opaque document, or one not known, is of no site)
+        // (…a→b→a: the middle frame is the one; an opaque origin same site with itself alone — a document that inherited
+        // it shares its key — and one not known with none)
         assert!(chain(&["http://a.test", "http://b.test", "http://a.test"]));
-        assert!(chain(&["null", "http://a.test"]));
+        assert!(chain(&["opaque:realm3", "http://a.test"]));
+        assert!(chain(&["opaque:realm4", "opaque:realm3"]));
+        assert!(!chain(&["opaque:realm3", "opaque:realm3"]));
         assert!(chain(&["http://a.test", ""]));
     }
 

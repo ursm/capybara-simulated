@@ -886,13 +886,14 @@ module Capybara
         return navigate_realm_window(browser, url, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace) if browser.is_a?(RealmWindow)
 
         blob ||= blob_bytes_for(url, source || browser) if url.to_s.start_with?('blob:')
+        initiator, referrer, referrer_policy = plan_source(browser, source, initiator_realm, referrer, referrer_policy)
         browser.traversable.plan_navigation(
           url.to_s,
           replace,
           user_activated == true,
           referrer,
           referrer_policy,
-          plan_initiator(browser, source, initiator_realm),
+          initiator,
           blob&.fetch(:bytes),
           blob&.fetch(:type)
         )
@@ -914,6 +915,7 @@ module Capybara
           return navigate_realm_window(browser, url, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, post: [post[:body].to_s, post[:content_type].to_s])
         end
 
+        initiator, referrer, referrer_policy = plan_source(browser, source, initiator_realm, referrer, referrer_policy)
         browser.traversable.plan_post(
           url.to_s,
           post[:body].to_s,
@@ -921,16 +923,18 @@ module Capybara
           user_activated == true,
           referrer,
           referrer_policy,
-          plan_initiator(browser, source, initiator_realm)
+          initiator
         )
       end
-      # The document a plan of `browser`'s navigation was begun by (Browser#navigation_initiator): `source`'s realm
-      # `initiator_realm`'s — where no window is named, the page of the window that opened `browser`, which a plan is never
-      # left without while there is one: no plan is a user's address bar's.
-      private def plan_initiator(browser, source, initiator_realm)
-        return source.navigation_initiator(initiator_realm.to_i) if source
+      # [initiator, Referer, its policy] of a plan of `browser`'s navigation: the document that began it
+      # (Browser#navigation_initiator) — `source`'s realm `initiator_realm`'s, referred as the caller says — or, where no
+      # window is named, the page of the window that opened `browser`, referred by that page under its policy
+      # (Browser#navigation_referrer): no plan is a user's address bar's while there is one.
+      private def plan_source(browser, source, initiator_realm, referrer, referrer_policy)
+        return [source.navigation_initiator(initiator_realm.to_i), referrer, referrer_policy] if source
 
-        window_browser(opener_handle_of(browser))&.navigation_initiator(0)
+        opener = window_browser(opener_handle_of(browser)) or return [nil, referrer, referrer_policy]
+        [opener.navigation_initiator(0), *opener.navigation_referrer(0)]
       end
 
       # A blob: document loaded into window `target` from the blob a navigation another window planned of it resolved

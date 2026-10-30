@@ -1486,15 +1486,19 @@ module Capybara
             submit_form_spec(action['spec'])
           end
         when 'download'
-          save_download(action['url'].to_s, action['filename'].to_s, action['realm'].to_i)
+          save_download(action)
         end
       end
 
       # A hyperlink's download (HTML "download the hyperlink") of the document of realm `realm` — the frame whose link it
       # is — fetched as the top-level navigation whose response it is: hop by hop, its redirects followed, its cookies sent
       # and its responses' stored as such a navigation's are, by that document (navigation_fetch.rs), its Referer that
-      # document's.
-      def download_link(url, filename_hint = '', realm: 0)
+      # document's under the link's referrer policy (`link_policy`, '' none: its `rel=noreferrer` / `referrerpolicy` — as
+      # Firefox 159 follows both and Chrome 156 the attribute, measured 2026-10-31), else the document's.
+      # (…its Fetch Metadata HTML's request's — "destination is the empty string", no `Sec-Fetch-User`, as it is no
+      # navigation request — but Sec-Fetch-Mode `navigate`, as Chrome 156 and Firefox 159 both send it (measured
+      # 2026-10-31; Firefox's Sec-Fetch-Dest `document`), the navigation whose cookies it carries)
+      def download_link(url, filename_hint = '', realm: 0, link_policy: '')
         # (…a `data:` URL's body its own, decoded: no request made of it)
         if url.to_s.match?(/\Adata:/i)
           mime, bytes = Native.data_url(url.to_s)
@@ -1507,16 +1511,19 @@ module Capybara
           url:             url.to_s,
           body_empty:      true,
           referrer:        source,
-          referrer_policy: policy.to_s,
+          referrer_policy: link_policy.empty? ? policy.to_s : link_policy,
           initiator:       initiating_url(realm),
           top_level:       true,
           **initiating_document(realm)
         })
         loop do
-          _, target, _, ref_source, ref_policy, _, _, _, _, cookie_context = fetch.begin_hop
+          _, target, _, ref_source, ref_policy, _, site, _, _, cookie_context = fetch.begin_hop
           env = rack_env_for(target, method: 'GET')
-          env['HTTP_USER_AGENT'] = @default_user_agent || USER_AGENT
-          env['REMOTE_ADDR']     = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
+          env['HTTP_USER_AGENT']     = @default_user_agent || USER_AGENT
+          env['REMOTE_ADDR']         = self.class.remote_addr_for(env['HTTP_HOST'] || env['SERVER_NAME'])
+          env['HTTP_SEC_FETCH_SITE'] = site
+          env['HTTP_SEC_FETCH_MODE'] = 'navigate'
+          env['HTTP_SEC_FETCH_DEST'] = 'empty'
           attach_cookies(env, env_request_url(env), cookie_context)
           # (…its Referer under the document's referrer policy, narrowed at each hop as a redirect's `Referrer-Policy` says)
           referrer               = Native.request_referrer(ref_policy, ref_source, target)
@@ -2209,12 +2216,14 @@ module Capybara
       def consume_pending_download
         pending = @runtime.call('__csimTakePendingDownload')
         return unless pending.is_a?(Hash) && pending['url']
-        save_download(pending['url'].to_s, pending['filename'].to_s, pending['realm'].to_i)
+        save_download(pending)
       end
 
-      # A download's resource saved to `downloads_directory`: a `blob:` URL's bytes from the page, anything else fetched —
-      # by the document of realm `realm`, whose hyperlink planned it.
-      def save_download(url, filename, realm = 0)
+      # A download's resource saved to `downloads_directory` — `download` the one a hyperlink planned (navigation_plan.rs
+      # `takeDownload`: its URL, file name, the realm whose document planned it and the link's referrer policy): a `blob:`
+      # URL's bytes from the page, anything else fetched.
+      def save_download(download)
+        url, filename = download['url'].to_s, download['filename'].to_s
         if url.start_with?('blob:')
           content = @runtime.call('__csimReadBlobBytes', url)
           return if content.nil?
@@ -2223,7 +2232,12 @@ module Capybara
           FileUtils.mkdir_p(dir)
           File.binwrite(File.join(dir, name), content)
         else
-          download_link(resolve_against_current(url, use_base: true), filename, realm: realm)
+          download_link(
+            resolve_against_current(url, use_base: true),
+            filename,
+            realm:       download['realm'].to_i,
+            link_policy: download['policy'].to_s
+          )
         end
       end
 
