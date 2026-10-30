@@ -59,8 +59,6 @@ pub(crate) struct Navigables {
     // state as HTML has it.
     top_names: HashMap<i32, Vec<u16>>,
     pub(crate) history: u64,
-    // …and its traversable's number in traversables.rs (0 none), whose opener its page disowns there.
-    pub(crate) traversable: u64,
     documents: HashMap<i32, NodeId>,
     // The windows `window.open` made in this isolate (auxiliary browsing contexts, top-level ones), which the page's
     // event loop — realm 0's — steps with its own, as it does its frames', in the order they were made; none closed.
@@ -502,16 +500,21 @@ impl RealmArena {
         let nav = &self.navigables;
         if nav.disowned.contains(&key) { None } else { nav.openers.get(&key).copied() }
     }
-    // (…the page's — key 0's — its traversable's, which outlives its documents: HTML's opener browsing context is the
-    // browsing context's, null once disowned whatever document it shows next)
+    // (…the page's — key 0's — its traversable's (session_history.rs), which outlives its documents: HTML's opener
+    // browsing context is the browsing context's, null once disowned whatever document it shows next)
     pub(crate) fn disown_opener(&mut self, key: i32) {
-        if key == 0 && self.navigables.traversable != 0 {
-            crate::traversables::disown(self.navigables.traversable);
+        match key {
+            0 if self.navigables.history != 0 => crate::session_history::disown(self.navigables.history),
+            _ => {
+                self.navigables.disowned.insert(key);
+            }
         }
-        self.navigables.disowned.insert(key);
     }
     pub(crate) fn opener_disowned(&self, key: i32) -> bool {
-        self.navigables.disowned.contains(&key) || (key == 0 && self.navigables.traversable != 0 && crate::traversables::disowned(self.navigables.traversable))
+        match key {
+            0 if self.navigables.history != 0 => crate::session_history::disowned(self.navigables.history),
+            _ => self.navigables.disowned.contains(&key),
+        }
     }
 
     // Whether realm `realm`'s document is in the page's browsing-context tree: the page's own (realm 0), or the active

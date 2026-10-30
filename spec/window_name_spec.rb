@@ -125,6 +125,16 @@ RSpec.describe 'a top-level window’s name', :every_host_local do
     session.within_window(popup) { expect(session).to have_no_text('again') }
   end
 
+  # (…nor through an opener that closed since — Chrome and Firefox measured a new window)
+  it 'is found by none through an opener that closed' do
+    session.visit 'http://a.test/'
+    middle = session.window_opened_by { session.execute_script("window.open('/q', 'mid')") }
+    far = session.within_window(middle) { session.window_opened_by { session.execute_script("window.open('http://b.test/far', 'pname')") } }
+    middle.close
+    session.execute_script("window.open('http://b.test/reused', 'pname')")
+    session.within_window(far) { expect(session).to have_no_text('reused') }
+  end
+
   # (…and the name a page gives its window is the one another's `window.open` finds it by, not the one it opened with)
   it 'is found by the name its page gave it' do
     session.visit 'http://a.test/'

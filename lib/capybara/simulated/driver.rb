@@ -460,7 +460,7 @@ module Capybara
           target.window_name == name && target.browsing_context_group == from.browsing_context_group && familiar_with?(from, target)
         }
       end
-      # HTML "familiar with", between top-level windows (traversables.rs `familiar`): `from`'s document of `target`'s
+      # HTML "familiar with", between top-level windows (session_history.rs `familiar`): `from`'s document of `target`'s
       # document's origin, or `target` an auxiliary browsing context whose opener `from` is familiar with — none once its
       # page disowned it (Chrome and Firefox measured: a window that set `opener = null` is found by no name its opener's
       # cross-origin page gives). (…`from`'s page's document judged, a frame's that targets by name too — a gap)
@@ -540,8 +540,9 @@ module Capybara
         # (with its opener) must exist before `visit` runs those scripts.
         aux.window_name = name
         # (…its opener browsing context the one opening it, which another window's familiarity with it goes through)
-        opener_browser = window_browser(opener_handle) if opener_handle
-        aux.traversable.opener = opener_browser.traversable if opener_browser
+        if (opener_browser = window_browser(opener_handle))
+          aux.traversable.opener = opener_browser.traversable
+        end
         @aux_windows << {handle: handle, browser: aux, opener: opener_handle}
         # (…another window of the session now, which may resolve the URLs the others made before it: their bytes entered in
         # the registry, for its workers' threads to read — Browser#partition_blob)
@@ -837,8 +838,6 @@ module Capybara
         return if h == PRIMARY_HANDLE
         @aux_windows.reject! {|w|
           next false unless w[:handle] == h
-
-          w[:browser].traversable.close!
           # HTML "close a browsing context": the teardown events (pagehide+unload,
           # this window and every nested frame, theirs first) fire while the VM
           # still works — a nested iframe's unload keepalive beacon depends on it.

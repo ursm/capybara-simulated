@@ -182,6 +182,14 @@ struct Traversable {
     // its task runs, in order — and the token the next one is given.
     queued: Vec<Queued>,
     tokens: u64,
+    // What another window of its browsing context group knows of it, its page in another isolate: the traversable that
+    // opened it (HTML's opener browsing context, by its number), whether its page disowned that one (`window.opener =
+    // null`), whether it closed, and its active document's origin's key as its page published it when that document
+    // began to load (`publishTraversableOrigin`; an opaque one's made this one's own; none before its first).
+    opener: Option<u64>,
+    disowned: bool,
+    closed: bool,
+    origin: Option<String>,
 }
 
 // A traversal queued: its token, its delta, the realm whose `history` asked for it, and whether it makes a document
@@ -773,11 +781,29 @@ impl SessionHistory {
         }
     }
     // #clear: no entries at all, nor traversals queued.
+    // (…a reset's: a fresh window's, what it knew of its opener and its documents gone with them)
     fn clear(&self) {
         let mut t = self.lock();
         t.state = State::new();
         t.saved = Default::default();
         t.queued.clear();
+        (t.opener, t.disowned, t.closed, t.origin) = (None, false, false, None);
+    }
+    // #opener = traversable: the window that opened it (HTML "create a new auxiliary browsing context").
+    fn set_opener(&self, opener: &SessionHistory) {
+        self.lock().opener = Some(opener.id);
+    }
+    // #disowned? -> whether its page disowned its opener.
+    fn is_disowned(&self) -> bool {
+        self.lock().disowned
+    }
+    // #close!: it closed (HTML "close a top-level traversable") — or was parked, its page gone.
+    fn close(&self) {
+        self.lock().closed = true;
+    }
+    // #familiar_with?(other) -> whether it is familiar with `other` (`familiar`).
+    fn is_familiar_with(&self, other: &SessionHistory) -> bool {
+        familiar(self.id, other.id)
     }
 }
 
@@ -803,6 +829,10 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("name", method!(SessionHistory::name, 0))?;
     class.define_method("name=", method!(SessionHistory::set_name, 1))?;
     class.define_method("show", method!(SessionHistory::show, 0))?;
+    class.define_method("opener=", method!(SessionHistory::set_opener, 1))?;
+    class.define_method("disowned?", method!(SessionHistory::is_disowned, 0))?;
+    class.define_method("close!", method!(SessionHistory::close, 0))?;
+    class.define_method("familiar_with?", method!(SessionHistory::is_familiar_with, 1))?;
     class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
@@ -1088,6 +1118,25 @@ mod tests {
     }
 
     #[test]
+    fn a_window_is_familiar_by_origin_or_through_an_opener_it_kept() {
+        let (page, popup, other) = (SessionHistory::new(), SessionHistory::new(), SessionHistory::new());
+        let origin = |h: &SessionHistory, o: &str| h.lock().origin = Some(o.to_owned());
+        origin(&page, "http://a.test");
+        origin(&popup, "http://b.test");
+        origin(&other, "http://a.test");
+        popup.set_opener(&page);
+        assert!(other.is_familiar_with(&page));
+        assert!(page.is_familiar_with(&popup));
+        assert!(!popup.is_familiar_with(&page));
+        // (…through no opener that closed, nor one disowned)
+        page.close();
+        assert!(!other.is_familiar_with(&popup));
+        page.lock().closed = false;
+        disown(popup.id);
+        assert!(!page.is_familiar_with(&popup));
+    }
+
+    #[test]
     fn a_saved_history_keeps_the_data_it_had() {
         let h = history();
         let a = h.push(TOP, TOP, "/a".into(), false, Data { texts: [None, Some("/r".into()), None, None], ..Default::default() }).unwrap();
@@ -1112,6 +1161,40 @@ pub(crate) fn set_name_of(id: u64, name: &[u16]) {
     t.state.set_name(build, name);
 }
 
+// What traversable `id` is known by to the others of its group — its opener, whether disowned, whether closed, its active
+// document's origin key — none where it is gone.
+fn known(id: u64) -> Option<(Option<u64>, bool, bool, Option<String>)> {
+    let traversable = histories().1.get(&id)?.upgrade()?;
+    let t = traversable.lock().unwrap_or_else(PoisonError::into_inner);
+    Some((t.opener, t.disowned, t.closed, t.origin.clone()))
+}
+// HTML "familiar with", between top-level traversables `a` and `b`: their active documents of one origin, `a` being `b`,
+// or `b` an auxiliary one whose opener — not disowned, not closed — `a` is familiar with.
+fn familiar(a: u64, b: u64) -> bool {
+    let origin = known(a).and_then(|k| k.3);
+    let mut b = b;
+    for _ in 0..8 {
+        let Some((opener, disowned, _, theirs)) = known(b) else { return false };
+        if a == b || origin.is_some() && origin == theirs {
+            return true;
+        }
+        match opener.filter(|&o| !disowned && known(o).is_some_and(|k| !k.2)) {
+            Some(o) => b = o,
+            None => return false,
+        }
+    }
+    false
+}
+// Traversable `id`'s page disowned its opener (window.js `set_opener`), and whether it has.
+pub(crate) fn disown(id: u64) {
+    if let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) {
+        traversable.lock().unwrap_or_else(PoisonError::into_inner).disowned = true;
+    }
+}
+pub(crate) fn disowned(id: u64) -> bool {
+    known(id).is_some_and(|k| k.1)
+}
+
 // The length of the session history numbered `id` (`SessionHistory#length`), none where it is gone.
 pub(crate) fn length_of(id: u64) -> Option<usize> {
     let traversable = histories().1.get(&id)?.upgrade()?;
@@ -1123,6 +1206,19 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setSessionHistory", set_session_history, context_id);
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
+    crate::dom::register(scope, ns, "publishTraversableOrigin", publish_origin, context_id);
+}
+
+// __dom.publishTraversableOrigin() — the page's document's origin, as it begins to load: the one its traversable is of to
+// the windows of other isolates (`familiar`), an opaque one's key (its isolate's) made the traversable's own.
+fn publish_origin(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let arena = crate::dom::realm(scope, 0);
+    let id = arena.navigables.history;
+    let Some(key) = arena.realm_state_mut(0).map(|s| s.location.origin_key(0)) else { return };
+    let key = if key.starts_with("opaque:") { format!("{key}@t{id}") } else { key };
+    if let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) {
+        traversable.lock().unwrap_or_else(PoisonError::into_inner).origin = Some(key);
+    }
 }
 
 // __dom.setSessionHistory(id) — the session history of the isolate's window (`SessionHistory#id`), the host's to say.

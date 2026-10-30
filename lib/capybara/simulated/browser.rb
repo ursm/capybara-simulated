@@ -208,7 +208,6 @@ module Capybara
         # The page's joint session history, its frames' with it, and what a replay of each entry sends and restores
         # (session_history.rs) — made before the runtime, whose realms are told it.
         @session_history              = Native::SessionHistory.new
-        @traversable                  = Native::Traversable.new
         @runtime                      = V8Runtime.new(self)
         # The wall-sync escape hatch, cached at construction (CLAUDE.md rule 3 — the env is fixed
         # for the session).
@@ -2166,12 +2165,13 @@ module Capybara
       # …and its target name (`window.name`), its active document state's (session_history.rs `State::name`): a new window
       # named as it opens, the one a name finds.
       def window_name = @session_history.name
-      # …and its top-level traversable (traversables.rs): the window that opened it, whether its page disowned it, whether
-      # it closed, the origin of its active document — what another window's familiarity with it is judged by.
-      attr_reader :traversable
       def window_name=(name)
         @session_history.name = name.to_s
       end
+      # …and its top-level traversable, whose session history it is (session_history.rs): the window that opened it,
+      # whether its page disowned it, whether it closed, the origin of its active document — what another window's
+      # familiarity with it is judged by.
+      def traversable = @session_history
       def inherit_browsing_context_group(opener)
         @browsing_context_group = opener.browsing_context_group
         @runtime.call('__csimSetBrowsingContextGroup', @browsing_context_group, "w#{object_id}")
@@ -3522,8 +3522,10 @@ module Capybara
       # stores this window issued (the transfer registry is process-wide). Runs
       # while the runtime is still alive so the transferDrop call lands.
       def dispose
-        # (…its blob URL registry first, process-global as the transfers are — blob_registry.rs — so a teardown step
-        # that raises leaves no entry another window of the session would find)
+        # (…its traversable closed — no window's familiarity goes through it after — and its blob URL registry first,
+        # process-global as the transfers are — blob_registry.rs — so a teardown step that raises leaves no entry another
+        # window of the session would find)
+        @session_history.close!
         Native.blob_window_dispose(@blob_window)
         # An aux window's background app requests are the same boundary hazard
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
@@ -6366,6 +6368,8 @@ module Capybara
       # BroadcastChannel fan-out membership also ends — a parked SW's BC listener is
       # unreachable, a documented gap with no in-scope observer).
       def park_for_service_workers!
+        # (…its window closed all the same: only its service workers live on)
+        @session_history.close!
         @workers.reject {|_h, w| w[:service] }.keys.each {|h| worker_terminate(h) }
         reset_event_sources
         reset_websockets
@@ -11192,7 +11196,9 @@ module Capybara
           # made with no fetch). (Narrow to about:blank specifically —
           # about:srcdoc carries its own markup.)
           if url.to_s.match?(ABOUT_BLANK)
-            # (…its origin its initiator's, an opaque one for none: a visit's)
+            # (…its origin its initiator's, an opaque one for none: a visit's — HTML "determine the origin", Chrome
+            # measured — and its base URL that document's)
+            inherit_creator(origin: url_origin(initiator).to_s, base: initiator.to_s, url: referer.to_s) if initiator
             commits.(initiator && url_origin(initiator))
             @current_url = url.to_s
             record_response(200, {'content-type' => 'text/html'})
@@ -11304,7 +11310,7 @@ module Capybara
       # as Chrome and Firefox leave it)
       private def clear_navigable_name(leaving_origin, origin)
         return if leaving_origin == :initial || (leaving_origin && leaving_origin == origin)
-        return if opener_handle && !@traversable.disowned?
+        return if opener_handle && !@session_history.disowned?
 
         @session_history.clear_name
       end
@@ -11385,7 +11391,7 @@ module Capybara
         policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
       end
 
-      def boot_response_into_ctx(html)
+      def boot_response_into_ctx(html, opaque_origin: false)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -11472,6 +11478,7 @@ module Capybara
           controller = nil if controller && controller[1] && !Native.sw_worker_activated(@sw_partition, controller[0])
           opts['controller'] = controller if controller
         end
+        opts['opaqueOrigin'] = true if opaque_origin
         creator, @creator = @creator, nil
         if creator && @current_url.to_s.match?(ABOUT_BLANK)
           opts['creatorOrigin'] = creator[:origin]
@@ -12011,10 +12018,12 @@ module Capybara
 
       # A top-level navigation that FAILED — a network error: Chrome still commits an error document at the target URL, so
       # the URL moves even though nothing loaded.
+      # (…its origin a new opaque one, whatever its URL's: HTML "determine the origin" for a navigation params' error —
+      # Chrome and Firefox measured: a window of the failed URL's origin finds it by no name)
       def commit_error_document(url)
         @current_url = url
         record_response(0, {'content-type' => 'text/html'})
-        boot_response_into_ctx('')
+        boot_response_into_ctx('', opaque_origin: true)
       end
       # Whether `url` is an HTTP(S) URL — one a fetch goes over the network for, and the only kind a redirect is followed to.
       def http_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
