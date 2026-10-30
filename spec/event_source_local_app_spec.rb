@@ -22,6 +22,16 @@ RSpec.describe 'an EventSource to the app' do
     def close = closed << true
   }
 
+  # A finite stream whose body takes a while to be let go of, as a framework's executor completing in a body proxy does.
+  EventSourceSlowCloseBody = Struct.new(:closing) {
+    def each = yield("data: x\n\n")
+
+    def close
+      closing << true
+      sleep 0.5
+    end
+  }
+
   let(:release) { Queue.new }
   let(:closed) { Queue.new }
 
@@ -35,6 +45,8 @@ RSpec.describe 'an EventSource to the app' do
         sent = env['HTTP_LAST_EVENT_ID']
         body = sent ? "data: b #{sent}\n\n" : "id: 7\nretry: 50\ndata: a\n\n"
         [200, {'content-type' => 'text/event-stream'}, [body]]
+      when '/slow-close'
+        [200, {'content-type' => 'text/event-stream'}, EventSourceSlowCloseBody.new(closed)]
       when '/slow'
         # (…an app's own timeout around something slow, answering 503 where it fires)
         begin
@@ -90,6 +102,13 @@ RSpec.describe 'an EventSource to the app' do
       es.onmessage = (e) => { window.got = e.data; };
     JS
     expect(poll_until { session.evaluate_script('window.got') }).to eq('error 2')
+  end
+
+  # (…the session's cancellation never raised into a reader letting go of what it holds, nor out of `reset!`)
+  it 'lets reset! cancel a reader in the middle of letting go of its body' do
+    session.execute_script("new EventSource('/slow-close')")
+    expect(closed.pop(timeout: 10)).to be(true)
+    expect { session.reset! }.not_to raise_error
   end
 
   it "delivers a worker's events into the worker, and closes its stream as the worker ends" do

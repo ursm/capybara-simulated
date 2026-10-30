@@ -3899,11 +3899,14 @@ module Capybara
         @event_source_lock.synchronize {
           id = (@event_source_seq += 1)
           @event_source_workers[id] = worker.handle if worker
-          @event_source_threads[id] = Thread.new do
-            Thread.current.report_on_exception = false
-            Thread.current[:csim_worker_record] = record
-            run_event_source_reader(id, request, queue)
-          end
+          # (…made with the session's cancellation deferred, which its reader lets in to its work alone)
+          @event_source_threads[id] = Thread.handle_interrupt(EventSourceCancelled => :never) {
+            Thread.new do
+              Thread.current.report_on_exception = false
+              Thread.current[:csim_worker_record] = record
+              run_event_source_reader(id, request, queue)
+            end
+          }
           id
         }
       end
@@ -3970,36 +3973,42 @@ module Capybara
       # a connection that could not be made, or was cut off, reconnects; a response the CORS check refused fails it —
       # the same server gives the same answer — as WPT's cross-origin tests expect)
       private def run_event_source_reader(id, request, queue)
-        Thread.current[:csim_event_stream_unreached] = false
-        status, headers, body, url = rack_fetch_request(request, nil, transport: method(:event_stream_transport), stream: true)
-        unless body
-          if Thread.current[:csim_event_stream_unreached]
-            queue << {id: id, type: '__reconnect', lastEventId: request.dig('headers', 'Last-Event-ID').to_s, retry: nil}
-          else
-            queue << {id: id, type: '__error', message: 'network error'}
-          end
-          return
-        end
-        content_type = header_field(headers, 'content-type')
-        unless Native.event_stream_response_ok(status, content_type ? header_text(content_type) : '')
-          queue << {id: id, type: '__error', message: "HTTP #{status}"}
-          return
-        end
-        queue << {id: id, type: '__open', url: url}
-        # (…its stream of the last event ID string the source had: a reconnection's request says it)
-        parser = Native.event_stream_open(request.dig('headers', 'Last-Event-ID').to_s)
-        begin
-          body.each do |chunk|
-            Native.event_stream_feed(parser, chunk).each do |type, data, event_id|
-              queue << {id: id, type: type, data: data, lastEventId: event_id}
+        parser = body = nil
+        # (…the session's cancellation let in to the work alone: the thread was made with it deferred, so the ensure that
+        # lets go of what the reader holds runs with it deferred again — a cancel that comes then is never raised, and
+        # the thread ends as its work did)
+        Thread.handle_interrupt(EventSourceCancelled => :immediate) do
+          Thread.current[:csim_event_stream_unreached] = false
+          status, headers, body, url = rack_fetch_request(request, nil, transport: method(:event_stream_transport), stream: true)
+          unless body
+            if Thread.current[:csim_event_stream_unreached]
+              queue << {id: id, type: '__reconnect', lastEventId: request.dig('headers', 'Last-Event-ID').to_s, retry: nil}
+            else
+              queue << {id: id, type: '__error', message: 'network error'}
             end
+            return
           end
-        rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
-          # (…the connection cut off mid-stream: it ends as a stream read to its end does)
+          content_type = header_field(headers, 'content-type')
+          unless Native.event_stream_response_ok(status, content_type ? header_text(content_type) : '')
+            queue << {id: id, type: '__error', message: "HTTP #{status}"}
+            return
+          end
+          queue << {id: id, type: '__open', url: url}
+          # (…its stream of the last event ID string the source had: a reconnection's request says it)
+          parser = Native.event_stream_open(request.dig('headers', 'Last-Event-ID').to_s)
+          begin
+            body.each do |chunk|
+              Native.event_stream_feed(parser, chunk).each do |type, data, event_id|
+                queue << {id: id, type: type, data: data, lastEventId: event_id}
+              end
+            end
+          rescue IOError, SystemCallError, OpenSSL::SSL::SSLError
+            # (…the connection cut off mid-stream: it ends as a stream read to its end does)
+          end
+          # HTML "reestablish the connection": the stream over, the source reconnects, asking with what it left.
+          last_event_id, retry_ms = Native.event_stream_reconnection(parser)
+          queue << {id: id, type: '__reconnect', lastEventId: last_event_id, retry: retry_ms}
         end
-        # HTML "reestablish the connection": the stream over, the source reconnects, asking with what it left.
-        last_event_id, retry_ms = Native.event_stream_reconnection(parser)
-        queue << {id: id, type: '__reconnect', lastEventId: last_event_id, retry: retry_ms}
       rescue EventSourceCancelled
         # (…the session closed it: nothing to tell the page, which closed it itself or is gone)
       rescue StandardError => e
@@ -4013,7 +4022,7 @@ module Capybara
           body.close if body.respond_to?(:close)
           socket.close if socket && !socket.closed?
         rescue StandardError
-          # (…closed concurrently: reset! killed the thread)
+          # (…closed already, the hop's socket by its body)
         end
         # (…and its connection's entry gone with it, where it is still this reader's: a reconnection opens another)
         @event_source_lock.synchronize do
@@ -4120,10 +4129,16 @@ module Capybara
           @event_source_workers.clear
           @event_source_threads.values.tap { @event_source_threads.clear }
         }
-        # (…and given a moment to end — one in the middle of an app call ends once the app has answered — so none is
-        # still in the app as the next test begins)
+        # (…and given a moment, one for them all, to end — one in the middle of an app call ends once the app has
+        # answered — so none is still in the app as the next test begins; however one ended is its own)
         threads.each {|t| cancel_event_source_reader(t) }
-        threads.each {|t| t.join(1) }
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+        threads.each do |t|
+          t.join([deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC), 0].max)
+        rescue Exception
+          # (…a reader that died of something of its own: an Exception, past `rescue StandardError` — an app's stray
+          # `Timeout::ExitException` — would end `reset!` with it)
+        end
         @event_source_queue.clear
       end
 
