@@ -749,7 +749,7 @@ module Capybara
       def window_ref_set(handle, id, prop, value)  = ((b = window_browser(handle)) && b.remote_ref_set(id, prop, value))
       def window_ref_call(handle, id, method, args) = (b = window_browser(handle)) ? b.remote_ref_call(id, method, args) : nil
       def window_ref_has(handle, id, prop)         = (b = window_browser(handle)) ? b.remote_ref_has(id, prop) : false
-      def window_ref_delete(handle, id, prop)      =(b = window_browser(handle)) ? b.remote_ref_delete(id, prop) : false
+      def window_ref_delete(handle, id, prop)      = (b = window_browser(handle)) ? b.remote_ref_delete(id, prop) : false
       # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
       # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
       # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, with history
