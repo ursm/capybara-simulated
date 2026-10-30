@@ -281,22 +281,32 @@ fn frame_cross_site(arena: &mut RealmArena, mut r: i32, target: &str) -> bool {
     }
     false
 }
-// The site for cookies of realm `r`'s document (RFC 6265bis §5.2.1): its top-level document's origin's site where every
-// document between is of that site — each by its origin, an about:blank or srcdoc one's its creator's (an about:blank
-// popup's its opener's) — None where one is not, or is of an opaque origin, or is gone.
-fn site_for_cookies(arena: &mut RealmArena, mut r: i32) -> Option<String> {
-    let mut sites = Vec::new();
-    loop {
-        let origin = known_document(arena, r)?;
-        let site = crate::realm_location::site(&origin)?;
-        match arena.parent_realm(r) {
-            Some(p) => {
-                sites.push(site);
-                r = p;
-            }
-            None => return sites.iter().all(|s| *s == site).then_some(site),
-        }
+// The site for cookies (RFC 6265bis §5.2.1) of a document whose origin is the first of `documents`, its ancestors' the
+// rest up to the top-level one's (`ancestor_documents_op`'s list): the top-level document's origin's site where every
+// document is of that site, None — an opaque origin, same-site with nothing — where one is not, is of an opaque origin,
+// or is not known.
+pub(crate) fn chain_site_for_cookies(documents: &[Option<String>]) -> Option<String> {
+    let sites = documents.iter().map(|d| d.as_deref().and_then(crate::realm_location::site)).collect::<Option<Vec<_>>>()?;
+    let top = sites.last()?;
+    sites.iter().all(|s| s == top).then(|| top.clone())
+}
+// …of realm `r`'s document: each by its origin, an about:blank or srcdoc one's its creator's (an about:blank popup's its
+// opener's) — None where one is gone.
+fn site_for_cookies(arena: &mut RealmArena, r: i32) -> Option<String> {
+    chain_site_for_cookies(&document_chain(arena, r, true))
+}
+// The origins of the documents of realm `r`'s ancestors (`known_document`), up to its top-level one, None for one not
+// known — its own first, `own`.
+fn document_chain(arena: &mut RealmArena, mut r: i32, own: bool) -> Vec<Option<String>> {
+    let mut origins = Vec::new();
+    if own {
+        origins.push(known_document(arena, r));
     }
+    while let Some(p) = arena.parent_realm(r) {
+        origins.push(known_document(arena, p));
+        r = p;
+    }
+    origins
 }
 // __dom.siteForCookies(realm) -> `site_for_cookies`, undefined for none.
 fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -305,20 +315,13 @@ fn site_for_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
         rv.set(v8::String::new(scope, &site).unwrap().into());
     }
 }
-// __dom.ancestorDocuments(realm, own) -> the origins of the documents of realm `realm`'s ancestors (`known_document`),
-// up to its top-level one (null for one not known) — its own first, `own`: what a request its document makes is
-// cross-site for cookies by (fetch_hop.rs `Client::cross_site`), besides its client; by its own too where the client is not
-// the document but the page the host pinned it to (an image's or a video's load), and for a navigation of a frame in it.
+// __dom.ancestorDocuments(realm, own) -> `document_chain` (null for one not known): what a request its document makes
+// is cross-site for cookies by (fetch_hop.rs `Client::cross_site`), besides its client; by its own too where the client
+// is not the document but the page the host pinned it to (an image's or a video's load), and for a navigation of a frame
+// in it — and, its own first, the site for cookies of a navigation it initiates (navigation_fetch.rs `Nav::cookies`).
 fn ancestor_documents_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let mut r = args.get(0).int32_value(scope).unwrap_or(0);
-    let mut origins = Vec::new();
-    if args.get(1).is_true() {
-        origins.push(known_document(&mut dom(scope).arena, r));
-    }
-    while let Some(p) = dom(scope).arena.parent_realm(r) {
-        origins.push(known_document(&mut dom(scope).arena, p));
-        r = p;
-    }
+    let r = args.get(0).int32_value(scope).unwrap_or(0);
+    let origins = document_chain(&mut dom(scope).arena, r, args.get(1).is_true());
     let items: Vec<v8::Local<'_, v8::Value>> = origins
         .iter()
         .map(|u| u.as_deref().and_then(|u| v8::String::new(scope, u)).map_or_else(|| v8::null(scope).into(), Into::into))

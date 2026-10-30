@@ -253,7 +253,9 @@ struct Posted {
 // A navigation planned — the traversable's ongoing navigation, one at a time: a second plan replaces the first, as a
 // navigation begun aborts the ongoing one (HTML "set the ongoing navigation") — its URL, whether it replaces the active
 // entry, whether the sender had transient activation, the Referer it sends and its policy, the URL of the document that
-// began it (its initiator, which seeds `Sec-Fetch-Site`), and what it navigates to (`Resource`).
+// began it (its initiator, whose site `Sec-Fetch-Site` and its cookies are measured from) and whether that document's
+// origin is opaque (a sandboxed one's: its `Origin: null`, of no site, cross-site to every URL), and what it navigates
+// to (`Resource`).
 #[derive(Clone, Debug, PartialEq)]
 struct Planned {
     url: String,
@@ -262,19 +264,19 @@ struct Planned {
     referrer: Option<String>,
     policy: Option<String>,
     initiator: Option<String>,
+    initiator_opaque: bool,
     resource: Resource,
 }
 // …a URL fetched with a GET; a `blob:` URL's blob — its bytes and type — as the sender's Location parsed it (HTML: the
 // URL's blob URL entry, resolved as it is parsed, which a revoke after does not take back); a POST resource, a form's
-// submission's — its encoded body, its content type, and whether the form's document's origin is opaque (its `Origin:
-// null`); or a `javascript:` URL's source, run in the target's document where that is same origin with the initiator's
-// as the task runs (HTML "navigate to a javascript: URL"), the initiator's origin by the key its traversable publishes
-// (`published_key`).
+// submission's — its encoded body and its content type; or a `javascript:` URL's source, run in the target's document
+// where that is same origin with the initiator's as the task runs (HTML "navigate to a javascript: URL"), the
+// initiator's origin by the key its traversable publishes (`published_key`).
 #[derive(Clone, Debug, PartialEq)]
 enum Resource {
     Get,
     Blob(Vec<u8>, String),
-    Post { body: Vec<u8>, content_type: String, origin_null: bool },
+    Post { body: Vec<u8>, content_type: String },
     Javascript { origin: String },
 }
 
@@ -1059,8 +1061,8 @@ impl SessionHistory {
     fn plan_navigation(&self, planned: Planned) {
         plan_on(&mut self.lock(), planned);
     }
-    // #plan_navigation(url, replace, activated, referrer, policy, initiator, blob_bytes, blob_type): …a GET's, a `blob:`
-    // URL's of the blob given.
+    // #plan_navigation(url, replace, activated, referrer, policy, initiator, origin_null, blob_bytes, blob_type): …a GET's,
+    // a `blob:` URL's of the blob given; `origin_null` whether the initiator's origin is opaque.
     #[allow(clippy::too_many_arguments)]
     fn plan_navigation_for_ruby(
         &self,
@@ -1070,6 +1072,7 @@ impl SessionHistory {
         referrer: Option<String>,
         policy: Option<String>,
         initiator: Option<String>,
+        origin_null: bool,
         blob_bytes: Option<RString>,
         blob_type: Option<String>,
     ) {
@@ -1077,10 +1080,11 @@ impl SessionHistory {
             Some(b) => Resource::Blob(crate::fetch_rules::ruby_bytes(b), blob_type.unwrap_or_default()),
             None => Resource::Get,
         };
-        self.plan_navigation(Planned { url, replace, activated, referrer, policy, initiator, resource });
+        self.plan_navigation(Planned { url, replace, activated, referrer, policy, initiator, initiator_opaque: origin_null, resource });
     }
     // #plan_post(url, body, content_type, origin_null, activated, referrer, policy, initiator): …a POST's, a form's
-    // submission to it by its name (HTML "navigate" with a POST resource; its history handling "push").
+    // submission to it by its name (HTML "navigate" with a POST resource; its history handling "push"), `origin_null`
+    // whether the form's document's origin is opaque.
     #[allow(clippy::too_many_arguments)]
     fn plan_post_for_ruby(
         &self,
@@ -1093,8 +1097,8 @@ impl SessionHistory {
         policy: Option<String>,
         initiator: Option<String>,
     ) {
-        let resource = Resource::Post { body: crate::fetch_rules::ruby_bytes(body), content_type, origin_null };
-        self.plan_navigation(Planned { url, replace: false, activated, referrer, policy, initiator, resource });
+        let resource = Resource::Post { body: crate::fetch_rules::ruby_bytes(body), content_type };
+        self.plan_navigation(Planned { url, replace: false, activated, referrer, policy, initiator, initiator_opaque: origin_null, resource });
     }
     // The navigation planned of it, taken (HTML: its task run) — none for one to a `javascript:` URL whose initiator is not
     // same origin with its active document as it is taken (HTML "navigate to a javascript: URL": the ongoing navigation
@@ -1107,8 +1111,8 @@ impl SessionHistory {
             _ => Some(planned),
         }
     }
-    // #take_planned -> {url:, replace:, activated:, referrer:, policy:, initiator:} and one of blob: [bytes, type], post:
-    // [body, content_type, origin_null], javascript: true — or nil for none (`take_planned`).
+    // #take_planned -> {url:, replace:, activated:, referrer:, policy:, initiator:, origin_null:} and one of blob: [bytes,
+    // type], post: [body, content_type], javascript: true — or nil for none (`take_planned`).
     fn take_planned_for_ruby(ruby: &magnus::Ruby, rb_self: &Self) -> Result<Option<RHash>, magnus::Error> {
         let Some(p) = rb_self.take_planned() else { return Ok(None) };
         let hash = ruby.hash_new();
@@ -1118,12 +1122,11 @@ impl SessionHistory {
         hash.aset(ruby.to_symbol("referrer"), p.referrer)?;
         hash.aset(ruby.to_symbol("policy"), p.policy)?;
         hash.aset(ruby.to_symbol("initiator"), p.initiator)?;
+        hash.aset(ruby.to_symbol("origin_null"), p.initiator_opaque)?;
         match p.resource {
             Resource::Get => {}
             Resource::Blob(bytes, kind) => hash.aset(ruby.to_symbol("blob"), (ruby.str_from_slice(&bytes), kind))?,
-            Resource::Post { body, content_type, origin_null } => {
-                hash.aset(ruby.to_symbol("post"), (ruby.str_from_slice(&body), content_type, origin_null))?;
-            }
+            Resource::Post { body, content_type } => hash.aset(ruby.to_symbol("post"), (ruby.str_from_slice(&body), content_type))?,
             Resource::Javascript { .. } => hash.aset(ruby.to_symbol("javascript"), true)?,
         }
         Ok(Some(hash))
@@ -1193,7 +1196,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
     class.define_method("post", method!(SessionHistory::post, 4))?;
     class.define_method("take_posted", method!(SessionHistory::take_posted, 0))?;
-    class.define_method("plan_navigation", method!(SessionHistory::plan_navigation_for_ruby, 8))?;
+    class.define_method("plan_navigation", method!(SessionHistory::plan_navigation_for_ruby, 9))?;
     class.define_method("plan_post", method!(SessionHistory::plan_post_for_ruby, 8))?;
     class.define_method("take_planned", method!(SessionHistory::take_planned_for_ruby, 0))?;
     class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
@@ -1514,6 +1517,7 @@ mod tests {
             referrer: None,
             policy: None,
             initiator: None,
+            initiator_opaque: false,
             resource: Resource::Get,
         };
         let (page, popup) = (SessionHistory::new(), SessionHistory::new());
@@ -1579,7 +1583,7 @@ mod tests {
         popup.clear_queued();
         assert_eq!(popup.take_asked(), vec![(kept, -1, 0, true)]);
         // (…a reload asked after a navigation planned aborting it, not one asked before it)
-        let get = |url: &str| Planned { url: url.into(), replace: false, activated: false, referrer: None, policy: None, initiator: None, resource: Resource::Get };
+        let get = |url: &str| Planned { url: url.into(), replace: false, activated: false, referrer: None, policy: None, initiator: None, initiator_opaque: false, resource: Resource::Get };
         let (before, _) = popup.lock().queue(0, 0, true);
         popup.plan_navigation(get("http://a.test/x"));
         popup.cancel_planned_before(before);
@@ -1604,11 +1608,12 @@ mod tests {
             referrer: None,
             policy: None,
             initiator: None,
+            initiator_opaque: false,
             resource,
         };
         let popup = SessionHistory::new();
         popup.lock().origin = Some("http://a.test".into());
-        let post = Resource::Post { body: b"k=v".to_vec(), content_type: "application/x-www-form-urlencoded".into(), origin_null: false };
+        let post = Resource::Post { body: b"k=v".to_vec(), content_type: "application/x-www-form-urlencoded".into() };
         popup.plan_navigation(plan("http://a.test/posted", post.clone()));
         assert_eq!(popup.take_planned().map(|p| p.resource), Some(post));
         let javascript = |origin: &str| Resource::Javascript { origin: origin.into() };
@@ -2101,6 +2106,6 @@ fn traversable_plan_javascript_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Fu
     let Some(key) = arena.realm_state_mut(cid).map(|s| s.location.origin_key(cid)) else { return };
     let origin = published_key(key, own);
     let Some(traversable) = histories().1.get(&id).and_then(Weak::upgrade) else { return };
-    let planned = Planned { url, replace: true, activated: false, referrer: None, policy: None, initiator: None, resource: Resource::Javascript { origin } };
+    let planned = Planned { url, replace: true, activated: false, referrer: None, policy: None, initiator: None, initiator_opaque: false, resource: Resource::Javascript { origin } };
     plan_on(&mut lock(&traversable), planned);
 }

@@ -159,6 +159,60 @@ RSpec.describe 'the cookie store' do
     ])
   end
 
+  # RFC 6265bis §5.2 judges a navigation by its client's "site for cookies", and §5.2.1 makes a document's that of its
+  # top-level origin only "if the top-level origin is same-site with the document's origin, and with each of the
+  # document's ancestor documents' origins. Otherwise its 'site for cookies' is an origin set to an opaque origin." So a
+  # frame of a's under b's page navigating the top to a is cross-site there — its Lax cookie sent, its Strict one not —
+  # where the same frame under a's page is same-site. Chrome 156 and Firefox 159 both judge by the initiator's origin
+  # alone (measured 2026-10-31: a popup a's frame under b's page opens to a gets the Strict cookie in both); the
+  # draft's explicit rule wins.
+  it "judges a navigation by its initiator's site for cookies" do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/top'   then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="https://a.test/frame"></iframe>']]
+      when '/frame' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><a href="https://a.test/echo" target="_top">go</a>']]
+      else
+        seen << [req.referer.to_s[%r{//([^/]+)}, 1], env['HTTP_COOKIE'].to_s]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    %w[a b].each do |host|
+      s.visit "https://#{host}.test/top"
+      s.within_frame(0) { s.click_link 'go' }
+      poll_until { seen.size == %w[a b].index(host) + 1 }
+    end
+    expect(seen).to eq([['a.test', 's=1; l=1'], ['a.test', 'l=1']])
+  end
+
+  # …and a navigation another window's script planned (session_history.rs `Planned`) by its initiator alike: a
+  # sandboxed page's — of an opaque origin, of no site — cross-site to its own host, its Strict cookie not sent and its
+  # Sec-Fetch-Site `cross-site`, a GET's as a POST's.
+  it "judges a navigation a sandboxed page planned of another window as of no site" do
+    seen = {}
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'   then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/boxed' then [200, {'content-type' => 'text/html', 'content-security-policy' => 'sandbox allow-scripts allow-popups'}, ['<!DOCTYPE html>boxed']]
+      else
+        seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://a.test/mine'
+    s.visit 'https://a.test/boxed'
+    popup = s.window_opened_by { s.execute_script("open('https://a.test/planned', 'w')") }
+    s.within_window(popup) { poll_until { seen.key?('/planned') } }
+    expect(seen).to eq('/mine' => ['s=1; l=1', 'none'], '/planned' => ['l=1', 'cross-site'])
+  end
+
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
   # document it reloads was reached by a same-site request — a page a cross-site link led to sends its Strict cookies
   # on no reload of the user's — where the page's own `location.reload()` is judged by its document's site, as any of
