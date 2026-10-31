@@ -37,6 +37,9 @@ pub(crate) struct Navigables {
     // Each nested realm's container — kept once the container's navigable is gone (its container left its document): a
     // window whose browsing context is discarded is no top-level one, its name '' and not to be set.
     containers: HashMap<i32, NodeId>,
+    // …and, a frame's document navigated away from, the container of the navigable it was of: what a WindowProxy of its
+    // window answers for from then on (`realm_now`) — let go of with the container.
+    succeeded: HashMap<i32, NodeId>,
     // Each nested realm's top-level realm, as it was when the realm became its container's navigable's: its document's
     // environment's top-level origin is that one's, whatever becomes of its container after (HTML "top-level origin").
     tops: HashMap<i32, i32>,
@@ -331,6 +334,9 @@ impl RealmArena {
         let Some(child) = nav.children.get_mut(&container) else { return None };
         if let Some(old) = child.realm.take() {
             nav.containers.remove(&old);
+            if realm.is_some() {
+                nav.succeeded.insert(old, container);
+            }
         }
         child.realm = realm;
         let first = child.last.is_none();
@@ -369,6 +375,14 @@ impl RealmArena {
     }
     pub(crate) fn frame_realm(&self, container: NodeId) -> Option<i32> {
         self.navigables.children.get(&container).and_then(|c| c.realm)
+    }
+    // The realm whose document is now the active document of the navigable realm `realm`'s document was of: its own
+    // where it still is, or no frame's; the one the navigable went on to — a frame navigated since (`succeeded`); none
+    // where the navigable is between documents.
+    pub(crate) fn realm_now(&self, realm: i32) -> Option<i32> {
+        let nav = &self.navigables;
+        let Some(container) = nav.containers.get(&realm).or_else(|| nav.succeeded.get(&realm)) else { return Some(realm) };
+        nav.children.get(container).and_then(|c| c.realm)
     }
     // The container, in realm `parent`'s document, of the navigable realm `realm`'s document is the active document of.
     pub(crate) fn frame_container(&self, parent: i32, realm: i32) -> Option<NodeId> {
@@ -780,6 +794,8 @@ impl RealmArena {
             for container in dead {
                 self.navigables.children.remove(&container);
             }
+            let nav = &mut self.navigables;
+            nav.succeeded.retain(|_, c| nav.children.contains_key(c));
             self.note_linked();
             let gone: Vec<i32> = self.navigables.containers.iter().filter(|&(_, &c)| self.get(c).is_none()).map(|(&r, _)| r).collect();
             for realm in gone {
@@ -1214,6 +1230,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigableRealm", parked_navigable_realm, context_id);
     crate::dom::register(scope, ns, "takeLostNavigables", take_lost_navigables, context_id);
+    crate::dom::register(scope, ns, "realmNow", realm_now, context_id);
     crate::dom::register(scope, ns, "unparkNavigable", unpark_navigable, context_id);
     crate::dom::register(scope, ns, "setRealmDocument", set_realm_document, context_id);
     crate::dom::register(scope, ns, "targetsOwnNavigable", targets_own_navigable, context_id);
@@ -1386,6 +1403,16 @@ fn take_lost_navigables(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let lost = crate::dom::realm(scope, cid).take_lost();
     let values: Vec<v8::Local<'_, v8::Value>> = lost.into_iter().map(|r| v8::Integer::new(scope, r).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &values).into());
+}
+
+// __dom.realmNow(realm) -> the realm whose document is now the active document of the navigable realm `realm`'s
+// document was of (`realm_now`), -1 for none: what a WindowProxy of that document's window answers to (HTML: one
+// however its navigable's active document changes) — a message posted by the script of a document navigated away from
+// sourced by it.
+fn realm_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_int32(-1) };
+    let cid = realm_id(scope, &args);
+    rv.set_int32(crate::dom::realm(scope, cid).realm_now(realm).unwrap_or(-1));
 }
 
 // __dom.unparkNavigable(realm) — the navigable between two documents whose last one was realm `realm`'s given up on
