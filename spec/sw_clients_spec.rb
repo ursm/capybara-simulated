@@ -645,7 +645,9 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
     JS
     5.times { session.evaluate_script('1') }
     browser = session.driver.browser
-    expect(browser.instance_variable_get(:@worker_in_flight)).to be > 0   # the leak is armed
+    posted = Capybara::Simulated::Native::WorkerHost::POSTED
+    worker_host = browser.instance_variable_get(:@worker_host)
+    expect(worker_host.owed(posted)).to be > 0   # the leak is armed
 
     session.execute_script("document.getElementById('a').remove();")
     # Barrier on the effect itself, not a fixed number of ticks: a reply already on the outbox
@@ -661,7 +663,7 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
 
     # Only the service worker may be left — the frame's workers are gone from @workers.
     expect(browser.instance_variable_get(:@workers).values.map {|w| w[:service] }).to all(be(true))
-    expect(browser.instance_variable_get(:@worker_in_flight)).to eq(0)
+    expect(worker_host.owed(posted)).to eq(0)
     expect(browser.worker_pending?).to be(false)
   end
 

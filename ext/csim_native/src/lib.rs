@@ -104,6 +104,7 @@ mod session_history;
 mod fetch_chain;
 mod navigation_fetch;
 mod worker_script_fetch;
+mod worker_host;
 mod fetch_hop;
 mod fetch_plan;
 mod sw_router;
@@ -293,6 +294,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("event_stream_response_ok", magnus::function!(event_source_state::response_ok_for_ruby, 2))?;
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
+    worker_host::define(native, ruby)?;
     http_cache::define(native, ruby)?;
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
     // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).
