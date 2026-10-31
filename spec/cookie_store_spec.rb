@@ -108,6 +108,30 @@ RSpec.describe 'the cookie store' do
     expect(seen.reject {|_, c| c.empty? }).to eq([])
   end
 
+  # A cookie set with no SameSite attribute is no Lax one: its same-site is "unset", which a cross-site request's
+  # "unset-or-less" retrieves (draft-ietf-httpbis-layered-cookies "Retrieve Cookies": "cookie's same-site is 'unset' and
+  # sameSite is one of 'strict-or-less', 'lax-or-less', or 'unset-or-less'") — so b's page sends it with its image of
+  # a's and its form's POST to a, where a Lax one goes with neither. Firefox 159 sends it with both; Chrome 156 is Lax by
+  # default, with the POST alone where the cookie is younger than two minutes (measured 2026-10-31).
+  it 'sends a cookie of no SameSite attribute cross-site' do
+    seen = {}
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => ['u=1; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/page' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="https://a.test/echo-img"><form method="post" action="https://a.test/echo-post"><button>go</button></form>']]
+      else
+        seen[req.path] = env['HTTP_COOKIE'].to_s
+        [200, {'content-type' => 'image/gif'}, ['GIF89a']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://b.test/page'
+    s.click_button 'go'
+    expect(seen).to eq('/echo-img' => 'u=1', '/echo-post' => 'u=1')
+  end
+
   # Fetch's "determine the same-site mode": "If request's redirect-taint is 'cross-site', then return 'unset-or-less'",
   # and a request's redirect-taint is "cross-site" once a URL of its URL list "is not same site with lastURL's origin and
   # request's origin is not same site with lastURL's origin". So a request a page makes through another site and back

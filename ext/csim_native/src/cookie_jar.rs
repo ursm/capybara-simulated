@@ -12,7 +12,7 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SameSite {
-    Default,
+    Unset,
     None,
     Lax,
     Strict,
@@ -55,8 +55,8 @@ fn lock() -> MutexGuard<'static, Registry> {
 pub(crate) const HTTP: u32 = 1;
 // …over a secure channel (https, or a host the host takes as potentially trustworthy);
 pub(crate) const SECURE: u32 = 2;
-// …for a request that is cross-site ("site for cookies"), where only a SameSite=None cookie goes — but a Lax one (and
-// one of none) too where it is a top-level navigation by a safe method (`LAX_RETRIEVE`, §5.8.3)…
+// …for a request that is cross-site ("site for cookies"), where only a SameSite=None cookie and one of none go — but a
+// Lax one too where it is a top-level navigation by a safe method (`LAX_RETRIEVE`, §5.8.3)…
 pub(crate) const CROSS_SITE: u32 = 4;
 pub(crate) const LAX_RETRIEVE: u32 = 8;
 // …and, setting one, whether the response is a top-level navigation's, of any method, which may set a SameSite one
@@ -226,7 +226,7 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
         has_path: false,
         secure: false,
         http_only: false,
-        same_site: SameSite::Default,
+        same_site: SameSite::Unset,
     };
     for av in attributes.split(';') {
         let (key, value) = av.split_once('=').map_or((trim(av), String::new()), |(k, v)| (trim(k), trim(v)));
@@ -263,7 +263,7 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
                     "none" => SameSite::None,
                     "lax" => SameSite::Lax,
                     "strict" => SameSite::Strict,
-                    _ => SameSite::Default,
+                    _ => SameSite::Unset,
                 }
             }
             _ => {}
@@ -377,6 +377,13 @@ impl Jar {
     // ── Retrieving (§5.8.3) ──────────────────────────────────────────────────────────────────────────────────────────
     // The cookie-string a request to `url` takes in `context`: the cookies it retrieves — the longest path first, then
     // the earliest made — `name=value` each (a nameless one its value), joined by `; `.
+    // A cookie set with no SameSite attribute is one whose same-site is "unset", which every same-site mode a context
+    // names retrieves, "unset-or-less" — a cross-site one's that may not retrieve a Lax cookie — included:
+    // draft-ietf-httpbis-layered-cookies "Retrieve Cookies" — "cookie's same-site is 'unset' and sameSite is one of
+    // 'strict-or-less', 'lax-or-less', or 'unset-or-less'". Not Lax by default: Chrome 156 withholds one from a
+    // cross-site image and sends it with a cross-site top-level POST (its "Lax+POST" exception for a cookie younger than
+    // two minutes), Firefox 159 sends it with both (measured 2026-10-31, its third-party cookies unpartitioned); the
+    // draft's text is explicit, and the spec wins.
     fn retrieve(&mut self, url: &str, context: u32, now: f64) -> String {
         self.cookies.retain(|c| c.expiry.is_none_or(|e| e > now));
         let Some((host, path)) = host_and_path(url) else { return String::new() };
@@ -390,9 +397,9 @@ impl Jar {
             .filter(|c| !c.secure || secure_channel)
             .filter(|c| !c.http_only || http)
             .filter(|c| !cross_site || match c.same_site {
-                SameSite::None => true,
+                SameSite::None | SameSite::Unset => true,
                 SameSite::Strict => false,
-                SameSite::Lax | SameSite::Default => lax_retrieve,
+                SameSite::Lax => lax_retrieve,
             })
             .collect();
         found.sort_by(|a, b| b.path.len().cmp(&a.path.len()).then(a.creation.cmp(&b.creation)));
@@ -492,17 +499,20 @@ mod tests {
             ("https://a.test/", "strict=3; SameSite=Strict", H | SECURE),
             ("https://a.test/", "none=4; SameSite=None; Secure", H | SECURE),
             ("https://a.test/", "nonone=5; SameSite=None", H | SECURE),
+            ("https://a.test/", "lax=6; SameSite=Lax", H | SECURE),
         ]);
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "s=1; h=2; strict=3; none=4");
-        assert_eq!(j.retrieve("http://a.test/", H, NOW), "h=2; strict=3");
-        assert_eq!(j.retrieve("https://a.test/", SECURE, NOW), "s=1; strict=3; none=4");
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE, NOW), "none=4");
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | LAX_RETRIEVE, NOW), "s=1; h=2; none=4");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "s=1; h=2; strict=3; none=4; lax=6");
+        assert_eq!(j.retrieve("http://a.test/", H, NOW), "h=2; strict=3; lax=6");
+        assert_eq!(j.retrieve("https://a.test/", SECURE, NOW), "s=1; strict=3; none=4; lax=6");
+        // (…cross-site, "unset-or-less": one of no SameSite attribute, "unset", as a SameSite=None one; Lax ones where a
+        // safe top-level navigation may retrieve them, "lax-or-less")
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE, NOW), "s=1; h=2; none=4");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | LAX_RETRIEVE, NOW), "s=1; h=2; none=4; lax=6");
         // (…the storage exception no retrieval one: a cross-site top-level navigation's POST sends no Lax cookie)
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | TOP_LEVEL_NAV, NOW), "none=4");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | TOP_LEVEL_NAV, NOW), "s=1; h=2; none=4");
         // (…a document write leaves an HttpOnly one be)
         j.store("https://a.test/", "h=x", SECURE, NOW);
-        assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "s=1; h=2; strict=3; none=4");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE, NOW), "s=1; h=2; strict=3; none=4; lax=6");
     }
 
     #[test]
