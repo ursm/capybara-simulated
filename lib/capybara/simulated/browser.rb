@@ -10560,19 +10560,19 @@ module Capybara
         # its Document object, renewed)
         keeps = kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
         # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
-        # the page's is: `boot_response_into_ctx` — while its realms still live: an initial about:blank's `unload` alone,
-        # which was never shown, its renewed Document visible still)
+        # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
+        # Document visible all the same)
         frozen_history { @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep') }
+        # (…its entry taking its controls' state as its handlers left it, which a traversal back to it restores: as the
+        # page's, `capture_outgoing_form_state` — none of an initial about:blank, which no entry is of)
+        history = window_history(realm_id)
+        if (id = history&.active(0)) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
+          history.update(id, {form_state: state})
+        end
         new_id =
           if keeps
             @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
           else
-            # (…its entry taking its controls' state as its handlers left it, which a traversal back to it restores: as the
-            # page's, `capture_outgoing_form_state`)
-            history = window_history(realm_id)
-            if (id = history&.active(0)) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
-              history.update(id, {form_state: state})
-            end
             made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
             # (…its name the one the window's next document keeps: window.js `__csimWindowNameFor`)
             made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, made[:csp], *made[:doc_origin])
