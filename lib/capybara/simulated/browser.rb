@@ -7486,14 +7486,13 @@ module Capybara
         )
       end
 
-      # Open an auxiliary window at about:blank — one of this window's browsing context group, its opener the document of
-      # realm `opener_realm_id` — as a realm in THIS browser's isolate, returning the new realm's context id for
-      # `window.open` to wrap in a NATIVE WindowProxy: `popup.document` a real same-isolate Document, its listeners and
-      # callbacks its own. (A pop-up opened at a URL is another isolate's still: Driver#open_window_from_js.)
+      # Open an auxiliary window at its initial about:blank — one of this window's browsing context group, its opener the
+      # document of realm `opener_realm_id` — as a realm in THIS browser's isolate, returning the new realm's context id
+      # for `window.open` to wrap in a NATIVE WindowProxy: `popup.document` a real same-isolate Document, its listeners and
+      # callbacks its own (Driver#open_realm_window).
       # (…its about:blank document's referrer its creator's URL, `creator_url`, and its policy container its creator's
       # clone: HTML "create a new browsing context and document")
       def open_window_realm(name: nil, opener_realm_id: 0, about_base: nil, creator_url: nil)
-        consume_user_activation(opener_realm_id)
         @runtime.create_window_realm(
           '', '', 'text/html',
           window_name:     name,
@@ -7503,6 +7502,21 @@ module Capybara
           referrer_policy: inherited_referrer_policy(opener_realm_id),
           viewport:        screen_size
         )
+      end
+
+      # …and the navigation it was opened for, to `url`, by the document of realm `initiator` — planned for the window as
+      # `open()`'s script runs (location.js `__csimNavigateFrom`), its source snapshot's activation `activated`: whether
+      # that document's window had it before the new window consumed it.
+      def plan_window_realm_navigation(realm, url, initiator, activated)
+        @runtime.realm_call(realm, '__csimNavigateFrom', url.to_s, initiator.to_i, '', activated)
+      end
+
+      # …or, opened at about:blank — `url`, a fragment of it its own — that document the one it was opened for, at that
+      # URL (HTML's "URL and history update steps" in place of the navigation), whose Window the next does not keep
+      # (bridge.entry.js `__csimOpenedAtInitial`).
+      def opened_at_initial(realm, url)
+        @runtime.realm_call(realm, '__csimUpdateLocation', url.to_s) unless url.to_s == 'about:blank'
+        @runtime.realm_call(realm, '__csimOpenedAtInitial')
       end
 
       # ── The windows `window.open` made in this isolate, as the driver addresses them (RealmWindow) ──

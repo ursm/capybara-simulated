@@ -699,6 +699,75 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.visit('/second')
     session.within_window(popup) { expect(session.evaluate_script('rd.title')).to eq('RM') }
   end
+
+  # A pop-up opened at a URL, with its opener, is such a window too: its document loaded as a task of its own, into the
+  # Window of its initial about:blank where it is of that one's origin — what the opener did to it as `open()` returned
+  # its own: a listener, a property, a callback, one object wherever read.
+  describe 'opened at a URL' do
+    it 'loads into the Window its opener holds, the listener and the callback it was given its own' do
+      session.execute_script(<<~JS)
+        window.log = [];
+        window.f = () => log.push('load:' + w.document.title);
+        window.w = window.open('/second');
+        w.onload = f;
+        w.addEventListener('load', () => log.push('listener'));
+        w.mark = 'kept';
+        log.push('sync:' + w.location.href);
+      JS
+      expect(session.windows.size).to eq(2)
+      expect(session.evaluate_script('log')).to eq(['sync:about:blank', 'load:second', 'listener'])
+      expect(session.evaluate_script('[w.onload === f, w.mark, w.opener === window, w.document.getElementById("second").textContent]'))
+        .to eq([true, 'kept', true, 'SECOND'])
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('#second')
+        expect(session.current_url).to end_with('/second')
+        expect(session.evaluate_script('window.mark')).to eq('kept')
+      end
+    end
+
+    it "hears its opener's messages with the opener as their source, and its own back" do
+      session.execute_script(<<~JS)
+        window.got = [];
+        window.addEventListener('message', (e) => got.push([e.data, e.source === w]));
+        window.w = window.open('/second');
+        w.addEventListener('message', (e) => { e.source.postMessage('pong', '*'); w.document.title = 'got:' + e.data + ':' + e.source.document.title; });
+      JS
+      session.has_css?('#none', wait: 0.2)
+      session.execute_script("w.postMessage('ping', '*')")
+      expect(session.evaluate_script('[w.document.title, got]')).to eq(['got:ping:main', [['pong', true]]])
+    end
+
+    it 'loads a document of another origin into a Window of its own, which its opener reaches only through the cross-origin members' do
+      browsers = session.driver.window_browsers.size
+      session.execute_script("window.w = window.open('http://other.example.com/second'); w.mark = 'initial';")
+      session.has_css?('#none', wait: 0.2)
+      expect(session.evaluate_script('(() => { try { return w.document.title; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+      expect(session.evaluate_script('[w.closed, w.opener === undefined, typeof w.postMessage]')).to eq([false, false, 'function'])
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('#second')
+        expect(session.evaluate_script('[window.mark, location.origin]')).to eq([nil, 'http://other.example.com'])
+      end
+      expect(session.driver.window_browsers.size).to eq(browsers)
+    end
+
+    # (…one of another site an isolate of its own, whose registries — its service workers' — are of its top-level site:
+    # Driver#hosts_partition?)
+    it 'loads a document of another site in an isolate of its own, its opener reaching it all the same' do
+      browsers = session.driver.window_browsers.size
+      session.execute_script("window.w = window.open('http://other.test/second')")
+      session.has_css?('#none', wait: 0.2)
+      expect(session.evaluate_script('[w.closed, w.opener === undefined, typeof w.postMessage]')).to eq([false, false, 'function'])
+      expect(session.driver.window_browsers.size).to eq(browsers + 1)
+      session.within_window(session.windows.last) { expect(session.evaluate_script('location.origin')).to eq('http://other.test') }
+    end
+
+    it 'costs no isolate of its own' do
+      browsers = session.driver.window_browsers.size
+      session.execute_script("window.w = window.open('/second')")
+      expect(session.windows.size).to eq(2)
+      expect(session.driver.window_browsers.size).to eq(browsers)
+    end
+  end
 end
 
 # …beside the frames of the page that opened it — one of another origin, one of its own: the driver's scope back at that

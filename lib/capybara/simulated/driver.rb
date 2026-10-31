@@ -537,7 +537,7 @@ module Capybara
       # (…`by_script` whether web content made it — a script's `window.open`, a link's or a form's target — which a script
       # may close, not the driver's `open_new_window`: HTML "is created by web content", its traversable's)
       def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, creator: nil, activation_realm: nil,
-                          user_activated: nil, by_script: true)
+                          user_activated: nil, by_script: true, planned: false)
         name = name.to_s
         # (…a document's to a `data:` URL, which a top-level browsing context refuses one's navigation to — a new window
         # opened at about:blank, a named one left as it is: Browser#top_level_data_refused?)
@@ -577,6 +577,26 @@ module Capybara
         url = 'about:blank' if refused
         had = source && activation_realm ? source.consume_user_activation(activation_realm) : source.nil?
         activated = user_activated.nil? ? had : user_activated
+        about_blank = url.to_s.empty? || url.to_s.match?(Browser::ABOUT_BLANK)
+        # A window of its opener's browsing context group: a realm of the opener's isolate, its documents that isolate's —
+        # its initial about:blank made with it (HTML "create a new auxiliary browsing context"), and the navigation it was
+        # opened for, if any, its own: planned as a task of its event loop where a script asked for it (`planned`, the
+        # script that called `open()` still on the stack), else begun now (a hyperlink followed, a form submitted).
+        # (…one of the isolate's storage partition: `hosts_partition?` — a Browser of its own where the isolate makes no
+        # realm for it)
+        if opener_handle && source && hosts_partition?(source, url.to_s)
+          opened = open_realm_window(
+            source,
+            url.to_s,
+            name:             name,
+            activation_realm: activation_realm.to_i,
+            creator:          creator,
+            planned:          planned,
+            plan:             [url.to_s, false, activation_realm.to_i, referrer, referrer_policy, activated, blob_snapshot],
+            post:             post && [post[:body].to_s, post[:content_type].to_s]
+          )
+          return opened if opened
+        end
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
@@ -615,9 +635,8 @@ module Capybara
         # URL its page may revoke first) or of the source's store, the source's document its initiator either way. (…an
         # about:blank one's none: the initial document at its URL — HTML's "URL and history update steps" in its place —
         # the document it was opened for, whose Window the next does not keep: `opened_at_initial`)
-        about_blank = url.to_s.match?(Browser::ABOUT_BLANK)
-        aux.open_initial_document(about_blank ? url.to_s : 'about:blank')
-        if about_blank || url.to_s.empty?
+        aux.open_initial_document(about_blank && !url.to_s.empty? ? url.to_s : 'about:blank')
+        if about_blank
           aux.traversable.opened_at_initial
         else
           plan = {
@@ -635,6 +654,40 @@ module Capybara
           end
         end
         handle
+      end
+
+      # A new window of `host`'s browsing context group, opened by the document of its realm `activation_realm`, in its
+      # isolate: its initial about:blank of its creator's origin and base URL, named `name` — the document it was opened
+      # for where `url` is about:blank, whose Window the next does not keep (Browser#opened_at_initial) — or, opened for
+      # another, that navigation, by the same document: `plan` (the window's location plan, Browser#navigate_window_realm)
+      # begun now, or — `planned` — planned for the window, which its event loop takes once the script that opened it is
+      # done (Browser#consume_pending_window_nav). Its handle returned; the realm of its document where a script opened
+      # it, which `open()` hands out as a WindowProxy (platform-globals.js).
+      private def open_realm_window(host, url, name:, activation_realm:, creator:, planned:, plan:, post:)
+        realm = host.open_window_realm(name: name, opener_realm_id: activation_realm, about_base: creator&.fetch(:base, nil), creator_url: creator&.fetch(:url, nil) || plan[3])
+        return unless realm
+
+        window = add_realm_window(host, realm, activation_realm)
+        if url.match?(Browser::ABOUT_BLANK)
+          host.opened_at_initial(realm, url)
+        # (…a `javascript:` URL's run as the window's own task, a hyperlink's or a form's too: location.js `__csimNavigateFrom`)
+        elsif (planned && !url.empty?) || url.match?(/\Ajavascript:/i)
+          host.plan_window_realm_navigation(realm, url, activation_realm, plan[5] == true)
+        elsif !url.empty?
+          host.navigate_window_realm(realm, 'location', plan, post: post)
+        end
+        planned ? realm : window.window_handle
+      end
+
+      # Whether a window opened at `url` is of the storage partition `host`'s isolate keeps its registries by — its page's
+      # top-level site (Browser#blob_partition_site), which its service workers' registrations are kept under
+      # (Browser#sw_partition) — that a window of another top-level site would share: one of another site is a Browser of
+      # its own, in its opener's browsing context group, until those are kept by top-level site. (…one at about:blank, or
+      # to run a javascript: URL, its creator's)
+      private def hosts_partition?(host, url)
+        return true if url.empty? || url.match?(Browser::ABOUT_BLANK) || url.match?(/\Ajavascript:/i)
+
+        Native.site(url).to_s == host.blob_partition_site
       end
 
       # A window `window.open` made in `host`'s isolate, its first document's realm `realm` — the key it is known by after
@@ -692,15 +745,8 @@ module Capybara
           )
           return existing[:handle]
         end
-        # A window opened at about:blank → a realm in the opener's isolate (shared heap); the
-        # returned realm-id context becomes a native WindowProxy on the JS side, so
-        # cross-window scripting/adoption need no cross-isolate RPC. The opener's realm
-        # id wires the popup's window.opener. One opened at a URL takes the separate-VM aux path still (R13 S6: its
-        # move into the opener's isolate is the next stage).
-        if resolved.nil? && (rid = opener_browser.open_window_realm(name: name, opener_realm_id: opener_realm_id, about_base: about_base, creator_url: referrer))
-          add_realm_window(opener_browser, rid, opener_realm_id)
-          return rid
-        end
+        # A new window of the opener's browsing context group: a realm of its isolate (`open_aux_window`), which the
+        # script's `open()` hands out as a native WindowProxy — its navigation, if any, planned as a task of its own.
         open_aux_window(
           resolved,
           name:             name,
@@ -709,7 +755,8 @@ module Capybara
           activation_realm: opener_realm_id,
           referrer:         referrer,
           referrer_policy:  referrer_policy,
-          creator:          {origin: about_origin, base: about_base, url: referrer}
+          creator:          {origin: about_origin, base: about_base, url: referrer},
+          planned:          true
         )
       end
 

@@ -2,11 +2,11 @@ require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
 
-# Each top-level traversable has a session history of its own (session_history.rs): the page's, a pop-up's in another
-# isolate, a window `window.open` made in the opener's isolate. What another window's script asks of it — a traversal of
-# that history, a navigation of it to a POST resource or to a `javascript:` URL — is a task of its own event loop (HTML
-# "traverse the history by a delta", "navigate": the steps after the source snapshot continue in the target's agent),
-# never run while the asking script is.
+# Each top-level traversable has a session history of its own (session_history.rs): the page's, a pop-up's — a window
+# `window.open` made in the opener's isolate. What another window's script asks of it — a traversal of that history, a
+# navigation of it to a POST resource or to a `javascript:` URL — is a task of its own event loop (HTML "traverse the
+# history by a delta", "navigate": the steps after the source snapshot continue in the target's agent), never run while
+# the asking script is.
 RSpec.describe 'the session history of each traversable' do
   let(:requests) { [] }
   let(:app) {
@@ -28,7 +28,7 @@ RSpec.describe 'the session history of each traversable' do
   def read(expr) = session.evaluate_script(expr)
   def hits(path) = requests.count {|r| r[1] == path }
 
-  context 'of a pop-up of another isolate' do
+  context 'of a pop-up' do
     before do
       session.execute_script("window.w = window.open('/a')")
       session.execute_script("w.location = '/b'")
@@ -185,7 +185,7 @@ RSpec.describe 'the session history of each traversable' do
   # (…HTML "navigate" with a POST resource, the steps after the source snapshot continuing as the window's task)
   # (…once the document it was opened for is in: a submission in the task that opened it aborts that navigation, the
   # window's ongoing one, which the POST's then replaces its initial about:blank by)
-  it 'posts a form to a window of another isolate by its name' do
+  it 'posts a form to a pop-up by its name, which a traversal back to its entry posts again' do
     session.execute_script("window.w = window.open('/a', 'named');")
     session.execute_script(<<~JS)
       document.body.insertAdjacentHTML('beforeend', '<form target=named method=post action=/posted><input name=k value=v></form>');
@@ -195,6 +195,7 @@ RSpec.describe 'the session history of each traversable' do
     expect(session.windows.size).to eq(2)
     expect(requests.last).to eq(['POST', '/posted', 'k=v', 'http://a.test'])
     session.execute_script('w.history.back()')
+    expect(read('w.location.pathname')).to eq('/a')
     session.execute_script('w.history.forward()')
     expect(requests.last).to eq(['POST', '/posted', 'k=v', 'http://a.test'])
   end

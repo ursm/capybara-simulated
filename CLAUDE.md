@@ -208,8 +208,11 @@ test that every later command addresses, for a page that merely called
 document that has since navigated away does nothing and returns undefined,
 where a browser would still run it: each document is a realm rebuilt from the
 snapshot, so the function went with the old one (handle ids are
-process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — until
-R13 S6 makes a same-group pop-up a realm of its opener's isolate; and a window
+process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — a
+pop-up of another top-level site's only, which stays an isolate of its own
+until the isolate keeps its registries (its service workers') by top-level
+site (`Driver#hosts_partition?`); a same-site pop-up is a realm of its
+opener's isolate, where the function runs as a browser runs it; and a window
 `window.open` made in its opener's isolate keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
 Document object too, renewed (its listeners, handlers, observer registrations,

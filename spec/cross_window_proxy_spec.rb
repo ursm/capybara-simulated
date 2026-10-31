@@ -2,11 +2,11 @@ require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
 
-# A window `window.open` opened at a URL is another Browser — another isolate — which its opener reaches through a
-# WindowProxy of its own (platform-globals.js `csimWindowProxy`). HTML's: same origin, its Window and its Location are
-# the real ones, whole; cross-origin, their CrossOriginProperties alone (HTML §7.2.1.3), anything else a SecurityError —
-# asked as each member is reached, by the origin the window's traversable published for its active document.
-RSpec.describe 'a WindowProxy of another isolate\'s window' do
+# A window `window.open` opened at a URL is a window of its opener's browsing context group — its documents realms of the
+# opener's isolate — which its opener reaches through a WindowProxy (platform-globals.js `frameWindowProxyFor`). HTML's:
+# same origin, its Window and its Location are the real ones, whole; cross-origin, their CrossOriginProperties alone
+# (HTML §7.2.1.3), anything else a SecurityError — asked as each member is reached, by the origin of its active document.
+RSpec.describe 'a WindowProxy of a pop-up' do
   # (…a page's script by its path: /opens opens a pop-up when its `f` is called, whose boot — /moves — navigates it)
   let(:scripts) {
     {
@@ -59,6 +59,12 @@ RSpec.describe 'a WindowProxy of another isolate\'s window' do
       expect(read('[w.location.pathname, w.history.length]')).to eq(['/dir/next', 1])
       session.execute_script("w.location.assign('again')")
       expect(read('[w.location.pathname, w.history.length]')).to eq(['/dir/again', 2])
+    end
+
+    # (…and so its `href` set inside a listener of this window's, the realm a dispatch enters)
+    it 'resolves the URL a listener of this window navigates it to against this document' do
+      session.execute_script("addEventListener('custom', () => { w.location.href = 'heard'; }); dispatchEvent(new Event('custom'));")
+      expect(read('w.location.pathname')).to eq('/dir/heard')
     end
 
     it 'navigates it to a fragment of its document within that document' do

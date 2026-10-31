@@ -2,12 +2,13 @@ require 'capybara/simulated'
 require 'rusty_racer'
 require_relative 'support/session_teardown'
 
-# A window `window.open` opened at a URL — another Browser, another isolate — loads as a window does: made at its initial
+# A window `window.open` opened at a URL — a realm of its opener's isolate — loads as a window does: made at its initial
 # about:blank, which fires no load, then navigated as a task of its own once its opener's script is done, its document
 # parsed, its scripts run and its DOMContentLoaded and `load` fired there (HTML "window open steps", "the end"). A
 # listener its opener puts on it right after `open()` is on the Window its same-origin document keeps (HTML's window
-# reuse), told of that load as a task of the opener's. Chrome 156 and Firefox 159, measured 2026-10-31, every one.
-RSpec.describe 'the load of another isolate\'s window' do
+# reuse), called in that load's dispatch, `this` the opener's WindowProxy of it. Chrome 156 and Firefox 159, measured
+# 2026-10-31, every one.
+RSpec.describe 'the load of a pop-up' do
   let(:scripts) {
     {
       # (…a pop-up that logs what its document does, in its origin's localStorage, which its opener reads)
@@ -116,14 +117,18 @@ RSpec.describe 'the load of another isolate\'s window' do
     expect(read('window.heard')).to eq(['popup onload'])
   end
 
-  it 'delivers the messages it posted as it loaded after its load, which its opener heard within it' do
+  # (…its load a task of the one event loop after the messages its parse posted, its opener's listener of it called in its
+  # dispatch, before the message its load handler posts: Firefox 159 measured 2026-10-31 — Chrome 156 fires the load
+  # first; HTML orders tasks of two task sources as a UA likes, and WPT replace-before-load/form-submit-popup.html asserts
+  # Firefox's)
+  it 'delivers the messages it posted as it parsed before its load, which its opener hears in that load' do
     run(<<~JS)
       window.heard = [];
       addEventListener('message', (e) => heard.push(e.data));
       window.w = open('/posts');
       w.addEventListener('load', () => heard.push('opener listener'));
     JS
-    expect(read('window.heard')).to eq(['opener listener', 'during-script', 'dcl', 'in-load'])
+    expect(read('window.heard')).to eq(['during-script', 'dcl', 'opener listener', 'in-load'])
   end
 
   # (…its load held for an image the server is slow to send, fired as the opener's wait polls, the pop-up not the active

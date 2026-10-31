@@ -2857,11 +2857,6 @@ fetch/metadata/generated/svg-image.https.sub.html:
 - sec-fetch-storage-access - Cross-site no attributes
 fetch/metadata/generated/window-history.https.sub.html:
 - sec-fetch-site - Cross-site - history.back
-- sec-fetch-site - Cross-site - history.forward
-- sec-fetch-site - Same origin - history.back
-- sec-fetch-site - Same origin - history.forward
-- sec-fetch-site - Same site - history.back
-- sec-fetch-site - Same site - history.forward
 fetch/metadata/generated/window-location.https.sub.html:
 - sec-fetch-user - location.assign with user activation
 - sec-fetch-user - location.href with user activation
@@ -3000,8 +2995,6 @@ html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/cont
 - Fetch client and URL resolution for location setter
 html/browsers/browsing-the-web/navigating-across-documents/multiple-globals/context-for-window-open.html:
 - Fetch client and URL resolution for window.open()
-html/browsers/browsing-the-web/navigating-across-documents/navigate-to-unparseable-url.html:
-- location.href setter throws a SyntaxError DOMException for unparseable URLs
 html/browsers/browsing-the-web/navigating-across-documents/navigate_too_many_calls.optional.html:
 - fragment navigations through navigate are ignored after too many calls
 - rate-limited navigations cancel pending lazy-load iframe navigations
@@ -3129,10 +3122,6 @@ html/browsers/history/the-history-interface/joint_session_history/002.html:
 html/browsers/history/the-history-interface/traverse_the_history_1.html:
 - Multiple history traversals from the same task
 - "[harness] TIMEOUT"
-html/browsers/history/the-history-interface/traverse_the_history_4.html:
-- Multiple history traversals, last would be aborted
-html/browsers/history/the-history-interface/traverse_the_history_5.html:
-- Multiple history traversals, last would be aborted
 html/browsers/history/the-history-interface/traverse_the_history_write_after_load_1.html:
 - Traverse the history after document.write after the load event
 - "[harness] TIMEOUT"
@@ -3601,7 +3590,6 @@ html/browsers/the-window-object/open-close/open-features-tokenization-top-left.h
 - '"top=152,left=152" should set top and left position of opened window'
 - '"top=152==left=152" should set top and left position of opened window'
 - '"top==142" should set top position of opened window'
-- "[harness] TIMEOUT"
 html/browsers/the-window-object/open-close/open-features-tokenization-width-height.html:
 - '" height = 402 , width = 401 ," should set height and width of opened window'
 - '" height = 402" should set height of opened window'
