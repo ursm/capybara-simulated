@@ -266,7 +266,7 @@ impl BroadcastInbox {
 // opaque origins of two windows may mint the same one, and a BroadcastChannel never bridges distinct opaque origins.
 // (A same-isolate opaque peer is reached in the isolate's own queue; a blob worker of an inherited one by its inbox.)
 fn reaches_other_windows(key: String) -> bool {
-    !key.split(' ').any(|part| part.starts_with(crate::realm_location::OPAQUE_KEY))
+    !key.split(' ').any(crate::realm_location::is_opaque_origin_key)
 }
 
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {

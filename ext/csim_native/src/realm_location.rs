@@ -123,7 +123,7 @@ impl RealmLocation {
         if origin != "null" {
             return origin.to_owned();
         }
-        self.origin_key.insert(format!("{OPAQUE_KEY}realm{cid}")).clone()
+        self.origin_key.insert(opaque_origin_key(format!("realm{cid}"))).clone()
     }
     // The key of the agent cluster the realm is of (HTML "obtain a similar-origin window agent"), in browsing context
     // group `group` of window `window` (the Dom's): its origin's site — its origin where its group is cross-origin
@@ -135,7 +135,7 @@ impl RealmLocation {
             return key.clone();
         }
         let key = self.origin_key(cid);
-        if key.starts_with(OPAQUE_KEY) {
+        if is_opaque_origin_key(&key) {
             return format!("{window}|{key}");
         }
         let key = if self.origin_keyed { key } else { site(&key).unwrap_or(key) };
@@ -395,7 +395,26 @@ fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 
 // What an opaque origin's key begins with.
-pub(crate) const OPAQUE_KEY: &str = "opaque:";
+const OPAQUE_KEY: &str = "opaque:";
+
+// For the host, which hands a worker the origin key its creator's realm gave it: Native.opaque_origin_key?(key) —
+// whether `key` is an opaque origin's — and Native.opaque_origin_key(token) -> the key of a new opaque origin, unique by
+// `token` (a data: worker's, by its handle).
+pub(crate) fn is_opaque_origin_key(key: &str) -> bool {
+    key.starts_with(OPAQUE_KEY)
+}
+fn is_opaque_origin_key_for_ruby(key: String) -> bool {
+    is_opaque_origin_key(&key)
+}
+fn opaque_origin_key(token: String) -> String {
+    format!("{OPAQUE_KEY}{token}")
+}
+pub(crate) fn define(native: magnus::RModule) -> Result<(), magnus::Error> {
+    use magnus::function;
+    native.define_module_function("opaque_origin_key?", function!(is_opaque_origin_key_for_ruby, 1))?;
+    native.define_module_function("opaque_origin_key", function!(opaque_origin_key, 1))?;
+    Ok(())
+}
 
 // The storage key of realm `cid`'s environment (HTML "obtain a storage key", with the partitioning Chrome and Firefox
 // ship, privacycg/storage-partitioning): its top-level site — the site of its top-level traversable's active document, a
@@ -419,7 +438,7 @@ pub(crate) fn storage_key_text(arena: &mut RealmArena, cid: i32) -> String {
 // SecurityError.
 fn origin_storage_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    match storage_key(&mut crate::dom::dom(scope).arena, cid).filter(|(_, origin)| !origin.starts_with(OPAQUE_KEY)) {
+    match storage_key(&mut crate::dom::dom(scope).arena, cid).filter(|(_, origin)| !is_opaque_origin_key(origin)) {
         Some((site, origin)) => rv.set(v8::String::new(scope, &format!("{site} {origin}")).unwrap().into()),
         None => rv.set_null(),
     }
@@ -436,7 +455,7 @@ fn bc_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 fn key_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = if args.get(0).is_string() { args.get(0).to_rust_string_lossy(scope) } else { String::new() };
     let key = key.rsplit(' ').next().unwrap_or_default();
-    let origin = if key.starts_with(OPAQUE_KEY) { "null" } else { key };
+    let origin = if is_opaque_origin_key(key) { "null" } else { key };
     rv.set(v8::String::new(scope, origin).unwrap().into());
 }
 

@@ -5053,7 +5053,7 @@ module Capybara
           sw_body
         elsif !sw_script
           fetch_worker_script(target, parent_worker ? @workers.dig(parent_worker, :url) : frame_realm_url(realm_id),
-                              opaque: creator_key.to_s.start_with?('opaque:'), dest: shared ? 'sharedworker' : 'worker')
+                              opaque: Native.opaque_origin_key?(creator_key.to_s), dest: shared ? 'sharedworker' : 'worker')
         end
         # Resource Timing for a DEDICATED worker's own main-script fetch — a browser files it in the
         # creating context's timeline (a classic worker as 'other', a module worker as 'script'; the
@@ -5108,7 +5108,7 @@ module Capybara
         unless service
           # (…an opaque origin's none: a sandboxed frame's)
           record[:site_for_cookies] =
-            if creator_key.to_s.start_with?('opaque:')
+            if Native.opaque_origin_key?(creator_key.to_s)
               nil
             elsif parent_worker
               @workers.dig(parent_worker, :site_for_cookies)
@@ -9009,7 +9009,7 @@ module Capybara
           if url.to_s.start_with?('blob:')
             creator_key
           elsif url.to_s.start_with?('data:')
-            "opaque:worker#{handle}"
+            Native.opaque_origin_key("worker#{handle}")
           end
         rt.eval_void("globalThis.__dom.setOriginKey(#{JSON.generate(worker_origin_key)});") if worker_origin_key
         # …and its agent cluster (HTML "obtain a dedicated/shared worker agent"): a dedicated worker's its owner's, a shared

@@ -298,6 +298,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     worker_host::define(native, ruby)?;
     clock_holds::define(native, ruby)?;
     broadcast_channels::define(native, ruby)?;
+    realm_location::define(native)?;
     storage_areas::define(native, ruby)?;
     http_cache::define(native, ruby)?;
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
