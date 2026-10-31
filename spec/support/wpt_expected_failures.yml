@@ -3335,8 +3335,12 @@ html/browsers/origin/cross-origin-objects/window-location-and-location-href-cros
   |this| value
 - Same-origin window.location setter throws TypeError in holder's realm on invalid
   |this| value
+# IN SCOPE, a justified gap (CLAUDE.md, rule 1): "BarProp objects of an auxiliary Window" asserts that the Document
+# of a pop-up's initial about:blank is replaced as its navigation to a document of its origin commits
+# (`assert_not_equals(openee.tiedToGlobalObject, openee.document)`), the Window kept. The driver keeps the Window and
+# renews the Document object in place (v8_runtime.rb `reuse_window_realm`): one document per realm. Its other subtest
+# holds text whatwg/html #6530 withdrew and is out of scope (wpt_out_of_scope.yml).
 html/browsers/the-window-object/BarProp.window.js:
-- BarBrop objects of a nested Window
 - BarProp objects of an auxiliary Window
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-01.html:
 - The window's length must return the number of child browsing contexts(in iframe)

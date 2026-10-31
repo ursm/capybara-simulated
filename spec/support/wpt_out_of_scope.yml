@@ -39895,6 +39895,14 @@ html/browsers/browsing-the-web/navigating-across-documents/010.tentative.html:
     reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
       specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
       path/suffix. CLAUDE.md rule 1.
+html/browsers/the-window-object/BarProp.window.js:
+- name: BarBrop objects of a nested Window
+  reason: 'Holds BarProp text whatwg/html withdrew in #6530 (merged 2021-10-29): "If
+    this BarProp object''s relevant global object''s browsing context is null, then
+    return false." — the test (2019) asserts `visible` false for a removed frame''s
+    window. The current text says the opposite: "Let browsingContext be this''s relevant
+    global object''s browsing context. If browsingContext is null, then return true."
+    CLAUDE.md rule 1, case 3.'
 html/browsers/the-window-object/open-close/open_fires_resize.tentative.html:
 - name: Opening a popup fires a resize event
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

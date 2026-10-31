@@ -94,6 +94,12 @@ PAGEHIDE_OF_INITIAL_ABOUT_BLANK =
 # backlog to chase either until one of the two changes. Each note is written above its file's entry in the in-scope
 # allowlist, quoting both, so the next regen keeps it. Map: rel => note.
 IN_SCOPE_NOTES = {
+  'html/browsers/the-window-object/BarProp.window.js' =>
+    'IN SCOPE, a justified gap (CLAUDE.md, rule 1): "BarProp objects of an auxiliary Window" asserts that the Document of ' \
+    "a pop-up's initial about:blank is replaced as its navigation to a document of its origin commits " \
+    '(`assert_not_equals(openee.tiedToGlobalObject, openee.document)`), the Window kept. The driver keeps the Window and ' \
+    'renews the Document object in place (v8_runtime.rb `reuse_window_realm`): one document per realm. Its other subtest ' \
+    'holds text whatwg/html #6530 withdrew and is out of scope (wpt_out_of_scope.yml).',
   'url/javascript-urls.window.js' =>
     'IN SCOPE, against the test: it asserts that both of two `javascript:` URL navigations begun in one task run ' \
     '("Property is ... once the navigation happened" after a second `anchor.click()` to `javascript:globalThis.verify()`). ' \
