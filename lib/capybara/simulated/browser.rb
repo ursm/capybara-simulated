@@ -7418,8 +7418,10 @@ module Capybara
           browser&.sw_fetch_answered(realm, fn, e[:fetch_id], e[:payload], nil) if fn
           # Track a stream's open span (head → terminal) per emitting worker, so worker_terminate
           # can release + error a body its worker died mid-stream.
-          if e[:kind] == 'fr_start' then @worker_host.stream_opened(e[:handle].to_i, e[:realm_id].to_i, e[:fetch_id].to_i)
-          else                           @worker_host.stream_closed(e[:handle].to_i, e[:realm_id].to_i, e[:fetch_id].to_i)
+          # (…open from its head to its terminal frame, the chunks between keeping it open)
+          case e[:kind]
+          when 'fr_start'             then @worker_host.stream_opened(e[:handle].to_i, e[:realm_id].to_i, e[:fetch_id].to_i)
+          when 'fr_close', 'fr_error' then @worker_host.stream_closed(e[:handle].to_i, e[:realm_id].to_i, e[:fetch_id].to_i)
           end
         end
         stream_terminals = stream_frames.count {|e| e[:kind] == 'fr_close' || e[:kind] == 'fr_error' }
