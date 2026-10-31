@@ -245,10 +245,13 @@ clock of its own window's while it waits (`hold_for_sw_fetch` is the
 host's): the driver's windows run one at a time on virtual clocks of their
 own, which a worker of every window's has to follow one of. A navigation
 into the scope of a worker still activating waits for it as Handle Fetch
-says — in place, the host's event loop stepped to whatever of it is due next
-(`await_sw_activation`), or deferred and made again once the worker
-activates where it can't wait so (a script of the host's on the stack,
-nothing due, `SW_ACTIVATION_VIRTUAL_MS` of virtual time gone) — except a
+says — in place, as long as the worker is at work, the host's event loop
+stepped to whatever of it is due next (`await_sw_activation`), or deferred
+where it can't wait so (a script of the host's on the stack, the worker
+parked with nothing of its own to do, `SW_ACTIVATION_VIRTUAL_MS` of virtual
+time gone) and made again once the worker activates, if no navigation,
+traversal or reload has replaced it as its navigable's ongoing one
+(session_history.rs `begin_navigation`) — except a
 redirect's later hop into such a scope, which waits what it can in place
 and, as no deferral can make a chain's hop again, goes on to the network
 where it can't. List and justify these explicitly; don't let them

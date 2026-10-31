@@ -6050,71 +6050,77 @@ module Capybara
       # navigation into the scope of a worker still activating waits for it (an address-bar one too, Chrome's as
       # measured), whichever window's and whatever navigates — a page, a frame, a window `window.open` made, a new
       # window's first: the host's event loop stepped to whatever of its is due next (`step_sw_activation`), whose clock
-      # the worker's follows, its `activate` handler's waitUntil settling as that clock moves. Where it can't finish so —
-      # the host has a script on the stack, nothing of the worker's is due, or SW_ACTIVATION_VIRTUAL_MS of the session's
-      # time passed — the navigation (`remake`, which makes it again) is deferred until the worker activates (or dies):
-      # the registry's `retry_navs` (`sw_navigations_due!`). Whether it was deferred. (…none given — a redirect's hop,
-      # which no deferral makes again — the hop waits what it can, and goes on; a caller asks `sw_registered?` first, which
-      # spares it the site)
-      private def await_sw_activation(url, site, &remake)
+      # the worker's follows, its `activate` handler's waitUntil settling as that clock moves — and as long as the worker
+      # is at work: running a task, its handler's or a fetch's. Where it can't finish so — the host has a script on the
+      # stack; the worker is parked with nothing of its own to do (waiting on something only another document can give
+      # it); or SW_ACTIVATION_VIRTUAL_MS of the session's time, or SW_ACTIVATION_HANG_GUARD of wall time, passed — the
+      # navigation (`remake`, which makes it again) is deferred until the worker activates or dies (the registry's
+      # `retry_navs`: `sw_navigations_due!`), and made again then only where it is still `navigable`'s ongoing navigation
+      # (`[session history, navigable]`: session_history.rs `begin_navigation`) — a navigation begun since, a traversal
+      # or a reload applied, replaced it, as HTML "navigate" aborts the one ongoing. Whether it was deferred. (…none
+      # given — a redirect's hop, which no deferral makes again — the hop waits what it can, and goes on; a caller asks
+      # `sw_registered?` first, which spares it the site)
+      private def await_sw_activation(url, site, navigable: nil, &remake)
+        history, nav = navigable
+        ongoing = history&.begin_navigation(nav)
         return false unless http_url?(url) && sw_activating_controller_for(url, site)
 
         waited = 0
-        idle   = 0
         guard  = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SW_ACTIVATION_HANG_GUARD
         while sw_activating_controller_for(url, site)
           advanced = sw_host.step_sw_activation
-          # (…nothing due nor at work for a few polls of the worker's inbox running — not one alone: a worker that just
-          # took its `activate` is at work before it says so — is a worker with nothing to do until something else does)
-          idle = advanced == :idle ? idle + 1 : 0
-          advanced = 0 if advanced == :idle && idle < 3
-          next if advanced.is_a?(Integer) && (waited += advanced) <= SW_ACTIVATION_VIRTUAL_MS &&
-                  Process.clock_gettime(Process::CLOCK_MONOTONIC) < guard
+          next if advanced && (waited += advanced) <= SW_ACTIVATION_VIRTUAL_MS && Process.clock_gettime(Process::CLOCK_MONOTONIC) < guard
           return false unless remake
 
           Native.sw_defer_navigation(@sw_partition)
-          @sw_deferred_navigations << remake
+          @sw_deferred_navigations << [history, nav, ongoing, remake]
           return true
         end
         false
       end
-      # …a step of the host's event loop for it: its workers' answers delivered; a worker at work waited on (its outbox);
-      # else its clock moved to the next time anything of its is due — its page's timers, its workers' (a worker's clock
-      # follows the window's, which it reads as it next polls its inbox: waited on too, a worker's timer moved to) — at
-      # once, with no wall time per virtual one. The virtual ms it advanced; nil where it can't be stepped now — a script
-      # of its on the stack, waiting on another window's — and :idle where nothing of its is due nor at work (a poll of
-      # its workers' outbox waited out).
+      # …a step of the host's event loop for it: its workers' answers delivered; a worker at work — not parked on its
+      # inbox, or with something in it — waited on (its outbox); a worker's timer come due waited on too, which it fires
+      # as it next polls its inbox; else its clock moved to the next time anything of its is due — its page's timers, its
+      # workers' (a worker's clock follows the window's) — at once, with no wall time per virtual one. The virtual ms it
+      # advanced; nil where it can't be stepped now — a script of its on the stack, waiting on another window's — or
+      # where nothing of its is due nor at work: its workers parked, with no timer.
       def step_sw_activation
         return if script_waiting?
 
         taking_window_tasks do
           next 0 if deliver_worker_messages.positive?
 
-          page = @runtime.next_timer_delay_ms
-          worker = worker_next_timer
-          if worker_drive_pending?
+          worker = sw_next_timer_at&.-(@runtime.clock)
+          if worker_drive_pending? || !sw_workers_parked? || worker&.<=(0)
             park_worker_reply(Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_POLL_INTERVAL)
-            0
-          elsif (due = [page, worker].select {|t| t >= 0 }.min)
-            @runtime.run_loop_step(due.ceil)
-            park_worker_reply(Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2 * WORKER_POLL_INTERVAL) if due == worker
-            due.ceil
-          else
-            park_worker_reply(Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_POLL_INTERVAL)
-            :idle
+            next 0
           end
+          due = [@runtime.next_timer_delay_ms, worker].compact.select {|t| t >= 0 }.min
+          next unless due
+
+          @runtime.run_loop_step(due.ceil)
+          due.ceil
         end
       end
+      # Whether every live service worker is parked on its inbox, nothing in it — its event loop with no task running —
+      # and the soonest time, on the window's clock, one has a timer set for (nil for none).
+      private def sw_workers_parked?
+        @workers.each_value.all? {|w| !w[:service] || !w[:thread]&.alive? || (w[:inbox].empty? && w[:inbox].num_waiting.positive?) }
+      end
+      private def sw_next_timer_at = @workers.each_value.filter_map {|w| w[:next_timer_at] if w[:service] && w[:thread]&.alive? }.min
 
       # The navigations deferred on an activating worker, made again — each as a navigation intent of this window's, as
-      # it next takes its tasks (`consume_sw_deferred_navigations`) — once the registry says a worker activated or died
-      # (`retry_navs`): every window's, a worker being any window's.
+      # it next takes its tasks (`consume_sw_deferred_navigations`), where it is still its navigable's ongoing navigation
+      # — once the registry says a worker activated or died (`retry_navs`): every window's, a worker being any window's.
       def sw_navigations_due!
         @sw_navigations_due.concat(@sw_deferred_navigations)
         @sw_deferred_navigations.clear
       end
       def consume_sw_deferred_navigations
-        @sw_navigations_due.shift.call until @sw_navigations_due.empty?
+        until @sw_navigations_due.empty?
+          history, nav, ongoing, remake = @sw_navigations_due.shift
+          remake.call if history.nil? || history.navigation_ongoing?(nav, ongoing)
+        end
       end
 
       # Release the subresource fetches Handle Fetch parked while `handle` was 'activating'
@@ -9696,6 +9702,8 @@ module Capybara
               next_timer = stopping.call ? -1.0 : rt.call('__nextTimerDelay').to_f
               record[:timers_due] = next_timer >= 0
               record[:next_timer] = next_timer
+              # (…and when, on the window's clock, which the worker's follows: what a wait on it steps the window to)
+              record[:next_timer_at] = (@runtime.clock + next_timer if next_timer >= 0)
             end
             # A lifecycle phase whose `waitUntil` was parked at boot may have settled off
             # the message dispatch / timer drain above (the extendable-event SYN/ACK, the
@@ -10692,7 +10700,12 @@ module Capybara
           log_console('warn', "window-realm navigation to #{url} not modeled; ignoring") unless top_level_data_refused?(url)
           return
         end
-        return if body.nil? && sw_registered? && await_sw_activation(url, Native.site(url).to_s) { navigate_window_realm(realm_id, kind, plan, by_user:, post:, initiator_document:) }
+        if body.nil? && sw_registered?
+          deferred = await_sw_activation(url, Native.site(url).to_s, navigable: [window_history(realm_id), 0]) do
+            navigate_window_realm(realm_id, kind, plan, by_user:, post:, initiator_document:)
+          end
+          return if deferred
+        end
 
         # (…its document asked first whether it may be unloaded, as the page's is — what its handlers would do to the
         # session history ignored: `prompt_page_to_unload`, `frozen_history`)
@@ -11374,7 +11387,8 @@ module Capybara
         commit: {}
       )
         if sw_registered?
-          deferred = await_sw_activation(url, blob_partition_site(realm_id)) do
+          nav, _, _, history = frame_navigable(realm_id)
+          deferred = await_sw_activation(url, blob_partition_site(realm_id), navigable: (history && [history, nav])) do
             navigate_realm_self(
               realm_id,
               url,
@@ -12117,7 +12131,7 @@ module Capybara
         origin: nil
       )
         if sw_registered?
-          deferred = await_sw_activation(url, Native.site(url).to_s) do
+          deferred = await_sw_activation(url, Native.site(url).to_s, navigable: [@session_history, 0]) do
             navigate_top_level(
               url,
               body,

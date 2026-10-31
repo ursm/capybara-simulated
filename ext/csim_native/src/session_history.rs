@@ -198,6 +198,11 @@ struct Traversable {
     // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
     saved: [Option<State>; 2],
     frames_saved: HashMap<u32, FrameSaved>,
+    // Each navigable's ongoing navigation (HTML "set the ongoing navigation"), by its number: one begun replaces the one
+    // before it, and a traversal applied makes it "traversal" (`go_to`) — which a navigation waiting to be made again
+    // (one deferred on an activating service worker: browser.rb `await_sw_activation`) is judged by.
+    ongoing: HashMap<u32, u64>,
+    next_ongoing: u64,
     // How many times its history has changed — an entry committed, a step gone to or held at, a navigable destroyed, a
     // document made anew, an entry's URL or fields or the target name written: what a frame's kept history is judged by
     // as it is restored (`restore_frame`), which gives back the whole of it only where none of these happened since.
@@ -796,6 +801,7 @@ impl Traversable {
     // The traversal to `step` applied — the step a plan gave.
     fn go_to(&mut self, step: i64) {
         self.version += 1;
+        self.ongoing.clear();
         let build = self.build;
         self.state.release_moved(step, build);
         self.state.current = step;
@@ -833,8 +839,10 @@ impl Traversable {
     // steps, and its own frames' with it, counted no more.
     fn destroy(&mut self, nav: u32) {
         self.version += 1;
-        // (…a navigation of it that kept the history, to give it back should it make no document, now nothing to restore)
+        // (…a navigation of it that kept the history, to give it back should it make no document, now nothing to restore;
+        // nor one of it ongoing)
         self.frames_saved.remove(&nav);
+        self.ongoing.remove(&nav);
         let build = self.build;
         let Some(doc) = self.state.parent_doc_of(nav, build) else { return };
         if let Some(nested) = self.state.docs.get_mut(&doc) {
@@ -1121,6 +1129,18 @@ impl SessionHistory {
     fn forget_frame(&self, nav: u32) {
         self.lock().frames_saved.remove(&nav);
     }
+    // #begin_navigation(navigable) -> the number of the navigation of `navigable` begun now, its ongoing one — and
+    // #navigation_ongoing?(navigable, number): whether it still is, no navigation begun nor traversal applied since.
+    fn begin_navigation(&self, nav: u32) -> u64 {
+        let mut t = self.lock();
+        t.next_ongoing += 1;
+        let id = t.next_ongoing;
+        t.ongoing.insert(nav, id);
+        id
+    }
+    fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
+        self.lock().ongoing.get(&nav) == Some(&id)
+    }
     // #clear: no entries at all, nor traversals queued.
     // (…a reset's: a fresh window's, what it knew of its opener and its documents gone with them)
     fn clear(&self) {
@@ -1128,6 +1148,7 @@ impl SessionHistory {
         t.state = State::new();
         t.saved = Default::default();
         t.frames_saved.clear();
+        t.ongoing.clear();
         (t.opener, t.disowned, t.closed, t.origin, t.by_web_content, t.popup_sandbox) = (None, false, false, None, false, 0);
         asking(&mut t, |t| {
             t.asked = Asked::default();
@@ -1402,6 +1423,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("forget", method!(SessionHistory::forget, 1))?;
     class.define_method("save_frame", method!(SessionHistory::save_frame, 1))?;
     class.define_method("restore_frame", method!(SessionHistory::restore_frame, 1))?;
+    class.define_method("begin_navigation", method!(SessionHistory::begin_navigation, 1))?;
+    class.define_method("navigation_ongoing?", method!(SessionHistory::navigation_ongoing, 2))?;
     class.define_method("forget_frame", method!(SessionHistory::forget_frame, 1))?;
     class.define_method("clear", method!(SessionHistory::clear, 0))?;
     Ok(())
@@ -1651,6 +1674,20 @@ mod tests {
         h.save_frame(2);
         h.lock().destroy(2);
         assert!(!h.restore_frame(2));
+    }
+
+    // A navigation begun is the navigable's ongoing one until another is begun or a traversal applied.
+    #[test]
+    fn a_navigation_is_ongoing_until_another_or_a_traversal() {
+        let h = history();
+        h.push(TOP, TOP, "/a".into(), false, Data::default());
+        let first = h.begin_navigation(TOP);
+        let frame = h.begin_navigation(1);
+        assert!(h.navigation_ongoing(TOP, first) && h.navigation_ongoing(1, frame));
+        let second = h.begin_navigation(TOP);
+        assert!(!h.navigation_ongoing(TOP, first) && h.navigation_ongoing(TOP, second));
+        h.go_to(h.step());
+        assert!(!h.navigation_ongoing(TOP, second) && !h.navigation_ongoing(1, frame));
     }
 
     #[test]
