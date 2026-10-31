@@ -242,13 +242,17 @@ worker runs on the event loop of the Browser that hosts the session's
 (the primary window's, `Browser#sw_host`), so its clock is that window's
 virtual clock — another window's controlled fetch, answered there, holds no
 clock of its own window's while it waits (`hold_for_sw_fetch` is the
-host's), and a navigation into the scope of a worker still activating waits
-for it by stepping the host's event loop, for at most `SW_ACTIVATION_WAIT`
-wall seconds and not while the host has a script on the stack
-(`await_sw_activation`), where Handle Fetch waits however long activation
-takes: the driver's windows run one at a time on virtual clocks of their
-own, which a worker of every window's has to follow one of. List and justify
-these explicitly; don't let them multiply.
+host's): the driver's windows run one at a time on virtual clocks of their
+own, which a worker of every window's has to follow one of. A navigation
+into the scope of a worker still activating waits for it as Handle Fetch
+says — in place, the host's event loop stepped to whatever of it is due next
+(`await_sw_activation`), or deferred and made again once the worker
+activates where it can't wait so (a script of the host's on the stack,
+nothing due, `SW_ACTIVATION_VIRTUAL_MS` of virtual time gone) — except a
+redirect's later hop into such a scope, which waits what it can in place
+and, as no deferral can make a chain's hop again, goes on to the network
+where it can't. List and justify these explicitly; don't let them
+multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox
