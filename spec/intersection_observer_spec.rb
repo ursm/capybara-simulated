@@ -155,8 +155,7 @@ RSpec.describe 'IntersectionObserver' do
         return [before > 0, window.__rounds - before];
       })()
     JS
-    expect(rounds[0]).to be(true)
-    expect(rounds[1]).to be_between(1, 3)
+    expect(rounds).to eq([true, 2])
   end
 
   it 'exposes the spec-shaped surface' do

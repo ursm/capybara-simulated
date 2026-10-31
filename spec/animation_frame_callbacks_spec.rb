@@ -76,6 +76,6 @@ RSpec.describe 'animation frame callbacks' do
       setTimeout(() => document.body.append(Object.assign(document.createElement('p'), { id: 'done' })), 3000);
     JS
     expect(session).to have_css('#done', visible: :all, wait: 5)
-    expect(session.evaluate_script('frames_run')).to be < 300
+    expect(session.evaluate_script('frames_run')).to be <= 190
   end
 end
