@@ -1109,14 +1109,17 @@ module Capybara
       # Worker / SSE / hijacked-fetch message (with no active timer) still
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
-      # (…this window's own channels, then what the session's other windows and its service workers' host owe it)
       def async_io_pending?
-        own_async_pending? || window_tasks_takeable? || agent_notices_pending? || sw_host_work_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending? ||
+          window_tasks_takeable? || agent_notices_pending? || sw_host_work_pending?
       end
-      # …those of this window's own: its workers', its event streams', its hijacked fetches', its cross-window inboxes', its
-      # WebSockets', its images' — what its own step delivers, whichever window is the active one (`steps_pending?`).
-      def own_async_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
+      # …of those of this window's own, the ones that are work under way, which its own step delivers whichever window is
+      # the active one (`steps_pending?`): its workers' at work (`worker_drive_pending?` — not a message posted to one that
+      # may never answer), what its event streams and its hijacked fetches have read (not a long poll still open), its
+      # cross-window inboxes, its WebSockets', its images'.
+      def own_work_pending?
+        worker_drive_pending? || event_source_pending? || !@hijack_fetch_queue.empty? || window_message_pending? || websocket_pending? ||
+          image_loads_pending?
       end
 
       # The engine registries' notices (agents.rs — IndexedDB's, Web Locks') for this window's realms, taken — each realm
@@ -1184,11 +1187,12 @@ module Capybara
       # …this window's: its timers; a `load` its document still owes, held for its images in flight (a pop-up's, whose
       # opener's listeners wait on it — `flush_pending_window_load`); a navigation a service worker asked of a client of
       # its, or one deferred on its activation, due (`consume_pending_sw_client_nav`, `consume_sw_deferred_navigations`);
-      # and what its own channels hold — a BroadcastChannel post or a `storage` event another window sent, a worker's
-      # answer, a socket's frame (`own_async_pending?`): every window's event loop runs, a background one's with no
-      # command sent to it, as a browser's does.
+      # and the work its own channels have under way — a BroadcastChannel post or a `storage` event another window sent, a
+      # worker's answer, a socket's frame (`own_work_pending?`): every window's event loop runs, a background one's with no
+      # command sent to it, as a browser's does — but never on what is open-ended (a worker that only listens, a long poll),
+      # which would keep every failing matcher of the active window waiting out its wait.
       def steps_pending?
-        @timers_active == true || @window_load_due == true || !@sw_navigations_due.empty? || own_async_pending? ||
+        @timers_active == true || @window_load_due == true || !@sw_navigations_due.empty? || own_work_pending? ||
           (sw_registered? && Native.sw_client_navs_queued(@sw_partition, @window_number))
       end
 
@@ -2990,7 +2994,9 @@ module Capybara
         # Background-thread work (workers, EventSource, MessageBus long-poll) keeps the settle loop alive even when settle_gen
         # is otherwise idle — and, where a window `window.open` made in this isolate is open, an image a document's load
         # waits for: a pop-up's, whose `w.onload` a wait of its opener's is for (the page's own load its visit waits out).
-        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || window_tasks_takeable? || websocket_pending?
+        # (…a worker's work under way, not a message posted to one that may never answer: a worker that only listens kept every
+        # failing matcher waiting out its wait)
+        return true if worker_drive_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || window_tasks_takeable? || websocket_pending?
         return true if image_loads_pending? && !@runtime.window_realm_meta.empty?
         # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
@@ -7479,7 +7485,7 @@ module Capybara
         !@worker_outbox.empty? || !@worker_outbox_head.nil? ||
           worker_reply_pending? ||
           @worker_host.owed?(OWED_WORK) ||
-          @workers.to_a.any? {|_h, w| !w[:inbox].empty? && w[:thread]&.alive? }
+          (!@workers.empty? && @workers.to_a.any? {|_h, w| !w[:inbox].empty? && w[:thread]&.alive? })
       end
 
       # ── Windows: window.open, hyperlink and form targets ──
