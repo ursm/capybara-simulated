@@ -271,7 +271,8 @@ RSpec.describe 'the blob URL store' do
     url = s.evaluate_script("URL.createObjectURL(new Blob(['<p>B'], {type: 'text/html'}))")
     s.within_frame(0) { s.execute_script("location.href = '/redir'") }
     s.evaluate_script('1')
-    expect(s.evaluate_script('frames[0].document.body.textContent')).to eq('')
+    # (…its error document of a new opaque origin, read in it: the page reaches only its cross-origin members)
+    expect(s.within_frame(0) { s.evaluate_script('[origin, document.body.textContent]') }).to eq(['null', ''])
     s.execute_script("frames[0].location.href = #{url.to_json}")
     poll_until { s.evaluate_script('frames[0].document.body.textContent') == 'B' }
     s.execute_script("frames[0].location.href = 'http://www.example.com/other'")

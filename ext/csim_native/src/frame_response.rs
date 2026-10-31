@@ -90,8 +90,13 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         // context and document")
         FrameSource::None => r.referrer = Some(realm(scope, cid).location.href().to_owned()).filter(|s| !s.is_empty()),
         // (…an about: URL no resource the network has: Fetch's scheme fetch answers about:blank with an empty document and
-        // any other with a network error, an empty document too — the URL the document's, its fragment for :target)
-        FrameSource::About(url) => r.url = url,
+        // any other with a network error, an empty document too, of a new opaque origin — the URL the document's, its
+        // fragment for :target)
+        FrameSource::About(url) => {
+            let path = url.split(['?', '#']).next().unwrap_or_default();
+            r.error = !path.eq_ignore_ascii_case("about:blank");
+            r.url = url;
+        }
         // (…a data: URL its own response, its MIME type `text/plain;charset=US-ASCII` where it names none — a malformed
         // one a network error, the empty document — and a blob: URL the blob's bytes, kept as the document loaded last,
         // which a reload of it revoked by then loads again: HTML keeps the blob alive for the document)
@@ -103,7 +108,9 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
             r.url = url;
         }
         FrameSource::Blob(url) => {
-            if let Some((bytes, content_type)) = crate::subresource_obtain::scheme_response(scope, host, &url)? {
+            let response = crate::subresource_obtain::scheme_response(scope, host, &url)?;
+            r.error = response.is_none();
+            if let Some((bytes, content_type)) = response {
                 let content_type = if content_type.is_empty() { "text/html".to_owned() } else { content_type };
                 let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
                 let content = Content { url: units(&url), bytes: bytes.clone(), content_type: units(&content_type), referrer: Vec::new(), policy: Vec::new() };
@@ -173,7 +180,8 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
 // The network's response to the frame's navigation — ONE host call owning the whole chain, a service worker's per hop
 // across every window's registrations (a redirect out of one's scope entering another's) with the network after
 // (browser.rb `frame_navigation_fetch`) — filed as its Resource Timing entry, and what it says of the document: none
-// for a failed navigation (a worker's network error, a redirect loop), the empty document of a new opaque origin. A build parked on a worker
+// for a failed navigation (a worker's network error, a redirect loop), the empty document of a new opaque
+// origin. A build parked on a worker
 // still activating (`FRAME_DEFERRED`) — HTML "Handle Fetch" waits for it — loads nothing and owes no `load`, its replay
 // the full build and load; a response that makes no document (a 204 / 205: HTML "navigate" aborted) leaves the frame at
 // the document it is at, its navigation over with no `load` (`FRAME_KEPT`) — one with none yet at its initial

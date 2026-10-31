@@ -20,6 +20,15 @@ RSpec.describe 'a frame at an about: URL' do
     expect(requests).to eq(['/'])
   end
 
+  # …any other about: URL's the network error's: an error document of a new opaque origin (HTML "create a document for
+  # inline content"), whose document the page cannot reach.
+  it 'loads an error document of a new opaque origin for an about: URL other than about:blank' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><iframe src="about:foo"></iframe>']] })
+    s.visit '/'
+    expect(s.evaluate_script('document.querySelector("iframe").contentDocument')).to be_nil
+    expect(s.within_frame(0) { s.evaluate_script('[origin, location.href]') }).to eq(['null', 'about:foo'])
+  end
+
   # …and a frame whose only `src` is of another namespace has none: about:blank, at its insertion and as its `srcdoc` is
   # removed alike (HTML reads the no-namespace attribute).
   it 'takes an src of another namespace for none, however it comes to navigate' do

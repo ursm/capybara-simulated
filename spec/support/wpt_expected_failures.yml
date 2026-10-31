@@ -3004,19 +3004,6 @@ html/browsers/browsing-the-web/navigating-across-documents/navigation-unload-sam
 - navigation-unload-same-origin
 html/browsers/browsing-the-web/navigating-across-documents/plugin-document.historical.html:
 - Same-origin PDFs must not create accessible Document objects
-html/browsers/browsing-the-web/navigating-across-documents/redirect-to-about.window.js:
-- An iframe that is navigated to a redirect to about:blank
-- An iframe that is navigated to a redirect to about:nonstandard
-- An iframe that is navigated to a redirect to about:srcdoc
-- An iframe with src set to a redirect to about:blank
-- An iframe with src set to a redirect to about:nonstandard
-- An iframe with src set to a redirect to about:srcdoc
-html/browsers/browsing-the-web/navigating-across-documents/redirect-to-data.html:
-- Loading an iframe with src=redirecting URL
-- Navigating an iframe to a redirecting URL
-html/browsers/browsing-the-web/navigating-across-documents/redirect-to-unparseable-url.html:
-- Navigating to a url (A) that redirects to an unparseable URL (B), saves the URL
-  (A) in the history entry, for later traversal
 html/browsers/browsing-the-web/navigating-across-documents/refresh/after-same-document-navigation.html:
 - Referrer from Refresh after Same-Document Navigation
 html/browsers/browsing-the-web/navigating-across-documents/refresh/navigate.window.js:
