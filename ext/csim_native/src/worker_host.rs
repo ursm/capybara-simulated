@@ -115,13 +115,11 @@ impl WorkerHost {
         state.waits[WAIT_FETCH] = None;
         state.waits[WAIT_MESSAGE] = None;
     }
-    // #reset — nothing owed at all, no hold, no race leg, no reply awaited, no client adopted either: the session's
-    // reset, its workers joined.
+    // #reset — and no hold, no race leg, no reply awaited, no client adopted either: the session's reset. (Still not the
+    // workers booting or busy: a thread the reset gave up joining lets go of its own as it ends, which a count zeroed
+    // here would take off the next session's worker.)
     fn reset(&self) {
         self.clear();
-        for count in &self.owed {
-            count.store(0, Ordering::Release);
-        }
         let mut state = self.lock();
         state.waits = Default::default();
         state.raced.clear();
@@ -233,6 +231,11 @@ impl WorkerHost {
             }
         })
     }
+    // #awaiting?(fetch_id) -> whether a thread still waits for the reply to `fetch_id`, not handed over yet nor let go of
+    // (a session's reset lets go of every one).
+    fn is_awaiting(&self, fetch_id: i64) -> bool {
+        self.lock().replies.contains_key(&fetch_id)
+    }
     // #forget_reply(fetch_id) — no thread waits for it any more: a reply handed over after is dropped.
     fn forget_reply(&self, fetch_id: i64) {
         self.lock().replies.remove(&fetch_id);
@@ -324,6 +327,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("await_navigation", method!(WorkerHost::await_navigation, 0))?;
     class.define_method("answer", method!(WorkerHost::answer, 2))?;
     class.define_method("await_reply", method!(WorkerHost::await_reply, 2))?;
+    class.define_method("awaiting?", method!(WorkerHost::is_awaiting, 1))?;
     class.define_method("forget_reply", method!(WorkerHost::forget_reply, 1))?;
     class.define_method("wait_left", method!(WorkerHost::wait_left, 2))?;
     class.define_method("wait_reset", method!(WorkerHost::wait_reset, 1))?;

@@ -645,7 +645,7 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
     JS
     5.times { session.evaluate_script('1') }
     browser = session.driver.browser
-    posted = Capybara::Simulated::Native::WorkerHost::POSTED
+    posted      = Capybara::Simulated::Native::WorkerHost::POSTED
     worker_host = browser.instance_variable_get(:@worker_host)
     expect(worker_host.owed(posted)).to be > 0   # the leak is armed
 

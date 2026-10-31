@@ -35,7 +35,7 @@ RSpec.describe "a message's source" do
     expect(session.evaluate_script('frames[1].got')).to eq([['across', true, false]])
   end
 
-  it "is the page whose own script posted through the same WindowProxy" do
+  it 'is the page whose own script posted through the same WindowProxy' do
     session.execute_script("window.w = open('/popup')")
     poll_until { session.evaluate_script('w.document.readyState') == 'complete' }
     session.execute_script("w.postMessage('own', '*')")

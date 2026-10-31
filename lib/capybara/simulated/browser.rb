@@ -5487,10 +5487,11 @@ module Capybara
         end
       end
       # The reply to `fetch_id` a thread waits for in place (`WorkerHost#await_direct`, `#await_navigation`), awaited for
-      # WORKER_ROUND_TRIP_BUDGET with the GVL released, a poll interval at a time — nil where none came.
+      # WORKER_ROUND_TRIP_BUDGET with the GVL released, a poll interval at a time — nil where none came, or the wait was
+      # let go of meanwhile (a session's reset).
       private def await_worker_reply(fetch_id)
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
-        while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive?
+        while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
           reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min) and return reply
         end
         nil
@@ -6946,7 +6947,6 @@ module Capybara
         match = sw_navigation_match(url, site) or return nil
         handle, preload_scope = match
         w      = @workers[handle] or return nil
-        fetch_id = @worker_host.await_navigation
         # Navigation Preload: when the controlling registration has it enabled, issue the parallel
         # preload request NOW (main thread, before dispatching the event) and hand the response to the
         # SW as `event.preloadResponse`. GET only (the feature does not support other methods). The SW
@@ -7034,9 +7034,13 @@ module Capybara
           # as `event.preloadResponse`.
           preloadResponse:     preload
         )
-        w[:inbox] << {kind: 'fetch', req:, fetch_id:}
-        reply = await_worker_reply(fetch_id)
-        @worker_host.forget_reply(fetch_id)
+        fetch_id = @worker_host.await_navigation
+        reply    = begin
+          w[:inbox] << {kind: 'fetch', req:, fetch_id:}
+          await_worker_reply(fetch_id)
+        ensure
+          @worker_host.forget_reply(fetch_id)
+        end
         # A race-network-and-fetch-handler route's pre-fetched network leg (the worker fetched it just before dispatching
         # the handler — see sw_race_network) wins where the server's modeled delay undercuts the handler's measured span,
         # or the handler fell through; one the SW never answered within budget is the network's answer already in hand
