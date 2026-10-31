@@ -571,6 +571,34 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     end
   end
 
+  # (…but the tasks queued then alone: an interval begun with it runs a tick or two of them, its later ones — each scheduled
+  # again after — none it waits on)
+  context 'reloaded with an interval running' do
+    include PollUntil
+
+    it 'reloads the page after a few ticks of it' do
+      session.execute_script("sessionStorage.t = 0; document.title = 'mark'; setInterval(() => sessionStorage.t++, 0); location.reload();")
+      expect(session).to have_title('main')
+      expect(session.evaluate_script('+sessionStorage.t')).to be < 16
+    end
+
+    it 'reloads a frame after a few ticks of it' do
+      session.execute_script("document.body.insertAdjacentHTML('beforeend', '<iframe id=\"if\" src=\"/second\"></iframe>')")
+      session.within_frame('if') { expect(session).to have_css('#second') }
+      session.execute_script("window.t = 0; document.getElementById('if').contentWindow.eval(\"document.title = 'mark'; setInterval(() => parent.t++, 0); location.reload()\")")
+      expect(poll_until { session.evaluate_script("document.getElementById('if').contentDocument.title") == 'second' }).to be(true)
+      expect(session.evaluate_script('t')).to be < 16
+    end
+
+    it 'reloads a window of this isolate after a few ticks of it' do
+      session.execute_script("window.w = window.open(); w.location = '/second';")
+      session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+      session.execute_script("window.t = 0; w.eval(\"document.title = 'mark'; setInterval(() => opener.t++, 0); location.reload()\")")
+      session.within_window(session.windows.last) { expect(session).to have_title('second') }
+      expect(session.evaluate_script('t')).to be < 16
+    end
+  end
+
   it 'is the opener of a pop-up it opens at a URL' do
     popup = open_popup
     session.within_window(popup) { session.execute_script("window.open('/second', 'deep')") }

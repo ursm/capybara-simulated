@@ -85,7 +85,7 @@ pub(crate) struct Reload {
     // …and the mark of the document's tasks queued by the time the task that planned it ended — as the host first came
     // to take it (timers.rs `task_mark`): those its history step applies after (`queued_before`), the traversal queue
     // running in parallel with that task.
-    mark: Option<u64>,
+    mark: Option<(u64, f64)>,
 }
 
 static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -279,6 +279,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "navigationBegun", navigation_begun, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
+    register(scope, ns, "reloadQueued", reload_queued_op, context_id);
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
     register(scope, ns, "routeFrameSubmission", route_frame_submission, context_id);
     register(scope, ns, "takeRoutedSubmission", take_routed_submission, context_id);
@@ -545,11 +546,12 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
         if own.traversal.is_none() && arena.window_history(w).is_some_and(|(h, _)| h.queued_documents()) {
             own = Own::default();
         }
-        // (…a reload's left planned while a task queued on the window's event loop before it is still to run: `take_reload`)
+        // (…a reload's left planned while a task queued on the window's event loop before it is still to run — which the
+        // host runs first, `reloadQueued` — as the page's is: `take_reload`)
         if own.location.is_none() && own.reload.is_some() {
             let arena = realm(scope, w);
             arena.navigation_plan.own = own;
-            if reload_waits(arena, w) {
+            if reload_queued(arena, w) > 0 {
                 continue;
             }
             own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
@@ -596,18 +598,25 @@ fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v
 }
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
 // more — undefined for none.
-// Whether the reload realm `cid`'s plan holds waits on a task queued on its document's event loop that has yet to run —
-// those queued by the time the host first comes to take it, its mark taken then (`Reload::mark`).
-fn reload_waits(arena: &mut crate::dom::RealmArena, cid: i32) -> bool {
+// How many tasks queued on realm `cid`'s document's event loop the reload its plan holds waits on: those queued by the
+// time the host first comes to take it, its mark taken then (`Reload::mark`) — 0 for none, or no reload.
+fn reload_queued(arena: &mut crate::dom::RealmArena, cid: i32) -> u32 {
     let now = arena.task_mark(cid);
-    let Some(reload) = arena.navigation_plan.own.reload.as_mut() else { return false };
+    let Some(reload) = arena.navigation_plan.own.reload.as_mut() else { return 0 };
     let mark = *reload.mark.get_or_insert(now);
-    arena.queued_before(cid, mark)
+    arena.queued_count(cid, mark)
 }
-// (…none while a task queued on its document's event loop before it is still to run: `reload_waits`, a turn later)
+// __dom.reloadQueued() -> `reload_queued` of the calling realm — the page's, or a window's of this isolate — which the
+// host runs (timers.js `__csimRunQueued`) before it takes the reload: the tasks HTML "apply the history step" step 12
+// queues the document's unloading after.
+fn reload_queued_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_uint32(reload_queued(realm(scope, cid), cid));
+}
+// (…none while a task queued on its document's event loop before it is still to run: `reload_queued`)
 fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    if reload_waits(realm(scope, cid), cid) {
+    if reload_queued(realm(scope, cid), cid) > 0 {
         return;
     }
     if let Some(reload) = plan(scope, &args).own.reload.take() {
