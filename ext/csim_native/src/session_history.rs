@@ -182,8 +182,9 @@ struct Traversable {
     made: u64,
     build: u32,
     // The history as it stood before a navigation that may end in no document (a download, a hand-off), by slot: the
-    // page's (0) and a frame's (1).
+    // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
     saved: [Option<State>; 2],
+    frames_saved: HashMap<u32, State>,
     // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
     // its task runs, in order — and the token the next one is given.
     queued: Vec<Queued>,
@@ -1029,12 +1030,29 @@ impl SessionHistory {
             *s = None;
         }
     }
+    // #save_frame(navigable) / #restore_frame(navigable) -> whether there was one / #forget_frame(navigable): …kept for
+    // a navigation of frame `navigable` — each frame's its own, whichever traversable's history it is of.
+    fn save_frame(&self, nav: u32) {
+        let mut t = self.lock();
+        let state = t.state.clone();
+        t.frames_saved.insert(nav, state);
+    }
+    fn restore_frame(&self, nav: u32) -> bool {
+        let mut t = self.lock();
+        let Some(state) = t.frames_saved.remove(&nav) else { return false };
+        t.state = state;
+        true
+    }
+    fn forget_frame(&self, nav: u32) {
+        self.lock().frames_saved.remove(&nav);
+    }
     // #clear: no entries at all, nor traversals queued.
     // (…a reset's: a fresh window's, what it knew of its opener and its documents gone with them)
     fn clear(&self) {
         let mut t = self.lock();
         t.state = State::new();
         t.saved = Default::default();
+        t.frames_saved.clear();
         (t.opener, t.disowned, t.closed, t.origin, t.by_web_content) = (None, false, false, None, false);
         asking(&mut t, |t| {
             t.asked = Asked::default();
@@ -1302,6 +1320,9 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("save", method!(SessionHistory::save, 1))?;
     class.define_method("restore", method!(SessionHistory::restore, 1))?;
     class.define_method("forget", method!(SessionHistory::forget, 1))?;
+    class.define_method("save_frame", method!(SessionHistory::save_frame, 1))?;
+    class.define_method("restore_frame", method!(SessionHistory::restore_frame, 1))?;
+    class.define_method("forget_frame", method!(SessionHistory::forget_frame, 1))?;
     class.define_method("clear", method!(SessionHistory::clear, 0))?;
     Ok(())
 }

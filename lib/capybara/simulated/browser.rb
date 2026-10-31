@@ -10780,7 +10780,7 @@ module Capybara
         return if new_url.to_s.match?(/\Ajavascript:/i)
         return unless (nav, parent_nav, _, history = frame_navigable(realm_id))
 
-        save_frame_history(realm_id, history)
+        save_frame_history(nav, history)
         # (…the first in place of the frame's initial about:blank, which no traversal goes back to: HTML "navigate" — a
         # navigable whose active document is its initial about:blank replaces it)
         initial = frame_entry(realm_id).nil? && @runtime.first_frame_realm?(realm_id) && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
@@ -10794,32 +10794,26 @@ module Capybara
       def replace_frame_entry(realm_id, url)
         return unless (nav, parent_nav, _, history = frame_navigable(realm_id)) && frame_entry(realm_id, create: true)
 
-        save_frame_history(realm_id, history)
+        save_frame_history(nav, history)
         history.replace(nav, parent_nav, url.to_s, false, {})
       end
       # …kept as it stood before a navigation recorded or replaced an entry of it, which one that ends in no document —
       # a download, a navigation handed off — restores (`frame_navigation_made_no_document`): neither is a navigation of
-      # the frame (HTML, Chrome).
-      def save_frame_history(realm_id, history)
-        history.save(1)
-        @frame_history_saved = [realm_id, history]
-      end
+      # the frame (HTML, Chrome) — kept by the frame's navigable in the history it is of (session_history.rs
+      # `save_frame`), each frame's its own.
+      def save_frame_history(nav, history) = history.save_frame(nav)
       def frame_navigation_made_no_document(realm_id)
         # (…the container's `sandbox` the navigation began with let go: frame_navigation.rs `releaseFrameSandbox`)
         @runtime.call('__csimReleaseFrameSandbox', realm_id)
         return @traversing_frames[:none] << realm_id if @traversing_frames
 
-        saved_for, history = @frame_history_saved
-        return unless saved_for == realm_id
-
-        @frame_history_saved = nil
-        history.restore(1)
+        _, _, nav, _, traversable = @runtime.frame_realm_tree(realm_id)
+        traversable_history(traversable)&.restore_frame(nav)
       end
-      # …and kept no more: the navigation made a document.
-      def frame_navigation_made_document
-        _, history = @frame_history_saved
-        @frame_history_saved = nil
-        history&.forget(1)
+      # …and kept no more: the navigation made a document, realm `realm_id`'s — its navigable's next.
+      def frame_navigation_made_document(realm_id)
+        _, _, nav, _, traversable = @runtime.frame_realm_tree(realm_id)
+        traversable_history(traversable)&.forget_frame(nav)
       end
       # The frame's CURRENT history entry (the loaded document), or nil — read by a reload to decide
       # whether to re-POST.
@@ -11339,7 +11333,7 @@ module Capybara
           refresh:         refresh
         ).to_i
         return if new_id.zero?
-        frame_navigation_made_document
+        frame_navigation_made_document(new_id)
         begin
           rebind_frame_realm(parent, handle, realm_id, new_id)
           # (…an entered frame's scope following it to its new document, as `reload_current_frame_realm` keeps it)
@@ -11800,7 +11794,7 @@ module Capybara
 
         new_id = @runtime.reload_frame_realm(old_id, parent.to_i, url, document_payload(bytes), content_type, client_id, seed, referrer: referrer, referrer_policy: referrer_policy, refresh: refresh).to_i
         return if new_id.zero?
-        frame_navigation_made_document
+        frame_navigation_made_document(new_id)
         rebind_frame_realm(parent, entry[:iframe_handle], old_id, new_id)
         if entry.equal?(@frame_stack.last)
           entry[:realm_id]  = new_id
