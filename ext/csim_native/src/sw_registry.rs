@@ -178,6 +178,9 @@ struct Outcome {
 // one the host could not tell) and the worker controlling it.
 pub(crate) struct Client {
     id: String,
+    // (…the realm it is, by its number in the session — its window's and that window's realm's, a worker client's the
+    // negative of its handle: `realm_key`)
+    owner: i64,
     site: String,
     url: String,
     kind: String,
@@ -193,8 +196,13 @@ struct Partition {
     jobs: Vec<Job>,
     // (…in the order they were made: Query Service Worker Client Objects lists them so)
     clients: Vec<Client>,
-    // (…the ids of the clients that count as focused: the focused context and its ancestors)
-    focused: Vec<String>,
+    // (…what counts as focused: the realms of each window's focus chain — navigables.rs `focus_chain`, by session
+    // number — and the window that has the system focus, the session's active one)
+    focus: HashMap<u32, Vec<i64>>,
+    active_window: u32,
+    // `WindowClient.navigate()`s a worker asked of a window's client, each `[worker, client, URL, its number]`, for
+    // that window to take as its next navigation intent (it rebuilds the realm, which the delivery cannot do mid-drain).
+    client_navs: HashMap<u32, Vec<(u32, String, String, i64)>>,
     // The registrations unregistered whose Clear Registration waits — until no client is using one and none of its
     // versions has an event pending — and whether a frame's navigation parked on an activating registration (the
     // engine keeps the frames: frame_navigation.rs `takeSwDeferredFrames`), which a settled registration replays.
@@ -290,6 +298,20 @@ impl Registry {
     }
 }
 
+// ── A realm's number in the session ──
+// A window's realms are numbered by its isolate (a worker client's realm the negative of its handle); the session's
+// number for one is its window's number times WINDOW_SPAN past it — the first window's its own — so what is kept of a
+// realm here (a client's, a pending fetch's, a port's holder's) says which window to deliver to.
+const WINDOW_SPAN: i64 = 1 << 40;
+pub(crate) fn realm_key_for_ruby(window: u32, realm: i64) -> i64 {
+    i64::from(window) * WINDOW_SPAN + realm
+}
+// …and `[window, realm]` a number names.
+pub(crate) fn realm_owner_for_ruby(key: i64) -> (u32, i64) {
+    let window = (key + WINDOW_SPAN / 2).div_euclid(WINDOW_SPAN);
+    (u32::try_from(window).unwrap_or(0), key - window * WINDOW_SPAN)
+}
+
 // ── For the host ──
 // A new browsing session's partition.
 pub(crate) fn partition_new_for_ruby() -> u64 {
@@ -301,13 +323,15 @@ pub(crate) fn partition_new_for_ruby() -> u64 {
 pub(crate) fn clear_for_ruby(partition: u64) {
     lock().partitions.remove(&partition);
 }
-// Whether the map of `partition` holds any registration — none, and no navigation or fetch has one to match (what a
-// navigation asks before it works out the storage key it would match by).
+// Whether `partition` holds any registration or job — none, and no navigation or fetch has one to match, nor is a
+// worker's work waiting (what a navigation asks before it works out the storage key it would match by, and another
+// window before it steps the host's work).
 pub(crate) fn any_for_ruby(partition: u64) -> bool {
-    lock().existing(partition).is_some_and(|p| p.registrations.iter().any(|r| r.mapped))
+    lock().existing(partition).is_some_and(|p| !p.registrations.is_empty() || !p.jobs.is_empty())
 }
 // Every registration the map of `partition` holds, in the order made: `[scope, registered, activating, serving, id,
 // top-level site]`, a handle nil for none.
+#[allow(clippy::type_complexity)]
 pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Option<u32>, Option<u32>, u32, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
@@ -386,9 +410,11 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
 }
 // ── The clients ──
 // A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn note_client_for_ruby(
     partition: u64,
     id: String,
+    owner: i64,
     site: String,
     url: String,
     kind: String,
@@ -398,7 +424,7 @@ pub(crate) fn note_client_for_ruby(
 ) {
     let mut reg = lock();
     let clients = &mut reg.partition(partition).clients;
-    let client = Client { id, site, url, kind, frame_type, origin, controller };
+    let client = Client { id, owner, site, url, kind, frame_type, origin, controller };
     match clients.iter_mut().find(|c| c.id == client.id) {
         Some(c) => *c = client,
         None => clients.push(client),
@@ -419,21 +445,58 @@ pub(crate) fn forget_client_for_ruby(partition: u64, id: String) -> bool {
     p.clients.retain(|c| c.id != id);
     p.clients.len() != before
 }
+// The realm the client `id` is, by its session number (`realm_key`), nil for none.
+pub(crate) fn client_owner_for_ruby(partition: u64, id: String) -> Option<i64> {
+    lock().existing(partition)?.clients.iter().find(|c| c.id == id).map(|c| c.owner)
+}
+// A window gone: its clients forgotten, its focus and the navigations asked of it with them — whether it had a client.
+pub(crate) fn forget_window_for_ruby(partition: u64, window: u32) -> bool {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return false };
+    p.focus.remove(&window);
+    p.client_navs.remove(&window);
+    let before = p.clients.len();
+    p.clients.retain(|c| realm_owner_for_ruby(c.owner).0 != window);
+    p.clients.len() != before
+}
+// A `WindowClient.navigate()` of worker `handle` for client `id`, queued for the window whose client it is: that
+// window's number, nil where the client is gone.
+pub(crate) fn queue_client_nav_for_ruby(partition: u64, handle: u32, id: String, url: String, nav: i64) -> Option<u32> {
+    let mut reg = lock();
+    let p = reg.existing(partition)?;
+    let window = realm_owner_for_ruby(p.clients.iter().find(|c| c.id == id)?.owner).0;
+    p.client_navs.entry(window).or_default().push((handle, id, url, nav));
+    Some(window)
+}
+// …whether any is queued for `window` (every window's, for none), and those queued for it, taken.
+pub(crate) fn client_navs_queued_for_ruby(partition: u64, window: Option<u32>) -> bool {
+    lock().existing(partition).is_some_and(|p| match window {
+        Some(w) => p.client_navs.get(&w).is_some_and(|q| !q.is_empty()),
+        None => p.client_navs.values().any(|q| !q.is_empty()),
+    })
+}
+pub(crate) fn take_client_navs_for_ruby(partition: u64, window: u32) -> Vec<(u32, String, String, i64)> {
+    lock().existing(partition).and_then(|p| p.client_navs.remove(&window)).unwrap_or_default()
+}
 // The client `id`'s `[url, controller]`, nil for none.
 pub(crate) fn client_entry_for_ruby(partition: u64, id: String) -> Option<(String, Option<u32>)> {
     let mut reg = lock();
     let c = reg.existing(partition)?.clients.iter().find(|c| c.id == id)?;
     Some((c.url.clone(), c.controller))
 }
-// Every client, `[id, url, controller, top-level site]` each, in creation order — and the ids of those that count as
-// focused, set.
+// Every client, `[id, url, controller, top-level site]` each, in creation order — and what counts as focused, set: the
+// realms of window `window`'s focus chain (navigables.rs `focus_chain`, by session number), and the window that has the
+// system focus.
 pub(crate) fn clients_for_ruby(partition: u64) -> Vec<(String, String, Option<u32>, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
     p.clients.iter().map(|c| (c.id.clone(), c.url.clone(), c.controller, c.site.clone())).collect()
 }
-pub(crate) fn set_focused_for_ruby(partition: u64, ids: Vec<String>) {
-    lock().partition(partition).focused = ids;
+pub(crate) fn set_focus_for_ruby(partition: u64, window: u32, chain: Vec<i64>) {
+    lock().partition(partition).focus.insert(window, chain);
+}
+pub(crate) fn set_active_window_for_ruby(partition: u64, window: u32) {
+    lock().partition(partition).active_window = window;
 }
 // The client `id` as the service worker `handle` of `origin` sees it — `[id, url, type, frame type, controlled by it,
 // focused]` — nil where it is none, or of another storage key: Clients are of the service worker's (Query Service Worker
@@ -465,11 +528,18 @@ pub(crate) fn match_clients_for_ruby(
             && (include_uncontrolled || c.controller == Some(handle))
             && (kind == "all" || c.kind == kind)
     });
-    let (focused, rest): (Vec<&Client>, Vec<&Client>) = matched.partition(|c| p.focused.contains(&c.id));
+    let (focused, rest): (Vec<&Client>, Vec<&Client>) = matched.partition(|c| p.focused(c));
     focused.into_iter().chain(rest).map(|c| client_seen(p, c, handle)).collect()
 }
 fn client_seen(p: &Partition, c: &Client, handle: u32) -> (String, String, String, String, bool, bool) {
-    (c.id.clone(), c.url.clone(), c.kind.clone(), c.frame_type.clone(), c.controller == Some(handle), p.focused.contains(&c.id))
+    (c.id.clone(), c.url.clone(), c.kind.clone(), c.frame_type.clone(), c.controller == Some(handle), p.focused(c))
+}
+impl Partition {
+    // Whether client `c` counts as focused (`WindowClient.focused`, `document.hasFocus()`): a realm of the focus chain
+    // of the window that has the system focus.
+    fn focused(&self, c: &Client) -> bool {
+        self.focus.get(&self.active_window).is_some_and(|chain| chain.contains(&c.owner))
+    }
 }
 
 // ── The job queues (Service Workers §8 Schedule Job, Run Job, Finish Job; the Register, Update and Unregister jobs) ──
@@ -1358,6 +1428,31 @@ mod tests {
         r.activating = None;
     }
 
+    // A realm's session number says its window — a worker client's (a negative realm) too — and a window gone takes its
+    // clients, and the navigations asked of them, with it.
+    #[test]
+    fn a_client_is_kept_with_the_window_whose_realm_it_is() {
+        for (window, realm) in [(0, 0), (0, 5), (0, -3), (2, 0), (2, 7), (2, -1), (9, -(1 << 30))] {
+            assert_eq!(realm_owner_for_ruby(realm_key_for_ruby(window, realm)), (window, realm));
+        }
+        let p = partition_new_for_ruby();
+        let note = |id: &str, owner: i64| note_client_for_ruby(p, id.into(), owner, String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), None, None);
+        note("w", realm_key_for_ruby(0, 0));
+        note("x", realm_key_for_ruby(1, 4));
+        assert_eq!(client_owner_for_ruby(p, "x".into()), Some(realm_key_for_ruby(1, 4)));
+        assert_eq!(queue_client_nav_for_ruby(p, 3, "x".into(), "https://a.test/n".into(), 1), Some(1));
+        assert!(queue_client_nav_for_ruby(p, 3, "gone".into(), "https://a.test/n".into(), 2).is_none());
+        assert!(client_navs_queued_for_ruby(p, None) && client_navs_queued_for_ruby(p, Some(1)) && !client_navs_queued_for_ruby(p, Some(0)));
+        assert_eq!(take_client_navs_for_ruby(p, 1).len(), 1);
+        assert!(!client_navs_queued_for_ruby(p, None));
+        queue_client_nav_for_ruby(p, 3, "x".into(), "https://a.test/n".into(), 3);
+        assert!(forget_window_for_ruby(p, 1));
+        assert!(!forget_window_for_ruby(p, 1));
+        assert!(!client_navs_queued_for_ruby(p, None));
+        assert_eq!(clients_for_ruby(p).len(), 1);
+        clear_for_ruby(p);
+    }
+
     // A registration is of a storage key: one a third-party frame of other.test made under a.test is none a first-party
     // other.test document sees — its lookups, its navigations, its clients — and the other way round.
     #[test]
@@ -1378,8 +1473,8 @@ mod tests {
         assert_eq!(registered_at_for_ruby(p, other.clone(), "https://other.test/".into()), 0);
         let navigation = |site: &str| match_worker_for_ruby(p, site.into(), "https://other.test/x".into(), "navigation".into()).map(|m| m.0);
         assert_eq!((navigation(&a), navigation(&other)), (Some(1), None));
-        note_client_for_ruby(p, "third".into(), a.clone(), "https://other.test/f".into(), "window".into(), "nested".into(), Some(other.clone()), None);
-        note_client_for_ruby(p, "first".into(), other.clone(), "https://other.test/".into(), "window".into(), "top-level".into(), Some(other.clone()), None);
+        note_client_for_ruby(p, "third".into(), 0, a.clone(), "https://other.test/f".into(), "window".into(), "nested".into(), Some(other.clone()), None);
+        note_client_for_ruby(p, "first".into(), 0, other.clone(), "https://other.test/".into(), "window".into(), "top-level".into(), Some(other.clone()), None);
         let seen: Vec<String> = match_clients_for_ruby(p, 1, other.clone(), true, "all".into()).into_iter().map(|c| c.0).collect();
         assert_eq!(seen, ["third"]);
         assert!(client_for_ruby(p, 1, other.clone(), "first".into()).is_none());
@@ -1430,7 +1525,7 @@ mod tests {
         worker_new_for_ruby(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(1));
         activated(p, scope(), 1);
-        note_client_for_ruby(p, "c".into(), String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), None, Some(1));
+        note_client_for_ruby(p, "c".into(), 0, String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), None, Some(1));
         defer_navigation_for_ruby(p);
         // (…out of the map at once, the parked navigation replayed, the clear waiting on the client)
         let (had, cmds) = unregister(p, scope());
@@ -1462,7 +1557,7 @@ mod tests {
         // (…no client using the registration: it may)
         assert!(verdict());
         // (…an in-scope client holds it, controlled or not — unless the candidate skipped waiting)
-        note_client_for_ruby(p, "c".into(), String::new(), "https://a.test/page".into(), "window".into(), "top-level".into(), None, None);
+        note_client_for_ruby(p, "c".into(), 0, String::new(), "https://a.test/page".into(), "window".into(), "top-level".into(), None, None);
         assert!(!verdict());
         hold_for_ruby(p, 2, "skip_waiting".into(), true);
         assert!(verdict());
@@ -1524,20 +1619,21 @@ mod tests {
         worker_new_for_ruby(p, 5, String::new(), "https://a.test/sw.js".into(), "classic".into());
         part(p, |q| q.workers.get_mut(&5).expect("a worker made").registration = id);
         let a = || Some("https://a.test".to_owned());
-        note_client_for_ruby(p, "w".into(), String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), a(), Some(5));
-        note_client_for_ruby(p, "f".into(), String::new(), "https://a.test/f".into(), "window".into(), "nested".into(), a(), None);
-        note_client_for_ruby(p, "x".into(), String::new(), "https://b.test/".into(), "window".into(), "nested".into(), Some("https://b.test".into()), None);
-        note_client_for_ruby(p, "k".into(), String::new(), "https://a.test/k.js".into(), "worker".into(), "none".into(), a(), Some(5));
+        note_client_for_ruby(p, "w".into(), 0, String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), a(), Some(5));
+        note_client_for_ruby(p, "f".into(), 0, String::new(), "https://a.test/f".into(), "window".into(), "nested".into(), a(), None);
+        note_client_for_ruby(p, "x".into(), 0, String::new(), "https://b.test/".into(), "window".into(), "nested".into(), Some("https://b.test".into()), None);
+        note_client_for_ruby(p, "k".into(), 0, String::new(), "https://a.test/k.js".into(), "worker".into(), "none".into(), a(), Some(5));
         let ids = |v: Vec<(String, String, String, String, bool, bool)>| v.into_iter().map(|c| c.0).collect::<Vec<_>>();
         assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), false, "window".into())), ["w"]);
         assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), true, "all".into())), ["w", "f", "k"]);
-        set_focused_for_ruby(p, vec!["f".into()]);
+        note_client_for_ruby(p, "f".into(), 7, String::new(), "https://a.test/f".into(), "window".into(), "nested".into(), a(), None);
+        set_focus_for_ruby(p, 0, vec![7]);
         assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), true, "window".into())), ["f", "w"]);
         assert!(client_for_ruby(p, 5, "https://a.test".into(), "x".into()).is_none());
         assert!(set_client_controller_for_ruby(p, "f".into(), Some(5)));
         assert_eq!(client_for_ruby(p, 5, "https://a.test".into(), "f".into()).map(|c| (c.4, c.5)), Some((true, true)));
         // Refreshed in place, gone when forgotten.
-        note_client_for_ruby(p, "w".into(), String::new(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), Some(5));
+        note_client_for_ruby(p, "w".into(), 0, String::new(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), Some(5));
         assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/2".into(), Some(5), String::new()));
         assert!(forget_client_for_ruby(p, "w".into()));
         assert!(!forget_client_for_ruby(p, "w".into()));
@@ -1637,7 +1733,7 @@ mod tests {
         worker_new_for_ruby(p, 9, String::new(), "a/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(9));
         set_version(p, id, "waiting".into(), Some(3));
-        note_client_for_ruby(p, "c".into(), String::new(), "https://b.test/".into(), "window".into(), "top-level".into(), None, Some(9));
+        note_client_for_ruby(p, "c".into(), 0, String::new(), "https://b.test/".into(), "window".into(), "top-level".into(), None, Some(9));
         assert_eq!(advance(p, 3), "try_activate");
         forget_client_for_ruby(p, "c".into());
         assert_eq!(advance(p, 3), "activating");

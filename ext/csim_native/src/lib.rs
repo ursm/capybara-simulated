@@ -187,6 +187,7 @@ mod attributes;
 mod selected_content;
 mod nonce;
 mod popovers;
+mod port_channels;
 mod activation;
 mod cookie_jar;
 mod http_auth;
@@ -357,12 +358,20 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("sw_worker_activated", magnus::function!(sw_registry::worker_activated_for_ruby, 2))?;
     native.define_module_function("sw_match_worker", magnus::function!(sw_registry::match_worker_for_ruby, 4))?;
     native.define_module_function("sw_controller", magnus::function!(sw_registry::controller_for_ruby, 3))?;
-    native.define_module_function("sw_note_client", magnus::function!(sw_registry::note_client_for_ruby, 8))?;
+    native.define_module_function("sw_note_client", magnus::function!(sw_registry::note_client_for_ruby, 9))?;
+    native.define_module_function("sw_client_owner", magnus::function!(sw_registry::client_owner_for_ruby, 2))?;
+    native.define_module_function("sw_forget_window", magnus::function!(sw_registry::forget_window_for_ruby, 2))?;
+    native.define_module_function("sw_queue_client_nav", magnus::function!(sw_registry::queue_client_nav_for_ruby, 5))?;
+    native.define_module_function("sw_client_navs_queued", magnus::function!(sw_registry::client_navs_queued_for_ruby, 2))?;
+    native.define_module_function("sw_take_client_navs", magnus::function!(sw_registry::take_client_navs_for_ruby, 2))?;
+    native.define_module_function("sw_realm_key", magnus::function!(sw_registry::realm_key_for_ruby, 2))?;
+    native.define_module_function("sw_realm_owner", magnus::function!(sw_registry::realm_owner_for_ruby, 1))?;
+    native.define_module_function("sw_set_active_window", magnus::function!(sw_registry::set_active_window_for_ruby, 2))?;
     native.define_module_function("sw_set_client_controller", magnus::function!(sw_registry::set_client_controller_for_ruby, 3))?;
     native.define_module_function("sw_forget_client", magnus::function!(sw_registry::forget_client_for_ruby, 2))?;
     native.define_module_function("sw_clients", magnus::function!(sw_registry::clients_for_ruby, 1))?;
     native.define_module_function("sw_client_entry", magnus::function!(sw_registry::client_entry_for_ruby, 2))?;
-    native.define_module_function("sw_set_focused", magnus::function!(sw_registry::set_focused_for_ruby, 2))?;
+    native.define_module_function("sw_set_focus", magnus::function!(sw_registry::set_focus_for_ruby, 3))?;
     native.define_module_function("sw_client", magnus::function!(sw_registry::client_for_ruby, 4))?;
     native.define_module_function("sw_match_clients", magnus::function!(sw_registry::match_clients_for_ruby, 5))?;
     native.define_module_function("sw_schedule_job", magnus::function!(sw_registry::schedule_job_for_ruby, 10))?;
@@ -406,6 +415,14 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // (…and a worker's token, its agents' owner, and its agents gone as it is reaped)
     native.define_module_function("agent_owner_new", magnus::function!(agents::owner_new, 0))?;
     native.define_module_function("agents_drop_owner", magnus::function!(agents::drop_owner, 1))?;
+    // …and its MessagePort channels across isolates (port_channels.rs), every window's and worker's.
+    native.define_module_function("port_end_here", magnus::function!(port_channels::here, 5))?;
+    native.define_module_function("port_end_gone", magnus::function!(port_channels::gone, 6))?;
+    native.define_module_function("port_redeliver", magnus::function!(port_channels::redeliver, 3))?;
+    native.define_module_function("port_end_closed", magnus::function!(port_channels::closed, 2))?;
+    native.define_module_function("port_post", magnus::function!(port_channels::post, 3))?;
+    native.define_module_function("port_forget_window", magnus::function!(port_channels::forget_window, 2))?;
+    native.define_module_function("port_channels_clear", magnus::function!(port_channels::clear, 1))?;
     native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
     native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;
     native.define_module_function("storage_copy", magnus::function!(storage_areas::copy, 2))?;

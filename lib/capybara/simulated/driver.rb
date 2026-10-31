@@ -118,8 +118,13 @@ module Capybara
         @viewport        = viewport
         @user_agent      = user_agent
         @touch           = touch
-        # …and how many windows it has made: each mints its contexts' ids in a space of its own (Browser#client_space).
-        @client_spaces   = 0
+        # …and how many windows it has made: each mints its contexts' ids in a space of its own (Browser#client_space),
+        # and is known by its number (Browser#window_number: what the engine's registries keep a realm of it by), each
+        # window's Browser by its number as long as it is open (`browser_of_window`), and the number of the one with the
+        # system focus (`sw_window_activated`).
+        @client_spaces        = 0
+        @windows_by_number    = {}
+        @active_window_number = 0
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
         # The session's other windows, `{handle:, window:, opener:}` each: a window a Browser of its own hosts — its own
@@ -144,7 +149,9 @@ module Capybara
                     session_partition: @session_partition,
                     sw_partition:    @sw_partition,
                     all_hosts_local: @all_hosts_local,
-                    client_space:    (@client_spaces += 1) == 1 ? '' : "w#{@client_spaces}-").tap do |b|
+                    client_space:    (@client_spaces += 1) == 1 ? '' : "w#{@client_spaces}-",
+                    window_number:   @client_spaces - 1).tap do |b|
+          @windows_by_number[b.window_number] = b
           b.touch_input        = @touch
           b.default_viewport   = @viewport   if @viewport
           b.default_user_agent = @user_agent if @user_agent
@@ -397,6 +404,7 @@ module Capybara
         @hosts.each {|b| b.dispose rescue nil }
         @hosts.clear
         @active_handle = nil
+        sw_window_activated
       end
 
       # Full teardown of the whole driver: aux windows AND the primary browser's
@@ -1070,15 +1078,27 @@ module Capybara
       end
 
       # The Browser that hosts the session's service workers (Browser#sw_host) — the primary window's, which lasts as
-      # long as the session — and the client ids that count as focused: the active window's
-      # (Browser#focused_client_ids), one window having the system focus.
+      # long as the session.
       def sw_host = @browser
-      def sw_focused_client_ids = host_of(active_browser || @browser).focused_client_ids
+      # The Browser of window number `number` (Browser#window_number), nil once it is gone (`window_gone`).
+      def browser_of_window(number) = @windows_by_number[number]
+      def window_gone(number)
+        @windows_by_number.delete(number)
+        sw_window_activated if number == @active_window_number
+      end
+      # The window with the system focus as the active one (`WindowClient.focused`: sw_registry.rs `focused`) — the
+      # primary's where the active one is gone.
+      private def sw_window_activated
+        @active_window_number = host_of(active_browser || @browser).window_number
+        @active_window_number = 0 unless @windows_by_number.key?(@active_window_number)
+        Native.sw_set_active_window(@sw_partition, @active_window_number)
+      end
 
       def switch_to_window(h)
         reap_closed_windows
         window_browser!(h)   # unknown / already-closed handle → WindowError
         @active_handle = (h == PRIMARY_HANDLE ? nil : h)
+        sw_window_activated
       end
       def resize_window_to(handle, w, h) = window_browser!(handle).set_viewport(w, h)
       # Forem's ahoy-tracking spec calls `driver.resize(w, h)` directly

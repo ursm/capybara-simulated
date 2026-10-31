@@ -201,7 +201,7 @@ module Capybara
       end
 
       def initialize(app, driver: nil, cookie_jar: nil, auth_cache: nil, local_storage: nil, session_partition: nil, sw_partition: nil, all_hosts_local: nil,
-                     client_space: '')
+                     client_space: '', window_number: 0)
         @app                          = app
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
@@ -263,6 +263,9 @@ module Capybara
         # the session's first window, `w<n>-` for each one after — a context's id unique in the session, whose lock
         # managers (web_locks.rs) every window's realms share.
         @client_space                 = client_space
+        # …and its number in the session (the driver's: Driver#browser_of_window), which the session's number for each
+        # of its realms carries (`sw_realm_key`) — 0 the session's first window's.
+        @window_number                = window_number
         @session_storage              = Native.storage_partition_new
         @session_history.session_storage = @session_storage
         @sticky_headers               = {}
@@ -518,18 +521,9 @@ module Capybara
         @sw_direct_lock    = Mutex.new
         @sw_direct_seq     = SW_DIRECT_FID_BASE
         @sw_direct_replies = {}
-        # The host's numbers for the realms of OTHER windows' Browsers its service workers answer (`sw_realm_token`):
-        # number → [browser, realm], and back.
-        @sw_realm_lock     = Mutex.new
-        @sw_realms         = {}
-        @sw_realm_tokens   = {}
-        @sw_realm_seq      = 0
         # (The service-worker clients — every frame/window and worker client, what a service
         # worker's Clients and an opaque child's inherited controller read — are the engine's
         # registry's, partition `@sw_partition`: sw_note_client. Forgotten when the last worker exits.)
-        # Cross-isolate MessagePort channels: each end's holder and the messages waiting for one
-        # (`port_end_here`). Cleared with the workers.
-        @port_ends           = {}
         # Workers whose initial script hasn't finished running yet. A worker that
         # posts immediately on spawn (no main->worker message first) would leave
         # `@worker_in_flight` at 0, so `worker_pending?` would be false in the gap
@@ -601,6 +595,10 @@ module Capybara
       # inbound message / fetch (releasing the GVL so it runs). Bounded so a genuinely stuck worker
       # can't hang settle — the outer poll loop re-drives across calls.
       WORKER_ROUND_TRIP_BUDGET = 1.0
+      # How long (wall seconds) a navigation waits for an activating worker to activate (`await_sw_activation`), and the
+      # virtual time each step of the host's event loop advances meanwhile.
+      SW_ACTIVATION_WAIT       = 5.0
+      SW_ACTIVATION_STEP_MS    = 16
       WORKER_TERMINATE_GRACE   = 0.05
       # Max rounds `drive_worker_to_quiescence` runs before yielding back to the poll loop.
       # A message handler's async bring-up (Emscripten WASM init) settles in a handful of
@@ -1203,7 +1201,7 @@ module Capybara
       # step queued there, a worker's answer to deliver: stepped as this window settles, where it is another window's,
       # as a page here waits on what it asked of them (a register()'s job, a fetch's response). (…none in a window of
       # the host's, which its own settle runs, nor while the host is busy: `window_busy?`)
-      private def sw_host_work_pending? = !sw_host? && sw_host.sw_work_pending?
+      private def sw_host_work_pending? = !sw_host? && Native.sw_any(@sw_partition) && sw_host.sw_work_pending?
       private def deliver_sw_host_work = sw_host_work_pending? ? sw_host.step_sw_work : 0
       def sw_work_pending?
         worker_drive_pending? || !Native.sw_queued_jobs(@sw_partition).empty? || !Native.sw_queued_steps(@sw_partition).empty?
@@ -1231,7 +1229,8 @@ module Capybara
       # redrawing its own DOM keeps no failing matcher here waiting out its wait. (…or a `load` its document still owes,
       # held for its images in flight: a pop-up's, whose opener's listeners wait on it — `flush_pending_window_load`)
       def background_timers_pending? = background_windows.any?(&:steps_pending?)
-      def steps_pending? = @timers_active == true || @window_load_due == true
+      # (…or a `WindowClient.navigate()` a service worker asked of a client of its: `consume_pending_sw_client_nav`)
+      def steps_pending? = @timers_active == true || @window_load_due == true || Native.sw_client_navs_queued(@sw_partition, @window_number)
 
       # A poll's advance of `ms` run in the session's other windows too (`step_in_background`): every window's event loop
       # runs as the active one's is polled, as `Driver#run_event_loop_frame` steps them all a frame.
@@ -2101,6 +2100,7 @@ module Capybara
           deliver_image_loads
           deliver_agent_notices
           deliver_sw_host_work
+          deliver_sw_client_navs
           break if @runtime.settle_gen > start_gen
           break unless @timers_active || async_io_pending?
           # ONE event-loop step replaces the old drain_microtasks(4)+drain_timers(32)
@@ -2119,6 +2119,7 @@ module Capybara
           deliver_image_loads
           deliver_agent_notices
           deliver_sw_host_work
+          deliver_sw_client_navs
           break if @runtime.settle_gen > start_gen
           # A background worker thread owes us a CONTRACTUAL reply (a swack / bcack /
           # fetch_response is posted under `ensure`, so it always comes) but hasn't posted it
@@ -2392,7 +2393,7 @@ module Capybara
       # default. The user-agent also flows into `navigator.userAgent`
       # on every VM rebuild so JS-side UA branches (Discourse's
       # `viewport_based_mobile_mode = false` path) resolve correctly.
-      attr_reader :default_viewport, :default_user_agent, :session_partition, :client_space
+      attr_reader :default_viewport, :default_user_agent, :session_partition, :client_space, :window_number
       # Whether the session's pointer is a touchscreen (the driver's `touch:`), told every document as it boots.
       attr_accessor :touch_input
 
@@ -3802,6 +3803,8 @@ module Capybara
         # window of the session would find)
         @session_history.close!
         Native.blob_window_dispose(@blob_window)
+        # (…and its number the driver's no more: nothing the engine's registries keep of it is delivered here)
+        @driver.window_gone(@window_number) if @driver.respond_to?(:window_gone)
         # An aux window's background app requests are the same boundary hazard
         # reset! drains (Driver#reset! disposes aux windows BEFORE the primary's
         # reset, so without this they'd cross into the next test untouched).
@@ -3823,7 +3826,7 @@ module Capybara
         # (…its service worker registrations first where it hosts the session's — else its clients forgotten there:
         # nothing below may skip them — and its storage sheds: its sessionStorage's, and a localStorage one no driver gave
         # it)
-        sw_host? ? Native.sw_clear(@sw_partition) : sw_host.sw_forget_window(self)
+        sw_host? ? Native.sw_clear(@sw_partition) : sw_window_gone
         Native.storage_clear(@session_storage)
         Native.storage_clear(@local_storage) if @local_storage_owned
         Native.cors_preflight_cache_drop(@cors_preflight_cache)
@@ -5294,9 +5297,9 @@ module Capybara
         sw_worker_client_fetch(sw_handle, req, client_handle)
       end
       # …a worker client's request, `client_handle` this window's worker's: the host's to dispatch, the worker its
-      # number for it (`sw_realm_token`, a worker's the negative of its handle).
+      # number for it (`sw_realm_key`, a worker's the negative of its handle).
       private def sw_worker_client_fetch(sw_handle, req_json, client_handle)
-        sw_host.sw_direct_fetch(sw_handle, req_json, sw_host.sw_realm_token(self, -client_handle.to_i))
+        sw_host.sw_direct_fetch(sw_handle, req_json, sw_realm_key(-client_handle.to_i))
       end
 
       # A controlled worker's MAIN SCRIPT fetch, hop by hop as the engine has it (worker_script_fetch.rs
@@ -5560,9 +5563,9 @@ module Capybara
       # A controlled client's fetch → the controlling SW's `fetch` event. Tracked in
       # @sw_fetch_pending (released by the `fetch_response`) so settle waits for the SW's
       # respondWith. If the handle is dead, return false so the client falls back to the network.
-      # (…the host's to dispatch, the realm its number for it: `sw_realm_token`)
+      # (…the host's to dispatch, the realm by the session's number for it: `sw_realm_key`)
       def service_worker_controller_fetch(handle, req_json, fetch_id, realm_id = 0)
-        return sw_host.service_worker_controller_fetch(handle, req_json, fetch_id, sw_host.sw_realm_token(self, realm_id)) unless sw_host?
+        return sw_host.service_worker_controller_fetch(handle, req_json, fetch_id, sw_realm_key(realm_id)) unless sw_host?
 
         w = @workers[handle.to_i]
         # (…none to a worker whose thread is gone, which would never answer: the network's)
@@ -5602,7 +5605,7 @@ module Capybara
       # it cancels the reader it's draining — firing the SW source stream's `cancel()`. @sw_open_streams
       # maps the stream to its emitting worker; the worker's terminal frame still clears the counter.
       def sw_stream_cancel(fetch_id, realm_id)
-        return sw_host.sw_stream_cancel(fetch_id, sw_host.sw_realm_token(self, realm_id)) unless sw_host?
+        return sw_host.sw_stream_cancel(fetch_id, sw_realm_key(realm_id)) unless sw_host?
 
         key = [realm_id.to_i, fetch_id.to_i]
         handle, = @sw_open_streams.find {|_h, streams| streams.key?(key) }
@@ -5917,11 +5920,11 @@ module Capybara
       # in-process): a real app keeps the "not supported" rejection, so its registration-failed branch runs rather than
       # a half-modeled success path.
       # (…`site` the top-level site of the caller's storage key, its registration's: sw_registry.rs)
-      # (…the host's to run, the realm its number for it: `sw_realm_token`)
+      # (…the host's to run, the realm by the session's number for it: `sw_realm_key`)
       def sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm_id, creator_key, site)
         return ['SecurityError', 'Service Workers not supported'] unless all_hosts_local?
         unless sw_host?
-          realm = sw_host.sw_realm_token(self, realm_id)
+          realm = sw_realm_key(realm_id)
           return sw_host.sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm, creator_key, site)
         end
 
@@ -5978,8 +5981,8 @@ module Capybara
 
       # The realm the host knows as `realm` (0: its window) announced as a client, where it is still alive.
       private def sw_report_client(realm)
-        browser, realm = sw_realm_of(realm)
-        browser.realm_told(realm, '__csim_swReportClient')
+        browser, realm = sw_window_realm(realm)
+        browser&.realm_told(realm, '__csim_swReportClient')
       end
 
       # The job's worker `handle` evaluated its script, `ok` or not (`message`).
@@ -6032,6 +6035,29 @@ module Capybara
       # engine's: sw_registry.rs `match_worker`, "activating").
       private def sw_activating_controller_for(url, site) = Native.sw_match_worker(@sw_partition, site.to_s, url.to_s, 'activating')&.first
 
+      # Handle Fetch: "If activeWorker's state is "activating", wait for activeWorker's state to become "activated"" — a
+      # top-level navigation into the scope of a worker still activating waits for it (an address-bar one too, Chrome's
+      # as measured), the host's event loop stepped meanwhile (`step_sw_activation`), whose clock the worker's follows:
+      # its `activate` handler's waitUntil settles as that clock moves. (…bounded by SW_ACTIVATION_WAIT, and none where
+      # the host can't be stepped now, the navigation then going on to the network as it did before it waited)
+      private def await_sw_activation(url, site)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SW_ACTIVATION_WAIT
+        while sw_activating_controller_for(url, site) && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          break unless sw_host.step_sw_activation
+        end
+      end
+      # …a step of the host's event loop for it: its timers due within SW_ACTIVATION_STEP_MS run and its workers'
+      # answers delivered — false where a script of its is on the stack, which no step may run under.
+      def step_sw_activation
+        return false if script_waiting? || @taking_window_tasks
+
+        taking_window_tasks do
+          @runtime.run_loop_step(SW_ACTIVATION_STEP_MS)
+          sleep 0.001 if deliver_worker_messages.zero?
+        end
+        true
+      end
+
       # Release the subresource fetches Handle Fetch parked while `handle` was 'activating'
       # (or, for a worker that died without activating, fall them through to the network so
       # their clients' pending fetch entries settle). The pending counter is bumped only
@@ -6064,44 +6090,30 @@ module Capybara
       # (sw_registry.rs keeps every one by its key, in the driver's partition) — so a service worker is ONE isolate
       # whichever window's script began it: hosted by the session's primary window's Browser (Driver#sw_host), which
       # lasts as long as the session, every other window's Browser asking it. What a worker answers reaches the window
-      # it is for: a realm of another window's by the number the host knows it by (`sw_realm_token`), a client by its
-      # id, whose space names its window (`client_space`), and what every realm is told every window's (`sw_broadcast`).
-      def sw_host = @driver.respond_to?(:sw_host) ? @driver.sw_host : self
+      # it is for by the session's number for the realm it is for (`sw_realm_key`, a client's the registry's: the realm
+      # it noted itself as), which names that window (Driver#browser_of_window) — dropped where the window is gone — and
+      # what every realm is told every window's (`sw_broadcast`).
+      def sw_host = (@sw_host ||= (@driver.respond_to?(:sw_host) && @driver.sw_host) || self)
       private def sw_host? = sw_host.equal?(self)
       # The Browsers whose realms the session's service workers reach.
       private def sw_browsers = @driver.respond_to?(:window_browsers) ? @driver.window_browsers : [self]
-      # The window's Browser whose client `client_id` is, nil for none.
-      private def sw_client_browser(client_id) = sw_browsers.find {|b| b.sw_client_realm(client_id) || b.sw_client_worker(client_id) }
 
-      # The number the host knows realm `realm` of `browser` by (a negative one a worker client's, by its handle): its
-      # own realms' their own, another window's one past every realm number of its own (SW_REALM_TOKEN_BASE), the sign
-      # kept.
-      def sw_realm_token(browser, realm)
-        return realm.to_i if browser.equal?(self)
-
-        @sw_realm_lock.synchronize do
-          @sw_realm_tokens[[browser, realm.to_i]] ||= begin
-            token = SW_REALM_TOKEN_BASE + (@sw_realm_seq += 1)
-            token = -token if realm.to_i.negative?
-            @sw_realms[token] = [browser, realm.to_i]
-            token
-          end
-        end
+      # The session's number for realm `realm` of this window (a negative one a worker client's, by its handle:
+      # sw_registry.rs `realm_key`)…
+      def sw_realm_key(realm) = Native.sw_realm_key(@window_number, realm.to_i)
+      # …and `[browser, realm]` one names, nil where its window is gone.
+      private def sw_window_realm(key)
+        window, realm = Native.sw_realm_owner(key.to_i)
+        browser = window == @window_number ? self : (@driver.browser_of_window(window) if @driver.respond_to?(:browser_of_window))
+        [browser, realm] if browser
       end
-      # …and `[browser, realm]` a number names.
-      private def sw_realm_of(token) = @sw_realm_lock.synchronize { @sw_realms[token.to_i] } || [self, token.to_i]
 
-      # A window's Browser closing: its realms' numbers let go of, the ports its isolates held (a message to one held
-      # for its next holder), and its clients — each no client any more, which may let a waiting worker activate or an
-      # unregistered registration clear (Handle Service Worker Client Unload).
-      def sw_forget_window(browser)
-        @sw_realm_lock.synchronize do
-          @sw_realms.reject! {|_, (b, _)| b.equal?(browser) }
-          @sw_realm_tokens.reject! {|(b, _), _| b.equal?(browser) }
-        end
-        @port_ends.each_value {|port_end| port_end[:at] = nil if port_end[:at]&.[](2).equal?(browser) }
-        gone = Native.sw_clients(@sw_partition).count {|id, *| browser.sw_client_of?(id) && Native.sw_forget_client(@sw_partition, id) }
-        sw_clients_unloaded if gone.positive?
+      # This window's Browser closing: its clients forgotten — each no client any more, which may let a waiting worker
+      # activate or an unregistered registration clear (Handle Service Worker Client Unload) — and the ports its
+      # isolates held, a message to one held for its next holder.
+      private def sw_window_gone
+        sw_host.sw_clients_unloaded if Native.sw_forget_window(@sw_partition, @window_number)
+        Native.port_forget_window(@session_partition, @window_number)
       end
 
       # Call a host fn in realm `realm` of this window (0: its page), where it is still alive.
@@ -6442,7 +6454,7 @@ module Capybara
       # realm's life.
       # (…`site` the top-level site of its storage key: its top-level traversable's)
       def sw_note_client(realm_id, url, frame_type, controller_handle = nil, origin = nil, site: '')
-        note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle, origin, site)
+        note_client(sw_client_id(realm_id), realm_id.to_i, url, 'window', frame_type, controller_handle, origin, site)
       end
 
       # A dedicated / shared WORKER that a service worker controls is a client too — with no
@@ -6458,7 +6470,7 @@ module Capybara
           else
             url_origin(url)
           end
-        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin, @workers.dig(handle, :partition).to_s)
+        note_client(sw_worker_client_id(handle), -handle.to_i, url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin, @workers.dig(handle, :partition).to_s)
       end
 
       # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted): its
@@ -6470,8 +6482,9 @@ module Capybara
       end
 
       # (…`origin` the client's own — a window's its document's, which an about:blank one inherits — what a service worker
-      # filters the clients it sees by)
-      private def note_client(client_id, url, type, frame_type, controller_handle, origin, site)
+      # filters the clients it sees by; `realm` the realm it is, a worker client's the negative of its handle, which the
+      # registry keeps by the session's number for it: what a worker's message to it is delivered by)
+      private def note_client(client_id, realm, url, type, frame_type, controller_handle, origin, site)
         ctrl = controller_handle.to_i
         ctrl = nil if ctrl.zero?
         # Within one document a controller is only ever GAINED (a claim / register
@@ -6483,9 +6496,9 @@ module Capybara
         if ctrl.nil? && prev_ctrl && prev_url == url.to_s && sw_live?(prev_ctrl)
           ctrl = prev_ctrl
         end
-        Native.sw_note_client(@sw_partition, client_id.to_s, site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
-        # (…and, a window's, the focused ids recomputed: its id is the one it adopted, which may be new)
-        Native.sw_set_focused(@sw_partition, sw_focused_client_ids) if type.to_s == 'window'
+        Native.sw_note_client(@sw_partition, client_id.to_s, sw_realm_key(realm), site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
+        # (…and, a window's, its window's focus chain as it stands: a new realm may be on it)
+        focus_changed if type.to_s == 'window'
         nil
       end
 
@@ -6504,18 +6517,26 @@ module Capybara
       # fetch_resps still to be delivered would address realms that no longer exist — and from any
       # node handle an in-flight find is holding. `drain_pending_navigation` is where every other
       # navigation intent lands, well clear of the V8 call we are inside.
-      def sw_navigate_client(handle, client_id, url, nav_id)
-        (@sw_pending_client_navs ||= []) << {handle: handle.to_i, client: client_id.to_s, url: url.to_s, nav_id: nav_id.to_i}
+      # (…queued in the registry for the window whose client it is — sw_registry.rs `queue_client_nav` — which takes it
+      # as it steps, whichever window's poll steps it: `steps_pending?`, the host's settle `deliver_sw_client_navs`)
+      def consume_pending_sw_client_nav
+        Native.sw_take_client_navs(@sw_partition, @window_number).each do |handle, client_id, url, nav_id|
+          perform_sw_client_navigate(handle, client_id, url, nav_id)
+        end
         nil
       end
+      # …the ones queued for the session's other windows, taken by each as the host settles: the worker that asked waits
+      # on it there, and another window's event loop runs only as one is stepped.
+      private def deliver_sw_client_navs
+        return 0 unless sw_host? && @driver.respond_to?(:several_windows?) && @driver.several_windows? && Native.sw_client_navs_queued(@sw_partition, nil)
 
-      def consume_pending_sw_client_nav
-        return if @sw_pending_client_navs.nil? || @sw_pending_client_navs.empty?
+        background_windows.each {|b| b.take_sw_client_navs }
+        1
+      end
+      def take_sw_client_navs
+        return if window_busy? || !Native.sw_client_navs_queued(@sw_partition, @window_number)
 
-        navs = @sw_pending_client_navs
-        @sw_pending_client_navs = nil
-        navs.each {|e| perform_sw_client_navigate(e[:handle], e[:client], e[:url], e[:nav_id]) }
-        nil
+        taking_window_tasks { consume_pending_sw_client_nav }
       end
 
       private def perform_sw_client_navigate(handle, client_id, url, nav_id)
@@ -6627,24 +6648,15 @@ module Capybara
         [*(@runtime.frame_realm_ids - @runtime.window_realm_trees), 0].each {|rid| sw_unregister_client(rid) }
       end
 
-      # The focus moved to another BROWSING CONTEXT (HTML "focused area of the top-level
-      # traversable" — the engine's: navigables.rs `set_focused_realm`), which feeds
-      # `WindowClient.focused` — the registry's, which a service worker reads (it can't query
-      # the browser).
+      # The focus moved to another BROWSING CONTEXT (HTML "focused area of the top-level traversable" — the engine's:
+      # navigables.rs `set_focused_realm`), which feeds `WindowClient.focused` — the registry's, which a service worker
+      # reads (it can't query the browser): this window's focus chain (navigables.rs `focus_chain`), by the session's
+      # numbers for its realms, the window with the system focus the driver's (Driver#switch_to_window).
       def focus_changed
-        Native.sw_set_focused(@sw_partition, sw_focused_client_ids)
+        chain = @runtime.realm_direct_call(0, '__csimFocusChain') || []
+        Native.sw_set_focus(@sw_partition, @window_number, chain.map {|realm| sw_realm_key(realm) })
         nil
       end
-      # …the session's: its active window's, the one with the system focus (Driver#sw_focused_client_ids).
-      private def sw_focused_client_ids = @driver.respond_to?(:sw_focused_client_ids) ? @driver.sw_focused_client_ids : focused_client_ids
-
-      # Every client id that counts as focused: the focused context's AND its ANCESTORS'
-      # (navigables.rs `focus_chain`). `WindowClient.focused` follows `document.hasFocus()`,
-      # which is true for the whole chain up from the focused frame — a page containing the
-      # focused iframe is itself focused (clients-matchall-include-uncontrolled expects the
-      # top-level window and the focused nested frame to BOTH report true) — and stops at a
-      # top-level one: an auxiliary window's OPENER is no ancestor of it.
-      def focused_client_ids = (@runtime.realm_direct_call(0, '__csimFocusChain') || []).map {|rid| sw_client_id(rid) }.uniq
 
       # A worker's service-worker Client id. Distinct from the realm ids below so the
       # client-message router can tell a worker client from a browsing context.
@@ -6696,102 +6708,60 @@ module Capybara
       # names. A `client.postMessage` to a controlled IFRAME reaches THAT frame's navigator.serviceWorker, not the top
       # window (postmessage-to-client); one to a discarded frame realm is dropped, as a real browser drops a message to
       # a gone client.
-      def sw_client_message_told(client_id, data, handle)
-        if (wh = sw_client_worker(client_id))
-          (w = @workers[wh]) && w[:inbox] << {kind: 'sw_client_message', data: data, handle: handle}
-        elsif (realm = sw_client_realm(client_id))
+      # (…`realm` the client's, a worker client's the negative of its handle)
+      def sw_client_message_told(realm, data, handle)
+        if realm.negative?
+          (w = @workers[-realm]) && w[:inbox] << {kind: 'sw_client_message', data: data, handle: handle}
+        else
           realm_told(realm, '__csim_swDeliverClientMessage', data, handle)
         end
         nil
       end
 
-      # Whether client `client_id` is of this window — minted in its space, which a window after the session's first
-      # has.
-      def sw_client_of?(client_id) = !@client_space.empty? && client_id.to_s.start_with?("client-#{@client_space}")
-
-      # The worker handle a client id names, or nil when the id is not a worker client's.
-      def sw_client_worker(client_id)
-        (m = /\Aclient-#{Regexp.escape(@client_space)}worker-(\d+)\z/.match(client_id.to_s)) ? m[1].to_i : nil
-      end
-
       # ── Cross-isolate MessagePort channels ──
-      # A channel's two ends, `<channel>/0` and `<channel>/1`, each held by a realm (`[:realm, id]`) or by a worker
-      # (`[:worker, handle]`) — of this window's, or of another window's `browser` (`[:realm, id, browser]`) — whichever
-      # isolate holds the port at that end, which says so as it takes it (`port_end_here`) and as it gives it up to
-      # another (`port_end_gone`). A message posted at one end goes to the other's holder; one for an end no isolate
-      # holds yet waits for its next holder (HTML's port message queue) — the messages its last holder had received and
-      # not delivered first. The channels are the session's, as a port goes from any window's realm to a service worker
-      # or another window: kept by the session's host (`sw_host`), a channel's id unique in the session (message-port.js
-      # `__csimAllocPortChannel`), every other window's Browser asking it.
-      def port_end_here(end_id, at)
-        return sw_host.port_end_here(end_id, [*at, self]) unless sw_host?
-
-        port_end = (@port_ends[end_id.to_s] ||= {})
-        return if port_end[:closed]
-        port_end[:at] = at
-        (port_end.delete(:pending) || []).each {|data| deliver_port_message(at, end_id.to_s, data) }
+      # A channel's two ends, each held by a realm (`[:realm, id]`) or a worker (`[:worker, handle]`) of a window — the
+      # session's channels, every window's, in the engine (port_channels.rs, the session's partition), which says where
+      # each message is to go: this window delivers it to its holder, of whichever window's that is
+      # (`deliver_port_message`). An end taken by one of this window's isolates…
+      def port_end_here(end_id, (kind, id))
+        Native.port_end_here(@session_partition, end_id.to_s, kind.to_s, @window_number, id.to_i).each do |data|
+          deliver_port_message([kind, id], end_id.to_s, data)
+        end
         nil
       end
-      # (`from`: the holder giving it up — which is no longer the holder where its next one has taken it already: what
-      # it held then goes to that one)
-      def port_end_gone(end_id, held, from)
-        return sw_host.port_end_gone(end_id, held, [*from, self]) unless sw_host?
-
-        port_end = (@port_ends[end_id.to_s] ||= {})
-        held = Array(held).map(&:to_s)
-        if port_end[:at] == from
-          port_end[:at] = nil
-          port_end[:pending] = held + port_end.fetch(:pending, [])
-        else
-          held.each {|data| port_receive(end_id.to_s, port_end, data) }
-        end
+      # …given up by it, with the messages it had received and not delivered (`held`): held for its next holder — or
+      # that one's, where it has taken the end already.
+      def port_end_gone(end_id, held, (kind, id))
+        (holder, messages) = Native.port_end_gone(@session_partition, end_id.to_s, Array(held).map(&:to_s), kind.to_s, @window_number, id.to_i)
+        messages&.each {|data| port_delivered(holder, end_id.to_s, data) }
         nil
       end
       # A message that reached an end's holder after it had given the end up — it was on its way — for the holder now.
       def port_redeliver(end_id, data)
-        return sw_host.port_redeliver(end_id, data) unless sw_host?
-
-        port_end = @port_ends[end_id.to_s] or return
-        port_receive(end_id.to_s, port_end, data.to_s)
+        holder = Native.port_redeliver(@session_partition, end_id.to_s, data.to_s)
+        port_delivered(holder, end_id.to_s, data.to_s) if holder
         nil
       end
-      # A port closed at its end: nothing more is delivered to it, and an end whose other is closed too is forgotten.
+      # A port closed at its end: nothing more is delivered to it.
       def port_end_closed(end_id)
-        return sw_host.port_end_closed(end_id) unless sw_host?
-
-        @port_ends[end_id.to_s] = {closed: true}
-        other = port_other_end(end_id)
-        if @port_ends.dig(other, :closed)
-          @port_ends.delete(end_id.to_s)
-          @port_ends.delete(other)
-        end
+        Native.port_end_closed(@session_partition, end_id.to_s)
         nil
       end
-      # (`from`: the end it is posted at — none where that end is closed, or forgotten: a worker's post and its close
-      # in one turn reach here after the close, its signals about ends being handled ahead of its messages)
+      # A message posted at end `from`, for the holder of the other.
       def port_post(from, data)
-        return sw_host.port_post(from, data) unless sw_host?
-        return if @port_ends.fetch(from.to_s, {})[:closed] || !@port_ends.key?(from.to_s)
-        to = port_other_end(from)
-        port_receive(to, (@port_ends[to] ||= {}), data.to_s)
+        to, holder = Native.port_post(@session_partition, from.to_s, data.to_s)
+        port_delivered(holder, to, data.to_s) if holder
         nil
       end
-      private def port_other_end(end_id) = end_id.to_s.sub(%r{/(\d)\z}) { "/#{1 - $1.to_i}" }
-      # (…to its holder, or held for its next one — or nowhere, at a closed end)
-      private def port_receive(end_id, port_end, data)
-        return if port_end[:closed]
-        if port_end[:at]
-          deliver_port_message(port_end[:at], end_id, data)
-        else
-          (port_end[:pending] ||= []) << data
-        end
+      # …to the holder the engine names, `[kind, window, id]`, of whichever window's — none of a window gone.
+      private def port_delivered((kind, window, id), end_id, data)
+        browser = window == @window_number ? self : (@driver.browser_of_window(window) if @driver.respond_to?(:browser_of_window))
+        browser&.deliver_port_message([kind.to_sym, id], end_id, data)
       end
-      # …into its holder: a realm's port (realm 0 the main one; a discarded frame's, nowhere), or a worker's by its inbox —
-      # counted like an sw_message, which the worker acks once its handler ran, so a settle waits out its reply — by the
-      # window whose it is.
-      def deliver_port_message((kind, id, browser), end_id, data)
-        return browser.deliver_port_message([kind, id], end_id, data) if browser && !browser.equal?(self)
-
+      # …into its holder of this window: a realm's port (realm 0 the main one; a discarded frame's, nowhere), or a
+      # worker's by its inbox — counted like an sw_message, which the worker acks once its handler ran, so a settle
+      # waits out its reply.
+      def deliver_port_message((kind, id), end_id, data)
         if kind == :worker
           w = @workers[id]
           return if !w || sw_redundant?(id)
@@ -7338,9 +7308,9 @@ module Capybara
         # each open stream still holds, so settle can reach idle.
         open = @sw_open_streams.delete(handle.to_i)
         if open&.any?
-          open.each_key do |token, fetch_id|
-            browser, realm = sw_realm_of(token)
-            browser.sw_fetch_answered(realm, '__csim_swFetchStreamError', fetch_id, nil, nil)
+          open.each_key do |key, fetch_id|
+            browser, realm = sw_window_realm(key)
+            browser&.sw_fetch_answered(realm, '__csim_swFetchStreamError', fetch_id, nil, nil)
           end
           @sw_fetch_pending = [0, @sw_fetch_pending - open.size].max
         end
@@ -7350,7 +7320,7 @@ module Capybara
         # A blocked worker that never returned messages leaves
         # `@worker_in_flight` permanently > 0; reset when no workers
         # remain so `polling?` can short-circuit again.
-        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @port_ends = {}; @sw_open_streams.clear) if @workers.empty?
+        (@worker_in_flight = 0; @worker_broadcast_pending = 0; @sw_message_pending = 0; @sw_fetch_pending = 0; @sw_fetch_wait_deadline = nil; @sw_msg_wait_deadline = nil; @sw_open_streams.clear) if @workers.empty?
         # The worker is gone — revoke the blob URLs it created.
         revoke_worker_blobs(handle.to_i)
         # A dead SERVICE worker's holds are let go (the registry's holds read none of a worker
@@ -7398,15 +7368,14 @@ module Capybara
           when 'port_redeliver' then port_redeliver(e[:end], e[:data])
           end
         end
-        # `WindowClient.navigate()` — only QUEUED here (see sw_navigate_client). It must not run
+        # `WindowClient.navigate()` — only QUEUED here (see consume_pending_sw_client_nav). It must not run
         # before the sw_msgs / claims / fetch_resps below: the worker emitted those FIRST, and a
         # navigation discards the realm they address. Queuing preserves the worker's own ordering
         # and keeps the realm rebuild out of the `@ticking` guard.
         sw_navs.each do |e|
-          browser = sw_client_browser(e[:client])
-          next sw_navigate_reply(e[:handle], e[:nav_id], '', '', 'the client is not a navigable browsing context') unless browser
+          next if Native.sw_queue_client_nav(@sw_partition, e[:handle].to_i, e[:client].to_s, e[:url].to_s, e[:nav_id].to_i)
 
-          browser.sw_navigate_client(e[:handle], e[:client], e[:url], e[:nav_id])
+          sw_navigate_reply(e[:handle], e[:nav_id], '', '', 'the client is not a navigable browsing context')
         end
         # A SERVICE WORKER's own `registration.unregister()` — an Unregister job at its scope,
         # as the client-side call is. One its worker made while evaluating queues behind that
@@ -7496,23 +7465,26 @@ module Capybara
         # (matching a real browser — a message to a gone client is discarded, not misrouted to top).
         # (…an id naming nothing we know dropped: a real browser discards a message to a gone client, and delivering it
         # to a main realm would MISROUTE it)
-        sw_msgs.each {|e| sw_client_browser(e[:client])&.sw_client_message_told(e[:client], e[:data], e[:handle]) }
+        sw_msgs.each do |e|
+          browser, realm = (key = Native.sw_client_owner(@sw_partition, e[:client].to_s)) && sw_window_realm(key)
+          browser&.sw_client_message_told(realm, e[:data], e[:handle])
+        end
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
         # A NEGATIVE realm_id names a WORKER client (-worker handle, __csimSWInterceptFetch):
         # its pendingFetch map lives in that worker's isolate, so the response rides its inbox.
-        # (…a realm of another window's by the number the host knows it by: `sw_realm_token`)
+        # (…a realm of another window's by the session's number for it: `sw_realm_key`)
         fetch_resps.each do |e|
-          browser, realm = sw_realm_of(e[:realm_id])
-          browser.sw_fetch_answered(realm, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp], {kind: 'sw_fetch_response', resp: e[:resp]})
+          browser, realm = sw_window_realm(e[:realm_id])
+          browser&.sw_fetch_answered(realm, '__csim_swControllerFetchResponse', e[:fetch_id], e[:resp], {kind: 'sw_fetch_response', resp: e[:resp]})
         end
         # Streaming respondWith frames — deliver IN EMISSION ORDER (per fetch id: start → chunk* →
         # close/error) so the client reassembles the body ReadableStream correctly. The request's
         # @sw_fetch_pending was counted at fetch time and clears on the terminal frame.
         stream_frames.each do |e|
           fn = STREAM_FRAME_FNS[e[:kind]]
-          browser, realm = sw_realm_of(e[:realm_id])
-          browser.sw_fetch_answered(realm, fn, e[:fetch_id], e[:payload], nil) if fn
+          browser, realm = sw_window_realm(e[:realm_id])
+          browser&.sw_fetch_answered(realm, fn, e[:fetch_id], e[:payload], nil) if fn
           # Track a stream's open span (head → terminal) per emitting worker, so worker_terminate
           # can release + error a body its worker died mid-stream.
           key = [e[:realm_id].to_i, e[:fetch_id].to_i]
@@ -8827,7 +8799,8 @@ module Capybara
         # id uniqueness across the whole process is the invariant the aliases rely on.
         @sw_client_aliases   = {}
         @sw_realm_aliases    = {}
-        @port_ends           = {}
+        # (…the session's MessagePort channels its host's to clear: port_channels.rs)
+        Native.port_channels_clear(@session_partition) if sw_host?
         @sw_nav_outbox.clear
         @transfer_buffer_lock.synchronize {
           @transfer_buffers.clear
@@ -9245,8 +9218,8 @@ module Capybara
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
         # the SAME id as this isolate's client identity (clientId() prefers the adopted one), so
         # a worker's own `ServiceWorker.postMessage` names itself correctly as the source and an
-        # SW's `client.postMessage` reply routes back to THIS isolate (sw_client_worker) instead
-        # of falling back to 'client-window' → the main realm. (Subresource interception FROM a
+        # SW's `client.postMessage` reply routes back to THIS isolate (the registry has it as this worker's:
+        # note_client) instead of falling back to 'client-window' → the main realm. (Subresource interception FROM a
         # worker isolate would also want this id, but no controller is ever installed into a
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
@@ -12172,6 +12145,7 @@ module Capybara
             end
             hop_body = req_body.to_s.empty? ? nil : req_body
             resp_body = nil
+            await_sw_activation(target, Native.site(target).to_s) if sw_registered?
             if sw_registered? &&
                (sw = sw_host.service_worker_navigation_fetch(
                  target,
@@ -12434,8 +12408,8 @@ module Capybara
         opts['csp'] = csp if csp
         refresh = refresh_header(@last_response_headers)
         opts['refresh'] = refresh if refresh
-        # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
-        # navigation went to the network, as a navigation does not yet wait for its activation)
+        # (…the worker controlling it: its navigation's — not one still activating, which the navigation's wait for it
+        # gave up on, the navigation having gone to the network: `await_sw_activation`)
         if http_url?(@current_url)
           controller = sw_client_controller_for(@current_url.to_s, Native.site(@current_url.to_s).to_s)
           controller = nil if controller && controller[1] && !Native.sw_worker_activated(@sw_partition, controller[0])

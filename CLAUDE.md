@@ -218,8 +218,9 @@ for one top-level site) gone now that the registrations, jobs and clients
 are the session's, each kept by its storage key, top-level site and origin
 (sw_registry.rs, the driver's partition), and each service worker one
 isolate whichever window began it, hosted by the primary window's Browser
-(`Browser#sw_host`) as are the session's MessagePort channels — and so a
-backlog item, not a design choice; a pop-up opened at
+(`Browser#sw_host`), the session's MessagePort channels the engine's too
+(port_channels.rs) — and so a backlog item, not a design choice; a pop-up
+opened at
 a URL of the page's site, or at about:blank, is a realm of its opener's
 isolate, where the function runs as a browser runs it (a `noopener` window is
 another isolate always, rightly: a browsing context group of its own, which no
@@ -236,8 +237,18 @@ reset, its sockets and event sources closed) and parsed again, where HTML makes 
 per realm — its handle 0, its arena root, the module state of every binding of the
 realm read it — so a second Document of a live realm would need every one of those
 re-keyed; its expandos, and its `html` / `head` / `body` objects, which the parse
-keeps, outlive it (`reuse_window_realm`, v8_runtime.rb). List and justify these
-explicitly; don't let them multiply.
+keeps, outlive it (`reuse_window_realm`, v8_runtime.rb); and a service
+worker runs on the event loop of the Browser that hosts the session's
+(the primary window's, `Browser#sw_host`), so its clock is that window's
+virtual clock — another window's controlled fetch, answered there, holds no
+clock of its own window's while it waits (`hold_for_sw_fetch` is the
+host's), and a navigation into the scope of a worker still activating waits
+for it by stepping the host's event loop, for at most `SW_ACTIVATION_WAIT`
+wall seconds and not while the host has a script on the stack
+(`await_sw_activation`), where Handle Fetch waits however long activation
+takes: the driver's windows run one at a time on virtual clocks of their
+own, which a worker of every window's has to follow one of. List and justify
+these explicitly; don't let them multiply.
 
 Caveat: real-browser behavior is the tiebreak only where the spec does
 not say. Where the spec is silent or ambiguous, match Chromium / Firefox
