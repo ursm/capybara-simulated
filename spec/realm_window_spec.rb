@@ -1,5 +1,6 @@
 require 'capybara/simulated'
 require_relative 'support/session_teardown'
+require_relative 'support/poll_until'
 
 # A window `window.open` made in its opener's isolate (RealmWindow) is a window of the session like any other: Capybara
 # switches to it, finds, clicks, fills, evaluates, reads its URL and title, navigates it, resizes it, paints it and
@@ -520,6 +521,54 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.click_button('btn')
     session.within_frame('pf') { expect(session).to have_css('#third') }
     expect(session.evaluate_script("document.getElementById('pf').contentWindow.location.pathname")).to eq('/f/y')
+  end
+
+  # A reload and a `javascript:` URL begun in one task, either first: the URL's script runs, then the reload makes the
+  # document again — HTML "reload a navigable" sets no ongoing navigation, and "apply the history step" unloads the
+  # document by a task (step 12) queued on its event loop after the URL's (navigation_plan.rs `reload_waits`). On the
+  # page, in a frame and in a window of this isolate alike.
+  context 'navigated to a javascript: URL and reloaded in one task' do
+    include PollUntil
+
+    def both_orders
+      ['location.href = JS; location.reload();', 'location.reload(); location.href = JS;'].map {|order| yield order }
+    end
+
+    it 'runs the URL, then reloads the page' do
+      results = both_orders do |order|
+        session.visit('/')
+        session.execute_script("sessionStorage.ran = 0; document.title = 'mark'; const JS = 'javascript:void(sessionStorage.ran = 1)'; #{order}")
+        expect(session).to have_title('main')
+        session.evaluate_script('sessionStorage.ran')
+      end
+      expect(results).to eq(%w[1 1])
+    end
+
+    it 'runs the URL, then reloads a frame' do
+      results = both_orders do |order|
+        session.visit('/')
+        session.execute_script("document.body.insertAdjacentHTML('beforeend', '<iframe id=\"rf\" src=\"/second\"></iframe>')")
+        session.within_frame('rf') { expect(session).to have_css('#second') }
+        session.execute_script("window.ran = 0; document.getElementById('rf').contentWindow.eval(#{"document.title = 'mark'; const JS = 'javascript:void(parent.ran = 1)'; #{order}".to_json})")
+        expect(poll_until { session.evaluate_script("document.getElementById('rf').contentDocument.title") == 'second' }).to be(true)
+        session.evaluate_script('ran')
+      end
+      expect(results).to eq([1, 1])
+    end
+
+    it 'runs the URL, then reloads a window of this isolate' do
+      results = both_orders do |order|
+        session.visit('/')
+        session.execute_script("window.w = window.open(); w.location = '/second';")
+        session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+        session.execute_script("window.ran = 0; w.eval(#{"document.title = 'mark'; const JS = 'javascript:void(opener.ran = 1)'; #{order}".to_json})")
+        session.within_window(session.windows.last) { expect(session).to have_title('second') }
+        ran = session.evaluate_script('ran')
+        session.windows.last.close
+        ran
+      end
+      expect(results).to eq([1, 1])
+    end
   end
 
   it 'is the opener of a pop-up it opens at a URL' do

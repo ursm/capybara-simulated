@@ -82,6 +82,10 @@ pub(crate) struct Traversal {
 pub(crate) struct Reload {
     activated: bool,
     blob: Option<v8::Global<v8::Value>>,
+    // …and the mark of the document's tasks queued by the time the task that planned it ended — as the host first came
+    // to take it (timers.rs `task_mark`): those its history step applies after (`queued_before`), the traversal queue
+    // running in parallel with that task.
+    mark: Option<u64>,
 }
 
 static PLANNED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -488,7 +492,7 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         return;
     }
     plan.let_go();
-    plan.own.reload = Some(Reload { activated, blob });
+    plan.own.reload = Some(Reload { activated, blob, mark: None });
     plan.own.planned = next_planned();
 }
 // __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob] of the location
@@ -541,6 +545,15 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
         if own.traversal.is_none() && arena.window_history(w).is_some_and(|(h, _)| h.queued_documents()) {
             own = Own::default();
         }
+        // (…a reload's left planned while a task queued on the window's event loop before it is still to run: `take_reload`)
+        if own.location.is_none() && own.reload.is_some() {
+            let arena = realm(scope, w);
+            arena.navigation_plan.own = own;
+            if reload_waits(arena, w) {
+                continue;
+            }
+            own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
+        }
         if (own.location.is_some() || own.reload.is_some() || own.traversal.is_some()) && !crate::dom::dom(scope).arena.window_closing(w) {
             taken.push((own.planned, w, own));
         }
@@ -583,7 +596,20 @@ fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v
 }
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
 // more — undefined for none.
+// Whether the reload realm `cid`'s plan holds waits on a task queued on its document's event loop that has yet to run —
+// those queued by the time the host first comes to take it, its mark taken then (`Reload::mark`).
+fn reload_waits(arena: &mut crate::dom::RealmArena, cid: i32) -> bool {
+    let now = arena.task_mark(cid);
+    let Some(reload) = arena.navigation_plan.own.reload.as_mut() else { return false };
+    let mark = *reload.mark.get_or_insert(now);
+    arena.queued_before(cid, mark)
+}
+// (…none while a task queued on its document's event loop before it is still to run: `reload_waits`, a turn later)
 fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    if reload_waits(realm(scope, cid), cid) {
+        return;
+    }
     if let Some(reload) = plan(scope, &args).own.reload.take() {
         rv.set_bool(reload.activated);
     }

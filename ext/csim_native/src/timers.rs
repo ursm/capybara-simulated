@@ -171,6 +171,17 @@ impl Timers {
 
 impl RealmArena {
     // Realm `cid`'s timers — the one entered, or one parked — none for a realm it has no state of.
+    // The mark of realm `cid`'s timers and platform tasks scheduled so far (`queued_before`).
+    pub(crate) fn task_mark(&mut self, cid: i32) -> u64 {
+        self.timers_of(cid).map_or(0, |t| t.seq)
+    }
+    // …and whether one scheduled by `mark` is due by its clock still, a task queued on its event loop that has yet to run:
+    // what a reload's history step waits on before it unloads the document (HTML "apply the history step" step 12 queues
+    // its unloading as a global task on the document's window, after those queued before it — a `javascript:` URL's).
+    pub(crate) fn queued_before(&mut self, cid: i32, mark: u64) -> bool {
+        let clock = self.realm_state(cid).map_or(0.0, |s| s.clock);
+        self.timers_of(cid).is_some_and(|t| t.order.iter().take_while(|&&(Due(due), _, _)| due <= clock).any(|&(_, seq, _)| seq <= mark))
+    }
     fn timers_of(&mut self, cid: i32) -> Option<&mut Timers> {
         if cid == self.cur() {
             Some(&mut self.timers)

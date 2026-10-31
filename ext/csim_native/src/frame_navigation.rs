@@ -96,7 +96,9 @@ const LOAD_OWED: u32 = 1 << 8;
 // whether that document had transient activation — or a reload of the document it is at.
 pub(crate) enum HostNavigation {
     Navigate { url: String, replace: bool, initiator: i32, referrer: (String, String), sandbox: Option<String>, activated: bool },
-    Reload,
+    // (…by the mark of the frame's document's tasks queued by the time the host first came to take it:
+    // navigation_plan.rs `Reload::mark`)
+    Reload { mark: Option<u64> },
 }
 
 // What `planFrameLocation` made of a navigation: none (the frame has no navigable), one planned, or one to a fragment of
@@ -648,7 +650,7 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(container) = arena.live_container(cid) else { return };
-    arena.frame_navigation(container).host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload));
+    arena.frame_navigation(container).host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { mark: None }));
     crate::navigation_plan::supersede_routed(scope, cid);
 }
 // __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of, and the
@@ -668,11 +670,23 @@ fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let reloads = args.get(0).to_rust_string_lossy(scope) == "reload";
     let arena = &mut crate::dom::dom(scope).arena;
-    let wanted = |h: &HostNavigation| matches!(h, HostNavigation::Reload) == reloads;
+    let wanted = |h: &HostNavigation| matches!(h, HostNavigation::Reload { .. }) == reloads;
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
     let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| wanted(h))).map(|(&c, _)| c).collect();
     for c in containers {
         let realm = arena.frame_realm(c);
+        // (…a reload left planned while a task queued on the frame's document's event loop before it is still to run:
+        // navigation_plan.rs `take_reload`)
+        if let Some(r) = realm {
+            let now = arena.task_mark(r);
+            let mark = arena.frame_navigations.0.get_mut(&c).and_then(|n| match &mut n.host {
+                Some((_, HostNavigation::Reload { mark })) => Some(*mark.get_or_insert(now)),
+                _ => None,
+            });
+            if mark.is_some_and(|m| arena.queued_before(r, m)) {
+                continue;
+            }
+        }
         let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
         let Some((at, host)) = nav.host.take() else { continue };
         // (…none of a container whose navigable has no document now, nothing to navigate)
@@ -708,7 +722,7 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
                 ];
                 v8::Array::new_with_elements(scope, &item).into()
             }
-            HostNavigation::Reload => realm,
+            HostNavigation::Reload { .. } => realm,
         };
         items.push(item);
     }
@@ -729,12 +743,13 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 
 // __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
 // `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it
-// plans to navigate to (`planned`), whose navigation HTML "plan to navigate" begins in a task after, ending that one.
+// plans to navigate to (`planned`), whose navigation HTML "plan to navigate" begins in a task after, ending that one, nor
+// a reload, which is no ongoing navigation (navigation_plan.rs `let_go`).
 fn cancel_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
     if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
-        nav.host = None;
+        nav.host.take_if(|(_, host)| matches!(host, HostNavigation::Navigate { .. }));
     }
 }
 
