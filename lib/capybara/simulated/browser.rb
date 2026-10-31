@@ -1525,13 +1525,16 @@ module Capybara
           dest:            '',
           body_raw:        true
         )
-        # (…another origin's an opaque response, whose bytes, status and headers HTML's "handle as a download" saves all the
-        # same: the side channel a host-side consumer reads, `opaque_render`)
-        result = {'status' => result['render_status'], 'headers' => result['render_headers'], 'body_raw' => result['opaque_render'], 'url' => url} if result&.dig('type') == 'opaque'
+        # (…another origin's an opaque response, whose bytes, status, headers and URL HTML's "handle as a download" saves
+        # all the same: the side channel a host-side consumer reads, `opaque_render`)
+        if result&.dig('type') == 'opaque'
+          result = {'status' => result['render_status'], 'headers' => result['render_headers'], 'body_raw' => result['opaque_render'], 'url' => result['render_url']}
+        end
         return unless result && result['status'].to_i == 200
 
-        # (…named by the link's `download` value where its Content-Disposition names nothing)
-        save_downloaded_response(result['url'].to_s.empty? ? url : result['url'], result['headers'] || {}, [result['body_raw'].to_s], hint: filename_hint)
+        # (…named by the link's `download` value where its Content-Disposition names nothing, else by its response's URL:
+        # HTML "get the suggested filename", the last one its redirects led to)
+        save_downloaded_response(result['url'], result['headers'] || {}, [result['body_raw'].to_s], hint: filename_hint)
       end
 
       # HTML "navigate": a navigation to `url` is one to a fragment of the current document where `url` has a fragment
@@ -9988,8 +9991,9 @@ module Capybara
           # A no-cors cross-origin response is OPAQUE: status 0, empty body, no exposed headers, empty URL (cors-basic
           # "Opaque filter").
           if kind == 'opaque'
-            # (…and, for a host-side consumer of the bytes — a download's, which saves them — its headers too)
-            meta = [status, header_text(header_field(resp_headers, 'content-type')), (stringify(resp_headers) if body_raw)]
+            # (…and, for a host-side consumer of the bytes — a download's, which saves them — its headers and its URL too, the
+            # one its redirects led to)
+            meta = [status, header_text(header_field(resp_headers, 'content-type')), *([stringify(resp_headers), target] if body_raw)]
             return response_hash(0, {}, '', '', false, type: 'opaque', body_null: true, opaque_render: body_str, encoded: encoded_size, opaque_render_meta: meta)
           end
           out = response_hash(status, exposed_headers, body_str, target, plan.redirected?, type: kind, body_null: null_body, body_cut_short: cut_short, body_raw: body_raw, encoded: encoded_size, raw_headers: resp_headers)
@@ -10192,8 +10196,8 @@ module Capybara
         # so the choice is made client-side. The bytes are already in memory (`body_str`).
         out['opaque_render'] = opaque_render.b if opaque_render && !opaque_render.empty?
         # (…and the status and MIME type it hides, for a consumer that checks them — a worker-imported script's)
-        out['render_status'], out['render_ct'], render_headers = opaque_render_meta if opaque_render_meta
-        out['render_headers'] = render_headers if render_headers
+        out['render_status'], out['render_ct'], render_headers, render_url = opaque_render_meta if opaque_render_meta
+        out.update('render_headers' => render_headers, 'render_url' => render_url) if render_headers
         out
       end
 

@@ -3,6 +3,7 @@
 require 'capybara/simulated'
 require 'tmpdir'
 require_relative 'support/session_teardown'
+require_relative 'support/every_host_local'
 
 # A download is saved under the filename its Content-Disposition gives (RFC 6266 §4.3, downloads.rs `filename`):
 # `filename*`'s ext-value (RFC 8187, its charset's bytes percent-encoded) over `filename`, whose raw UTF-8 bytes are
@@ -81,5 +82,24 @@ RSpec.describe 'a download' do
     expect(s.current_path).to eq('/a')
     s.refresh
     expect(hits).to eq(['GET /dl', 'GET /a', 'POST /dl', 'GET /a'])
+  end
+
+  # …and one of no Content-Disposition nor `download` value under the last path segment of its response's URL — the one
+  # its redirects led to (HTML "get the suggested filename": "Let filename be the … last path segment of response's
+  # URL") — another origin's opaque response's too.
+  it "is saved under its response's URL's name, where a redirect led it" do
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/page' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><a href="https://b.test/dl" download>other</a><a href="/dl" download>own</a>']]
+      when '/dl'   then [302, {'location' => "/files/report-#{req.host[0]}.csv"}, ['']]
+      else [200, {'content-type' => 'text/csv'}, ['a,b']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/page'
+    s.click_link 'own'
+    s.click_link 'other'
+    expect(Dir.children(@dir).sort).to eq(%w[report-a.csv report-b.csv])
   end
 end
