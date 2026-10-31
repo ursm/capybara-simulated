@@ -881,14 +881,14 @@ module Capybara
       # A blob: URL's blob is resolved here too, in the source's blob URL store (`blob_bytes_for`), as HTML resolves a URL's
       # blob URL entry as it is parsed: one the source revokes after still loads; none, a revoked one's, is a network error.
       # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
-      private def navigate_window(browser, url, source: nil, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
+      private def navigate_window(browser, url, source:, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
         return if url.nil? || url.to_s.empty? || Browser::DATA_URL.match?(url.to_s)
         if browser.is_a?(RealmWindow)
           return navigate_realm_window(browser, url, source, initiator_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace)
         end
 
-        blob ||= blob_bytes_for(url, source || browser) if url.to_s.start_with?('blob:')
-        initiator, referrer, referrer_policy = plan_source(browser, source, initiator_realm, referrer, referrer_policy)
+        blob ||= blob_bytes_for(url, source) if url.to_s.start_with?('blob:')
+        initiator = source.navigation_initiator(initiator_realm.to_i)
         browser.traversable.plan_navigation(
           url.to_s,
           replace,
@@ -903,11 +903,11 @@ module Capybara
 
       # …one `window.open` made in a Browser's isolate, by another isolate's document: navigated in its host as its own
       # location would be — the Referer and policy the caller's — its request's initiator the caller's document as its
-      # Browser describes it (`plan_source`: Browser#navigation_initiator of `source`'s realm `initiator_realm`, the
-      # opener's page where none is named), which no realm of that isolate is.
+      # Browser describes it (Browser#navigation_initiator of `source`'s realm `initiator_realm`), which no realm of that
+      # isolate is.
       private def navigate_realm_window(window, url, source, initiator_realm, referrer:, referrer_policy:, user_activated:, replace: false, post: nil)
-        realm = window.realm or return
-        initiator, referrer, referrer_policy = plan_source(window, source, initiator_realm, referrer, referrer_policy)
+        realm     = window.realm or return
+        initiator = source.navigation_initiator(initiator_realm.to_i)
         plan = [url.to_s, replace, nil, referrer, referrer_policy, user_activated == true, nil]
         window.host.navigate_window_realm(realm, 'location', plan, post: post, initiator_document: initiator || {})
       end
@@ -920,7 +920,7 @@ module Capybara
           return navigate_realm_window(browser, url, source, initiator_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, post: post)
         end
 
-        initiator, referrer, referrer_policy = plan_source(browser, source, initiator_realm, referrer, referrer_policy)
+        initiator = source.navigation_initiator(initiator_realm.to_i)
         browser.traversable.plan_post(
           url.to_s,
           post[:body].to_s,
@@ -931,17 +931,6 @@ module Capybara
           initiator
         )
       end
-      # [initiator, Referer, its policy] of a plan of `browser`'s navigation: the document that began it
-      # (Browser#navigation_initiator) — `source`'s realm `initiator_realm`'s, referred as the caller says — or, where no
-      # window is named, the page of the window that opened `browser`, referred by that page under its policy
-      # (Browser#navigation_referrer): no plan is a user's address bar's while there is one.
-      private def plan_source(browser, source, initiator_realm, referrer, referrer_policy)
-        return [source.navigation_initiator(initiator_realm.to_i), referrer, referrer_policy] if source
-
-        opener = window_browser(opener_handle_of(browser)) or return [nil, referrer, referrer_policy]
-        [opener.navigation_initiator(0), *opener.navigation_referrer(0)]
-      end
-
       # A blob: document loaded into window `target` from the blob a navigation another window planned of it resolved
       # (`navigate_window`) — false for none.
       def load_blob_document(target, url, bytes, type) = !bytes.nil? && load_blob_into_window(target, url, target, snapshot: {'bytes' => bytes, 'type' => type})

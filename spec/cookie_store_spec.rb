@@ -309,7 +309,7 @@ RSpec.describe 'the cookie store' do
   # b's URL, which its worker answers with a redirect back to a, reaches a cross-site — no SameSite cookie, Sec-Fetch-Site
   # `cross-site` — as the same chain the network made would (Fetch's redirect-taint walks the whole URL list) — and an
   # XHR's chain the same way.
-  it "keeps the redirect-taint of a chain a service worker redirected" do
+  it 'keeps the redirect-taint of a chain a service worker redirected' do
     seen   = {}
     worker = <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
