@@ -40,10 +40,16 @@ struct Nav {
 
 impl Nav {
     // The hop's cookie context, and whether a document above the navigable is cross-site to its URL — by Fetch's
-    // "determine the same-site mode": cross-site ("unset-or-less") where the hop's URL is cross-site to the initiator's
-    // origin (step 2, `initiator_cross_site`), where "request's client's has cross-site ancestor is true" (step 4: the
+    // "determine the same-site mode": cross-site where the hop's URL is cross-site to the initiator's origin (step 2,
+    // `initiator_cross_site`), where "request's client's has cross-site ancestor is true" (step 4: the
     // INITIATOR's, as the client of a navigation is its initiating document's environment), or where the chain's
     // redirect-taint is "cross-site" (step 5).
+    // - Step 2, "If request's top-level navigation initiator origin is non-null and is not same site with request's URL's
+    //   origin, then return 'unset-or-less'", is not applied to a top-level GET: read as it stands it would
+    //   withhold the Lax cookie from every cross-site top-level GET — a link from another site's page — which no browser
+    //   does, and which is the very request a Lax cookie is for. Such a GET is cross-site and Lax
+    //   (`LAX_RETRIEVE`), as step 3 below would make it; any other request takes step 2 as it stands. So step 3 is not
+    //   the only step whose text is not applied as written.
     // - Step 3, "If request's method is 'GET' and request's destination is 'document', then return 'lax-or-less'", read as
     //   it stands would withhold the Strict cookie from every top-level GET, a same-site one's too, which no browser does
     //   (Chrome and Firefox both send it): a top-level GET keeps Strict where steps 2 and 5 leave it same-site, and is Lax
