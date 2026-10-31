@@ -3613,9 +3613,7 @@ html/browsers/the-window-object/security-window/window-security.https.html:
 - A SecurityError exception must be thrown when window.onmousewheel is accessed from
   a different origin.
 html/browsers/the-window-object/self-et-al.window.js:
-- iframeWindow.frames before and after removal
 - iframeWindow.globalThis before and after removal
-- popupWindow.frames before, after closing, and after discarding
 - popupWindow.globalThis before, after closing, and after discarding
 html/browsers/the-window-object/window-aliases.html:
 - frames should be the global object
