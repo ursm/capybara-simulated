@@ -1372,17 +1372,6 @@ module WptRunner
     FileUtils.rm_f(Dir.glob(File.join(stash_dir, '*')))
   end
 
-  # The page's `load` is a task its parse queued (bridge.entry.js `queueLoadOfTheEnd`), which the visit's steps run; the
-  # runner fires it at once all the same, as the visit returns — what its stepping cadence was tuned to (letting the
-  # task fire it instead moved web-animations' rAF-timed subtests: R11 S5). Idempotent: the task finds it fired. The
-  # bridge's `__csimFireWindowLoad` uses a module-captured `Event` constructor — a test that does `delete window.Event`
-  # (interface-objects.html) would otherwise make `new Event('load')` throw and the harness never finish.
-  def fire_window_load(s)
-    s.evaluate_script(
-      "typeof __csimFireWindowLoad === 'function' ? __csimFireWindowLoad() : window.dispatchEvent(new Event('load'))"
-    )
-  end
-
   # Run a SINGLE (rel, variant-query) pair. `query` is '' for a no-variant file.
   # (`page` the one it is visited at — a JS test's wrapper for one of its globals)
   def run_one(rel, query = '', page = js_test?(rel) ? any_js_pages(rel).first.last : rel)
@@ -1393,8 +1382,9 @@ module WptRunner
     s = session
     # A variant query (if any) is appended to the visited URL.
     visit = "#{page}#{query}"
+    # (…its `load`, which testharness completes its sync tests off, the task its parse queued: the page's event loop
+    # runs it as the visit ends, or later where its images or frames delay it — the steps below)
     s.visit(origin ? "#{origin}/#{visit}" : "/#{visit}")
-    fire_window_load(s)
 
     res = nil
     idle = 0
@@ -1763,7 +1753,6 @@ module WptRunner
     s = session
     s.current_window.resize_to(*REFTEST_VIEWPORT)
     s.visit(origin ? "#{origin}/#{rel}" : "/#{rel}")
-    fire_window_load(s)
     ready = false
     REFTEST_WAIT_FRAMES.times do
       s.driver.run_event_loop_frame(FRAME_MS)

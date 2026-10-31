@@ -70,11 +70,12 @@ RSpec.describe 'the load "the end" queues' do
     expect(s.evaluate_script('log')).to eq(%w[a b load])
   end
 
-  # A frame whose load handler navigates it again has loaded all the same: its container's `load` fires for it, and the
-  # page's waits for none of the next document's (HTML "completely finish loading" queues the container's as the frame's
-  # load task ends) — where one that navigated as it PARSED was aborted ("navigate" → "abort a document and its
-  # descendants"), firing no load of its own nor its container's, and the container's load is the next document's. (The
-  # page's load before that one: Firefox 159's order, in a frame; Chrome 156 fires the frame's first.)
+  # A frame whose load handler navigates it again has loaded all the same: its container's `load` fires for it (HTML
+  # "completely finish loading" queues it as the frame's load task ends) — where one that navigated as it PARSED was
+  # aborted ("navigate" → "abort a document and its descendants"), firing no load of its own nor its container's, and the
+  # container's load is the next document's. The page's waits for both next documents: "navigate" sets the navigable's
+  # "is delaying load events" until "finalize a cross-document navigation", and an iframe delays its document's load
+  # while it is (Chrome 156 fires `b:/done` before the page's load; Firefox 159 the page's first).
   it "fires a frame's container load for a document whose load handler navigates it, not for one that navigated as it parsed" do
     s = session_for(
       '/'       => <<~HTML,
@@ -92,11 +93,13 @@ RSpec.describe 'the load "the end" queues' do
     )
     s.visit '/'
     s.document.synchronize(3) { raise Capybara::ExpectationNotMet if s.evaluate_script('log.length') < 4 }
-    expect(s.evaluate_script('log')).to eq(['a', 'page', 'b:/done', 'a'])
+    expect(s.evaluate_script('log')).to eq(['a', 'b:/done', 'a', 'page'])
   end
 
   # …and one that navigated as it parsed to a response that makes no document — a 204, a download — leaves the page
-  # waiting on nothing: its page's load fires, and no load of the aborted document's nor of its container (Chrome).
+  # waiting on nothing once that navigation is finalized ("If historyEntry's document is null, then return", its
+  # navigable delaying load events no more): its page's load fires, and no load of the aborted document's nor of its
+  # container (Chrome).
   %w[/204 /dl.csv].each do |target|
     it "fires the page's load where a frame aborted as it parsed navigates to #{target}" do
       s = session_for(

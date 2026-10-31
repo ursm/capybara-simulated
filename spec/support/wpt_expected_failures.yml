@@ -99,7 +99,6 @@ css/css-animations/animation-important-002.html:
 - "== css/css-animations/animation-important-002-ref.html"
 css/css-animations/animation-pseudo-dynamic-001.html:
 - "== css/css-animations/animation-pseudo-dynamic-001-ref.html (both renderings blank)"
-css/css-animations/animation-restarted-after-changing-iteration-count-after-completion.html: HARNESS_ERROR
 css/css-animations/animationevent-marker-pseudoelement.html:
 - AnimationEvent should have the correct pseudoElement memeber
 - "[harness] TIMEOUT"
@@ -6985,9 +6984,6 @@ web-animations/interfaces/Animatable/getAnimations.html:
 - The legacy Selectors Level 2 single-colon selectors can be used
 - Throws SyntaxError for an empty selector
 - Throws SyntaxError for an invalid pseudo-element selector
-web-animations/interfaces/Animation/onremove.html:
-- onremove event is fired when replaced animation is removed.
-- onremove events are fired in the correct order
 web-animations/interfaces/Animation/startTime.html:
 - startTime is resolved when running
 web-animations/interfaces/Animation/style-change-events.html:
@@ -7056,8 +7052,6 @@ web-animations/timing-model/timelines/sibling-iframe-timeline.html:
 web-animations/timing-model/timelines/timelines.html:
 - Timeline time increases once per animation frame
 - Timeline time increases once per animation frame in an iframe
-web-animations/timing-model/timelines/update-and-send-events-replacement.html:
-- Dispatches remove events after finish events
 web-locks/bfcache/contention.https.window.js:
 - "[harness] ERROR"
 - "[harness] ERROR"

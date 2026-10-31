@@ -837,10 +837,24 @@ fn take_sw_deferred_frames(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
 
 // Whether a connected container of realm `cid`'s documents owes its element's `load`: HTML's iframe, which delays its
 // document's load event until its load event steps ran.
+// (…and those whose navigable is delaying load events: HTML "navigate" sets a child navigable's "is delaying load
+// events" as a navigation of it begins, and "finalize a cross-document navigation" clears it — the document it makes
+// delaying by its own load from then on, a navigation that makes none (a 204, a download) delaying nothing — and an
+// iframe delays its document's load while its content navigable is delaying load events. Here: a navigation planned of
+// it, its location's, its reload's or a form's to it, the host has not taken yet — taking it is finalizing it, the fetch
+// and the document it makes run as it is taken: browser.rb `consume_pending_frame_nav`, frame-nav.js `land`.)
 fn frame_loads_owed(arena: &RealmArena, cid: i32) -> bool {
     arena.frame_navigations.0.iter().any(|(&container, nav)| {
-        nav.flags & LOAD_OWED != 0 && arena.get(container).is_some_and(|n| n.realm == cid) && arena.is_connected(container)
+        (nav.flags & LOAD_OWED != 0 || nav.delaying_load_events())
+            && arena.get(container).is_some_and(|n| n.realm == cid)
+            && arena.is_connected(container)
     })
+}
+impl FrameNavigation {
+    // Whether its navigable is delaying load events: a navigation planned of it not taken yet (`frame_loads_owed`).
+    fn delaying_load_events(&self) -> bool {
+        self.planned != 0 || self.host.is_some()
+    }
 }
 
 // A realm's document's load event: delayed, or delayed and its container's load owed to the parent after it (HTML: a

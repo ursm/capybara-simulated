@@ -10282,6 +10282,7 @@ module Capybara
         # Window-realm self-navs are realm navs too — drain them at every frame-nav drain point.
         consume_pending_window_nav
         @runtime.call('__csimTakeFrameNavigations', 'navigate').each do |realm_id, url, replace, initiator, source, policy, sandbox, activated|
+          parent   = @runtime.frame_realm_parent(realm_id)
           referrer = [source, policy]
           invalidate_find_cache
           # If this frame is on the entered `within_frame` stack, navigate it
@@ -10311,7 +10312,17 @@ module Capybara
           end
         rescue StandardError => e
           log_console('warn', "frame self-navigation failed: #{e.message}")
+        ensure
+          frame_navigation_finalized(parent)
         end
+      end
+      # A frame navigation taken and finalized — its document made, or none (a 204, a download, a failure): its navigable
+      # delays its parent's load no more (frame_navigation.rs `frame_loads_owed`), which the parent's document asks again
+      # (a document it made delays it by its own load from here on).
+      private def frame_navigation_finalized(parent)
+        frame_realm_host_call(parent, '__csimLoadBlockerSettled') unless parent.nil?
+      rescue StandardError
+        nil
       end
       # The navigations the windows `window.open` made in this isolate planned of their own — each in its realm's plan,
       # as the page's are (navigation_plan.rs `takeWindowNavigations`: none of a window closed since, HTML "cannot
@@ -10541,6 +10552,7 @@ module Capybara
           reloads += @runtime.call('__csimTakeFrameNavigations', 'reload').reject {|r| r.is_a?(Array) }
         end
         reloads.each do |realm_id|
+          parent = @runtime.frame_realm_parent(realm_id)
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps
           # the frame stack in sync) — re-fetching its current document URL, which
@@ -10571,6 +10583,8 @@ module Capybara
           end
         rescue StandardError => e
           log_console('warn', "frame self-reload failed: #{e.message}")
+        ensure
+          frame_navigation_finalized(parent)
         end
       end
       def consume_pending_page_submission

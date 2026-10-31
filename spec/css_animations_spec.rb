@@ -252,7 +252,8 @@ RSpec.describe 'CSS animations and transitions' do
         el.style.flexGrow = '10';
       JS
       out = Array.new(5) { s.evaluate_script("getComputedStyle(document.getElementById('a')).flexGrow").to_f }
-      expect(out.each_cons(2).map {|a, b| b - a }).to eq([1, 1, 1, 1])
+      # (…its start time a rendering update's, a frame's interval after the last: steps of one to float precision)
+      expect(out.each_cons(2).map {|a, b| (b - a).round(4) }).to eq([1, 1, 1, 1])
       s.execute_script("document.getElementById('a').style.flexGrow = '0';")
       back = Array.new(4) { s.evaluate_script("getComputedStyle(document.getElementById('a')).flexGrow").to_f }
       expect(back.first).to be_between(out.last - 1, out.last + 1)
