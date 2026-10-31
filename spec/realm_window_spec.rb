@@ -704,6 +704,28 @@ RSpec.describe 'a window made in its opener\'s isolate' do
   # Window of its initial about:blank where it is of that one's origin — what the opener did to it as `open()` returned
   # its own: a listener, a property, a callback, one object wherever read.
   describe 'opened at a URL' do
+    # (…its every document sandboxed as the sandboxed frame that opened it is — HTML's popup sandboxing flag set, its
+    # creator's where that has no `allow-popups-to-escape-sandbox` — its origin a new opaque one without
+    # `allow-same-origin`; with the escape, none: one of its opener's site, a realm of its isolate, and one of another,
+    # a Browser of its own, alike)
+    {
+      'allow-scripts allow-popups'                                => nil,
+      'allow-scripts allow-popups allow-popups-to-escape-sandbox' => :own
+    }.each do |flags, origin|
+      %w[http://www.example.com http://other.test].each do |site|
+        it "is sandboxed as the frame that opened it is: sandbox=\"#{flags}\", #{site}" do
+          opener = "<script>window.go = () => open('#{site}/second')</script>"
+          frame  = %(<iframe id=sb sandbox="#{flags}" srcdoc="#{opener}"></iframe>)
+          session.execute_script("document.body.insertAdjacentHTML('beforeend', #{frame.to_json})")
+          session.within_frame('sb') { session.execute_script('go()') }
+          session.within_window(session.windows.last) do
+            expect(session).to have_css('#second')
+            expect(session.evaluate_script('self.origin')).to eq(origin == :own ? site : 'null')
+          end
+        end
+      end
+    end
+
     it 'loads into the Window its opener holds, the listener and the callback it was given its own' do
       session.execute_script(<<~JS)
         window.log = [];

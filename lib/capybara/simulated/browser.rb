@@ -7521,6 +7521,9 @@ module Capybara
       def initial_document_at(realm, url)
         @runtime.realm_call(realm, '__csimUpdateLocation', url.to_s) unless url.to_s.empty? || url.to_s == 'about:blank'
       end
+      # The sandboxing a window the document of realm `realm` opens is made with (realm_location.rs `popupFlags`), which a
+      # window of another isolate is given (Driver#open_aux_window).
+      def popup_flags(realm) = @runtime.realm_direct_call(realm.to_i, '__csimPopupFlags').to_i
 
       # ── The windows `window.open` made in this isolate, as the driver addresses them (RealmWindow) ──
       # The realm of the document window `key` shows now — the one its first document's was, a navigation's after each

@@ -483,9 +483,12 @@ impl RealmArena {
     // session storage" of a new auxiliary browsing context — `window.open`'s, never a noopener one, which is no window
     // of this isolate)
     pub(crate) fn set_stepped_window(&mut self, realm: i32, on: bool, opener: Option<i32>, key: i32) {
-        let opener_storage = match opener {
-            Some(opener) if on && !self.navigables.window_histories.contains_key(&key) => crate::session_history::session_storage_of(self, opener),
-            _ => 0,
+        let (opener_storage, popup) = match opener {
+            Some(opener) if on && !self.navigables.window_histories.contains_key(&key) => (
+                crate::session_history::session_storage_of(self, opener),
+                self.realm_state(opener).map_or(0, |s| crate::sandbox::popup_flags(s.location.sandbox)),
+            ),
+            _ => (0, 0),
         };
         let nav = &mut self.navigables;
         nav.windows.retain(|&w| w != realm);
@@ -493,7 +496,13 @@ impl RealmArena {
             nav.window_keys.insert(realm, key);
             nav.window_realms.insert(key, realm);
             nav.opened.insert(key);
-            nav.window_histories.entry(key).or_insert_with(|| crate::session_history::SessionHistory::copying(opener_storage));
+            // (…and the sandboxing its opener's document propagates to the windows it opens, its every document's:
+            // HTML's popup sandboxing flag set)
+            nav.window_histories.entry(key).or_insert_with(|| {
+                let history = crate::session_history::SessionHistory::copying(opener_storage);
+                history.set_popup_sandbox(popup);
+                history
+            });
             // (…as it was first made: a navigation of the window keeps it, whatever of the realm it names is gone since)
             // (…a frame's by its navigable, which the documents it navigates to keep: `frame_openers`)
             if let Some(opener) = opener {

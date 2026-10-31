@@ -70,6 +70,13 @@ fn csp_sandbox_directives(header: &str) -> Vec<&str> {
         .collect()
 }
 
+// The popup sandboxing flag set of a window a document whose active sandboxing flag set is `own` opens: those flags,
+// where they propagate to the auxiliary browsing contexts it opens — no `allow-popups-to-escape-sandbox` — else none
+// (HTML "the rules for choosing a navigable").
+pub(crate) fn popup_flags(own: u32) -> u32 {
+    if own & PROPAGATES_TO_AUXILIARY != 0 { own } else { 0 }
+}
+
 // The flags a document its container's `sandbox` attribute (None for none) and its response's CSP (None for none)
 // sandbox has of them — none where neither sandboxes it.
 pub(crate) fn sandboxing(csp: Option<&str>, attribute: Option<&str>) -> u32 {

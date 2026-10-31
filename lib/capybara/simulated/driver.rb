@@ -617,6 +617,9 @@ module Capybara
         when Browser then aux.traversable.opener = opener_window.traversable
         end
         aux.traversable.by_web_content = by_script
+        # (…and sandboxed as the document that opened it is, where that one's sandbox propagates to the windows it opens:
+        # HTML's popup sandboxing flag set, its every document's)
+        aux.traversable.popup_sandbox = source.popup_flags(activation_realm) if source && activation_realm
         @aux_windows << {handle: handle, window: aux, opener: opener_handle}
         # (…another window of the session now, which may resolve the URLs the others made before it: their bytes entered in
         # the registry, for its workers' threads to read — Browser#partition_blob)

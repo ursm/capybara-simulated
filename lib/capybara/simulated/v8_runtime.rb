@@ -1288,12 +1288,17 @@ module Capybara
         # (…its referrer the Referer its navigation sent, its policy its response's: HTML "create and initialize a
         # Document object"; its sandboxing a CSP `sandbox`'s)
         realm.call('__csimSetPendingReferrer', referrer.to_s, referrer_policy.to_s) unless referrer.to_s.empty? && referrer_policy.to_s.empty?
-        realm.eval_void("__dom.setSandbox(__dom.cspSandboxing(#{JSON.generate(csp)}));") if csp
-        # (…an about:blank one a navigation made, its navigable's sandboxing: `navigationOrigins`)
-        realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") if sandbox.to_i.positive?
         adopt_client_id(realm, client_id)
-        realm.call('__csimSetDocumentOrigin', doc_origin&.to_s)
-        realm.call('__csimSetLocationOrigin', location_origin&.to_s)
+        if doc_origin
+          # (…an about:blank one a navigation made its initiator's origins, its navigable's sandboxing: `navigationOrigins`)
+          realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") if sandbox.to_i.positive?
+          realm.call('__csimSetDocumentOrigin', doc_origin.to_s)
+          realm.call('__csimSetLocationOrigin', location_origin&.to_s)
+        else
+          # (…another sandboxed as its window is, and by its response's CSP `sandbox`: realm_location.rs
+          # `seedWindowDocument`)
+          realm.eval_void("__dom.seedWindowDocument(#{JSON.generate(url.to_s)}, #{JSON.generate(csp)});")
+        end
         # (…its window's session history told of it, before its scripts read its `history`)
         realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer, *entry[2])
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")

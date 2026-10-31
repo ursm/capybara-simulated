@@ -219,6 +219,10 @@ struct Traversable {
     // of its opener's made with it (`SessionHistory::copying`), which goes with it (`owns_storage`).
     session_storage: u64,
     owns_storage: bool,
+    // The sandboxing flags its top-level navigable was made with (HTML's popup sandboxing flag set: the flags of the
+    // sandboxed document that opened it, where they propagate to the windows it opens), which every document of it is
+    // sandboxed by (`popup_sandbox_of`).
+    popup_sandbox: u32,
 }
 
 impl Drop for Traversable {
@@ -1053,7 +1057,7 @@ impl SessionHistory {
         t.state = State::new();
         t.saved = Default::default();
         t.frames_saved.clear();
-        (t.opener, t.disowned, t.closed, t.origin, t.by_web_content) = (None, false, false, None, false);
+        (t.opener, t.disowned, t.closed, t.origin, t.by_web_content, t.popup_sandbox) = (None, false, false, None, false, 0);
         asking(&mut t, |t| {
             t.asked = Asked::default();
             t.queued.clear();
@@ -1081,6 +1085,10 @@ impl SessionHistory {
     // #by_web_content = whether web content made it (`by_web_content`).
     fn set_by_web_content(&self, by: bool) {
         self.lock().by_web_content = by;
+    }
+    // #popup_sandbox = flags: the sandboxing flags it was made with (`popup_sandbox`).
+    pub(crate) fn set_popup_sandbox(&self, flags: u32) {
+        self.lock().popup_sandbox = flags;
     }
     // #opener = traversable: the window that opened it (HTML "create a new auxiliary browsing context").
     fn set_opener(&self, opener: &SessionHistory) {
@@ -1290,6 +1298,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("close!", method!(SessionHistory::close, 0))?;
     class.define_method("ask_close", method!(SessionHistory::ask_close, 1))?;
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
+    class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
     class.define_method("session_storage=", method!(SessionHistory::set_session_storage, 1))?;
     class.define_method("closing?", method!(SessionHistory::is_closing, 0))?;
     class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
@@ -1995,6 +2004,10 @@ fn window_traversable(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc
 // none below 1), never one another traversable shares.
 pub(crate) fn session_storage_of(arena: &crate::dom::RealmArena, realm: i32) -> u64 {
     traversable_of(arena, realm).map_or(0, |(t, _)| lock(&t).session_storage)
+}
+// …and its popup sandboxing flag set (`Traversable::popup_sandbox`), none for a realm of none.
+pub(crate) fn popup_sandbox_of(arena: &crate::dom::RealmArena, realm: i32) -> u32 {
+    traversable_of(arena, realm).map_or(0, |(t, _)| lock(&t).popup_sandbox)
 }
 // __dom.sessionStorageShed(realm) -> realm `realm`'s (storage.js: the realm whose global's area it is, whichever realm's
 // method runs).
