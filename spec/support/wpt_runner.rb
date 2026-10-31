@@ -1372,12 +1372,11 @@ module WptRunner
     FileUtils.rm_f(Dir.glob(File.join(stash_dir, '*')))
   end
 
-  # The driver doesn't auto-fire window 'load'; testharness completes its
-  # sync tests off that event (then a setTimeout(0) sets `all_loaded`), and a
-  # reftest does its rendering work there. Prefer the bridge's
-  # `__csimFireWindowLoad`, which uses a module-captured `Event` constructor — a
-  # test that does `delete window.Event` (interface-objects.html) would otherwise
-  # make `new Event('load')` throw and the harness never finish.
+  # The page's `load` is a task its parse queued (bridge.entry.js `queueLoadOfTheEnd`), which the visit's steps run; the
+  # runner fires it at once all the same, as the visit returns — what its stepping cadence was tuned to (letting the
+  # task fire it instead moved web-animations' rAF-timed subtests: R11 S5). Idempotent: the task finds it fired. The
+  # bridge's `__csimFireWindowLoad` uses a module-captured `Event` constructor — a test that does `delete window.Event`
+  # (interface-objects.html) would otherwise make `new Event('load')` throw and the harness never finish.
   def fire_window_load(s)
     s.evaluate_script(
       "typeof __csimFireWindowLoad === 'function' ? __csimFireWindowLoad() : window.dispatchEvent(new Event('load'))"

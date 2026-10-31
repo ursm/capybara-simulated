@@ -1321,6 +1321,11 @@ impl Animations {
     // finished state moves, which the page's event loop is to reach rather than fast-forward past. None: nothing
     // runs.
     pub(crate) fn next_frame_delay(&self) -> Option<f64> {
+        // (…at once where events are queued for the next rendering update to send — a script's `cancel()` of the last
+        // animation running leaves no other frame to send them in: Web Animations "update animations and send events")
+        if !self.playback_events.is_empty() || !self.css_events.is_empty() {
+            return Some(0.0);
+        }
         let mut best: Option<f64> = None;
         for (&id, a) in &self.animations {
             let due = if a.pending.is_some() && a.timeline.is_some() {

@@ -31,6 +31,25 @@ RSpec.describe 'the load "the end" queues' do
     expect(s.evaluate_script('log')).to eq(['parse timeout', 'load complete', 'load timeout'])
   end
 
+  # The images a page's style uses fetched before its load: HTML leaves open which CSS fetches delay the load event
+  # (csswg-drafts#1088), and Chrome 156 and Firefox 159 both hold the load for a CSS background image (measured
+  # 2026-11-01) — fetched at the end of the parse here, where a rendering update would fetch them.
+  it 'fetches the images its style uses before its load' do
+    s = session_for(
+      '/'       => <<~HTML,
+        <!DOCTYPE html><meta charset="utf-8"><style>#d { width: 10px; height: 10px; background-image: url(/bg.png) }</style>
+        <div id="d"></div>
+        <script>
+          window.log = [];
+          addEventListener('load', () => log.push(performance.getEntriesByType('resource').some((e) => e.name.endsWith('/bg.png'))));
+        </script>
+      HTML
+      '/bg.png' => [200, {'content-type' => 'image/png'}, ['']]
+    )
+    s.visit '/'
+    expect(s.evaluate_script('log')).to eq([true])
+  end
+
   # HTML "the end" step 7: the load waits for the set of scripts that will execute as soon as possible — an external
   # script a script inserted, and one that one inserted in turn, run before it.
   it 'waits for the external scripts inserted as the page loads' do
@@ -53,7 +72,9 @@ RSpec.describe 'the load "the end" queues' do
 
   # A frame whose load handler navigates it again has loaded all the same: its container's `load` fires for it, and the
   # page's waits for none of the next document's (HTML "completely finish loading" queues the container's as the frame's
-  # load task ends) — where one planned as it LOADED replaces it, and the container's load is the next document's.
+  # load task ends) — where one that navigated as it PARSED was aborted ("navigate" → "abort a document and its
+  # descendants"), firing no load of its own nor its container's, and the container's load is the next document's. (The
+  # page's load before that one: Firefox 159's order, in a frame; Chrome 156 fires the frame's first.)
   it "fires a frame's container load for a document whose load handler navigates it, not for one that navigated as it parsed" do
     s = session_for(
       '/'       => <<~HTML,
@@ -71,6 +92,25 @@ RSpec.describe 'the load "the end" queues' do
     )
     s.visit '/'
     s.document.synchronize(3) { raise Capybara::ExpectationNotMet if s.evaluate_script('log.length') < 4 }
-    expect(s.evaluate_script('log')).to eq(['a', 'b:/done', 'page', 'a'])
+    expect(s.evaluate_script('log')).to eq(['a', 'page', 'b:/done', 'a'])
+  end
+
+  # …and one that navigated as it parsed to a response that makes no document — a 204, a download — leaves the page
+  # waiting on nothing: its page's load fires, and no load of the aborted document's nor of its container (Chrome).
+  %w[/204 /dl.csv].each do |target|
+    it "fires the page's load where a frame aborted as it parsed navigates to #{target}" do
+      s = session_for(
+        '/'       => <<~HTML,
+          <!DOCTYPE html><meta charset="utf-8"><script>window.log = []; addEventListener('load', () => log.push('page'));</script>
+          <iframe id="f" src="/nav" onload="log.push('container')"></iframe>
+        HTML
+        '/nav'    => "<script>location.href = '#{target}'; addEventListener('load', () => parent.log.push('frame'));</script>",
+        '/204'    => [204, {}, []],
+        '/dl.csv' => [200, {'content-type' => 'text/csv', 'content-disposition' => 'attachment; filename="a.csv"'}, ["a,b\n"]]
+      )
+      s.visit '/'
+      s.has_css?('#never', wait: 0.5)
+      expect(s.evaluate_script('log')).to eq(['page'])
+    end
   end
 end

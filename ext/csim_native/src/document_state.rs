@@ -25,13 +25,26 @@ struct DocumentState {
     // Whether it will declaratively refresh (HTML: a `<meta http-equiv=refresh>` or a `Refresh` header said so already,
     // which no later one undoes): the engine's alone, which no binding writes (declarative_refresh.rs).
     will_refresh: bool,
+    // Whether a navigation of its navigable aborted it while its parser was active (HTML "navigate" → "abort a document
+    // and its descendants" → "abort a parser"): "the end" runs for it no more — no load of its own, none at its
+    // container. The engine's alone; a parse it begins afresh (its readiness `loading` again) clears it.
+    aborted: bool,
 }
 
 impl Default for DocumentState {
     // A document is complete and in no-quirks mode until it says otherwise (DOM "create a document": mode "no-quirks";
     // the parser makes one loading).
     fn default() -> Self {
-        DocumentState { mode: 0, ready: READY_COMPLETE, flags: 0, insertions: 0, destructive_ignored: 0, current_script: None, will_refresh: false }
+        DocumentState {
+            mode: 0,
+            ready: READY_COMPLETE,
+            flags: 0,
+            insertions: 0,
+            destructive_ignored: 0,
+            current_script: None,
+            will_refresh: false,
+            aborted: false,
+        }
     }
 }
 
@@ -43,9 +56,8 @@ const INSERTIONS: u32 = 3;
 const DESTRUCTIVE_IGNORED: u32 = 4;
 // …and the flag that says a document has no browsing context (`FLAGS`'s first).
 const NO_BROWSING_CONTEXT: u32 = 1;
-// …and the one that says its load fired (dom-nodes.js `DOC_LOAD_FIRED`).
-const LOAD_FIRED: u32 = 8;
 const READY_COMPLETE: u32 = 2;
+const READY_LOADING: u32 = 0;
 
 // …its texts, as the bindings number them (`DOC_TEXT_*`): none until set — a document's URL then its realm's, its
 // encoding UTF-8, its content type text/html, its referrer (HTML §3.1.2: the URL of the document that navigated to it,
@@ -92,12 +104,17 @@ impl DocumentStates {
     pub(crate) fn mode(&self, doc: NodeId) -> u32 {
         self.0.get(&doc).map_or(0, |s| s.mode)
     }
-    // Whether `doc`'s load event fired: HTML "the end" ran to its load (the bindings' flag, dom-nodes.js `_loadFired`).
-    pub(crate) fn load_fired(&self, doc: NodeId) -> bool {
-        self.0.get(&doc).is_some_and(|s| s.flags & LOAD_FIRED != 0)
-    }
     pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)
+    }
+    // `doc` aborted by a navigation of its navigable, where its parser is active (`aborted`): whether it was.
+    pub(crate) fn abort_parsing(&mut self, doc: NodeId) -> bool {
+        let Some(state) = self.0.get_mut(&doc).filter(|s| s.ready == READY_LOADING) else { return false };
+        state.aborted = true;
+        true
+    }
+    pub(crate) fn aborted(&self, doc: NodeId) -> bool {
+        self.0.get(&doc).is_some_and(|s| s.aborted)
     }
     // Whether `doc` will declaratively refresh, and that it will.
     pub(crate) fn will_refresh(&self, doc: NodeId) -> bool {
@@ -136,6 +153,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…a fast call: a sheet's cascade key and its owner's sheet memo read the mode on every refresh)
     crate::dom::register_fast(scope, ns, "docState", doc_state, DOC_STATE_FAST, context_id);
     crate::dom::register(scope, ns, "setDocState", set_doc_state, context_id);
+    crate::dom::register(scope, ns, "docAborted", doc_aborted, context_id);
     // (…and one: a node's name and an element's serialization ask whether its document is an HTML one)
     crate::dom::register_fast(scope, ns, "docIsHtml", doc_is_html, DOC_IS_HTML_FAST, context_id);
     crate::dom::register(scope, ns, "docUrl", doc_url, context_id);
@@ -187,6 +205,12 @@ const DOC_STATE_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::ne
     ),
 )];
 
+// __dom.docAborted(docNid) -> whether a navigation aborted the document as it parsed (`aborted`).
+fn doc_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    rv.set_bool(crate::dom::dom(scope).arena.document_states.aborted(doc));
+}
+
 // __dom.setDocState(docNid, field, value) — the document's field set.
 fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
@@ -196,7 +220,12 @@ fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let state = crate::dom::dom(scope).arena.document_states.0.entry(doc).or_default();
     match field {
         MODE => state.mode = value.min(2),
-        READY => state.ready = value.min(2),
+        READY => {
+            state.ready = value.min(2);
+            if state.ready == READY_LOADING {
+                state.aborted = false;
+            }
+        }
         FLAGS => state.flags = value,
         INSERTIONS => state.insertions = value,
         DESTRUCTIVE_IGNORED => state.destructive_ignored = value,

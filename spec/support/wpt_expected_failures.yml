@@ -1788,9 +1788,6 @@ css/css-transitions/transition-events-with-document-change.html:
 - transition events for an element changing document
 css/css-transitions/transition-reparented.html:
 - When an element is reparented, any CSS Transition on it should be cancelled
-css/css-transitions/transitioncancel-001.html:
-- transitioncancel should be fired if the element is made display:none during the
-  transition
 css/css-transitions/unregistered-custom-property-transition.html:
 - first value -> unset transition with allow-discrete
 css/cssom/CSSStyleSheet-constructable-insertRule-base-uri.html:
@@ -3023,8 +3020,6 @@ html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/f
 - Replace during pageshow, triggered by submitButton.click()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-button-click.html:
 - Replace before load, triggered by submitButton.click()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-cross-frame.html:
-- No replace before load, triggered by cross-iframe formElement.submit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-load.html:
 - Replace during the load event, triggered by formElement.submit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-submit-during-pageshow.html:

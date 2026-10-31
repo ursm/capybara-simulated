@@ -26,4 +26,22 @@ RSpec.describe 'animation frame callbacks' do
     3.times { session.execute_script('__drainTimers(20)') }
     expect(session.evaluate_script('log')).to eq(%w[a c d next])
   end
+
+  # HTML's event loop takes a rendering opportunity between tasks: a step whose budget reaches a timer due later runs the
+  # frame a task asked for first — an animation frame callback, and a callback that frame's own callbacks ask for a
+  # frame's interval on — never the later timer ahead of it, as one step with a single rendering update at its end did.
+  it 'runs the frames owed before a timer due later in the same step' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.log = [];
+      const t0 = performance.now();
+      setTimeout(() => log.push('timer'), 50);
+      requestAnimationFrame(() => {
+        log.push('frame');
+        requestAnimationFrame((t) => log.push('next frame ' + (t - t0 < 50)));
+      });
+      __drainTimers(100);
+    JS
+    expect(session.evaluate_script('log')).to eq(['frame', 'next frame true', 'timer'])
+  end
 end
