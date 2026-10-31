@@ -2444,7 +2444,11 @@ module Capybara
           # in-flight call on the isolate). Stash the intent
           # and drain after the call returns — as a location's
           # navigation and a reload are (navigation_plan.rs).
-          @pending_history_traverse = delta
+          # (…each of a task's, in order, each step judged as the one before it is applied: two `history.back()` that move
+          # a frame alone both apply — HTML "traverse the history by a delta", Chrome and Firefox measured 2026-11-01 —
+          # where one that makes the page's document again lets those asked of that document after it go,
+          # session_history.rs `take_due`)
+          (@pending_history_traversals ||= []) << delta
         end
       end
 
@@ -2476,10 +2480,10 @@ module Capybara
       end
 
       def consume_pending_history_traverse
-        return unless (delta = @pending_history_traverse)
-        @pending_history_traverse = nil
+        return unless (deltas = @pending_history_traversals)
+        @pending_history_traversals = nil
         invalidate_find_cache
-        perform_history_traverse(delta)
+        deltas.each {|delta| perform_history_traverse(delta) }
       rescue StandardError => e
         log_console('warn', "history traversal failed: #{e.message}")
       end
@@ -3381,7 +3385,7 @@ module Capybara
       # fired-timer signals can't see. Aux-window opens are intentionally excluded:
       # they build a separate Browser, not a hop in a same-page chain.
       private def pending_nav_intent?
-        !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
+        !@pending_history_traversals.nil? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
       end
       # Whether a window `window.open` made in this isolate has a navigation of its own planned, or a traversal queued that
       # plans one (`consume_pending_window_nav`) — none asked where it made none.
@@ -3676,7 +3680,7 @@ module Capybara
         # A JS-driven history.back()/go() that scheduled a deferred traverse but
         # never drained (the page navigated away first) must not survive the reset
         # — otherwise the stale target replays against the NEXT page's fresh history.
-        @pending_history_traverse = nil
+        @pending_history_traversals = nil
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
         # running after `reset_session!` (Capybara's per-test teardown
@@ -12546,7 +12550,7 @@ module Capybara
       # (The page's own plan — its location navigation, its reload, a frame's submission to it — its windows', the
       # host's navigations of its frames and the frames' submissions it routes are stashed alike, in the engine:
       # navigation_plan.rs `flushBegin`.)
-      NAV_INTENT_SLOTS = %i[@pending_history_traverse].freeze
+      NAV_INTENT_SLOTS = %i[@pending_history_traversals].freeze
       private_constant :NAV_INTENT_SLOTS
 
       def flush_outgoing_page_init

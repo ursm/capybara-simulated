@@ -335,6 +335,21 @@ RSpec.describe 'the joint session history' do
     expect(hits).not_to include('/x')
   end
 
+  # …and two that each move a frame alone, asked in one task, both applied — each judged from where the one before it
+  # went (HTML "traverse the history by a delta"; Chrome and Firefox, measured 2026-11-01: a page whose frame went
+  # /f1 → /f2 → /f3, `history.back(); history.back()`, the frame at /f1) — and so forward again.
+  it 'applies two traversals of a task that each move a frame alone' do
+    session.visit '/top'
+    session.execute_script('frames[0].location = "/f2"')
+    expect(frame_path).to eq('/f2')
+    session.execute_script('frames[0].location = "/b"')
+    expect(frame_path).to eq('/b')
+    session.execute_script('history.back(); history.back()')
+    expect(frame_path).to eq('/f1')
+    session.execute_script('history.forward(); history.forward()')
+    expect(frame_path).to eq('/b')
+  end
+
   # The page navigated on: its frames' steps stay steps of the document it left (Chrome: 3 after /b), and a traversal
   # back to it makes it again, its frames with it.
   it "keeps a frame's steps once the page has navigated on" do
