@@ -3204,7 +3204,6 @@ module Capybara
         if @worker_host.owed?(OWED_FETCH) && (held = hold_for_sw_fetch(turns))
           return held
         end
-        @worker_host.wait_reset(WorkerHost::WAIT_FETCH) unless @worker_host.owed?(OWED_FETCH)
 
         # Same interlude for an in-flight `ws.close()` handshake: the reader thread surfaces the
         # server's echoed close frame as `__close` — real off-thread work the JS event-loop probe
@@ -3215,7 +3214,6 @@ module Capybara
         if !@ws_closing.empty? && (held = hold_for_ws_close(turns))
           return held
         end
-        @worker_host.wait_reset(WorkerHost::WAIT_SOCKET_CLOSE) if @ws_closing.empty?
 
         # Same interlude for a pending SW message swack / broadcast ack — but WITHOUT holding
         # the clock. Its reply is the same kind of cross-isolate transfer completed on the worker
@@ -3226,7 +3224,8 @@ module Capybara
         # via the clock, so (unlike a fetch) we must NOT hold: holding regressed about-blank-
         # replacement. See drain_pending_message_reply.
         drain_pending_message_reply if worker_message_reply_pending?
-        @worker_host.wait_reset(WorkerHost::WAIT_MESSAGE) unless worker_message_reply_pending?
+        # (…and each hold whose reply is owed no more let go of, its next one waiting afresh: one call for the three)
+        @worker_host.waits_settled(@ws_closing.empty?)
 
         # Phase 2 — advance one real frame so the next batch of timers becomes due.
         # Its work counts toward `progressed` too: a timer that first comes due in

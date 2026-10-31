@@ -155,8 +155,15 @@ impl WorkerHost {
     // ── Race legs ──
     // #race_leg(realm, fetch_id, response, server_ms) — the network leg of that fetch, fetched as its event is
     // dispatched: its response (the respondWith wire) and the delay the server modeled.
+    // (…none kept for a navigation no thread waits for any more: its race was decided as its wait ended, and a leg the
+    // worker got to only after would linger until the page is made again — a client fetch's leg is always in first, the
+    // worker fetching it before it dispatches the event its handler answers)
     fn race_leg(&self, realm: i64, fetch_id: i64, response: String, server_ms: f64) {
-        self.lock().raced.insert((realm, fetch_id), Leg { response, server_ms, started: Instant::now() });
+        let mut state = self.lock();
+        if fetch_id < 0 && !state.replies.contains_key(&fetch_id) {
+            return;
+        }
+        state.raced.insert((realm, fetch_id), Leg { response, server_ms, started: Instant::now() });
     }
     // #race_winner(realm, fetch_id, handler_response) -> the network leg's response where it wins over the handler's —
     // the handler fell through, or the server's modeled delay is shorter than the handler's dispatch took — nil where
@@ -251,6 +258,19 @@ impl WorkerHost {
         let now = Instant::now();
         if deadline >= now { deadline.duration_since(now).as_secs_f64() } else { -now.duration_since(deadline).as_secs_f64() }
     }
+    // #waits_settled(sockets_closed) — each hold whose reply is owed no more let go of, so the next waits afresh: a
+    // fetch's where no fetch is owed, a message's where no bcack nor swack is, a socket close's where none is closing
+    // (`sockets_closed`, the host's to know) — what an event-loop step does once its holds are behind it, in one call.
+    fn waits_settled(&self, sockets_closed: bool) {
+        let fetches = self.owed[FETCH].load(Ordering::Acquire);
+        let messages = self.owed[BROADCAST].load(Ordering::Acquire) + self.owed[MESSAGE].load(Ordering::Acquire);
+        let mut state = self.lock();
+        for (kind, settled) in [(WAIT_FETCH, fetches == 0), (WAIT_MESSAGE, messages == 0), (WAIT_SOCKET_CLOSE, sockets_closed)] {
+            if settled {
+                state.waits[kind] = None;
+            }
+        }
+    }
     // #wait_reset(kind) — a reply of `kind` came in, or none is owed: the next one waits afresh.
     fn wait_reset(&self, kind: usize) {
         if let Some(wait) = self.lock().waits.get_mut(kind) {
@@ -331,6 +351,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("forget_reply", method!(WorkerHost::forget_reply, 1))?;
     class.define_method("wait_left", method!(WorkerHost::wait_left, 2))?;
     class.define_method("wait_reset", method!(WorkerHost::wait_reset, 1))?;
+    class.define_method("waits_settled", method!(WorkerHost::waits_settled, 1))?;
     class.define_method("adopt_client", method!(WorkerHost::adopt_client, 2))?;
     class.define_method("client_of", method!(WorkerHost::client_of, 1))?;
     class.define_method("realm_of", method!(WorkerHost::realm_of, 1))?;
@@ -378,6 +399,17 @@ mod tests {
         assert_eq!(host.race_winner(0, 2, Some("handler".into())), None);
         host.race_leg(0, 3, "net".into(), 60_000.0);
         assert_eq!(host.race_winner(0, 3, Some(FALLTHROUGH.into())).as_deref(), Some("net"));
+    }
+
+    #[test]
+    fn a_navigation_leg_after_its_wait_is_let_go_of() {
+        let host = WorkerHost::new();
+        let id = host.await_navigation();
+        host.race_leg(0, id, "net".into(), 0.0);
+        host.forget_reply(id);
+        assert_eq!(host.race_winner(0, id, Some(FALLTHROUGH.into())).as_deref(), Some("net"));
+        host.race_leg(0, id, "late".into(), 0.0);
+        assert!(host.lock().raced.is_empty());
     }
 
     #[test]
