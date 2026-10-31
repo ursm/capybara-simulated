@@ -214,8 +214,11 @@ site than its opener's page, judged then, on that URL (`Driver#hosts_partition?`
 an isolate of its own for good, so one that comes back to its opener's
 origin is reached whole, through the RPC, and has the gap — a split nothing
 needs any more, its reason (an isolate's service worker registrations, kept
-for one top-level site) gone now that every registration and client is kept
-by its storage key, top-level site and origin (sw_registry.rs), and so a
+for one top-level site) gone now that the registrations, jobs and clients
+are the session's, each kept by its storage key, top-level site and origin
+(sw_registry.rs, the driver's partition), and each service worker one
+isolate whichever window began it, hosted by the primary window's Browser
+(`Browser#sw_host`) as are the session's MessagePort channels — and so a
 backlog item, not a design choice; a pop-up opened at
 a URL of the page's site, or at about:blank, is a realm of its opener's
 isolate, where the function runs as a browser runs it (a `noopener` window is

@@ -301,6 +301,11 @@ pub(crate) fn partition_new_for_ruby() -> u64 {
 pub(crate) fn clear_for_ruby(partition: u64) {
     lock().partitions.remove(&partition);
 }
+// Whether the map of `partition` holds any registration — none, and no navigation or fetch has one to match (what a
+// navigation asks before it works out the storage key it would match by).
+pub(crate) fn any_for_ruby(partition: u64) -> bool {
+    lock().existing(partition).is_some_and(|p| p.registrations.iter().any(|r| r.mapped))
+}
 // Every registration the map of `partition` holds, in the order made: `[scope, registered, activating, serving, id,
 // top-level site]`, a handle nil for none.
 pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Option<u32>, Option<u32>, u32, String)> {

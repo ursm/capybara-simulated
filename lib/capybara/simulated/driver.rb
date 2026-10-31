@@ -104,6 +104,10 @@ module Capybara
         # which a service worker and every same-origin window share — and every window and frame and the next visit the
         # clipboard (idb_databases.rs, cache_storage.rs, system_clipboard.rs).
         @session_partition = Native.session_partition_new
+        # …and its service workers: their registrations, jobs and clients, each of a storage key, in the engine's
+        # registry (sw_registry.rs), every window's — and the workers themselves, which one window's Browser hosts
+        # (`sw_host`).
+        @sw_partition      = Native.sw_partition_new
         # Capture the universal-server flag ONCE, at session construction — the WPT
         # runner sets CSIM_LOCAL_ALL_HOSTS only while building the session, then
         # restores it. Every window (incl. aux windows opened later) inherits this so
@@ -122,13 +126,6 @@ module Capybara
         # isolate, a browsing context group of its own or a pop-up of another's — or one `window.open` made in a Browser's
         # isolate (RealmWindow), addressed in its host.
         @aux_windows     = []
-        # Browsers whose WINDOW closed while they still host an active service-worker
-        # registration. A registration is profile-wide state independent of the document
-        # that created it (a page registers, closes, and the SW keeps controlling
-        # navigations elsewhere), so the Browser is parked — keeping its SW worker
-        # thread + scope registry alive for sw_navigation_fetch — instead of disposed.
-        # Reclaimed by reset_windows!.
-        @sw_parked       = []
         # Browsers whose own window closed while windows `window.open` made in their isolates are open still: those
         # windows' hosts, stepped with them, retired with the last (`reap_closed_windows`).
         @hosts           = []
@@ -145,6 +142,7 @@ module Capybara
                     auth_cache:      @auth_cache,
                     local_storage:   @local_storage,
                     session_partition: @session_partition,
+                    sw_partition:    @sw_partition,
                     all_hosts_local: @all_hosts_local,
                     client_space:    (@client_spaces += 1) == 1 ? '' : "w#{@client_spaces}-").tap do |b|
           b.touch_input        = @touch
@@ -396,9 +394,8 @@ module Capybara
           window.is_a?(Browser) ? (window.dispose rescue nil) : window.discard!
         end
         @aux_windows.clear
-        (@hosts + @sw_parked).each {|b| b.dispose rescue nil }
+        @hosts.each {|b| b.dispose rescue nil }
         @hosts.clear
-        @sw_parked.clear
         @active_handle = nil
       end
 
@@ -693,9 +690,9 @@ module Capybara
 
       # Whether a window opened at `url` is of `host`'s page's top-level site (Browser#blob_partition_site): one of another
       # site is a Browser of its own, in its opener's browsing context group — a split its reason is gone from (the
-      # isolate's service worker registrations, kept for one site once, are each kept by its storage key now:
-      # sw_registry.rs), kept until the cross-site pop-up is a realm too (CLAUDE.md's gap list). (…one at about:blank, or
-      # to run a javascript: URL, its creator's)
+      # isolate's service worker registrations, kept for one site once, are the session's now, each by its storage key:
+      # sw_registry.rs, `sw_host`), kept until the cross-site pop-up is a realm too (CLAUDE.md's gap list). (…one at
+      # about:blank, or to run a javascript: URL, its creator's)
       private def hosts_partition?(host, url)
         return true if url.empty? || url.match?(Browser::ABOUT_BLANK) || url.match?(/\Ajavascript:/i)
 
@@ -777,9 +774,9 @@ module Capybara
 
 
       # The Browser whose window's registry is number `window` — the window a blob URL's
-      # maker is in — among the open, the primary and the parked ones.
+      # maker is in — among the open and the primary.
       private def browser_of_blob_window(window)
-        (window_browsers + @sw_parked).find {|b| b.blob_window == window }
+        window_browsers.find {|b| b.blob_window == window }
       end
       # Whether a window of this session other than `browser`'s is open (Browser#blob_shared?).
       def other_windows?(browser)
@@ -1066,66 +1063,17 @@ module Capybara
       end
       # Whether windows `window.open` made in Browser `b`'s isolate are open.
       private def hosts_windows?(b) = @aux_windows.any? {|o| o[:window].is_a?(RealmWindow) && o[:window].host.equal?(b) }
-      # A Browser no window of the session is of any more: disposed — or, still hosting a live service-worker
-      # registration, parked (see @sw_parked): its document-scoped machinery torn down, older parked browsers whose scopes
-      # this one re-registered retired (the newest registration for a scope is THE registration, as in a real profile),
-      # and the browser kept alive.
+      # A Browser no window of the session is of any more: disposed. (…its service workers none: the session's are the
+      # primary window's Browser's, which no window's closing retires — Browser#sw_host)
       private def retire_browser(b)
-        if b.sw_registrations_active?
-          b.park_for_service_workers!
-          retire_shadowed_parked(b)
-          @sw_parked << b
-        else
-          b.dispose rescue nil
-        end
+        b.dispose rescue nil
       end
 
-      # Dispose parked browsers whose live scopes are ALL re-registered by `newcomer` —
-      # their registrations are replaced, so keeping the old worker would let a stale
-      # SW shadow the new one in sw_navigation_fetch. A partially-overlapping parked
-      # browser stays (its non-shadowed scopes are still the live registrations; the
-      # newest-first search below picks the newcomer for the shared ones).
-      private def retire_shadowed_parked(newcomer)
-        fresh = newcomer.sw_live_scopes
-        @sw_parked.reject! {|b|
-          scopes = b.sw_live_scopes
-          next false if scopes.empty? || !(scopes - fresh).empty?
-          b.dispose rescue nil
-          true
-        }
-      end
-
-      # Dispose parked browsers whose service workers have all died since parking
-      # (the SW unregistered itself / closed) — nothing routes to them anymore, and
-      # each pins a whole V8 isolate until reset otherwise.
-      private def sweep_dead_parked
-        @sw_parked.reject! {|b|
-          next false if b.sw_registrations_active?
-          b.dispose rescue nil
-          true
-        }
-      end
-
-      # The fetch-event round-trip for a controlled NAVIGATION, resolved across the whole
-      # window set: a service-worker registration is profile-wide, so the Browser hosting
-      # the controlling SW may be any window's — or a parked one whose window already
-      # closed (searched newest-parked first: a re-registered scope's newest worker is
-      # the active registration). Returns the owner's respondWith wire hash, or nil
-      # (uncontrolled → load from the network).
-      # (…`site` the top-level site of the navigation's environment, whose storage key's registrations alone match)
-      def sw_navigation_fetch(url, site:, **kw)
-        sweep_dead_parked
-        owner = (window_browsers + @sw_parked.reverse).find {|b|
-          b.sw_controls_navigation?(url, site)
-        }
-        return nil unless owner
-
-        resp = owner.service_worker_navigation_fetch(url, site: site, **kw)
-        # Nobody pumps a parked browser — drop what the handler queued for its dead
-        # clients so the outbox can't grow across a long test.
-        owner.drop_dead_letter_worker_messages if @sw_parked.include?(owner)
-        resp
-      end
+      # The Browser that hosts the session's service workers (Browser#sw_host) — the primary window's, which lasts as
+      # long as the session — and the client ids that count as focused: the active window's
+      # (Browser#focused_client_ids), one window having the system focus.
+      def sw_host = @browser
+      def sw_focused_client_ids = host_of(active_browser || @browser).focused_client_ids
 
       def switch_to_window(h)
         reap_closed_windows

@@ -346,6 +346,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // A session's service worker registrations (sw_registry.rs).
     native.define_module_function("sw_partition_new", magnus::function!(sw_registry::partition_new_for_ruby, 0))?;
     native.define_module_function("sw_clear", magnus::function!(sw_registry::clear_for_ruby, 1))?;
+    native.define_module_function("sw_any", magnus::function!(sw_registry::any_for_ruby, 1))?;
     native.define_module_function("sw_registrations", magnus::function!(sw_registry::registrations_for_ruby, 1))?;
     native.define_module_function("sw_versions", magnus::function!(sw_registry::versions_for_ruby, 2))?;
     native.define_module_function("sw_worker_new", magnus::function!(sw_registry::worker_new_for_ruby, 5))?;
