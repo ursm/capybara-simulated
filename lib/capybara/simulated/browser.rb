@@ -6721,8 +6721,9 @@ module Capybara
       # 303 of a non-GET/HEAD rewrite the next hop to a bodyless GET — Fetch
       # "HTTP-redirect fetch" — so a redirected form POST "must clear body"; 307/308
       # re-POST). Returns __rackFetch's response wire shape (the JS frame builder
-      # reads body / headers / url / redirected / charset), or nil for a failed
-      # navigation (respondWith network error / redirect loop).
+      # reads body / headers / url / redirected / charset), or `{'error' => true, 'url'}`
+      # for a failed navigation (respondWith network error / redirect loop / a blocked
+      # opener policy), its URL the hop it failed at.
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
                                  referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false,
                                  coop: nil)
@@ -6742,6 +6743,10 @@ module Capybara
         end
         await_sw_activation(url, navigation_site.(url)) if !defer_ok && sw_registered?
         target      = url.to_s
+        # (…a network error's the URL it was at — its last hop's: HTML "create navigation params by fetching" sets the
+        # entry's URL to each URL a redirect goes on to, the error document committed at that one; Chrome and Firefox,
+        # measured 2026-11-01, traverse back to the last URL they requested)
+        failed      = ->(at) { {'error' => true, 'url' => at} }
         initiator   = referrer_source
         # (…referred by the document that holds the container — a srcdoc one's its own container's — under the policy the
         # container's `referrerpolicy` attribute sets, else that document's: `realm_referrer_initiator`)
@@ -6816,7 +6821,7 @@ module Capybara
                navigation_cross_site: fetch.cross_site?,
                cookie_context:        cookies
              ))
-            return nil if sw['networkError']
+            return failed.(target) if sw['networkError']
 
             status  = (sw['status'] || 200).to_i
             headers = sw['headers'] || {}
@@ -6835,17 +6840,17 @@ module Capybara
               dest:              dest,
               cookie_context:    cookies,
               user_activated:    user_activated
-            ) or return nil
+            ) or return failed.(target)
             status, headers, resp_body = response
             body = nil   # read only for the terminal hop, below
           end
           # (…a top-level traversable's, each response's opener policy enforced as it comes, a redirect's too: `enforce_coop`)
-          return nil if coop && !enforce_coop(coop, target, headers)
+          return failed.(target) if coop && !enforce_coop(coop, target, headers)
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
             # (…the next hop — a GET where the redirect makes one — or none: a Location no URL, a scheme no fetch goes to)
             command, to_get, new_client = fetch.redirect(status.to_i, loc.to_s, referrer_policy_header(headers))
-            return nil if command == 'fail'
+            return failed.(target) if command == 'fail'
             # (…one handed off, the frame staying at the document it is at)
             return {'no_document' => true} if command == 'hand_off'
 
@@ -10440,8 +10445,9 @@ module Capybara
           resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop: coop, **by)
           return if resp && resp['no_document']
 
-          # (…a network error an error document at the URL, of a new opaque origin, as the page's is: `response_outcome`)
-          resp ||= {'status' => 0, 'headers' => {'content-type' => 'text/html'}, 'body' => '', 'url' => url, 'error' => true}
+          # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
+          # `response_outcome`)
+          resp = {'status' => 0, 'headers' => {'content-type' => 'text/html'}, 'body' => '', 'url' => resp ? resp['url'] : url, 'error' => true} if !resp || resp['error']
           headers = resp['headers'] || {}
           response = [resp['status'], headers]
           # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307

@@ -93,8 +93,10 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
         // any other with a network error, an empty document too, of a new opaque origin — the URL the document's, its
         // fragment for :target)
         FrameSource::About(url) => {
+            // (…its path exactly "blank" — Fetch "scheme fetch" compares the path, not ASCII case-insensitively — the
+            // scheme the parser lowercases: `about:BLANK` an error document)
             let path = url.split(['?', '#']).next().unwrap_or_default();
-            r.error = !path.eq_ignore_ascii_case("about:blank");
+            r.error = !(path.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("about:")) && path.get(6..) == Some("blank"));
             r.url = url;
         }
         // (…a data: URL its own response, its MIME type `text/plain;charset=US-ASCII` where it names none — a malformed
@@ -218,6 +220,10 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
     let resp = resp.and_then(|resp| v8::Local::<v8::Object>::try_from(resp).ok());
     let flag = |scope: &mut v8::PinScope<'_, '_>, k: &str| resp.and_then(|resp| member(scope, resp, k)).is_some_and(|v| v.is_true());
     let no_document = flag(scope, "no_document");
+    // (…a network error, at the URL it failed at: its last hop's, HTML "create navigation params by fetching" setting the
+    // entry's URL to each a redirect goes on to — Chrome and Firefox, measured 2026-11-01, traverse back to it)
+    let failed_at = flag(scope, "error").then(|| resp.and_then(|resp| member(scope, resp, "url")).map(|v| v.to_rust_string_lossy(scope))).flatten();
+    let resp = resp.filter(|_| failed_at.is_none());
     if no_document {
         let arena = realm(scope, cid);
         arena.take_frame_history_url(container);
@@ -255,6 +261,9 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
     call(scope, host, H_FILE, &[entry.into()])?;
     let Some(resp) = resp else {
         r.error = true;
+        if let Some(url) = failed_at {
+            r.url = url;
+        }
         return Ok(FRAME_BUILD);
     };
     let string = |scope: &mut v8::PinScope<'_, '_>, k: &str| member(scope, resp, k).map(|v| v.to_rust_string_lossy(scope)).filter(|s| !s.is_empty());

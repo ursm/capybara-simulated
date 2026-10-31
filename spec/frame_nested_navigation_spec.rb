@@ -491,6 +491,8 @@ RSpec.describe 'a nested document navigating itself' do
     })
     s.visit '/'
     expect(s.evaluate_script('(() => { try { return frames[0].location.pathname; } catch (e) { return e.name; } })()')).to eq('SecurityError')
-    expect(s.within_frame(0) { s.evaluate_script('origin') }).to eq('null')
+    # (…at the URL it failed at, its last hop's — HTML sets the entry's URL to each a redirect goes on to; Chrome and
+    # Firefox, measured 2026-11-01, traverse back to the last URL they requested — as a navigation's is)
+    expect(s.within_frame(0) { s.evaluate_script('[location.pathname, origin]') }).to eq(['/r20', 'null'])
   end
 end

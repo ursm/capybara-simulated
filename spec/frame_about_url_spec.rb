@@ -22,11 +22,13 @@ RSpec.describe 'a frame at an about: URL' do
 
   # …any other about: URL's the network error's: an error document of a new opaque origin (HTML "create a document for
   # inline content"), whose document the page cannot reach.
-  it 'loads an error document of a new opaque origin for an about: URL other than about:blank' do
-    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><iframe src="about:foo"></iframe>']] })
+  it 'loads an error document of a new opaque origin for an about: URL other than about:blank, its path compared exactly' do
+    s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><iframe src="about:foo"></iframe><iframe src="about:BLANK"></iframe>']] })
     s.visit '/'
-    expect(s.evaluate_script('document.querySelector("iframe").contentDocument')).to be_nil
+    expect(s.evaluate_script('[...document.querySelectorAll("iframe")].map((f) => f.contentDocument)')).to eq([nil, nil])
     expect(s.within_frame(0) { s.evaluate_script('[origin, location.href]') }).to eq(['null', 'about:foo'])
+    # (…`about:BLANK` too: Fetch's scheme fetch takes about:blank's path as exactly "blank")
+    expect(s.within_frame(1) { s.evaluate_script('[origin, location.href]') }).to eq(['null', 'about:BLANK'])
   end
 
   # …and a frame whose only `src` is of another namespace has none: about:blank, at its insertion and as its `srcdoc` is
