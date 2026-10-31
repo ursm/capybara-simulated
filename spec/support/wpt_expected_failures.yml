@@ -2960,10 +2960,6 @@ html/browsers/browsing-the-web/navigating-across-documents/initial-empty-documen
 - history.replaceState
 html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/iframe-src-204.html:
 - about:blank on top of 204 loads async
-html/browsers/browsing-the-web/navigating-across-documents/initial-empty-document/window-open-nourl.html:
-- "[harness] TIMEOUT"
-- location.assign
-- location.href
 html/browsers/browsing-the-web/navigating-across-documents/javascript-url-load-as-html.xhtml:
 - 'javascript: URL navigation to a string must create a HTML document using the correct
   properties'

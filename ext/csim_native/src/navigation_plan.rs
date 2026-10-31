@@ -63,9 +63,6 @@ struct Own {
     reload: Option<Reload>,
     submission: Option<FrameSubmission>,
     traversal: Option<Traversal>,
-    // …a navigation to a `javascript:` URL, by its id: the ongoing navigation while its task waits to run, which one
-    // planned after it ends (`javascriptOngoing`).
-    javascript: Option<u64>,
     planned: u64,
 }
 
@@ -105,6 +102,9 @@ pub(crate) struct NavigationPlan {
     // the navigation commits no document after all (`flushRestore`).
     saved: Option<Own>,
     flushed: Option<Own>,
+    // How many times a navigation planned superseded what was planned before it: what a `javascript:` URL's task, which
+    // one planned after it ends, asks (`javascriptOngoing`).
+    superseded: u64,
 }
 
 // A form's submission a frame's document made that the host routes, as the task ends, to the navigable its target
@@ -237,6 +237,7 @@ impl NavigationPlan {
         self.navigation = None;
         self.submission = None;
         self.own = Own::default();
+        self.superseded += 1;
     }
     // A traversal of the document's window that makes its document again planned (`Traversal`): the navigation planned
     // before it let go — HTML "apply the history step" sets the ongoing navigation to "traversal".
@@ -431,31 +432,31 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
     plan.own.planned = next_planned();
 }
-// __dom.planJavascript() -> the id of a navigation of the calling realm's top-level document to a `javascript:` URL, its
-// ongoing navigation now: what it planned before let go (HTML "navigate": the ongoing navigation set to its id, which
-// aborts the one before — a location navigation another window's script planned of it), its script a task to come
-// (url-parse.js `runJavascriptURL`) — -1, none, while a traversal is planned.
+// __dom.planJavascript() -> a navigation of the calling realm's top-level document to a `javascript:` URL begun, its task
+// to come (url-parse.js `runJavascriptURL`): the location navigation another window's script planned of it let go —
+// and the count of supersessions it is to be judged by (`javascriptOngoing`); -1, none, while a
+// traversal is planned. Another `javascript:` URL's ends none: the URL standard's WPT (url/javascript-urls.window.js)
+// runs two a task begins, as Chrome does.
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
     let plan = plan(scope, &args);
     if plan.traversal_planned() {
         return rv.set_double(-1.0);
     }
-    plan.supersede();
-    let id = next_planned();
-    plan.own.javascript = Some(id);
-    rv.set_double(id as f64);
-}
-// __dom.javascriptOngoing(id) -> whether the navigation `id` (`planJavascript`) is the ongoing one still, its task
-// running now — no navigation planned since ("if targetNavigable's ongoing navigation is no longer navigationId, then
-// return") — and so no more.
-fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
-    let plan = plan(scope, &args);
-    let ongoing = plan.own.javascript == Some(id);
-    if ongoing {
-        plan.own.javascript = None;
+    // (…only a location navigation another realm's script planned of it: what its own document's click listener planned
+    // — `<a href="javascript:void(0)" onclick="location.href = '/next'">`, a form it submitted — goes on, the
+    // `javascript:` URL's followed after it)
+    if plan.own.location.as_ref().is_some_and(|l| l.initiator.as_ref().is_some_and(|i| i.0 != cid)) {
+        plan.own.location = None;
     }
-    rv.set_bool(ongoing);
+    rv.set_double(plan.superseded as f64);
+}
+// __dom.javascriptOngoing(at) -> whether a `javascript:` URL's navigation begun at supersession count `at` goes on as
+// its task runs: no navigation planned since superseded it ("if targetNavigable's ongoing navigation is no longer
+// navigationId, then return").
+fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let at = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    rv.set_bool(plan(scope, &args).superseded == at);
 }
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
@@ -513,10 +514,7 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
     for w in windows {
-        let plan = &mut realm(scope, w).navigation_plan;
-        let mut own = std::mem::take(&mut plan.own);
-        // (…a `javascript:` URL's its task's still, which no host takes)
-        plan.own.javascript = own.javascript.take();
+        let mut own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
         // (…a location's or a reload's let go where a traversal its window queued makes its document again: its task,
         // which plans that traversal, goes ahead of them — HTML "apply the history step" sets the ongoing navigation to
         // "traversal", as the page's does: browser.rb `apply_planned_traversals_before_navigations`)

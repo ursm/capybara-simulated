@@ -366,6 +366,15 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     expect(session.evaluate_script('w.document.title')).to eq('third')
   end
 
+  # (…but none its own document's click listener planned before the `javascript:` hyperlink was followed)
+  it 'follows the navigation a javascript: link\'s own click listener planned' do
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<a id="js" href="javascript:void(0)" onclick="location.href = \\'/second\\'">js</a>');
+    JS
+    session.find(:css, '#js').click
+    expect(session).to have_css('#second')
+  end
+
   it 'is the opener of a pop-up it opens at a URL' do
     popup = open_popup
     session.within_window(popup) { session.execute_script("window.open('/second', 'deep')") }
