@@ -634,11 +634,9 @@ module Capybara
         # a POST carrying its form's document's origin, a blob: URL's the blob of the click-time snapshot (a link's whose
         # URL its page may revoke first) or of the source's store, the source's document its initiator either way. (…an
         # about:blank one's none: the initial document at its URL — HTML's "URL and history update steps" in its place —
-        # the document it was opened for, whose Window the next does not keep: `opened_at_initial`)
+        # its initial about:blank still, whose Window a navigation to a document of its origin keeps)
         aux.open_initial_document(about_blank && !url.to_s.empty? ? url.to_s : 'about:blank')
-        if about_blank
-          aux.traversable.opened_at_initial
-        else
+        unless about_blank
           plan = {
             source:          source,
             initiator_realm: activation_realm,
@@ -657,9 +655,9 @@ module Capybara
       end
 
       # A new window of `host`'s browsing context group, opened by the document of its realm `activation_realm`, in its
-      # isolate: its initial about:blank of its creator's origin and base URL, named `name` — the document it was opened
-      # for where `url` is about:blank, whose Window the next does not keep (Browser#opened_at_initial) — or, opened for
-      # another, that navigation, by the same document: `plan` (the window's location plan, Browser#navigate_window_realm)
+      # isolate: its initial about:blank of its creator's origin and base URL, named `name` — at `url` where that is
+      # about:blank or none (Browser#initial_document_at), its initial about:blank still — or, opened for another, that
+      # navigation, by the same document: `plan` (the window's location plan, Browser#navigate_window_realm)
       # begun now, or — `planned` — planned for the window, which its event loop takes once the script that opened it is
       # done (Browser#consume_pending_window_nav). Its handle returned; the realm of its document where a script opened
       # it, which `open()` hands out as a WindowProxy (platform-globals.js).
@@ -668,12 +666,12 @@ module Capybara
         return unless realm
 
         window = add_realm_window(host, realm, activation_realm)
-        if url.match?(Browser::ABOUT_BLANK)
-          host.opened_at_initial(realm, url)
+        if url.empty? || url.match?(Browser::ABOUT_BLANK)
+          host.initial_document_at(realm, url)
         # (…a `javascript:` URL's run as the window's own task, a hyperlink's or a form's too: location.js `__csimNavigateFrom`)
-        elsif (planned && !url.empty?) || url.match?(/\Ajavascript:/i)
+        elsif planned || url.match?(/\Ajavascript:/i)
           host.plan_window_realm_navigation(realm, url, activation_realm, plan[5] == true)
-        elsif !url.empty?
+        else
           host.navigate_window_realm(realm, 'location', plan, post: post)
         end
         planned ? realm : window.window_handle

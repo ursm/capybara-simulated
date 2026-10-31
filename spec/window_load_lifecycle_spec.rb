@@ -90,9 +90,28 @@ RSpec.describe 'the load of a pop-up' do
     expect(read('[window.seen, w.foo]')).to eq(['42,42', 42])
   end
 
-  it 'keeps nothing its opener set on a window it opened at about:blank, which a navigation after replaces' do
+  # (…one opened at about:blank, or at none, its initial about:blank still — HTML's window open steps run the URL and
+  # history update steps alone — whose Window "create and initialize a Document object" reuses: the spec's explicit rule,
+  # where Chrome and Firefox keep nothing, measured 2026-10-31)
+  it 'keeps what its opener set on a window it opened at about:blank, or at no URL, through the navigation after' do
     run("window.w = open('about:blank'); w.foo = 42; w.location = '/reads';")
-    expect(read('[window.seen, w.foo]')).to eq([',', nil])
+    expect(read('[window.seen, w.foo]')).to eq(['42,42', 42])
+    run("window.w = open(); w.foo = 43; w.location = '/reads';")
+    expect(read('[window.seen, w.foo]')).to eq(['43,43', 43])
+  end
+
+  # (…its initial about:blank unloaded all the same, as the Window the next document keeps hears: its `pagehide`, its
+  # `visibilitychange`, its `unload` — Chrome and Firefox, measured 2026-10-31, and WPT close-method.window.js, which a
+  # `pagehide` of an `open()` window's closes; HTML's "unload a document" fires the first two only where the page is
+  # showing, which no parse made an initial about:blank — the next document visible all the same, a new one's)
+  it 'unloads the initial about:blank whose Window the next document keeps, which is visible' do
+    run(<<~JS)
+      window.heard = [];
+      window.w = open('/reads');
+      for (const type of ['pagehide', 'visibilitychange', 'unload']) w.addEventListener(type, () => heard.push(type));
+    JS
+    probe = '[window.seen, heard, w.document.visibilityState, w.document.hidden]'
+    expect(read(probe)).to eq([',', %w[pagehide visibilitychange unload], 'visible', false])
   end
 
   # (…as a browser's one event loop does: the opener's listener, put on the Window first, runs first, in the load's own

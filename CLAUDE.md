@@ -216,7 +216,7 @@ opener's isolate, where the function runs as a browser runs it; and a window
 `window.open` made in its opener's isolate keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
 Document object too, renewed (its listeners, handlers, observer registrations,
-adopted sheets, fonts, selection range, design mode and initial-about:blank flag
+adopted sheets, fonts, selection range, design mode, visibility and initial-about:blank flag
 reset, its sockets and event sources closed) and parsed again, where HTML makes a new one: the bridge holds one document
 per realm — its handle 0, its arena root, the module state of every binding of the
 realm read it — so a second Document of a live realm would need every one of those

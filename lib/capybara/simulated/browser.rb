@@ -7511,12 +7511,10 @@ module Capybara
         @runtime.realm_call(realm, '__csimNavigateFrom', url.to_s, initiator.to_i, '', activated)
       end
 
-      # …or, opened at about:blank — `url`, a fragment of it its own — that document the one it was opened for, at that
-      # URL (HTML's "URL and history update steps" in place of the navigation), whose Window the next does not keep
-      # (bridge.entry.js `__csimOpenedAtInitial`).
-      def opened_at_initial(realm, url)
-        @runtime.realm_call(realm, '__csimUpdateLocation', url.to_s) unless url.to_s == 'about:blank'
-        @runtime.realm_call(realm, '__csimOpenedAtInitial')
+      # …or, opened at about:blank — `url`, a fragment of it its own; none for '' — its initial about:blank at that URL (HTML's
+      # window open steps: the URL and history update steps in place of a navigation), the initial one still.
+      def initial_document_at(realm, url)
+        @runtime.realm_call(realm, '__csimUpdateLocation', url.to_s) unless url.to_s.empty? || url.to_s == 'about:blank'
       end
 
       # ── The windows `window.open` made in this isolate, as the driver addresses them (RealmWindow) ──
@@ -10554,14 +10552,16 @@ module Capybara
         # (…its entry of the window's session history: how it is made, the step a traversal goes to, a POST's resource)
         entry = [how, step, (post if http_url?(url))]
         # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept — and
-        # its Document object, renewed: no unload of it, whose hidden visibility the renewed one would keep)
+        # its Document object, renewed)
+        keeps = kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
+        # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
+        # the page's is: `boot_response_into_ctx` — while its realms still live: an initial about:blank's `unload` alone,
+        # which was never shown, its renewed Document visible still)
+        frozen_history { @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep') }
         new_id =
-          if kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
+          if keeps
             @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
           else
-            # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its
-            # descendants", as the page's is: `boot_response_into_ctx` — while its realms still live)
-            frozen_history { @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep') }
             # (…its entry taking its controls' state as its handlers left it, which a traversal back to it restores: as the
             # page's, `capture_outgoing_form_state`)
             history = window_history(realm_id)

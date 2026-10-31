@@ -1235,12 +1235,6 @@ impl SessionHistory {
     fn is_initial(&self) -> bool {
         self.lock().initial
     }
-    // #opened_at_initial: the window opened at about:blank — `open('about:blank')`, its initial about:blank the document
-    // it was opened for, no navigation after: that document is the window's own then, whose Window the next one does not
-    // keep (Chrome and Firefox measured: `w = open('about:blank'); w.foo = 1; w.location = url` — `url`'s has no `foo`).
-    fn opened_at_initial(&self) {
-        self.lock().initial = false;
-    }
     // #familiar_with?(other) -> whether it is familiar with `other` (`familiar`).
     fn is_familiar_with(&self, other: &SessionHistory) -> bool {
         familiar(self.id, other.id)
@@ -1289,7 +1283,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
     class.define_method("posted?", method!(SessionHistory::is_posted, 0))?;
     class.define_method("initial?", method!(SessionHistory::is_initial, 0))?;
-    class.define_method("opened_at_initial", method!(SessionHistory::opened_at_initial, 0))?;
     class.define_method("familiar_with?", method!(SessionHistory::is_familiar_with, 1))?;
     class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
