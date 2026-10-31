@@ -618,12 +618,12 @@ RSpec.describe 'a window made in its opener\'s isolate' do
 
   it 'is the opener of a pop-up it opens at a URL' do
     popup = open_popup
-    session.within_window(popup) { session.execute_script("window.open('/second', 'deep')") }
-    expect(session.driver.send(:window_entries).last[:opener]).to eq(popup.handle)
+    session.within_window(popup) { session.execute_script("window.deep = window.open('/second', 'deep')") }
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    session.within_window(popup) { expect(session.evaluate_script('[deep.opener === window, deep.opener === opener]')).to eq([true, false]) }
   end
 
-  # (…by a link of its host's page that names it: another isolate's script, which no WindowProxy of it could be handed,
-  # opens a window of its own meanwhile — R13 S6)
+  # (…by a link of its host's page that names it)
   it 'is found by its name by a link of the page that opened it' do
     session.execute_script(<<~JS)
       window.w = window.open('', 'nm');
@@ -706,8 +706,7 @@ RSpec.describe 'a window made in its opener\'s isolate' do
   describe 'opened at a URL' do
     # (…its every document sandboxed as the sandboxed frame that opened it is — HTML's popup sandboxing flag set, its
     # creator's where that has no `allow-popups-to-escape-sandbox` — its origin a new opaque one without
-    # `allow-same-origin`; with the escape, none: one of its opener's site, a realm of its isolate, and one of another,
-    # a Browser of its own, alike)
+    # `allow-same-origin`; with the escape, none: one of its opener's site and one of another alike)
     {
       'allow-scripts allow-popups'                                => nil,
       'allow-scripts allow-popups allow-popups-to-escape-sandbox' => :own
@@ -772,15 +771,19 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       expect(session.driver.window_browsers.size).to eq(browsers)
     end
 
-    # (…one of another site an isolate of its own, whose registries — its service workers' — are of its top-level site:
-    # Driver#hosts_partition?)
-    it 'loads a document of another site in an isolate of its own, its opener reaching it all the same' do
+    # (…one of another site likewise: its storage — its Web Storage areas, its databases, its channels — partitioned by its
+    # own top-level site, not shared with its opener's page, whose isolate it shares: realm_location.rs `storage_key`)
+    it 'loads a document of another site into its opener\'s isolate, its opener reaching it all the same' do
       browsers = session.driver.window_browsers.size
       session.execute_script("window.w = window.open('http://other.test/second')")
       session.has_css?('#none', wait: 0.2)
       expect(session.evaluate_script('[w.closed, w.opener === undefined, typeof w.postMessage]')).to eq([false, false, 'function'])
-      expect(session.driver.window_browsers.size).to eq(browsers + 1)
-      session.within_window(session.windows.last) { expect(session.evaluate_script('location.origin')).to eq('http://other.test') }
+      expect(session.evaluate_script('(() => { try { return w.document.title; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+      expect(session.driver.window_browsers.size).to eq(browsers)
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('#second')
+        expect(session.evaluate_script('[location.origin, opener === null]')).to eq(['http://other.test', false])
+      end
     end
 
     it 'costs no isolate of its own' do
@@ -1045,5 +1048,48 @@ RSpec.describe 'a window made in its opener\'s isolate, beside the frames of its
     let(:path) { '/?sandbox=allow-scripts%20allow-popups' }
 
     include_examples 'a frame it is not found from', 1
+  end
+end
+
+# A pop-up of another site is a realm of its opener's isolate too, its storage partitioned by its top-level site
+# (realm_location.rs `storage_key`): a frame of the opener's origin in it is a third party there — its Web Storage area,
+# its databases and its BroadcastChannels none of the opener's page's, as in Chrome and Firefox (privacycg/storage-
+# partitioning; WPT IndexedDB/idb-partitioned-basic, webmessaging/broadcastchannel/cross-partition).
+RSpec.describe 'a window of another site made in its opener\'s isolate', :every_host_local do
+  let(:session) {
+    simulated_session(lambda {|env|
+      body = if env['PATH_INFO'] == '/framed'
+        '<!doctype html><meta charset="utf-8"><title>framed</title><iframe name="fr" src="http://a.test/frame"></iframe>'
+      else
+        '<!doctype html><meta charset="utf-8"><title>page</title><p id="page">PAGE</p>'
+      end
+      [200, {'content-type' => 'text/html'}, [body]]
+    })
+  }
+  before { session.visit('http://a.test/') }
+  after  { session.reset_session! }
+
+  it 'keeps a frame of its opener\'s origin apart from the storage its opener\'s page has' do
+    popup = session.window_opened_by do
+      session.execute_script(<<~JS)
+        window.heard = [];
+        new BroadcastChannel('ch').onmessage = (e) => heard.push(e.data);
+        localStorage.setItem('k', 'first party');
+        indexedDB.open('db');
+        window.w = open('http://b.example/framed');
+      JS
+    end
+    session.within_window(popup) do
+      session.within_frame('fr') do
+        expect(session.evaluate_script('[location.origin, localStorage.getItem("k")]')).to eq(['http://a.test', nil])
+        expect(session.evaluate_async_script('indexedDB.databases().then((d) => arguments[0](d.map((x) => x.name)))')).to eq([])
+        session.execute_script("new BroadcastChannel('ch').postMessage('third party')")
+      end
+    end
+    session.execute_script("new BroadcastChannel('ch').postMessage('first party')")
+    expect(session).to have_css('#page')
+    expect(session.evaluate_script('heard')).to eq(['first party'])
+    expect(session.evaluate_async_script('indexedDB.databases().then((d) => arguments[0](d.map((x) => x.name)))')).to eq(['db'])
+    expect(session.driver.window_browsers.size).to eq(1)
   end
 end

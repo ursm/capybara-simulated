@@ -42,6 +42,9 @@ pub(crate) struct Location {
     initiator: Option<(i32, String, String)>,
     activated: bool,
     blob: Option<v8::Global<v8::Value>>,
+    // …the number of the navigation it is, its navigable's ongoing one as it was planned (HTML "navigate" step 20): the
+    // one record of it, which the host goes on with as it takes it (browser.rb `navigate_top_level`).
+    ongoing: u64,
 }
 
 // A form's submission a frame's document made that navigates the top-level document (its target `_top`, or a `_parent`
@@ -174,8 +177,8 @@ fn route(arena: &crate::dom::RealmArena, realm: i32, target: &[u16]) -> Route {
         // (…a window's of this isolate: its own tree's — or a discarded frame's own — or the one a name found from
         // another tree)
         Choice::TopLevel(window) | Choice::Window(window) => Route::Window(window),
-        // (…`_blank`'s, named none; a name no navigable of this isolate has — another isolate's window's, whose navigation
-        // by a form is the host's to plan, or none — a new one of its name)
+        // (…`_blank`'s, named none; a name no navigable of this isolate has — of its browsing context group, which no
+        // window of another isolate is of — a new one of its name)
         Choice::New if crate::navigables::target_keyword(&String::from_utf16_lossy(target)) == crate::navigables::TARGET_BLANK => {
             Route::NewWindow(Vec::new())
         }
@@ -464,9 +467,9 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         return;
     }
     arena.navigation_plan.supersede();
-    begin_navigation_of(arena, cid, None);
+    let ongoing = begin_navigation_of(arena, cid, None);
     let plan = &mut arena.navigation_plan;
-    plan.own.location = Some(Location { url, replace, initiator, activated, blob });
+    plan.own.location = Some(Location { url, replace, initiator, activated, blob, ongoing });
     plan.own.planned = next_planned();
 }
 // __dom.planJavascript() -> a navigation of the calling realm's navigable — its page's, a window's of this isolate, a
@@ -528,9 +531,9 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     plan.own.reload = Some(Reload { activated, blob, mark: None });
     plan.own.planned = next_planned();
 }
-// __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob] of the location
-// navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none), which it plans
-// no more — or null.
+// __dom.takeLocation() -> [url, replace, initiatorRealm, referrerSource, referrerPolicy, activated, blob, ongoing] of the
+// location navigation planned (initiatorRealm and the Referer null for the document's own, blob undefined for none), which
+// it plans no more — or null.
 fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
     let Some(l) = plan(scope, &args).own.location.take() else { return };
@@ -559,6 +562,7 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
         policy,
         v8::Boolean::new(scope, l.activated).into(),
         l.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
+        v8::Number::new(scope, l.ongoing as f64).into(),
     ]
 }
 // __dom.windowsPlanned() -> whether a window `window.open` made in this isolate has a navigation of its own planned —

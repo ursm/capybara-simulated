@@ -202,33 +202,14 @@ non-configurable through it outlives the navigation that replaces its window
 (`frameWindowProxyFor`, platform-globals.js); and the primary window —
 the Capybara session's own — is never script-closable, where HTML makes a
 window whose session history has one entry closable by its script
-(`Driver#script_close_window`): closing it would end the session under the
+(`Browser#script_close`): closing it would end the session under the
 test that every later command addresses, for a page that merely called
-`close()` on itself; and a function another isolate's window holds of a
-document that has since navigated away does nothing and returns undefined,
-where a browser would still run it: each document is a realm rebuilt from the
-snapshot, so the function went with the old one (handle ids are
-process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — of
-a pop-up whose `open()` (or link, or form) named a URL of another top-level
-site than its opener's page, judged then, on that URL (`Driver#hosts_partition?`):
-an isolate of its own for good, so one that comes back to its opener's
-origin is reached whole, through the RPC, and has the gap — a split nothing
-needs any more, its reason (an isolate's service worker registrations, kept
-for one top-level site) gone now that the registrations, jobs and clients
-are the session's, each kept by its storage key, top-level site and origin
-(sw_registry.rs, the driver's partition), and each service worker one
-isolate whichever window began it, hosted by the primary window's Browser
-(`Browser#sw_host`), the session's MessagePort channels the engine's too
-(port_channels.rs) — and so a backlog item, not a design choice; a pop-up
-opened at
-a URL of the page's site, or at about:blank, is a realm of its opener's
-isolate, where the function runs as a browser runs it (a `noopener` window is
-another isolate always, rightly: a browsing context group of its own, which no
-function reaches), and stays one wherever a redirect or a navigation takes it,
-as HTML keeps its browsing context group; and the WindowProxy of a pop-up
-opened cross-site, of another isolate, cross-origin has no child frame by index — `w[0]` a SecurityError,
-where HTML, Chrome and Firefox give that frame's WindowProxy — the RPC
-reaching that window's page alone (`csimWindowProxy`), gone with it; and a window
+`close()` on itself; and a function of a document that has since navigated
+away still runs, in its own realm, as a browser runs it, but reads an empty
+document there, where a browser's reads the document it was made with: each
+document is a realm, whose arena the engine drops as its navigable goes on to
+the next (one document per realm, as below) — a page's realm number, 0, the
+next document's too, whose `location` it then reads; and a window
 `window.open` made in its opener's isolate keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
 Document object too, renewed (its listeners, handlers, observer registrations,

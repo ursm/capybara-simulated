@@ -1,5 +1,5 @@
-// Cache Storage (Service Workers §5.4-5.5): per storage key — a driver session's partition, and the origin key the
-// bindings name (cache-storage.js `originKey`) — a name-to-cache map in creation order, each cache a list of
+// Cache Storage (Service Workers §5.4-5.5): per storage key — a driver session's partition, and the storage key the
+// bindings name (realm_location.rs `storage_key`: top-level site and origin) — a name-to-cache map in creation order, each cache a list of
 // request-response entries in stored order. One registry for the process, so every window and worker of a session reads
 // the same caches, and a page reloaded finds what the last one stored. A cache outlives its name: a Cache object stays
 // bound to the cache it opened after `delete()` unmaps the name, and the name opened again is a new cache — so a cache
@@ -68,7 +68,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "cacheRemove", remove_op, context_id);
 }
 
-// The storage key the first two arguments name: the session's partition and the origin key.
+// What the first two arguments name: the session's partition and the storage key.
 fn key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> (u64, String) {
     (args.get(0).integer_value(scope).unwrap_or(0) as u64, args.get(1).to_rust_string_lossy(scope))
 }

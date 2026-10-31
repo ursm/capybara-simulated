@@ -1,6 +1,7 @@
 // Web Locks' lock managers (Web Locks §3), one registry for the process: a manager for each storage bucket — a driver
-// session's partition and a storage key (an origin's) — with its held lock set and its lock request queue map, so every
-// realm and worker of an origin contends for the same locks, as the tabs of one app do.
+// session's partition and a storage key (its top-level site and origin: realm_location.rs `storage_key`) — with its held
+// lock set and its lock request queue map, so every realm and worker of an origin under one top-level site contends for
+// the same locks, as the tabs of one app do.
 //
 // Who asks is an AGENT (agents.rs), and what a manager owes one — a request of its granted, a lock of its stolen — is a
 // notice of its (kinds 16-17 below), a task of its own: the bindings (locks.js) keep each request's callback and

@@ -127,9 +127,9 @@ module Capybara
         @active_window_number = 0
         @browser         = build_window_browser
         @browser.window_handle = PRIMARY_HANDLE
-        # The session's other windows, `{handle:, window:, opener:}` each: a window a Browser of its own hosts — its own
-        # isolate, a browsing context group of its own or a pop-up of another's — or one `window.open` made in a Browser's
-        # isolate (RealmWindow), addressed in its host.
+        # The session's other windows, `{handle:, window:}` each: a window a Browser of its own hosts — its own isolate, a
+        # browsing context group of its own (a `noopener` pop-up, the driver's `open_new_window`) — or a pop-up of a
+        # Browser's browsing context group, a realm of its isolate (RealmWindow), addressed in its host.
         @aux_windows     = []
         # Browsers whose own window closed while windows `window.open` made in their isolates are open still: those
         # windows' hosts, stepped with them, retired with the last (`reap_closed_windows`).
@@ -200,8 +200,8 @@ module Capybara
         window unless window.discard_due?
       end
       # A window `window.open` made in a Browser's isolate whose script asked to close it, its close a task of its host's
-      # event loop due now: run, as the driver is between calls (Browser#run_due_tasks) — as another isolate's close is
-      # taken as the action that asked for it ends (Browser#take_window_tasks).
+      # event loop due now: run, as the driver is between calls (Browser#run_due_tasks) — as a Browser's own page's close
+      # is taken as the action that asked for it ends (Browser#take_window_tasks).
       private def settle_close(window)
         window.host.run_due_tasks if window.is_a?(RealmWindow) && window.closing? && !window.discard_due?
       end
@@ -486,45 +486,16 @@ module Capybara
         [PRIMARY_HANDLE] + @aux_windows.map {|w| w[:handle] }
       end
 
-      # All window entries (primary + aux) as `{handle:, window:, opener:}`.
+      # All window entries (primary + aux) as `{handle:, window:}`.
       # (…none whose close ran: no window of the session reaches it, its opener's `opener` of it none — Browser#close_steps)
       private def window_entries
-        [{handle: PRIMARY_HANDLE, window: @browser, opener: nil}] + @aux_windows.reject {|w| w[:window].discard_due? }
+        [{handle: PRIMARY_HANDLE, window: @browser}] + @aux_windows.reject {|w| w[:window].discard_due? }
       end
-      # …the one whose target name is `name` (its `window.name`, as it stands: Browser#window_name) in `from`'s browsing
-      # context group, that `from` is familiar with — HTML "find a navigable by target name" searches the group's set,
-      # skipping those: a `noopener` window's name finds none of its opener's, a cross-origin pop-up's none of the page's
-      # (Chrome and Firefox open a new window) — none for '' or none `from`. None that is closing: its `close()` takes it
-      # out of every lookup by name at once, its discard a task later (WPT close-method.window.js).
-      # Only the session's other Browsers are searched: never `from`'s own page, nor a window `window.open` made in a
-      # Browser's isolate (RealmWindow). For `from`'s own isolate, its engine has already chosen (navigables.rs
-      # `find_navigable`, which judges the frame that named the window and its sandbox). When it asks here, it chose a new
-      # window: a sandboxed frame, or a frame not familiar with the window of that name, must not reach it. No other
-      # isolate's WindowProxy reaches a RealmWindow (`isolate_window`) until R13 S6 brings every pop-up of a group into its
-      # opener's isolate, so another isolate that names one opens a window of its own meanwhile.
-      # (…"familiar with" between top-level windows, session_history.rs `familiar`: none once its page disowned it, Chrome
-      # and Firefox measured — a window that set `opener = null` is found by no name its opener's cross-origin page gives.
-      # `from`'s page's document is judged, also when a frame of `from` names another isolate's window, and the frame's
-      # sandbox is not asked — a gap: a frame not familiar with that window, or sandboxed against navigating it, reaches it)
-      private def named_window(name, from)
-        return if name.empty? || from.nil?
-
-        window_entries.find {|w|
-          target = w[:window]
-          target.is_a?(Browser) && !target.equal?(from) && target.window_name == name && !target.closing? &&
-            target.browsing_context_group == from.browsing_context_group && from.traversable.familiar_with?(target.traversable)
-        }
-      end
-
       # The Browser backing a handle, or nil if the window is closed/unknown.
       # (…a window `window.open` made in a Browser's isolate its RealmWindow)
       def window_browser(handle)
         window_entries.find {|w| w[:handle] == handle }&.fetch(:window)
       end
-
-      # …the Browser of a window of its own isolate, which the remote-ref RPC and another isolate's WindowProxy address —
-      # none for a window `window.open` made in a Browser's isolate, which no other isolate's proxy reaches (R13 S6).
-      private def isolate_window(handle) = (window = window_browser(handle)).is_a?(Browser) ? window : nil
 
       # Same, but for the operations that ADDRESS a window rather than probe for one: a closed or
       # unknown handle is Capybara's `WindowError`, never a silent fall back to the current window.
@@ -532,21 +503,24 @@ module Capybara
         window_browser(handle) or raise Capybara::WindowError, "Unknown window handle: #{handle}"
       end
 
-      # Open (or, by `name`, reuse) an auxiliary window. `target="_blank"`
-      # clicks and `window.open` both land here. A non-empty `name` that
-      # matches an existing window navigates that window instead of opening a
-      # new one (HTML window-name targeting); `opener_handle` records the
-      # opener so the new window's `window.opener` resolves back to it.
+      # Open a new top-level window. `target="_blank"` clicks, a name no window has, and `window.open` land here — the
+      # engine has chosen no navigable of its browsing context group by that name already (navigables.rs `find_navigable`).
+      # With its `opener` (a script's `window.open`, a hyperlink's or a form's whose noopener HTML "get an element's
+      # noopener" leaves unset — `rel=opener`, a named target), a window of `source`'s browsing context group: a realm of
+      # its isolate (`open_realm_window`), whatever its site — its opener reaching it through a WindowProxy gated by the
+      # CrossOriginProperties as a frame's is, its storage partitioned by its own top-level site (realm_location.rs
+      # `storage_key`). Without one, a browsing context group of its own: a Browser of its own, which no script of
+      # another window reaches.
       # (…`activation_realm` the realm of `source`'s whose window chose the new one, whose user activation a new window
-      # consumes — not one a name found)
+      # consumes)
       # (…`by_script` whether web content made it — a script's `window.open`, a link's or a form's target — which a script
       # may close, not the driver's `open_new_window`: HTML "is created by web content", its traversable's)
-      def open_aux_window(url = nil, name: nil, opener_handle: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, creator: nil, activation_realm: nil,
+      def open_aux_window(url = nil, name: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, creator: nil, activation_realm: nil,
                           user_activated: nil, by_script: true, planned: false)
         name = name.to_s
         # (…a document's to a `data:` URL, which a top-level browsing context refuses one's navigation to — a new window
-        # opened at about:blank, a named one left as it is: Browser#top_level_data_refused?)
-        refused = source&.top_level_data_refused?(url)
+        # opened at about:blank: Browser#top_level_data_refused?)
+        url = 'about:blank' if source&.top_level_data_refused?(url)
         # (…the policy the opening hyperlink sets, else its document's)
         referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
         # A blob: URL opened from a different storage partition is forced noopener
@@ -554,32 +528,8 @@ module Capybara
         # top-level window is the blob's own partition (so the blob still loads), but
         # the opener relationship is severed.
         opener = false if opener && url.to_s.start_with?('blob:') && source && cross_partition_blob?(url, source, activation_realm.to_i)
-        # A window opened with its opener (`opener`: a hyperlink's or a form's whose noopener HTML "get an element's
-        # noopener" leaves unset — `rel=opener`, a named target) — resolve the opener handle from the source.
-        opener_handle ||= handle_for(source) if opener && source
-        if (existing = named_window(name, source))
-          return existing[:handle] if refused
-
-          # (…its navigation carrying whether the opening document's window has transient activation, unconsumed: no new
-          # one is made)
-          activated = user_activated.nil? ? source && activation_realm && source.source_activated?(activation_realm) : user_activated
-          plan = {
-            source:          source,
-            initiator_realm: activation_realm,
-            referrer:        referrer,
-            referrer_policy: referrer_policy,
-            user_activated:  activated
-          }
-          if post
-            post_window(existing[:window], url, post, **plan)
-          else
-            navigate_window(existing[:window], url, **plan)
-          end
-          return existing[:handle]
-        end
         # (…the window's own navigation carrying whether its opener had it: the source snapshot's — its plan's, where a
         # hyperlink or a form planned it, else taken as it opens)
-        url = 'about:blank' if refused
         # (…the driver's own window had it, of no opener; one a document opened consumes its window's, which one of
         # another window's choosing has none of)
         had = source.nil? || (!activation_realm.nil? && source.consume_user_activation(activation_realm))
@@ -588,11 +538,10 @@ module Capybara
         # A window of its opener's browsing context group: a realm of the opener's isolate, its documents that isolate's —
         # its initial about:blank made with it (HTML "create a new auxiliary browsing context"), and the navigation it was
         # opened for, if any, its own: planned as a task of its event loop where a script asked for it (`planned`, the
-        # script that called `open()` still on the stack), else begun now (a hyperlink followed, a form submitted).
-        # (…one of the page's top-level site: `hosts_partition?` — a Browser of its own where the isolate makes no realm for
-        # it)
-        if opener_handle && source && hosts_partition?(source, url.to_s)
-          opened = open_realm_window(
+        # script that called `open()` still on the stack), else begun now (a hyperlink followed, a form submitted). None
+        # where the isolate made no realm for it.
+        if opener && source
+          return open_realm_window(
             source,
             url.to_s,
             name:             name,
@@ -605,49 +554,28 @@ module Capybara
             blob:             blob_snapshot,
             post:             post && [post[:body].to_s, post[:content_type].to_s]
           )
-          return opened if opened
         end
         @next_window_seq += 1
         handle = "csim-window-#{@next_window_seq}"
         aux = build_window_browser
         aux.window_handle = handle
-        # Registered BEFORE its documents boot: their scripts read
-        # `window.opener`, which resolves through this entry — so the entry
-        # (with its opener) must exist before they run.
         aux.window_name = name
-        # (…its opener browsing context the one opening it, which another window's familiarity with it goes through — a
-        # window `window.open` made in a Browser's isolate by the number of its traversable there)
-        case (opener_window = window_browser(opener_handle))
-        when RealmWindow then aux.traversable.opener_id = opener_window.traversable_id
-        when Browser then aux.traversable.opener = opener_window.traversable
-        end
         aux.traversable.by_web_content = by_script
         # (…and sandboxed as the document that opened it is, where that one's sandbox propagates to the windows it opens:
         # HTML's popup sandboxing flag set, its every document's)
         aux.traversable.popup_sandbox = source.popup_flags(activation_realm) if source && activation_realm
-        @aux_windows << {handle: handle, window: aux, opener: opener_handle}
+        @aux_windows << {handle: handle, window: aux}
         # (…another window of the session now, which may resolve the URLs the others made before it: their bytes entered in
         # the registry, for its workers' threads to read — Browser#partition_blob)
         window_browsers.each {|b| b.fill_blob_markers unless b.equal?(aux) }
-        # (…in its opener's browsing context group, where it has one: its about:blank, cross-origin isolated as it is)
-        if opener_handle && source
-          aux.inherit_cross_origin_isolation(source)
-          aux.inherit_browsing_context_group(source)
-          # (…and its session storage a copy of its opener's, as it opens: HTML "copy the session storage" — Chrome measured)
-          Native.storage_copy(source.session_storage_shed(activation_realm.to_i), aux.session_storage_shed)
-        end
-        # (…and its initial about:blank document its creator's origin and base URL — the document that called
-        # `window.open`: a window it opens at about:blank stays that document, its origin no new opaque one)
-        aux.inherit_creator(**creator) if creator && opener_handle
-        # Its initial about:blank, made with it (HTML "create a new auxiliary browsing context": what `open()` hands back is
-        # a window at it, which its opener's script reads as the call returns), firing no load — and the navigation it was
-        # opened for, if any, planned: a task of the window's own that its event loop takes once this one's script is done
-        # (Browser#take_window_tasks), its document parsed, its scripts run and its load fired there, as any of its
-        # navigations' are (HTML "window open steps": "navigate" the new navigable) — a `<form target=_blank method=post>`'s
-        # a POST carrying its form's document's origin, a blob: URL's the blob of the click-time snapshot (a link's whose
-        # URL its page may revoke first) or of the source's store, the source's document its initiator either way. (…an
-        # about:blank one's none: the initial document at its URL — HTML's "URL and history update steps" in its place —
-        # its initial about:blank still, whose Window a navigation to a document of its origin keeps)
+        # Its initial about:blank, made with it (HTML "create a new top-level traversable"), firing no load — and the
+        # navigation it was opened for, if any, planned: a task of the window's own that its event loop takes once this
+        # one's script is done (Browser#take_window_tasks), its document parsed, its scripts run and its load fired there,
+        # as any of its navigations' are (HTML "window open steps": "navigate" the new navigable) — a
+        # `<form target=_blank method=post>`'s a POST carrying its form's document's origin, a blob: URL's the blob of the
+        # click-time snapshot (a link's whose URL its page may revoke first) or of the source's store, the source's
+        # document its initiator either way. (…an about:blank one's none: the initial document at its URL — HTML's "URL
+        # and history update steps" in its place)
         aux.open_initial_document(about_blank && !url.to_s.empty? ? url.to_s : 'about:blank')
         unless about_blank
           plan = {
@@ -683,7 +611,7 @@ module Capybara
         )
         return unless realm
 
-        window = add_realm_window(host, realm, activation_realm)
+        window = add_realm_window(host, realm)
         if url.empty? || url.match?(Browser::ABOUT_BLANK)
           host.initial_document_at(realm, url)
         # (…a `javascript:` URL's run as the window's own task, a hyperlink's or a form's too: location.js `__csimNavigateFrom`)
@@ -696,45 +624,26 @@ module Capybara
         window.window_handle
       end
 
-      # Whether a window opened at `url` is of `host`'s page's top-level site (Browser#blob_partition_site): one of another
-      # site is a Browser of its own, in its opener's browsing context group — a split its reason is gone from (the
-      # isolate's service worker registrations, kept for one site once, are the session's now, each by its storage key:
-      # sw_registry.rs, `sw_host`), kept until the cross-site pop-up is a realm too (CLAUDE.md's gap list). (…one at
-      # about:blank, or to run a javascript: URL, its creator's)
-      private def hosts_partition?(host, url)
-        return true if url.empty? || url.match?(Browser::ABOUT_BLANK) || url.match?(/\Ajavascript:/i)
-
-        Native.site(url).to_s == host.blob_partition_site
-      end
-
       # A window `window.open` made in `host`'s isolate, its first document's realm `realm` — the key it is known by after
-      # (RealmWindow) — a window of the session from now on, with a handle of its own.
-      # (…its opener the window of `opener_realm`'s document: one `window.open` made in the same isolate, or the host's page)
-      private def add_realm_window(host, realm, opener_realm)
+      # (RealmWindow) — a window of the session from now on, with a handle of its own. (…its opener the engine's to know:
+      # navigables.rs `window_opener`)
+      private def add_realm_window(host, realm)
         window = RealmWindow.new(host, realm)
         window.window_handle = "csim-window-#{@next_window_seq += 1}"
-        @aux_windows << {handle: window.window_handle, window: window, opener: handle_of_realm(host, opener_realm)}
+        @aux_windows << {handle: window.window_handle, window: window}
         window
       end
-      # The handle of the window whose document is realm `realm` of `host`'s isolate: a window `window.open` made there,
-      # else the host's own (its page, or a frame of it).
-      private def handle_of_realm(host, realm)
-        window = @aux_windows.find {|w| w[:window].is_a?(RealmWindow) && w[:window].host.equal?(host) && w[:window].realm == realm }
-        window ? window[:handle] : handle_for(host)
-      end
 
-      # ── JS-facing window routing (called via Browser host fns) ──────
-      # Each window is a separate Browser/VM, so a cross-window reference is a
-      # proxy that forwards here; the Driver routes to the target Browser.
-
-      # `window.open(url, name)` from the `opener` window's JS. Resolves the URL
-      # against the opener's document and records the opener relationship.
-      # (…`noopener` one with none — `window.open` returning null, its about:blank document a new opaque origin, not the
-      # opener's — and `referrer` / `referrer_policy` its navigation's, the calling document's)
-      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, about_origin = nil, noopener: false, referrer: nil, referrer_policy: nil)
+      # `window.open(url, name)` from the JS of `opener_browser`'s realm `opener_realm_id`, which chose a new window
+      # (platform-globals.js `windowOpenSteps`): the URL resolved against its document, the window a realm of its isolate —
+      # its number returned, which the script's `open()` hands out as a WindowProxy of that realm, its navigation, if any,
+      # planned as a task of its own — or, `noopener`, a Browser of its own, nil returned: `window.open` returns null, its
+      # about:blank document a new opaque origin, not the opener's. (…`about_base` the opener document's base URL, which
+      # its about:blank takes, and `referrer` / `referrer_policy` its navigation's, the calling document's)
+      def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, noopener: false, referrer: nil, referrer_policy: nil)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
         # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to: the window
-        # opened at about:blank, as at an empty URL — a named one left as it is)
+        # opened at about:blank, as at an empty URL)
         resolved = nil if opener_browser.top_level_data_refused?(resolved)
         # Opening a blob: URL whose storage partition differs from the opener's
         # top-level site is forced NOOPENER (cross-partition-navigation): the new
@@ -742,44 +651,20 @@ module Capybara
         # blob still loads — but there is no opener relationship and `window.open`
         # returns null. Same-partition keeps the normal opener.
         noopener ||= resolved.to_s.start_with?('blob:') && cross_partition_blob?(resolved, opener_browser, opener_realm_id)
-        if noopener
-          # (…no opener_handle ⇒ window.opener null)
-          # (…an empty URL about:blank, as the window open steps make it: the opener path's window realm is that already)
-          open_aux_window(resolved || 'about:blank', name: name, source: opener_browser, activation_realm: opener_realm_id, referrer: referrer, referrer_policy: referrer_policy)
-          return nil
-        end
-        # A name an existing window has chooses that window — navigated where a URL was given — before an empty URL
-        # makes a new about:blank realm (HTML "the rules for choosing a navigable": `open('', 'nm')` is `nm`'s window).
-        if (existing = named_window(name.to_s, opener_browser))
-          navigate_window(
-            existing[:window],
-            resolved,
-            source:          opener_browser,
-            initiator_realm: opener_realm_id,
-            referrer:        referrer,
-            referrer_policy: referrer_policy,
-            user_activated:  opener_browser.source_activated?(opener_realm_id)
-          )
-          return existing[:handle]
-        end
-        # A new window of the opener's browsing context group: a realm of its isolate (`open_aux_window`), which the
-        # script's `open()` hands out as a native WindowProxy by that realm — its navigation, if any, planned as a task of
-        # its own — or a Browser of its own, by its handle.
         handle = open_aux_window(
-          resolved,
+          noopener ? resolved || 'about:blank' : resolved,
           name:             name,
-          opener_handle:    handle_of_realm(opener_browser, opener_realm_id),
+          opener:           !noopener,
           source:           opener_browser,
           activation_realm: opener_realm_id,
           referrer:         referrer,
           referrer_policy:  referrer_policy,
-          creator:          {origin: about_origin, base: about_base, url: referrer},
+          creator:          {base: about_base, url: referrer},
           planned:          true
         )
         window = window_browser(handle)
-        window.is_a?(RealmWindow) ? window.realm : handle
+        window.realm if window.is_a?(RealmWindow)
       end
-
 
       # The Browser whose window's registry is number `window` — the window a blob URL's
       # maker is in — among the open and the primary.
@@ -844,7 +729,8 @@ module Capybara
 
       # `BroadcastChannel.postMessage` — deliver to every OTHER window's channels
       # with the same name (same-window delivery is handled in-VM by the sender).
-      def broadcast_channel(source_browser, name, data, origin = nil)
+      # (…`key` the poster's storage key, realm_location.rs `bcKey`: its top-level site, then its origin's key)
+      def broadcast_channel(source_browser, name, data, key = nil)
         # An opaque origin is unique to its own agent cluster; its key is a token ('opaque:…') minted
         # per-realm and therefore only unique WITHIN one isolate — two unrelated opaque contexts in
         # DIFFERENT windows could mint the same token. A BroadcastChannel never bridges two distinct
@@ -852,9 +738,10 @@ module Capybara
         # WINDOW post from an opaque origin reaches no one: drop it rather than risk a cross-isolate
         # token collision. (Same-isolate opaque peers are reached in-VM / via enqueue_broadcast; an
         # inherited-origin blob worker via its own inbox — neither goes through this cross-window path.)
-        return if origin.to_s.start_with?('opaque:')
+        return if key.to_s.split(' ').last.to_s.start_with?('opaque:')
+
         window_browsers.each do |b|
-          b.enqueue_broadcast(name, data, nil, origin) unless b.equal?(source_browser)
+          b.enqueue_broadcast(name, data, nil, key) unless b.equal?(source_browser)
         end
       end
 
@@ -868,102 +755,25 @@ module Capybara
         end
       end
 
-      # raw_: an identity read — this runs inside host-fn callbacks (a popup's boot
-      # script reading opener.location), where the ticking current_url must not re-enter.
-      def window_location(handle)        = (isolate_window(handle)&.raw_current_url).to_s
-      # The number of the top-level traversable the window of `handle` is, nil for one gone.
-      def window_traversable(handle)     = isolate_window(handle)&.traversable&.id
-      # Cross-window remote-ref RPC: route a node/object proxy op to the window
-      # that owns the ref (handle), executing in that window's VM.
-      def window_ref_get(handle, id, prop)         = (b = isolate_window(handle)) ? b.remote_ref_get(id, prop) : nil
-      def window_ref_set(handle, id, prop, value)  = ((b = isolate_window(handle)) && b.remote_ref_set(id, prop, value))
-      def window_ref_has(handle, id, prop)         = (b = isolate_window(handle)) ? b.remote_ref_has(id, prop) : false
-      def window_ref_delete(handle, id, prop)      = (b = isolate_window(handle)) ? b.remote_ref_delete(id, prop) : false
-      # (…a function it returns a callback handle for the caller's realm `receiver`)
-      def window_ref_call(handle, id, method, args, receiver)
-        nesting_window_calls { (b = isolate_window(handle)) ? b.remote_ref_call(id, method, args, receiver) : nil }
-      end
-      # …and a callback the window of `handle` handed the one of `caller` (a function of its realm `realm`, by its id),
-      # called back in that window — synchronously, as the caller's task runs, as a browser's one event loop would call
-      # it: `w.onload = f` heard as the window's load dispatches — let go of once the caller holds it no more, and what it
-      # threw out of a dispatch there reported in its own realm.
-      def window_ref_apply(handle, realm, id, this, args, caller, receiver)
-        nesting_window_calls { (b = isolate_window(handle)) ? b.remote_ref_apply(realm, id, this, args, caller, receiver) : UNDEFINED }
-      end
-      def window_ref_release(handle, realm, id)  = isolate_window(handle)&.remote_ref_release(realm, id)
-      def window_ref_report(handle, realm, thrown) = isolate_window(handle)&.remote_ref_report(realm, thrown)
-      def window_ref_sweep(handle)                 = isolate_window(handle)&.collect_released
-      # The windows' calls into one another, each a host call within the last on the one native stack: nested past
-      # `WINDOW_CALL_DEPTH_MAX`, the innermost a RangeError its caller throws, as a browser's one stack overflows — calls
-      # that recurse from window to window without end (host-queries.js `__remoteThrow`'s marker). Each nests ~11 KB of the
-      # main thread's 8 MB stack (Ruby's and V8's frames): Ruby's own "stack level too deep" measured at ~720 nested calls (a
-      # ping-pong 360 round trips deep), so 500, a margin below it — 250 round trips, each two calls.
-      WINDOW_CALL_DEPTH_MAX = 500
-      STACK_OVERFLOW = {'__csimThrow' => {'name' => 'RangeError', 'message' => 'Maximum call stack size exceeded', 'stack' => ''}}.freeze
-      # …and what a callback of a window gone, or of a document gone, returns: nothing, as a function that returns none.
-      UNDEFINED = {'__csimUndefined' => true}.freeze
-      private def nesting_window_calls
-        return STACK_OVERFLOW if @window_call_depth.to_i >= WINDOW_CALL_DEPTH_MAX
 
-        @window_call_depth = @window_call_depth.to_i + 1
-        begin
-          yield
-        ensure
-          @window_call_depth -= 1
-        end
-      end
-      # A cross-window Location-object navigation (`w.location = url`, `w.location.replace(url)`, …) to `url`, which the
-      # caller parsed — per HTML relative to the ENTRY settings object, the document of the script navigating, NOT the
-      # target window's (platform-globals.js `csimWindowProxy`) — by the window `source`, its initiator, sending `referrer`
-      # by `referrer_policy`, with history handling "replace" where `replace` — its document the one of `source`'s realm
-      # `realm` whose script set it.
-      def window_set_location(source, handle, url, realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false)
-        b = isolate_window(handle) or return
-        navigate_window(
-          b,
-          url,
-          source:          source,
-          initiator_realm: realm,
-          referrer:        referrer,
-          referrer_policy: referrer_policy,
-          user_activated:  user_activated,
-          replace:         replace
-        )
-      end
-      # The handle of the window that opened `browser`'s — none once that one is discarded (HTML's `opener` getter: its
-      # opener browsing context's WindowProxy, none for a context gone; WPT opener-closed.html).
-      # (…a window `window.open` made in a Browser's isolate, which no other isolate reaches, its host's page standing in:
-      # a gap until R13 S6)
-      def opener_handle_of(browser)
-        handle = handle_for(browser)
-        opener = window_entries.find {|w| w[:handle] == handle }&.fetch(:opener)
-        window = window_browser(opener)
-        window.is_a?(RealmWindow) ? handle_for(window.host) : (opener if window)
-      end
-      private def handle_for(browser) = browser.window_handle
-
-      # Navigate an existing window, by another window's script (`source`'s): HTML "navigate", whose source snapshot —
-      # the Referer, the initiator (the document of `source`'s realm `initiator_realm` whose script asked — a frame's, not
-      # its page's — whose site Sec-Fetch-Site and the SameSite cookie gate measure from, of none where its origin is
-      # opaque, a sandboxed one's: Browser#navigation_initiator), the activation, the history handling — is taken here, as
-      # the script asks, and whose navigation the window begins as a task of its own event loop (Browser#take_window_tasks):
-      # never while the script that asked is on the stack, nor one of the window's own (its context rebuilt under it).
-      # (…`user_activated` whether the navigating document's window had transient activation as it began; `replace` its
-      # history handling "replace")
+      # The navigation a window of a browsing context group of its own was opened for (`open_aux_window`), by the document
+      # of `source`'s realm `initiator_realm`: HTML "navigate", whose source snapshot — the Referer, the initiator (that
+      # document — a frame's, not its page's — whose site Sec-Fetch-Site and the SameSite cookie gate measure from, of none
+      # where its origin is opaque, a sandboxed one's: Browser#navigation_initiator), the activation — is taken here, and
+      # whose navigation the window begins as a task of its own event loop (Browser#take_window_tasks), never while the
+      # script that opened it is on the stack. (…`user_activated` whether the opening document's window had transient
+      # activation as it began)
       # A blob: URL's blob is resolved here too, in the source's blob URL store (`blob_bytes_for`), as HTML resolves a URL's
       # blob URL entry as it is parsed: one the source revokes after still loads; none, a revoked one's, is a network error.
       # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
-      private def navigate_window(browser, url, source:, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, replace: false, blob: nil)
+      private def navigate_window(browser, url, source:, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, blob: nil)
         return if url.nil? || url.to_s.empty? || Browser::DATA_URL.match?(url.to_s)
-        if browser.is_a?(RealmWindow)
-          return navigate_realm_window(browser, url, source, initiator_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, replace: replace)
-        end
 
         blob ||= blob_bytes_for(url, source) if url.to_s.start_with?('blob:')
         initiator = source.navigation_initiator(initiator_realm.to_i)
         browser.traversable.plan_navigation(
           url.to_s,
-          replace,
+          false,
           user_activated == true,
           referrer,
           referrer_policy,
@@ -973,24 +783,9 @@ module Capybara
         )
       end
 
-      # …one `window.open` made in a Browser's isolate, by another isolate's document: navigated in its host as its own
-      # location would be — the Referer and policy the caller's — its request's initiator the caller's document as its
-      # Browser describes it (Browser#navigation_initiator of `source`'s realm `initiator_realm`), which no realm of that
-      # isolate is.
-      private def navigate_realm_window(window, url, source, initiator_realm, referrer:, referrer_policy:, user_activated:, replace: false, post: nil)
-        realm = window.realm or return
-        plan  = [url.to_s, replace, nil, referrer, referrer_policy, user_activated == true, nil]
-        window.host.navigate_window_realm(realm, 'location', plan, post: post, initiator_document: source.navigation_initiator(initiator_realm.to_i))
-      end
-
-      # …a form's submission to it by its name, with a POST resource (HTML "navigate", `documentResource` a POST resource:
-      # its encoded body and content type, from the form's document's origin — the initiator's), planned likewise.
+      # …a form's submission that opened it, with a POST resource (HTML "navigate", `documentResource` a POST resource: its
+      # encoded body and content type, from the form's document's origin — the initiator's), planned likewise.
       private def post_window(browser, url, post, source:, initiator_realm:, referrer:, referrer_policy:, user_activated:)
-        if browser.is_a?(RealmWindow)
-          post = [post[:body].to_s, post[:content_type].to_s]
-          return navigate_realm_window(browser, url, source, initiator_realm, referrer: referrer, referrer_policy: referrer_policy, user_activated: user_activated, post: post)
-        end
-
         initiator = source.navigation_initiator(initiator_realm.to_i)
         browser.traversable.plan_post(
           url.to_s,
@@ -1002,7 +797,7 @@ module Capybara
           initiator
         )
       end
-      # A blob: document loaded into window `target` from the blob a navigation another window planned of it resolved
+      # A blob: document loaded into window `target` from the blob the navigation it was opened for resolved
       # (`navigate_window`) — false for none.
       def load_blob_document(target, url, bytes, type) = !bytes.nil? && load_blob_into_window(target, url, target, snapshot: {'bytes' => bytes, 'type' => type})
 
@@ -1031,15 +826,6 @@ module Capybara
         window = w[:window]
         window.close! unless window.discard_due?
         discard_window(w)
-      end
-
-      # `close()` of the window of `handle` by the script of `source`'s window (HTML's Window `close()`, whose checks — one
-      # script-closable, that the caller is familiar with — are its traversable's: session_history.rs `ask_close`): set
-      # closing at once, which its `closed` reports, its close a task of its own event loop (Browser#take_window_tasks)
-      # and its discard the driver's after (`reap_closed_windows`). The primary window is the session's, which no script
-      # closes (a justified gap where its history has one entry: CLAUDE.md).
-      def script_close_window(source, handle)
-        isolate_window(handle)&.traversable&.ask_close(source.traversable)
       end
 
       # Discard the windows whose close ran (Browser#discard_due?) — as the driver is between calls, none of their own

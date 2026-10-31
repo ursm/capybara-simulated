@@ -641,10 +641,6 @@ module Capybara
       def pump_message_loop
         @ctx&.pump_message_loop
       end
-      # …and a full collection of the isolate first, for one whose garbage another isolate waits on (Browser#collect_released).
-      def collect_garbage
-        @ctx&.low_memory_notification
-      end
 
       # (…of realm `realm`'s document, a window `window.open` made in this isolate: its own, which none of the page's
       # changes)

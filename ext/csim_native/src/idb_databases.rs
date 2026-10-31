@@ -1,5 +1,5 @@
 // Indexed Database's databases (§2.1-2.4), one registry for the process: each named by the driver session's partition,
-// a storage key (an origin's) and its name, with its version, its object stores' schema and records (idb.rs), its
+// a storage key (its top-level site and origin: realm_location.rs `storage_key`) and its name, with its version, its object stores' schema and records (idb.rs), its
 // connections, its transactions and their order, and the queue its open and delete requests wait in — so every realm
 // and worker of a session reads the same database, and a page reloaded finds what the last one wrote.
 //

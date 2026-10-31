@@ -1,5 +1,6 @@
-// BroadcastChannels (HTML §9.5): every channel of the isolate, every realm's — its realm, its name, the origin it is
-// scoped to (its KEY: a tuple origin's serialization, an opaque one's token), whether it is closed — in the order the
+// BroadcastChannels (HTML §9.5): every channel of the isolate, every realm's — its realm, its name, the storage key it
+// is scoped to (realm_location.rs `bcKey`: its realm's top-level site and its origin's KEY, a tuple origin's
+// serialization, an opaque one's token), whether it is closed — in the order the
 // channels were made, which is the order a post reaches them in ("sorted by creation"). The isolate's (its `Dom`): a
 // post in a frame reaches the page's channels as its own, and an inbound one, another window's or a worker's, reaches
 // every realm's.
@@ -26,7 +27,7 @@ pub(crate) struct BroadcastChannels {
     next: u64,
     // (…in creation order, which its numbers are)
     of: BTreeMap<u64, Channel>,
-    // The channels of each name and origin key, in creation order: what a post looks up.
+    // The channels of each name and storage key, in creation order: what a post looks up.
     by_key: HashMap<(String, String), Vec<u64>>,
     // The size at which the next sweep lets go of the channels nothing holds: twice what the last one left.
     sweep_at: usize,
@@ -45,12 +46,12 @@ struct Delivery {
 }
 
 impl BroadcastChannels {
-    // The channels a post to `name` of `origin_key` reaches, in creation order: every open one but the poster — and,
+    // The channels a post to `name` of storage key `key` reaches, in creation order: every open one but the poster — and,
     // where `except_id` is 0, but every channel of `except_realm` (a realm another window's or a worker's post came
     // through); -1 a realm none is of.
     // (…the poster by its number, unique in the isolate, whichever realm's method posted)
-    fn targets(&self, name: &str, origin_key: &str, except_realm: i32, except_id: u64) -> Vec<(i32, u64)> {
-        let Some(ids) = self.by_key.get(&(name.to_owned(), origin_key.to_owned())) else { return Vec::new() };
+    fn targets(&self, name: &str, key: &str, except_realm: i32, except_id: u64) -> Vec<(i32, u64)> {
+        let Some(ids) = self.by_key.get(&(name.to_owned(), key.to_owned())) else { return Vec::new() };
         ids.iter()
             .filter_map(|id| Some((*id, self.of.get(id)?)))
             .filter(|(id, c)| {
@@ -127,13 +128,13 @@ fn id_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> u64 
     v.number_value(scope).map_or(0, |n| n as u64)
 }
 
-// __dom.bcNew(channel, name, originKey) -> the number of `channel`, a new open one of the calling realm's, of that name and
-// origin.
+// __dom.bcNew(channel, name) -> the number of `channel`, a new open one of the calling realm's, of that name and the
+// realm's storage key.
 fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let object = v8::Weak::new(scope, args.get(0));
     let realm = realm_id(scope, &args);
     let name = args.get(1).to_rust_string_lossy(scope);
-    let origin_key = args.get(2).to_rust_string_lossy(scope);
+    let key = crate::realm_location::storage_key_text(&mut dom(scope).arena, realm);
     let channels = &mut dom(scope).broadcast_channels;
     if channels.of.len() >= channels.sweep_at.max(64) {
         // (…the collected ones: a closed one whose object lives on is still closed, its post a throw)
@@ -142,7 +143,7 @@ fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     }
     channels.next += 1;
     let id = channels.next;
-    channels.by_key.entry((name, origin_key)).or_default().push(id);
+    channels.by_key.entry((name, key)).or_default().push(id);
     channels.of.insert(id, Channel { realm, closed: false, object });
     rv.set_double(id as f64);
 }
@@ -153,14 +154,14 @@ fn close_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
         c.closed = true;
     }
 }
-// __dom.bcTargets(name, originKey, exceptRealm, exceptId) -> the channels a post reaches, in creation order, each its
+// __dom.bcTargets(name, key, exceptRealm, exceptId) -> the channels a post reaches, in creation order, each its
 // realm and its number: [realm, id, realm, id, …].
 fn targets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let name = args.get(0).to_rust_string_lossy(scope);
-    let origin_key = args.get(1).to_rust_string_lossy(scope);
+    let key = args.get(1).to_rust_string_lossy(scope);
     let except_realm = args.get(2).int32_value(scope).unwrap_or(-1);
     let except_id = id_arg(scope, args.get(3));
-    let targets = dom(scope).broadcast_channels.targets(&name, &origin_key, except_realm, except_id);
+    let targets = dom(scope).broadcast_channels.targets(&name, &key, except_realm, except_id);
     let flat: Vec<f64> = targets.into_iter().flat_map(|(realm, id)| [f64::from(realm), id as f64]).collect();
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }

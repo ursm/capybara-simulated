@@ -87,21 +87,15 @@ RSpec.describe 'a function handed to another window of its group' do
   end
 end
 
-# …and one handed a window of another isolate — a pop-up opened at a URL of another site, a Browser of its own
-# (Driver#hosts_partition?), navigated back to its opener's origin, whose script reaches it through a WindowProxy of
-# that isolate (platform-globals.js `csimWindowProxy`) — crosses as a callback handle: the receiving window holds a
-# function that calls it back through the host, synchronously (platform-globals.js `__csimRemoteCallback`). What it
-# throws is thrown again in the caller, an Error of its kind there; calls that recurse from window to window stop at
-# `Driver::WINDOW_CALL_DEPTH_MAX`; a handle of a document gone calls nothing of the next (the gap CLAUDE.md lists); and
-# those the receiver lets go of are let go of where they were made.
-RSpec.describe "a function handed to another isolate's window" do
+# …and one handed a pop-up of another site, navigated back to its opener's origin — a realm of its opener's isolate too
+# (Driver#open_aux_window), whose functions are its own: the function itself, called in the realm that made it.
+RSpec.describe 'a function handed to a pop-up of another site' do
   let(:pages) {
     {
       '/opener' => <<~JS,
         window.check = (v) => { if (!v) throw new Error('assert failed'); };
-        window.typed = () => null.x;
         window.ping = (n) => (n <= 0 ? 0 : w.pong(n - 1) + 1);
-        window.hit = (s) => 'A ' + s;
+        window.hit = (s) => 'A ' + s + ':' + typeof document;
       JS
       '/other'  => "window.other = (s) => { window.called = s; return 'B'; };",
       '/popup'  => <<~JS
@@ -109,7 +103,7 @@ RSpec.describe "a function handed to another isolate's window" do
         window.store = (f) => { keep = f; };
         window.later = () => keep('late');
         window.pong = (n) => opener.ping(n);
-        window.take = (f) => 1;
+        window.echo = (f) => f;
       JS
     }
   }
@@ -120,46 +114,35 @@ RSpec.describe "a function handed to another isolate's window" do
   let(:session) { simulated_session(app) }
   before do
     session.visit 'http://a.test/opener'
-    browsers = session.driver.window_browsers.size
     session.execute_script("window.w = open('http://other.test/x', 'pw')")
-    expect(session.driver.window_browsers.size).to eq(browsers + 1)
     session.execute_script("w.location = 'http://a.test/popup'")
-    expect(read('typeof w.take')).to eq('function')
+    expect(read('typeof w.echo')).to eq('function')
+    expect(session.driver.window_browsers.size).to eq(1)
   end
 
   def run(script) = session.execute_script(script)
   def read(expr) = session.evaluate_script(expr)
   def in_popup(&) = session.within_window(session.windows.last, &)
 
-  it 'throws in the caller what the function threw, an Error of its kind' do
+  it 'is the function itself, which throws an exception of the realm that made it' do
+    expect(read('w.echo(hit) === hit')).to be(true)
     in_popup do
-      expect(read("(() => { try { opener.check(false); return 'none'; } catch (e) { return [e.name, e.message, e instanceof Error]; } })()"))
-        .to eq(['Error', 'assert failed', true])
-      expect(read("(() => { try { opener.typed(); } catch (e) { return [e.name, e instanceof TypeError]; } })()")).to eq(['TypeError', true])
+      expect(read("(() => { try { opener.check(false); return 'none'; } catch (e) { return [e.message, e instanceof opener.Error, e instanceof Error]; } })()"))
+        .to eq(['assert failed', true, false])
     end
   end
 
-  # (…a ping-pong 240 round trips deep, 480 calls nested, under `Driver::WINDOW_CALL_DEPTH_MAX`)
   it 'throws a RangeError for calls that recurse from window to window without end' do
     expect(read("(() => { try { return ping(1e6); } catch (e) { return e.name; } })()")).to eq('RangeError')
-    expect(read('ping(240)')).to eq(240)
   end
 
-  it 'calls nothing of the next document through a handle of a document gone' do
+  # (…Chrome and Firefox measured, as above: a function of a document navigated away still runs)
+  it 'runs a function of a document navigated away, in its realm' do
     run('w.store(window.hit)')
-    expect(in_popup { read('later()') }).to eq('A late')
+    expect(in_popup { read('later()') }).to eq('A late:object')
     session.visit 'http://a.test/other'
     run("window.w = open('', 'pw')")
-    expect(in_popup { read('later()') }).to be_nil
+    expect(in_popup { read('later()') }).to eq('A late:object')
     expect(read('window.called')).to be_nil
-  end
-
-  # (…3000 closures over 200 KB each: let go of here as the pop-up's isolate collects the functions it held them by)
-  it 'lets go of the functions the receiver let go of' do
-    ctx = session.driver.browser.instance_variable_get(:@runtime).instance_variable_get(:@ctx)
-    used = -> { ctx.low_memory_notification; ctx.heap_statistics[:used_heap_size] >> 20 }
-    before = used.()
-    run('for (let i = 0; i < 3000; i++) { const big = new Array(25000).fill(i); w.take(() => big.length); }')
-    expect(used.() - before).to be < 40
   end
 end

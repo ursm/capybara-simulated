@@ -59929,23 +59929,6 @@ service-workers/cache-storage/cache-storage-buckets.https.any.js:
     Buildable in-process (a bucket dimension on the origin-partitioned cache store),
     but unratified specs default out per CLAUDE.md rule 1 (chasing an in-flux spec
     bakes in churn). Re-audit if it advances to a ratified standard."
-service-workers/cache-storage/cross-partition.https.tentative.html:
-- name: CacheStorage caches shouldn't be shared with a cross-partition dedicated worker
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: CacheStorage caches shouldn't be shared with a cross-partition iframe
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: CacheStorage caches shouldn't be shared with a cross-partition service worker
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: CacheStorage caches shouldn't be shared with a cross-partition shared worker
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/clients-matchall-frozen.https.html:
 - name: Test Clients.matchAll()
   reason: "[WICG] Page Lifecycle API (Client.lifecycleState, document 'freeze', test_driver.freeze;
@@ -61695,39 +61678,12 @@ web-locks/partitioned-web-locks.tentative.https.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: WebLocks of an iframe under a 3rd-party site are partitioned
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 - name: "[harness] TIMEOUT"
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
 web-locks/storage-buckets.tentative.https.any.js:
 - name: Storage buckets have independent locks
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-webmessaging/broadcastchannel/cross-partition.https.tentative.html:
-- name: BroadcastChannel messages aren't received from a cross-partition dedicated
-    worker
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: BroadcastChannel messages aren't received from a cross-partition iframe
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: BroadcastChannel messages aren't received from a cross-partition service worker
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: BroadcastChannel messages aren't received from a cross-partition shared worker
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: BroadcastChannel messages aren't received from a nested iframe with a cross-site
-    ancestor
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.

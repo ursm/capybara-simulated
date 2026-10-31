@@ -175,7 +175,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "opaqueOriginCause", opaque_origin_cause, context_id);
     register(scope, ns, "frameOrigins", frame_origins_op, context_id);
     register(scope, ns, "cspSandboxing", csp_sandboxing, context_id);
-    register(scope, ns, "popupOrigins", popup_origins_op, context_id);
     register(scope, ns, "navigationOrigins", navigation_origins_op, context_id);
     register(scope, ns, "setSandbox", set_sandbox, context_id);
     register(scope, ns, "takeOpenerOrigins", take_opener_origins, context_id);
@@ -186,6 +185,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "setDocumentOrigin", set_document_origin, context_id);
     register(scope, ns, "originKey", origin_key, context_id);
     register(scope, ns, "originStorageKey", origin_storage_key, context_id);
+    register(scope, ns, "bcKey", bc_key, context_id);
     register(scope, ns, "keyOrigin", key_origin, context_id);
     register(scope, ns, "realmOrigin", realm_origin, context_id);
     register(scope, ns, "realmOriginKey", realm_origin_key, context_id);
@@ -295,13 +295,6 @@ fn frame_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let value = creation_value(scope, created);
     rv.set(value);
 }
-// __dom.popupOrigins() -> `popup_origins`.
-fn popup_origins_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let created = popup_origins(realm(scope, cid), cid);
-    let value = creation_value(scope, created);
-    rv.set(value);
-}
 // __dom.navigationOrigins(initiator, navigable) -> `[document, location, sandbox]` of the about:blank document a
 // navigation the document of realm `initiator` began makes in the navigable whose document is realm `navigable`'s (a
 // reload of an about:blank popup, its `location` set to about:blank — by itself or by its opener): its origin the
@@ -334,7 +327,7 @@ fn take_opener_origins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     location.origin_override = created.location.map(str::to_owned);
 }
 // __dom.pageSandbox(csp) -> the sandboxing flags the page's document, as it loads, has: its window's popup sandboxing flag
-// set (`popup_sandbox_of`: a pop-up's of another isolate, made by a sandboxed document — `SessionHistory#popup_sandbox=`)
+// set (`popup_sandbox_of`: a pop-up's a Browser hosts, made by a sandboxed document — `SessionHistory#popup_sandbox=`)
 // and its response's Content-Security-Policy `csp`'s `sandbox` (null for none) — HTML "determine the creation sandboxing
 // flags" for a top-level navigable.
 fn page_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -344,7 +337,7 @@ fn page_sandbox(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     rv.set_uint32(popup | crate::sandbox::sandboxing(csp.as_deref(), None));
 }
 // __dom.popupFlags() -> the popup sandboxing flag set of a window the calling realm's document opens
-// (`sandbox::popup_flags`): what the host gives a window of another isolate it opens (`SessionHistory#popup_sandbox=`).
+// (`sandbox::popup_flags`): what the host gives a window it opens as a Browser of its own (`SessionHistory#popup_sandbox=`).
 fn popup_flags_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     rv.set_uint32(crate::sandbox::popup_flags(realm(scope, cid).location.sandbox));
@@ -398,23 +391,46 @@ fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // What an opaque origin's key begins with.
 const OPAQUE_KEY: &str = "opaque:";
 
-// __dom.originStorageKey() -> the realm's storage key ("obtain a storage key"): its origin's key — null for an opaque
-// origin (a sandboxed frame's, a data: worker's), whose every storage request (IndexedDB, Cache Storage, Web Locks) is
-// a SecurityError.
+// The storage key of realm `cid`'s environment (HTML "obtain a storage key", with the partitioning Chrome and Firefox
+// ship, privacycg/storage-partitioning): its top-level site — the site of its top-level traversable's active document, a
+// worker's its owner's (blob_rules.rs `partition_site`) — and its origin, by its key (`origin_key`): an opaque one's a
+// token of its own. What Web Storage's areas, IndexedDB's databases, Cache Storage's caches, Web Locks' managers and
+// BroadcastChannel are scoped to, so a document of another site's window or frame shares none of them with its origin
+// as a first party — a pop-up of another site none with its opener's page, whose isolate it shares.
+pub(crate) fn storage_key(arena: &mut RealmArena, cid: i32) -> Option<(String, String)> {
+    let site = crate::blob_rules::partition_site(arena, cid);
+    let origin = arena.realm_state_mut(cid)?.location.origin_key(cid);
+    Some((site, origin))
+}
+// …as one string: the site, then the origin key, a space between (no origin's serialization holds one) — what a
+// BroadcastChannel is scoped to (HTML "obtain a storage key for non-storage purposes"), an opaque origin's by its token.
+pub(crate) fn storage_key_text(arena: &mut RealmArena, cid: i32) -> String {
+    storage_key(arena, cid).map(|(site, origin)| format!("{site} {origin}")).unwrap_or_default()
+}
+
+// __dom.originStorageKey() -> the calling realm's storage key, as one string — null for an opaque origin (a sandboxed
+// frame's, a data: worker's), which has none: its every storage request (IndexedDB, Cache Storage, Web Locks) a
+// SecurityError.
 fn origin_storage_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let key = realm(scope, cid).location.origin_key(cid);
-    if key.starts_with(OPAQUE_KEY) {
-        return rv.set_null();
+    match storage_key(&mut crate::dom::dom(scope).arena, cid).filter(|(_, origin)| !origin.starts_with(OPAQUE_KEY)) {
+        Some((site, origin)) => rv.set(v8::String::new(scope, &format!("{site} {origin}")).unwrap().into()),
+        None => rv.set_null(),
     }
+}
+// __dom.bcKey() -> …and as a BroadcastChannel is scoped to it, an opaque origin's too.
+fn bc_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let key = storage_key_text(&mut crate::dom::dom(scope).arena, cid);
     rv.set(v8::String::new(scope, &key).unwrap().into());
 }
 
-// __dom.keyOrigin(key) -> the origin an origin key serializes (what MessageEvent.origin exposes): "null" for an opaque
-// one's, a tuple origin's itself, '' for none.
+// __dom.keyOrigin(key) -> the origin a key serializes (what MessageEvent.origin exposes) — an origin key's, or a storage
+// key's origin key (`bcKey`): "null" for an opaque one's, a tuple origin's itself, '' for none.
 fn key_origin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key = if args.get(0).is_string() { args.get(0).to_rust_string_lossy(scope) } else { String::new() };
-    let origin = if key.starts_with(OPAQUE_KEY) { "null" } else { &key };
+    let key = key.rsplit(' ').next().unwrap_or_default();
+    let origin = if key.starts_with(OPAQUE_KEY) { "null" } else { key };
     rv.set(v8::String::new(scope, origin).unwrap().into());
 }
 

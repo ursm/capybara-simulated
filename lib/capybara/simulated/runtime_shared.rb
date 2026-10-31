@@ -79,18 +79,15 @@ module Capybara
         '__csim_wsClose'             => ->(b, *a) { b.ws_close(a[0], a[1], a[2]); nil },
         '__csim_rackFetchAsync'      => ->(b, *a) { b.rack_fetch_async(a[0], a[1]) },
         '__csim_rackFetchAsyncAbort' => ->(b, *a) { b.rack_fetch_async_abort(a[0]); nil },
-        # Cross-window references (window.open / opener / postMessage). A separate-VM
-        # aux window forwards to the Driver; a same-origin window realm lives in this
-        # isolate. a[2] is the opener's realm id (for wiring window.opener); a[3]/a[4] the opener
-        # document's base URL and origin, which an about:blank popup inherits.
-        # (…each that runs another window's script made under `reaching_another_window`: this window's script waits on
-        # the call, its VM on the stack, which a navigation of this window that script makes must not rebuild)
-        '__csimWindowOpen'           => ->(b, *a) { b.reaching_another_window { b.open_child_window(a[0], a[1], a[2], a[3], a[4], a[5], a[6]) } },
+        # `window.open`: a new window of this window's browsing context group, a realm of this isolate (its number), or —
+        # noopener — a browsing context group of its own (nil). a[2] is the opener's realm id (for wiring window.opener);
+        # a[3] the opener document's base URL, which an about:blank popup inherits.
+        '__csimWindowOpen'           => ->(b, *a) { b.open_child_window(*a[0, 6]) },
         # A `target=_blank`/named link/area activation from a frame or window realm:
         # open a new auxiliary window (the realm's VM isn't rebuilt — a fresh window
         # is). `opener` = rel=opener (target=_blank defaults to noopener); the Driver
         # forces noopener for a cross-partition blob: target.
-        '__csimOpenAuxFromRealm'     => ->(b, *a) { b.reaching_another_window { b.open_aux_from_realm(*a[0, 6]); nil } },
+        '__csimOpenAuxFromRealm'     => ->(b, *a) { b.open_aux_from_realm(*a[0, 6]); nil },
         '__csimBroadcast'            => ->(b, *a) { b.broadcast_to_windows(a[0], a[1], a[2].to_i, a[3]); nil },
         # BroadcastChannel's multi-realm path: the isolate queues one ordered delivery per channel (broadcast_channels.rs
         # `bcQueue`), the host the other windows' and the workers' (`broadcast_queued`). Only taken where a sibling
@@ -102,34 +99,8 @@ module Capybara
         '__csimSessionPartition'     => ->(b, *_a) { b.session_partition },
         # …and the space the window's environment ids are minted in (Browser#client_space).
         '__csimClientSpace'          => ->(b, *_a) { b.client_space },
-        # The number of the top-level traversable the window of handle a[0] is (nil for a window gone): what its
-        # WindowProxy asks its origin of (session_history.rs `traversableSameOrigin`).
-        '__csimWindowTraversable'    => ->(b, *a) { b.window_traversable(a[0]) },
-        # …and the handle of this window itself, which a window another one's RPC names is matched against.
-        '__csimOwnWindowHandle'      => ->(b, *_) { b.window_handle.to_s },
-        # Cross-window remote-ref RPC: route an opener's node/object proxy op to
-        # the target window's VM (a[0]=window handle, a[1]=ref id, a[2]=prop/method).
-        '__csimWindowRefGet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_get(a[0], a[1], a[2]) } },
-        '__csimWindowRefSet'         => ->(b, *a) { b.reaching_another_window { b.window_ref_set(a[0], a[1], a[2], a[3]) } },
-        '__csimWindowRefCall'        => ->(b, *a) { b.reaching_another_window { b.window_ref_call(a[0], a[1], a[2], a[3], a[4]) } },
-        '__csimWindowRefHas'         => ->(b, *a) { b.reaching_another_window { b.window_ref_has(a[0], a[1], a[2]) } },
-        '__csimWindowRefDelete'      => ->(b, *a) { b.reaching_another_window { b.window_ref_delete(a[0], a[1], a[2]) } },
-        # …and a callback of another window's — a function of its realm a[1] it handed this one, by its id a[2] — called
-        # back there with this a[3] and the arguments a[4], its result for this one's realm a[5]
-        # (platform-globals.js `__csimRemoteCallback`); let go of, this window holding it no more; and what it threw out
-        # of a dispatch here, a[2], reported there.
-        '__csimWindowRefApply'       => ->(b, *a) { b.reaching_another_window { b.window_ref_apply(a[0], a[1], a[2], a[3], a[4], a[5]) } },
-        '__csimWindowRefRelease'     => ->(b, *a) { b.window_ref_release(a[0], a[1], a[2]); nil },
-        '__csimWindowRefReport'      => ->(b, *a) { b.reaching_another_window { b.window_ref_report(a[0], a[1], a[2]) }; nil },
-        # …and the window of handle a[0], to which this one handed many, collected, so that it lets go of those it holds no
-        # more (host-queries.js `__remoteCallbackOf`) — whether it did
-        '__csimWindowRefSweep'       => ->(b, *a) { b.reaching_another_window { b.window_ref_sweep(a[0]) } == true },
-        '__csimWindowLocation'       => ->(b, *a) { b.window_location_of(a[0]) },
-        # (…a navigation another window begins as a task of its own: planned, its source snapshot this window's realm a[4]'s)
-        '__csimWindowSetLocation'    => ->(b, *a) { b.set_window_location(a[0], a[1], a[4], user_activated: a[2] == true, replace: a[3] == true); nil },
-        # (…the window of handle a[0] — '' this one — set closing, its close a task of its own)
-        '__csimWindowClose'          => ->(b, *a) { b.close_window_of(a[0]); nil },
-        '__csimWindowOpener'         => ->(b, *_) { b.opener_handle },
+        # (…this window's page set closing by its script, its close a task of its own)
+        '__csimWindowClose'          => ->(b, *_a) { b.script_close; nil },
         # a[3] is the CREATING realm (the worker dies when it is discarded); a[4] that context's
         # CURRENT controller handle, which a DEDICATED worker inherits rather than scope-matching
         # its own — often opaque (blob:/data:) — script URL. 0 when the creator is uncontrolled.
