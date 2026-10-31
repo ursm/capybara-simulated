@@ -28827,469 +28827,580 @@ cookies/partitioned-cookies/partitioned-cookies.tentative.https.html:
     path/suffix. CLAUDE.md rule 1.
 cookies/samesite/fetch.https.html:
 - name: Cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to same-host fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to subdomain fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Same-host redirecting to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Subdomain redirecting to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 cookies/samesite/form-post-blank-reload.https.html:
 - name: Reloaded cross-site top-level form POSTs are strictly same-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 cookies/samesite/form-post-blank.https.html:
 - name: Cross-site redirecting to cross-site top-level form POSTs are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to same-host top-level form POSTs are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to subdomain top-level form POSTs are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site top-level form POSTs are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Same-host redirecting to cross-site top-level form POSTs are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Subdomain redirecting to cross-site top-level form POSTs are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 cookies/samesite/iframe-reload.https.html:
 - name: Reloaded cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 cookies/samesite/iframe.https.html:
 - name: Cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site navigating to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site navigating to same-host fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site navigating to subdomain fetches are cross-site-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to same-host fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to subdomain fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Same-host navigating to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Same-host redirecting to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Subdomain navigating to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Subdomain redirecting to cross-site fetches are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 cookies/samesite/img.https.html:
 - name: Cross-site images are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to cross-site images are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to same-host images are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to subdomain images are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Same-host redirecting to cross-site images are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: Subdomain redirecting to cross-site images are cross-site
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 cookies/samesite/multiple-samesite-attributes.https.html:
 - name: Cross-site redirecting to same-host images are cross-site
-  reason: 'Holds RFC 6265bis (draft -14, §5.6.7): a SameSite attribute of an unknown
-    value sets the cookie''s same-site-flag anew ("Let enforcement be ''Default''"),
-    which a cross-site retrieval excludes like a Lax one ("unless … The same-site-flag
-    is ''Lax'' or ''Default''"), so `SameSite=None; SameSite=unsupported` is expected
-    absent on a cross-site image. draft-ietf-httpbis-layered-cookies, which "obsoletes
-    RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the same-site mode"
-    names, says the opposite on both counts: an unknown value sets nothing (only "None",
-    "Strict" and "Lax" set cookie''s same-site), and "Retrieve Cookies" includes a
-    cookie when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''" — or when "cookie''s same-site is ''none''"
-    — so it goes with a cross-site request (CLAUDE.md rule 1 clause 3).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; multiple-samesite-attributes asserts it of cookies whose last SameSite
+    attribute is of no known value (as served, `SameSite=Unsupported` alone: setSameSiteMultiAttribute.py''s
+    dict keeps the last of its duplicate keys), to which -22 §5.6.7 gives the flag
+    "Default" ("Let enforcement be ''Default''") where the layered draft sets nothing
+    (only "None", "Strict" and "Lax" set cookie''s same-site). Out of scope by the
+    user''s ruling of 2026-10-31, not by a withdrawal: the driver follows Fetch''s
+    "determine the same-site mode" and its normative [COOKIES] reference, draft-ietf-httpbis-layered-cookies,
+    whose "Retrieve Cookies" includes a cookie whose same-site is "unset" under every
+    mode ("cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
+    ''lax-or-less'', or ''unset-or-less''") and which obsoletes 6265bis if approved
+    ("Obsoletes: 6265 (if approved)"; "This document obsoletes RFC 6265 and 6265bis").
+    Chrome 156 ships Lax by default, with a two-minute exception for a cross-site
+    top-level POST; Firefox 159 sends the cookie with a cross-site image and POST
+    (measured 2026-10-31). The same subtests'' Strict, Lax and None assertions are
+    held by spec/wpt_samesite_guard_spec.rb.'
 - name: Cross-site redirecting to subdomain images are cross-site
-  reason: 'Holds RFC 6265bis (draft -14, §5.6.7): a SameSite attribute of an unknown
-    value sets the cookie''s same-site-flag anew ("Let enforcement be ''Default''"),
-    which a cross-site retrieval excludes like a Lax one ("unless … The same-site-flag
-    is ''Lax'' or ''Default''"), so `SameSite=None; SameSite=unsupported` is expected
-    absent on a cross-site image. draft-ietf-httpbis-layered-cookies, which "obsoletes
-    RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the same-site mode"
-    names, says the opposite on both counts: an unknown value sets nothing (only "None",
-    "Strict" and "Lax" set cookie''s same-site), and "Retrieve Cookies" includes a
-    cookie when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''" — or when "cookie''s same-site is ''none''"
-    — so it goes with a cross-site request (CLAUDE.md rule 1 clause 3).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; multiple-samesite-attributes asserts it of cookies whose last SameSite
+    attribute is of no known value (as served, `SameSite=Unsupported` alone: setSameSiteMultiAttribute.py''s
+    dict keeps the last of its duplicate keys), to which -22 §5.6.7 gives the flag
+    "Default" ("Let enforcement be ''Default''") where the layered draft sets nothing
+    (only "None", "Strict" and "Lax" set cookie''s same-site). Out of scope by the
+    user''s ruling of 2026-10-31, not by a withdrawal: the driver follows Fetch''s
+    "determine the same-site mode" and its normative [COOKIES] reference, draft-ietf-httpbis-layered-cookies,
+    whose "Retrieve Cookies" includes a cookie whose same-site is "unset" under every
+    mode ("cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
+    ''lax-or-less'', or ''unset-or-less''") and which obsoletes 6265bis if approved
+    ("Obsoletes: 6265 (if approved)"; "This document obsoletes RFC 6265 and 6265bis").
+    Chrome 156 ships Lax by default, with a two-minute exception for a cross-site
+    top-level POST; Firefox 159 sends the cookie with a cross-site image and POST
+    (measured 2026-10-31). The same subtests'' Strict, Lax and None assertions are
+    held by spec/wpt_samesite_guard_spec.rb.'
 cookies/schemeful-same-site/schemeful-iframe-subresource.tentative.html:
 - name: SameSite cookies with intervening cross-scheme iframe and subresources
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
@@ -59849,209 +59960,251 @@ service-workers/service-worker/partitioned.tentative.https.html:
     path/suffix. CLAUDE.md rule 1.
 service-workers/service-worker/same-site-cookies.https.html:
 - name: cross-site, form post with fallback
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: cross-site, form post with no service worker
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: cross-site, form post with passthrough
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, form post with fallback and cross-site redirect
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, form post with fallback, cross-site redirect, and same-origin
     redirect
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, form post with no service worker and cross-site redirect
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, form post with no service worker, cross-site redirect, and same-origin
     redirect
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, form post with passthrough and cross-site redirect
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, form post with passthrough, cross-site redirect, and same-origin
     redirect
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, nested set location with cross-site middle frame and change-request
     service worker
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, nested set location with cross-site middle frame and fallback
     service worker
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, nested set location with cross-site middle frame and navpreload
     service worker
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, nested set location with cross-site middle frame and no service
     worker
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 - name: same-origin, nested set location with cross-site middle frame and passthrough
     service worker
-  reason: 'Holds the "Lax by default" rule of RFC 6265bis (draft -14, §5.8.3: a cookie
-    whose same-site-flag is not "None" is excluded from a cross-site retrieval "unless
-    … The same-site-flag is ''Lax'' or ''Default''" and the request "uses a ''safe''
-    method"; -07 §4.1.2.7: a cookie of no known SameSite value is "subject to a default
-    enforcement mode that is equivalent to ''Lax''"), which cookie-helper.sub.js asserts
-    ("Expects SameSite-Lax-by-default"). draft-ietf-httpbis-layered-cookies, which
-    "obsoletes RFC 6265 and 6265bis" and is the [COOKIES] Fetch''s "determine the
-    same-site mode" names, says the opposite: "Retrieve Cookies" includes a cookie
-    when "cookie''s same-site is ''unset'' and sameSite is one of ''strict-or-less'',
-    ''lax-or-less'', or ''unset-or-less''", so a cookie of no SameSite attribute goes
-    with a cross-site request (CLAUDE.md rule 1 clause 3). Firefox 159 sends it with
-    a cross-site image and POST; Chrome 156 is Lax by default, with its two-minute
-    Lax+POST exception (measured 2026-10-31).'
+  reason: 'Holds RFC 6265bis''s Lax by default, draft -22 (IESG-approved, in the RFC
+    Editor queue): §5.8.3 excludes a cookie whose same-site-flag is not "None" from
+    a cross-site retrieval "unless … The same-site-flag is ''Lax'' or ''Default''"
+    and the request "uses a ''safe'' method", and §4.1.2.7 makes a SameSite value
+    it does not know "subject to a default enforcement mode that is equivalent to
+    ''Lax''"; cookie-helper.sub.js asserts it ("Expects SameSite-Lax-by-default").
+    Out of scope by the user''s ruling of 2026-10-31, not by a withdrawal: the driver
+    follows Fetch''s "determine the same-site mode" and its normative [COOKIES] reference,
+    draft-ietf-httpbis-layered-cookies, whose "Retrieve Cookies" includes a cookie
+    whose same-site is "unset" under every mode ("cookie''s same-site is ''unset''
+    and sameSite is one of ''strict-or-less'', ''lax-or-less'', or ''unset-or-less''")
+    and which obsoletes 6265bis if approved ("Obsoletes: 6265 (if approved)"; "This
+    document obsoletes RFC 6265 and 6265bis"). Chrome 156 ships Lax by default, with
+    a two-minute exception for a cross-site top-level POST; Firefox 159 sends the
+    cookie with a cross-site image and POST (measured 2026-10-31). The same subtests''
+    Strict, Lax and None assertions are held by spec/wpt_samesite_guard_spec.rb.'
 service-workers/service-worker/tentative/fetch-event-download-fallback.https.html:
 - name: Download FetchEvent without respondWith() falls back without navigating the
     page.
