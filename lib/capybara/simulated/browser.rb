@@ -320,7 +320,8 @@ module Capybara
         @read_owes_tick               = false
         @last_read_handle             = nil
         @polling_grace                = nil
-        @last_polled_gen              = nil
+        # (…the settle generation a wait last sampled, by the realm whose document it was of: `polling?`)
+        @last_polled_gens             = {}
         @idle_settle_polls            = 0
         @ticking                      = false
         # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
@@ -3016,16 +3017,18 @@ module Capybara
         if @timers_active || worker_timers_pending? || background_steps_pending?
           # (…the document's of the window it addresses: the page's, or a window's `in_window` — a matcher in one waits on
           # none of the other's redraws)
-          gen = @runtime.settle_gen(@top_realm_id)
+          gen  = @runtime.settle_gen(@top_realm_id)
+          last = @last_polled_gens[@top_realm_id]
           # (…the grace a CHANGE of it earns: the first sample is none — a background window's worker still booting as
-          # the wait began made every failing matcher of the active window wait out its whole wait)
-          if @last_polled_gen.nil?
-            @last_polled_gen = gen
+          # the wait began made every failing matcher of the active window wait out its whole wait — and a sample is of
+          # its realm's document: the first after a switch to another window's is no change of the one before)
+          if last.nil?
+            @last_polled_gens[@top_realm_id] = gen
             @idle_settle_polls = 0
             return true
           end
-          if gen != @last_polled_gen
-            @last_polled_gen = gen
+          if gen != last
+            @last_polled_gens[@top_realm_id] = gen
             @idle_settle_polls = 0
             @polling_grace = POLLING_GRACE_POLLS
             return true
@@ -3500,7 +3503,7 @@ module Capybara
         @wall_clock_last    = @last_tick_ts   # CSIM_CLOCK_WALL escape hatch: don't replay the prev page's gap
         @timers_active      = false
         @polling_grace      = nil
-        @last_polled_gen    = nil
+        @last_polled_gens   = {}
         @idle_settle_polls  = 0
         @ff_transient_polls = 0
         # Disarm the find pre-tick so the FIRST find after this navigation reads the current DOM
