@@ -76,6 +76,9 @@ pub(crate) struct Navigables {
     // though its sandboxing lets it navigate no other top-level traversable — and its `opener` — a window's by its key,
     // which outlives the documents it navigates to, a frame's or the page's by its realm (`opener_now`).
     openers: HashMap<i32, i32>,
+    // …and, a frame's document having made it, that frame's navigable, which outlives the realm of the document it had
+    // then (`opener_now`).
+    frame_openers: HashMap<i32, u32>,
     // …which a script may close, as no other top-level traversable (HTML "script-closable": one a script created), and
     // those it has: their proxies reporting them closed at once, stepped until the task the close queued discards them
     // (`discard_window`), their realms lingering inert after.
@@ -301,8 +304,12 @@ impl RealmArena {
                 }
             }
             None if cid == 0 && nav.history != 0 => crate::session_history::set_name_of(nav.history, &name),
+            // (…a window's, its current entry's document state's too: session_history.rs `set_current_name`)
             None => {
-                nav.top_names.insert(cid, name);
+                if let Some((history, _)) = self.window_history(cid) {
+                    history.set_current_name(&name);
+                }
+                self.navigables.top_names.insert(cid, name);
             }
         }
     }
@@ -488,7 +495,11 @@ impl RealmArena {
             nav.opened.insert(key);
             nav.window_histories.entry(key).or_insert_with(|| crate::session_history::SessionHistory::copying(opener_storage));
             // (…as it was first made: a navigation of the window keeps it, whatever of the realm it names is gone since)
+            // (…a frame's by its navigable, which the documents it navigates to keep: `frame_openers`)
             if let Some(opener) = opener {
+                if let Some(&navigable) = nav.navigable_ids.get(&opener) {
+                    nav.frame_openers.entry(key).or_insert(navigable);
+                }
                 let opener = nav.window_keys.get(&opener).copied().unwrap_or(opener);
                 nav.openers.entry(key).or_insert(opener);
             }
@@ -553,6 +564,10 @@ impl RealmArena {
     fn opener_now(&self, key: i32) -> Option<i32> {
         let nav = &self.navigables;
         let opener = *nav.openers.get(&key)?;
+        // (…a frame's navigable's active document now, whatever it navigated to: none once the frame is removed)
+        if let Some(&navigable) = nav.frame_openers.get(&key) {
+            return self.navigable_active_realm(navigable).filter(|&r| !self.is_dropped(r) && !nav.lost.contains(&r));
+        }
         match nav.window_realms.get(&opener) {
             Some(&realm) => (!nav.lost.contains(&realm)).then_some(realm),
             // (…the page's, its traversable closed: the isolate hosts the windows it opened still — Driver `@hosts`)
@@ -703,6 +718,7 @@ impl RealmArena {
                     nav.window_realms.remove(&key);
                     nav.window_histories.remove(&key);
                     nav.openers.remove(&key);
+                    nav.frame_openers.remove(&key);
                     nav.opened.remove(&key);
                     nav.closed.remove(&key);
                     nav.disowned.remove(&key);

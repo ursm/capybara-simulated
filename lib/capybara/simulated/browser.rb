@@ -10513,7 +10513,7 @@ module Capybara
           else
             made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
             # (…its name the one the window's next document keeps: window.js `__csimWindowNameFor`)
-            made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, *made[:doc_origin])
+            made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, made[:csp], *made[:doc_origin])
             @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
           end
         return unless new_id

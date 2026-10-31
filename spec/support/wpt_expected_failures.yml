@@ -3143,7 +3143,6 @@ html/browsers/history/the-location-interface/assign-replace-from-iframe.html:
   an iframe
 - Browser sends Referer header in iframe request when location.replace is called from
   an iframe
-- "[harness] TIMEOUT"
 html/browsers/history/the-location-interface/assign-replace-from-top-to-nested-iframe.html:
 - Browser sends Referer header in nested iframe request when location.assign is called
   on an iframe
@@ -3152,7 +3151,6 @@ html/browsers/history/the-location-interface/assign-replace-from-top-to-nested-i
 html/browsers/history/the-location-interface/assign-with-nested-iframe.html:
 - Browser sends Referer header when location.assign is called in iframe document on
   another nested iframe element
-- "[harness] TIMEOUT"
 html/browsers/history/the-location-interface/create-script-set-location.html:
 - "[harness] ERROR"
 - "[harness] no subtests"
@@ -3240,7 +3238,6 @@ html/browsers/history/the-location-interface/reload_document_write_onload.html:
 html/browsers/history/the-location-interface/replace-with-nested-iframe.html:
 - Browser sends Referer header when location.replace is called in iframe document
   on another nested iframe element
-- "[harness] TIMEOUT"
 html/browsers/history/the-location-interface/same-hash.html:
 - Using location.assign("about:srcdoc#te%3Cst") must reset scroll position
 - Using location.assign("about:srcdoc#te%3cst") must reset scroll position

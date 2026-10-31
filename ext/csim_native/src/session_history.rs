@@ -935,6 +935,13 @@ impl SessionHistory {
     pub(crate) fn queued_documents(&self) -> bool {
         self.lock().queued_documents()
     }
+    // …and its current entry's document state's navigable target name made `name`: a window's of this isolate, whose
+    // `window.name` was set (navigables.rs `set_window_name`) — what a traversal back to that entry brings back.
+    pub(crate) fn set_current_name(&self, name: &[u16]) {
+        let mut t = self.lock();
+        let build = t.build;
+        t.state.set_name(build, name);
+    }
     // The POST its current entry's document was made of, which a reload of it sends again — none for a GET's.
     pub(crate) fn current_post(&self) -> Option<Post> {
         let t = self.lock();
@@ -2124,7 +2131,10 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         (Arc::from(body), text(scope, args.get(5)))
     });
     let cid = crate::dom::realm_id(scope, &args);
-    let Some((traversable, _)) = window_traversable(crate::dom::realm(scope, cid), cid) else { return };
+    let arena = crate::dom::realm(scope, cid);
+    let name = arena.window_name(cid).into_owned();
+    let Some((traversable, _)) = window_traversable(arena, cid) else { return };
+    let mut restored = None;
     let state = {
         let mut t = lock(&traversable);
         // (…the traversals the document it replaces queued let go with it — one its `unload` asked for among them (WPT
@@ -2132,18 +2142,25 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         t.queued.retain(|q| q.asked);
         match how.as_str() {
             "push" | "replace" => {
-                let data = Data { post, texts: [None, referrer, None, None], ..Data::default() };
+                // (…its document state's navigable target name the window's as its document begins: HTML keeps it there)
+                let data = Data { post, texts: [None, referrer, None, None], name: Some(name), ..Data::default() };
                 let replace = how == "replace" && !t.state.entries.is_empty();
                 t.commit(TOP, 0, &url, false, replace, data);
                 None
             }
+            // (…and the name its entry's document state keeps, the window's again: HTML "apply the history step")
             "step" => {
                 t.go_to(step);
-                t.state.current_entry(TOP, t.build).and_then(|e| e.data.state.clone())
+                let entry = t.state.current_entry(TOP, t.build);
+                restored = entry.and_then(|e| e.data.name.clone());
+                entry.and_then(|e| e.data.state.clone())
             }
             _ => t.state.current_entry(TOP, t.build).and_then(|e| e.data.state.clone()),
         }
     };
+    if let Some(name) = restored {
+        crate::dom::realm(scope, cid).set_window_name(cid, name);
+    }
     rv.set(state_value(scope, state.as_ref()));
 }
 

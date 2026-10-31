@@ -368,13 +368,15 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     expect(session.evaluate_script('w.document.title')).to eq('third')
   end
 
-  # (…but none its own document's click listener planned before the `javascript:` hyperlink was followed)
-  it 'follows the navigation a javascript: link\'s own click listener planned' do
+  # (…but not a form's submission its click listener made, whose navigation HTML "plan to navigate" begins in a task
+  # after the `javascript:` hyperlink's — and ends it)
+  it "submits a form a javascript: link's own click listener submitted" do
     session.execute_script(<<~JS)
-      document.body.insertAdjacentHTML('beforeend', '<a id="js" href="javascript:void(0)" onclick="location.href = \\'/second\\'">js</a>');
+      document.body.insertAdjacentHTML('beforeend', '<form method="post" action="/posted"><input name="q" value="v"></form>' +
+        '<a id="js" href="javascript:void(0)" onclick="document.forms[0].submit()">js</a>');
     JS
     session.find(:css, '#js').click
-    expect(session).to have_css('#second')
+    expect(session).to have_text('POST q=v')
   end
 
   # (…its host page's document destroyed with its window — HTML "destroy a document": its timers run no more — the
@@ -425,6 +427,43 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       session.refresh
       expect(session).to have_text('POST k=v')
     end
+  end
+
+  # (…a frame's navigable, not the realm of the document it had: its next document the opener then, its removal none)
+  it 'has the frame that opened it its opener across a navigation of that frame' do
+    session.execute_script("document.body.insertAdjacentHTML('beforeend', '<iframe id=\"fo\" src=\"/second\"></iframe>')")
+    session.within_frame('fo') { expect(session).to have_css('#second') }
+    session.execute_script("window.f = document.getElementById('fo'); window.w2 = f.contentWindow.eval('window.open()');")
+    session.execute_script("f.src = '/third'")
+    session.within_frame('fo') { expect(session).to have_css('#third') }
+    expect(session.evaluate_script('w2.opener.location.pathname')).to eq('/third')
+    session.execute_script('f.remove()')
+    expect(session.evaluate_script('w2.opener')).to be_nil
+  end
+
+  # (…HTML keeps the name in the entry's document state: a traversal back to one of another origin brings back its name,
+  # which the navigation away from it cleared)
+  it 'has the name of the entry a traversal goes back to', :every_host_local do
+    session.execute_script("window.w = window.open(); w.location = '/second';")
+    session.within_window(session.windows.last) do
+      expect(session).to have_css('#second')
+      session.execute_script("window.name = 'kept'; opener = null;")
+      session.visit('http://other.test/third')
+      expect(session.evaluate_script('window.name')).to eq('')
+      session.go_back
+      expect(session).to have_css('#second')
+      expect(session.evaluate_script('window.name')).to eq('kept')
+    end
+  end
+
+  # (…a script its opener writes into it run with its own document the entry: HTML "prepare to run script")
+  it "resolves a URL a script its opener writes into it navigates it to against its own document" do
+    session.visit('/dir/page')
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      w.document.write('<base href="/elsewhere/"><script>location.href = "next"<\\/script>');
+    JS
+    session.within_window(session.windows.last) { expect(session).to have_current_path('/elsewhere/next') }
   end
 
   it 'is the opener of a pop-up it opens at a URL' do

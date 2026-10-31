@@ -433,22 +433,22 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan.own.planned = next_planned();
 }
 // __dom.planJavascript() -> a navigation of the calling realm's top-level document to a `javascript:` URL begun, its task
-// to come (url-parse.js `runJavascriptURL`): the location navigation another window's script planned of it let go —
-// and the count of supersessions it is to be judged by (`javascriptOngoing`); -1, none, while a
-// traversal is planned. Another `javascript:` URL's ends none: the URL standard's WPT (url/javascript-urls.window.js)
-// runs two a task begins, as Chrome does.
+// to come (url-parse.js `runJavascriptURL`), and the count of supersessions it is to be judged by (`javascriptOngoing`);
+// -1, none, while a traversal is planned. It is the navigable's ongoing navigation from now on (HTML "navigate", step 20
+// before step 21's `javascript:` branch: "Set the ongoing navigation for navigable to navigationId."), which ends the
+// navigation planned before it, whichever document planned it: a location navigation, a reload, a hyperlink's — but not
+// a form's submission, whose navigation HTML "plan to navigate" begins in a task after this one, and which ends this one
+// instead. (Chrome and Firefox navigate on to a location set before it — whatwg/html#2590 — where the spec wins.)
+// Another `javascript:` URL's ends none: the URL standard's WPT (url/javascript-urls.window.js) runs both of two a task
+// begins.
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
     let plan = plan(scope, &args);
     if plan.traversal_planned() {
         return rv.set_double(-1.0);
     }
-    // (…only a location navigation another realm's script planned of it: what its own document's click listener planned
-    // — `<a href="javascript:void(0)" onclick="location.href = '/next'">`, a form it submitted — goes on, the
-    // `javascript:` URL's followed after it)
-    if plan.own.location.as_ref().is_some_and(|l| l.initiator.as_ref().is_some_and(|i| i.0 != cid)) {
-        plan.own.location = None;
-    }
+    let submission = plan.own.submission.take();
+    plan.navigation = None;
+    plan.own = Own { submission, ..Own::default() };
     rv.set_double(plan.superseded as f64);
 }
 // __dom.javascriptOngoing(at) -> whether a `javascript:` URL's navigation begun at supersession count `at` goes on as
