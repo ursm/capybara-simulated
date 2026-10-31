@@ -260,8 +260,18 @@ impl BroadcastInbox {
     }
 }
 
+// Whether a post scoped to storage key `key` (realm_location.rs `bcKey`) reaches the channels of the session's other
+// windows: none where its origin or its top-level site is opaque — an opaque origin is its own agent cluster's, which no
+// other window's isolate holds, and its key a token minted per realm, unique only within its isolate: two unrelated
+// opaque origins of two windows may mint the same one, and a BroadcastChannel never bridges distinct opaque origins.
+// (A same-isolate opaque peer is reached in the isolate's own queue; a blob worker of an inherited one by its inbox.)
+fn reaches_other_windows(key: String) -> bool {
+    !key.split(' ').any(|part| part.starts_with(crate::realm_location::OPAQUE_KEY))
+}
+
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
     use magnus::{function, method, Module, Object};
+    native.define_module_function("broadcast_reaches_other_windows", function!(reaches_other_windows, 1))?;
     let class = native.define_class("BroadcastInbox", ruby.class_object())?;
     class.define_singleton_method("new", function!(BroadcastInbox::new, 0))?;
     class.define_method("push", method!(BroadcastInbox::push, 4))?;
@@ -287,5 +297,12 @@ mod inbox_tests {
         assert!(inbox.is_pending());
         inbox.clear();
         assert!(!inbox.is_pending());
+    }
+
+    #[test]
+    fn an_opaque_origin_or_site_reaches_no_other_window() {
+        assert!(reaches_other_windows("http://a.test http://a.test".to_owned()));
+        assert!(!reaches_other_windows("http://a.test opaque:7".to_owned()));
+        assert!(!reaches_other_windows("opaque:3 http://a.test".to_owned()));
     }
 }

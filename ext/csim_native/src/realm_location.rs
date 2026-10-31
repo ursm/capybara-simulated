@@ -395,7 +395,7 @@ fn origin_key(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 }
 
 // What an opaque origin's key begins with.
-const OPAQUE_KEY: &str = "opaque:";
+pub(crate) const OPAQUE_KEY: &str = "opaque:";
 
 // The storage key of realm `cid`'s environment (HTML "obtain a storage key", with the partitioning Chrome and Firefox
 // ship, privacycg/storage-partitioning): its top-level site — the site of its top-level traversable's active document, a
