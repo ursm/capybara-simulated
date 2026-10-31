@@ -260,6 +260,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
     crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "frameNavigationFinalized", frame_navigation_finalized, context_id);
     crate::dom::register(scope, ns, "takeFrameNavigations", take_frame_navigations, context_id);
     crate::dom::register(scope, ns, "frameContent", frame_content, context_id);
     crate::dom::register(scope, ns, "setFrameContent", set_frame_content, context_id);
@@ -849,6 +850,22 @@ fn frame_loads_owed(arena: &RealmArena, cid: i32) -> bool {
             && arena.get(container).is_some_and(|n| n.realm == cid)
             && arena.is_connected(container)
     })
+}
+// __dom.frameNavigationFinalized(containerNid) -> the realm of the container's document, to ask about its load again, or
+// -1: HTML "finalize a cross-document navigation" of the container's navigable — its plan taken (and the document it
+// made, which delays the load by its own from here on, or none: a 204, a download, a failure), landed, or cancelled,
+// which every one of those paths answers through — clearing its "is delaying load events" where no later navigation
+// of it is planned meanwhile (`delaying_load_events`).
+fn frame_navigation_finalized(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_int32(-1);
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let arena = &crate::dom::dom(scope).arena;
+    if arena.frame_navigations.0.get(&container).is_some_and(FrameNavigation::delaying_load_events) {
+        return;
+    }
+    if let Some(node) = arena.get(container) {
+        rv.set_int32(node.realm);
+    }
 }
 impl FrameNavigation {
     // Whether its navigable is delaying load events: a navigation planned of it not taken yet (`frame_loads_owed`).

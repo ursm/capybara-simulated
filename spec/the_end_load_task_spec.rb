@@ -116,4 +116,26 @@ RSpec.describe 'the load "the end" queues' do
       expect(s.evaluate_script('log')).to eq(['page'])
     end
   end
+
+  # …and a form submitted into a frame as the page parses, or from its DOMContentLoaded, whose response makes no document
+  # — a 204 / 205, by GET or POST — likewise: the navigation finalized with none, the page's load fires (Chrome).
+  {
+    'as it parses'           => ['', '<script>fm.submit()</script>'],
+    'from DOMContentLoaded'  => ["document.addEventListener('DOMContentLoaded', () => fm.submit());", ''],
+    'by POST as it parses'   => ['', '<script>fm.method = "post"; fm.submit()</script>']
+  }.each do |shape, (head, tail)|
+    it "fires the page's load where a form submitted into a frame #{shape} is answered 204" do
+      s = session_for(
+        '/'    => <<~HTML,
+          <!DOCTYPE html><meta charset="utf-8"><script>window.log = []; addEventListener('load', () => log.push('page')); #{head}</script>
+          <iframe name="t" src="/c"></iframe><form id="fm" target="t" action="/204"><input name="a" value="1"></form>#{tail}
+        HTML
+        '/c'   => 'c',
+        '/204' => [204, {}, []]
+      )
+      s.visit '/'
+      s.has_css?('#never', wait: 0.5)
+      expect(s.evaluate_script('log')).to eq(['page'])
+    end
+  end
 end
