@@ -132,6 +132,27 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq('/echo-img' => 'u=1', '/echo-post' => 'u=1')
   end
 
+  # …and a SameSite attribute of a value the draft does not know sets nothing, an earlier one's kept ("Parse a Cookie"
+  # sets cookie's same-site for "None", "Strict" and "Lax" alone): `SameSite=None; SameSite=bogus` is a SameSite=None
+  # cookie, sent with b's image of a's, and `SameSite=Lax; SameSite=bogus` a Lax one, not sent with it.
+  it 'keeps an earlier SameSite attribute where a later one is of no known value' do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => ['n=1; SameSite=None; SameSite=bogus; Secure; Path=/', 'l=1; SameSite=Lax; SameSite=bogus; Path=/']}, ['set']]
+      when '/page' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><img src="https://a.test/echo">']]
+      else
+        seen << env['HTTP_COOKIE'].to_s
+        [200, {'content-type' => 'image/gif'}, ['GIF89a']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://b.test/page'
+    expect(seen).to eq(['n=1'])
+  end
+
   # Fetch's "determine the same-site mode": "If request's redirect-taint is 'cross-site', then return 'unset-or-less'",
   # and a request's redirect-taint is "cross-site" once a URL of its URL list "is not same site with lastURL's origin and
   # request's origin is not same site with lastURL's origin". So a request a page makes through another site and back

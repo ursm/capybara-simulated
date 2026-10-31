@@ -258,12 +258,15 @@ fn parse(line: &str, now: f64) -> Option<Parsed> {
             }
             "secure" => parsed.secure = true,
             "httponly" => parsed.http_only = true,
+            // (…a value it does not know sets nothing, an earlier attribute's kept: draft-ietf-httpbis-layered-cookies
+            // "Parse a Cookie" sets cookie's same-site for "None", "Strict" and "Lax" alone, where RFC 6265bis
+            // set "Default")
             "samesite" => {
                 parsed.same_site = match value.to_ascii_lowercase().as_str() {
                     "none" => SameSite::None,
                     "lax" => SameSite::Lax,
                     "strict" => SameSite::Strict,
-                    _ => SameSite::Unset,
+                    _ => parsed.same_site,
                 }
             }
             _ => {}
@@ -551,6 +554,18 @@ mod tests {
         // (…a Domain attribute naming the host's public suffix leaves a `__Host-` one out too)
         let mut g = jar(&[("https://github.io/", "__Host-gh=1; Secure; Path=/; Domain=github.io", H | SECURE)]);
         assert_eq!(g.retrieve("https://github.io/", H | SECURE, NOW), "");
+    }
+
+    #[test]
+    fn keeps_an_earlier_same_site_where_a_later_value_is_unknown() {
+        let mut j = jar(&[
+            ("https://a.test/", "n=1; SameSite=None; SameSite=bogus; Secure", H | SECURE),
+            ("https://a.test/", "l=2; SameSite=Lax; SameSite=bogus", H | SECURE),
+            ("https://a.test/", "u=3; SameSite=bogus", H | SECURE),
+            ("https://a.test/", "s=4; SameSite=bogus; SameSite=Strict", H | SECURE),
+        ]);
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE, NOW), "n=1; u=3");
+        assert_eq!(j.retrieve("https://a.test/", H | SECURE | CROSS_SITE | LAX_RETRIEVE, NOW), "n=1; l=2; u=3");
     }
 
     #[test]
