@@ -111,11 +111,13 @@ pub(crate) fn post(partition: u64, from: String, data: String) -> Option<(String
     Some((to, holder))
 }
 
-// A window gone: every end one of its isolates held held for its next holder.
+// A window gone: every end one of its isolates held closed, the messages held for it dropped — its document destroyed,
+// nothing is delivered to its ports any more (HTML "MessagePort … garbage collection": its owner gone). An end given
+// up (`gone`) before it went, on its way to another holder, is no longer the window's, and stays.
 pub(crate) fn forget_window(partition: u64, window: u32) {
     for e in lock().iter_mut().filter(|((p, _), _)| *p == partition).map(|(_, e)| e) {
         if e.at.as_ref().is_some_and(|(_, w, _)| *w == window) {
-            e.at = None;
+            *e = End { closed: true, ..End::default() };
         }
     }
 }
@@ -142,14 +144,20 @@ mod tests {
         assert_eq!(gone(p, "c/0".into(), vec!["x".into()], "realm".into(), 0, 1), None);
         assert_eq!(post(p, "c/1".into(), "y".into()), None);
         assert_eq!(here(p, "c/0".into(), "realm".into(), 2, 3), vec!["x".to_owned(), "y".to_owned()]);
-        // (…a window gone: its ends held for their next holders)
+        // (…a window gone: its ends closed, nothing held for them — an end it gave up before, on its way, kept)
+        assert!(here(p, "d/0".into(), "realm".into(), 2, 3).is_empty());
+        assert_eq!(gone(p, "d/0".into(), Vec::new(), "realm".into(), 2, 3), None);
         forget_window(p, 2);
-        assert_eq!(post(p, "c/1".into(), "z".into()), None);
-        closed(p, "c/0".into());
-        assert_eq!(post(p, "c/1".into(), "w".into()), None);
+        for n in 0..3 {
+            assert_eq!(post(p, "c/1".into(), format!("z{n}")), None);
+        }
+        assert!(lock().get(&(p, "c/0".into())).is_some_and(|e| e.closed && e.pending.is_empty()));
+        assert!(lock().get(&(p, "d/0".into())).is_some_and(|e| !e.closed));
         assert_eq!(post(p, "c/0".into(), "w".into()), None);
+        // (…both ends closed: the channel forgotten)
         closed(p, "c/1".into());
-        assert!(lock().keys().all(|(q, _)| *q != p));
+        assert!(!lock().contains_key(&(p, "c/0".into())) && !lock().contains_key(&(p, "c/1".into())));
         clear(p);
+        assert!(lock().keys().all(|(q, _)| *q != p));
     }
 }

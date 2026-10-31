@@ -301,9 +301,13 @@ impl Registry {
 // ── A realm's number in the session ──
 // A window's realms are numbered by its isolate (a worker client's realm the negative of its handle); the session's
 // number for one is its window's number times WINDOW_SPAN past it — the first window's its own — so what is kept of a
-// realm here (a client's, a pending fetch's, a port's holder's) says which window to deliver to.
+// realm here (a client's, a pending fetch's, a port's holder's) says which window to deliver to. A realm number is
+// within ±WINDOW_SPAN / 2 (an isolate's contexts and a session's worker handles are counted far below 2³⁹), and a
+// session has fewer than 2²³ windows (i64 holds 2²³ spans): the product neither overflows nor reaches the next span.
 const WINDOW_SPAN: i64 = 1 << 40;
 pub(crate) fn realm_key_for_ruby(window: u32, realm: i64) -> i64 {
+    debug_assert!(window < 1 << 23, "window {window} past the 2^23 a realm's session number holds");
+    debug_assert!(realm.abs() < WINDOW_SPAN / 2, "realm {realm} past the span of a window");
     i64::from(window) * WINDOW_SPAN + realm
 }
 // …and `[window, realm]` a number names.
