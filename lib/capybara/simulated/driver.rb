@@ -906,10 +906,9 @@ module Capybara
       # Browser describes it (Browser#navigation_initiator of `source`'s realm `initiator_realm`), which no realm of that
       # isolate is.
       private def navigate_realm_window(window, url, source, initiator_realm, referrer:, referrer_policy:, user_activated:, replace: false, post: nil)
-        realm     = window.realm or return
-        initiator = source.navigation_initiator(initiator_realm.to_i)
-        plan = [url.to_s, replace, nil, referrer, referrer_policy, user_activated == true, nil]
-        window.host.navigate_window_realm(realm, 'location', plan, post: post, initiator_document: initiator || {})
+        realm = window.realm or return
+        plan  = [url.to_s, replace, nil, referrer, referrer_policy, user_activated == true, nil]
+        window.host.navigate_window_realm(realm, 'location', plan, post: post, initiator_document: source.navigation_initiator(initiator_realm.to_i))
       end
 
       # …a form's submission to it by its name, with a POST resource (HTML "navigate", `documentResource` a POST resource:
