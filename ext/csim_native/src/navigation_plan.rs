@@ -83,8 +83,11 @@ pub(crate) struct Reload {
     activated: bool,
     blob: Option<v8::Global<v8::Value>>,
     // …and the mark of the document's tasks queued by the time the task that planned it ended — as the host first came
-    // to take it (timers.rs `task_mark`): those its history step applies after (`queued_before`), the traversal queue
-    // running in parallel with that task.
+    // to take it (timers.rs `task_mark`): those its history step unloads the document after (`queued_count`, which the
+    // host runs first). The traversal queue runs in parallel with the document's tasks: one of them that navigates begins
+    // a navigation before the reload's history step is taken, which that navigation supersedes (`planLocation`) —
+    // Chrome 156 and Firefox 159 measured: `setTimeout(() => location.href = x, 0); location.reload()` goes to `x`,
+    // reloading nothing, on the page and in a pop-up.
     mark: Option<(u64, f64)>,
 }
 
@@ -279,7 +282,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "navigationBegun", navigation_begun, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
-    register(scope, ns, "reloadQueued", reload_queued_op, context_id);
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
     register(scope, ns, "routeFrameSubmission", route_frame_submission, context_id);
     register(scope, ns, "takeRoutedSubmission", take_routed_submission, context_id);
@@ -454,8 +456,9 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // navigation HTML "plan to navigate" begins in a task after this one, ending this one instead; nor a hyperlink's that
 // opens a new window, whose navigation is that navigable's; nor a reload, which HTML "reload a navigable" queues on the
 // traversal queue as "apply the reload history step" and is no ongoing navigation until that step applies (step 8.4,
-// "traversal") — which here is the host's, as the task ends, before this one's task runs. (Chrome and Firefox go on with
-// a location navigation set before it — whatwg/html#2590 — the spec's text the ruling here.)
+// "traversal") — the host's, once the tasks queued on the document's event loop by then have run, this one's among them
+// (`Reload::mark`). (Chrome and Firefox go on with a location navigation set before it — whatwg/html#2590 — the spec's
+// text the ruling here.)
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let plan = plan(scope, &args);
     if plan.traversal_planned() {
@@ -537,6 +540,7 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
 fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
+    let mut waiting = Vec::new();
     for w in windows {
         let mut own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
         // (…a location's or a reload's let go where a traversal its window queued makes its document again: its task,
@@ -547,11 +551,13 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
             own = Own::default();
         }
         // (…a reload's left planned while a task queued on the window's event loop before it is still to run — which the
-        // host runs first, `reloadQueued` — as the page's is: `take_reload`)
+        // host runs first: `[realm, "queued", count]` in its place — as the page's is: `take_reload`)
         if own.location.is_none() && own.reload.is_some() {
             let arena = realm(scope, w);
             arena.navigation_plan.own = own;
-            if reload_queued(arena, w) > 0 {
+            let queued = reload_queued(arena, w);
+            if queued > 0 {
+                waiting.push((w, queued));
                 continue;
             }
             own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
@@ -562,6 +568,10 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     }
     taken.sort_by_key(|&(planned, ..)| planned);
     let mut items = Vec::new();
+    for (w, queued) in waiting {
+        let item = [v8::Integer::new(scope, w).into(), v8::String::new(scope, "queued").unwrap().into(), v8::Integer::new_from_unsigned(scope, queued).into()];
+        items.push(v8::Array::new_with_elements(scope, &item).into());
+    }
     for (_, w, own) in taken {
         let realm = v8::Integer::new(scope, w).into();
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload, own.traversal) {
@@ -606,18 +616,14 @@ fn reload_queued(arena: &mut crate::dom::RealmArena, cid: i32) -> u32 {
     let mark = *reload.mark.get_or_insert(now);
     arena.queued_count(cid, mark)
 }
-// __dom.reloadQueued() -> `reload_queued` of the calling realm — the page's, or a window's of this isolate — which the
-// host runs (timers.js `__csimRunQueued`) before it takes the reload: the tasks HTML "apply the history step" step 12
-// queues the document's unloading after.
-fn reload_queued_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(reload_queued(realm(scope, cid), cid));
-}
-// (…none while a task queued on its document's event loop before it is still to run: `reload_queued`)
+// (…`[count]` instead while tasks queued on its document's event loop before it are still to run: `reload_queued`, which
+// the host runs first)
 fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    if reload_queued(realm(scope, cid), cid) > 0 {
-        return;
+    let queued = reload_queued(realm(scope, cid), cid);
+    if queued > 0 {
+        let count = v8::Integer::new_from_unsigned(scope, queued).into();
+        return rv.set(v8::Array::new_with_elements(scope, &[count]).into());
     }
     if let Some(reload) = plan(scope, &args).own.reload.take() {
         rv.set_bool(reload.activated);

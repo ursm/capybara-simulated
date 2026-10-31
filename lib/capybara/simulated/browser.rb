@@ -10415,13 +10415,15 @@ module Capybara
         # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's
         # the host's now — history.js `__csimApplyWindowTraversals`)
         @runtime.call('__csimApplyWindowTraversals')
-        # (…a reload's after the tasks queued on its window's event loop before it: `run_queued_before_reload`)
-        @runtime.window_realm_meta.each_key {|realm| run_queued_before_reload(realm) if @runtime.frame_realm_alive?(realm) }
         WINDOW_NAV_ROUNDS.times do
           navs = @runtime.call('__csimTakeWindowNavigations')
           break if navs.empty?
 
           navs.each do |realm_id, kind, *plan|
+            # (…a reload's waiting on the tasks queued on its window's event loop before it, run first, taken a round later:
+            # `run_queued_before_reload`)
+            next run_queued_before_reload(realm_id, plan[0]) if kind == 'queued'
+
             navigate_window_realm(realm_id, kind, plan)
           rescue StandardError => e
             log_console('warn', "window realm self-navigation failed: #{e.message}")
@@ -10554,23 +10556,32 @@ module Capybara
       # `ScriptTerminatedError`. (…`activated` whether the page had transient activation as it was called)
       # (…the tasks queued on the page's event loop before it run first: `run_queued_before_reload`)
       def consume_pending_reload
-        run_queued_before_reload(0)
         activated = @runtime.call('__csimTakeReload')
-        from_document(0) { refresh(user_activated: activated, through_ui: false) } unless activated.nil?
+        if activated.is_a?(Array)
+          run_queued_before_reload(0, activated[0])
+          activated = @runtime.call('__csimTakeReload')
+        end
+        from_document(0) { refresh(user_activated: activated, through_ui: false) } unless activated.nil? || activated.is_a?(Array)
       end
-      # A reload's history step, applied as the task that planned it ends, unloads the document by a task HTML "apply the
-      # history step" queues (step 12) on its event loop after those queued on it by then — a `javascript:` URL's begun in
-      # the same task among them, before the reload or after it: those run first, in the realm `realm` whose document it
-      # reloads, as many as are queued (navigation_plan.rs `reloadQueued`), none of a repeating timer's later ones.
-      private def run_queued_before_reload(realm)
-        queued = @runtime.realm_call(realm, '__csimReloadQueued').to_i
-        @runtime.realm_call(realm, '__csimRunQueued', queued) if queued.positive?
+      # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
+      # loop after those queued on it by then — a `javascript:` URL's begun in the same task among them, before the reload or
+      # after it: those run first, in the realm `realm` whose document it reloads, as many as were queued — `queued`, which
+      # the take of the reload answered instead of it (navigation_plan.rs `reload_queued`) — none of a repeating timer's later
+      # ones. (…a navigation one of them begins outruns the reload, whose history step is taken only after: the traversal
+      # queue runs in parallel with the document's tasks — Chrome and Firefox navigate, not reload)
+      private def run_queued_before_reload(realm, queued)
+        @runtime.realm_call(realm, '__csimRunQueued', queued.to_i)
       end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends — the
-      # tasks queued on each frame's event loop before it run first (`frameReloadsQueued`).
+      # tasks queued on each frame's event loop before it run first, `[realm, count]` in its place (`run_queued_before_reload`).
       def consume_pending_frame_reload
-        @runtime.call('__csimFramesReloadQueued').each {|realm, queued| @runtime.realm_call(realm, '__csimRunQueued', queued) }
-        @runtime.call('__csimTakeFrameNavigations', 'reload').each do |realm_id|
+        reloads = @runtime.call('__csimTakeFrameNavigations', 'reload')
+        waiting, reloads = reloads.partition {|r| r.is_a?(Array) }
+        unless waiting.empty?
+          waiting.each {|realm, queued| run_queued_before_reload(realm, queued) }
+          reloads += @runtime.call('__csimTakeFrameNavigations', 'reload').reject {|r| r.is_a?(Array) }
+        end
+        reloads.each do |realm_id|
           invalidate_find_cache
           # An entered `within_frame` frame reloads through `navigate_frame` (keeps
           # the frame stack in sync) — re-fetching its current document URL, which

@@ -252,7 +252,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
     crate::dom::register(scope, ns, "cancelFrameLocation", cancel_frame_location, context_id);
-    crate::dom::register(scope, ns, "frameReloadsQueued", frame_reloads_queued, context_id);
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
     crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
@@ -667,19 +666,25 @@ fn drop_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 // __dom.takeFrameNavigations(kind) -> the navigations of the kind `kind` ("navigate", "reload") the host planned of
 // frames, in the order they were planned, which none plans any more: `[realm, url, replace, initiatorRealm,
 // referrerSource, referrerPolicy, [sandbox], activated]` each, a reload's its realm alone — realm the frame's now, sandbox
-// null where the container had no attribute.
+// null where the container had no attribute — and, last, `[realm, count]` of each reload still waiting on the tasks queued
+// on its frame's event loop before it, which the host runs before it takes it (`frame_reload_queued`).
 fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let reloads = args.get(0).to_rust_string_lossy(scope) == "reload";
     let arena = &mut crate::dom::dom(scope).arena;
     let wanted = |h: &HostNavigation| matches!(h, HostNavigation::Reload { .. }) == reloads;
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
+    let mut waiting: Vec<(i32, u32)> = Vec::new();
     let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| wanted(h))).map(|(&c, _)| c).collect();
     for c in containers {
         let realm = arena.frame_realm(c);
         // (…a reload left planned while a task queued on the frame's document's event loop before it is still to run,
-        // which the host runs first: `frameReloadsQueued`)
-        if realm.is_some_and(|r| frame_reload_queued(arena, c, r) > 0) {
-            continue;
+        // which the host runs first: `[realm, count]` in its place)
+        if let Some(r) = realm {
+            let queued = frame_reload_queued(arena, c, r);
+            if queued > 0 {
+                waiting.push((r, queued));
+                continue;
+            }
         }
         let Some(nav) = arena.frame_navigations.0.get_mut(&c) else { continue };
         let Some((at, host)) = nav.host.take() else { continue };
@@ -720,6 +725,9 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         };
         items.push(item);
     }
+    for (r, queued) in waiting {
+        items.push(v8::Array::new_with_elements(scope, &[v8::Integer::new(scope, r).into(), v8::Integer::new_from_unsigned(scope, queued).into()]).into());
+    }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
@@ -745,26 +753,6 @@ fn frame_reload_queued(arena: &mut crate::dom::RealmArena, c: NodeId, realm: i32
         _ => None,
     });
     mark.map_or(0, |m| arena.queued_count(realm, m))
-}
-// __dom.frameReloadsQueued() -> `[realm, count]` of each frame whose reload waits on tasks queued on its document's event
-// loop before it (`frame_reload_queued`): what the host runs, in the frame's realm, before it takes the reload
-// (browser.rb `consume_pending_frame_reload`).
-fn frame_reloads_queued(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    let reloads: Vec<(NodeId, i32)> = arena
-        .frame_navigations
-        .0
-        .iter()
-        .filter(|(_, n)| matches!(n.host, Some((_, HostNavigation::Reload { .. }))))
-        .filter_map(|(&c, _)| arena.frame_realm(c).map(|r| (c, r)))
-        .collect();
-    let waiting: Vec<(i32, u32)> = reloads.into_iter().map(|(c, r)| (r, frame_reload_queued(arena, c, r))).filter(|&(_, n)| n > 0).collect();
-    let items: Vec<v8::Local<v8::Value>> = waiting
-        .into_iter()
-        .map(|(r, n)| v8::Array::new_with_elements(scope, &[v8::Integer::new(scope, r).into(), v8::Integer::new_from_unsigned(scope, n).into()]).into())
-        .collect();
-    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 // __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
 // `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it

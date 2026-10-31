@@ -571,6 +571,23 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     end
   end
 
+  # (…and a navigation one of those tasks begins outruns it: the traversal queue runs in parallel with the document's tasks,
+  # the reload's history step taken after them — Chrome 156 and Firefox 159 measured: the page and a pop-up go to the
+  # task's URL, reloading nothing)
+  context 'reloaded with a task queued that navigates' do
+    it 'goes to the task\'s URL on the page' do
+      session.execute_script("document.title = 'mark'; setTimeout(() => { location.href = '/second'; }, 0); location.reload();")
+      expect(session).to have_css('#second')
+    end
+
+    it "goes to the task's URL in a window of this isolate" do
+      session.execute_script("window.w = window.open(); w.location = '/third';")
+      session.within_window(session.windows.last) { expect(session).to have_css('#third') }
+      session.execute_script("w.eval(\"setTimeout(() => { location.href = '/second'; }, 0); location.reload();\")")
+      session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    end
+  end
+
   # (…but the tasks queued then alone: an interval begun with it runs a tick or two of them, its later ones — each scheduled
   # again after — none it waits on)
   context 'reloaded with an interval running' do
