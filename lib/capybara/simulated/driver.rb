@@ -544,6 +544,9 @@ module Capybara
         # top-level window is the blob's own partition (so the blob still loads), but
         # the opener relationship is severed.
         opener = false if opener && url.to_s.start_with?('blob:') && source && cross_partition_blob?(url, source, activation_realm.to_i)
+        # (…and none from a document of another origin than its top-level one's under a same-origin opener policy: HTML
+        # "the rules for choosing a navigable", Browser#opener_policy_isolates?)
+        opener = false if opener && source&.opener_policy_isolates?(activation_realm.to_i)
         # (…the window's own navigation carrying whether its opener had it: the source snapshot's — its plan's, where a
         # hyperlink or a form planned it, else taken as it opens)
         # (…the driver's own window had it, of no opener; one a document opened consumes its window's, which one of
@@ -638,6 +641,26 @@ module Capybara
           host.navigate_window_realm(realm, 'location', [url, false, activation_realm, referrer, referrer_policy, activated, blob], post: post)
         end
         window.window_handle
+      end
+
+      # A window `window.open` made in `host`'s isolate whose navigation response, at `url`, needs a browsing context group
+      # switch (Browser#coop_switch?): the browsing context it was discarded — its document unloaded, the opener's
+      # WindowProxy of it `closed`, its own `opener` none — and the window a new browsing context of a group of its own, a
+      # Browser of its own: its handle the same, its name and its sandboxing kept, the document it makes the response's
+      # (`response` its status and headers, `body`, `made` the request's Referer and policy). HTML "obtain a browsing
+      # context to use for a navigation response".
+      def move_window_to_new_group(host, realm, url, response, body, made)
+        entry = @aux_windows.find {|w| w[:window].is_a?(RealmWindow) && w[:window].host.equal?(host) && w[:window].realm == realm } or return
+        aux = build_window_browser
+        aux.window_handle = entry[:handle]
+        aux.window_name = host.window_realm_name(realm)
+        aux.traversable.by_web_content = true
+        aux.traversable.popup_sandbox = host.window_realm_sandbox(realm)
+        host.close_window_realm(entry[:window].key)
+        entry[:window] = aux
+        window_browsers.each {|b| b.fill_blob_markers unless b.equal?(aux) }
+        aux.adopt_navigation_response(url, response, body, referrer: made[:referrer], referrer_policy: made[:referrer_policy])
+        nil
       end
 
       # A window `window.open` made in `host`'s isolate, its first document's realm `realm` — the key it is known by after

@@ -332,7 +332,7 @@ fn structured_serialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
         ModuleRule::Share(modules) => modules.take(),
         ModuleRule::Refuse(_) => Vec::new(),
     };
-    let cluster = (!modules.is_empty()).then(|| {
+    let cluster = (!modules.is_empty() || !shared.is_empty()).then(|| {
         let cid = realm_id(scope, &args);
         crate::realm_location::agent_cluster_key(scope, cid)
     });
@@ -370,12 +370,15 @@ fn structured_deserialize(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let Some(number) = args.get(0).uint32_value(scope) else { return };
     let Ok(hook) = v8::Local::<v8::Function>::try_from(args.get(1)) else { return };
     let Some(serialized) = dom(scope).serialized.remove(&number) else { return };
-    // (…a WebAssembly.Module's compiled module read back in the agent cluster it was serialized in alone: another's is
-    // a DataCloneError — the WebAssembly JS API's deserialization steps — a message's `messageerror`)
+    // (…a WebAssembly.Module's compiled module, and a SharedArrayBuffer's memory, read back in the agent cluster it was
+    // serialized in alone: another's is a DataCloneError — the WebAssembly JS API's deserialization steps, HTML
+    // StructuredDeserialize's for a SharedArrayBuffer ("if targetRealm's corresponding agent cluster is not
+    // serialized.[[AgentCluster]]") — a message's `messageerror`)
     if let Some(cluster) = &serialized.cluster {
         let cid = realm_id(scope, &args);
         if crate::realm_location::agent_cluster_key(scope, cid) != *cluster {
-            let Some(message) = v8::String::new(scope, "A WebAssembly.Module could not be read back in another agent cluster.") else { return };
+            let what = if serialized.modules.is_empty() { "SharedArrayBuffer" } else { "WebAssembly.Module" };
+            let Some(message) = v8::String::new(scope, &format!("A {what} could not be read back in another agent cluster.")) else { return };
             return throw_dom_exception(scope, message, "DataCloneError");
         }
     }

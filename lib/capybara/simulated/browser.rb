@@ -7646,15 +7646,18 @@ module Capybara
       # (…its about:blank document's referrer its creator's URL, `creator_url`, and its policy container its creator's
       # clone: HTML "create a new browsing context and document")
       def open_window_realm(name: nil, opener_realm_id: 0, about_base: nil, creator_url: nil)
-        @runtime.create_window_realm(
+        realm = @runtime.create_window_realm(
           '', '', 'text/html',
           window_name:     name,
           opener_id:       opener_realm_id,
           about_base:      about_base,
           referrer:        creator_url,
           referrer_policy: inherited_referrer_policy(opener_realm_id),
-          viewport:        screen_size
+          viewport:        screen_size,
+          group:           @runtime.window_group(opener_realm_id)
         )
+        @runtime.window_realm_meta[realm][:coop] = creator_coop(opener_realm_id) if realm
+        realm
       end
 
       # …and the navigation it was opened for, to `url`, by the document of realm `initiator` — planned for the window as
@@ -7734,6 +7737,29 @@ module Capybara
         realm = window_realm_made(key) or return
         @runtime.dispose_frame_realm_tree(realm)
       end
+      # Whether a window the document of realm `realm` opens is opened without its opener (HTML "the rules for choosing a
+      # navigable", step 8.4): its top-level document's opener policy "same-origin" or "same-origin-plus-COEP", and its
+      # origin not that one's — a cross-origin frame's of such a page.
+      def opener_policy_isolates?(realm)
+        return false unless %w[same-origin same-origin-plus-COEP].include?(document_coop(realm))
+
+        document_origin(realm) != document_origin(@runtime.top_level_realm(realm))
+      end
+      # A navigation response of window realm `realm`'s that left its browsing context group for a Browser of its own
+      # (Driver#move_window_to_new_group): its name and the sandboxing flags its navigable's documents are made with, which
+      # the new one takes (HTML: its popup sandboxing flag set the navigation's final sandboxing flags).
+      def window_realm_name(realm)    = @runtime.realm_call(realm, '__csimWindowName').to_s
+      def window_realm_sandbox(realm) = @runtime.realm_call(realm, '__csimPopupSandbox').to_i
+      # …and the document that response makes, made by this window — a Browser of its own, its first — at `url`: the
+      # response's status and headers, its body, the Referer its request sent and its policy.
+      def adopt_navigation_response(url, response, body, referrer:, referrer_policy:)
+        @current_referer = referrer.to_s
+        record_history({url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact)
+        @current_url = url.to_s
+        record_response(*response)
+        boot_response_into_ctx(body.to_s)
+      end
+
 
       # HTML "rules for choosing a navigable": a new top-level traversable made consumes the user activation of the
       # window that chose it, realm `realm_id`'s — the engine's (user_activation.rs), in every window of its page.
@@ -10550,6 +10576,12 @@ module Capybara
             client_id:       resp['resulting_client_id'],
             refresh:         refresh_header(headers)
           }
+          # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
+          # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
+          # use for a navigation response")
+          if coop_switch?(realm_id, url, headers) && @driver.respond_to?(:move_window_to_new_group)
+            return @driver.move_window_to_new_group(self, realm_id, url, response, body, made)
+          end
         end
         # (…about:blank a new empty document — HTML "navigate" to a URL matching about:blank, its reload too, which
         # Chrome measured makes a new one, its writes gone — of the initiator's origin and base URL, sandboxed as the
@@ -10587,6 +10619,7 @@ module Capybara
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || [200, {}]
+        @runtime.window_realm_meta[new_id][:coop] = response ? response_coop(response[1]) : 'unsafe-none'
         # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
         if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
           @runtime.realm_call(new_id, '__csimRestoreFormState', state)
@@ -12148,6 +12181,7 @@ module Capybara
             end
             return download_in_place(target, headers, resp_body || [document]) if download_response?(headers)
 
+            leave_browsing_context_group if coop_switch?(0, target, headers)
             @current_url = target
             record_response(status, headers)
             commits.(url_origin(target))
@@ -12265,6 +12299,44 @@ module Capybara
       # (a real browser's http://www.example.com would not be; its http://127.0.0.1 would). Not modelled: a cross-origin
       # frame's own `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service
       # worker's own COEP (it is never isolated here).
+      # A document's opener policy (coop.rs `obtain`), of its response's headers `headers`.
+      private def response_coop(headers)
+        header = ->(name) { (headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last&.then { header_text(_1) } }
+        Native.coop_value(header.('cross-origin-opener-policy'), header.('cross-origin-embedder-policy'))
+      end
+      # …that of the top-level document realm `realm`'s is in: the page's, or a window's `window.open` made in this
+      # isolate — its initial about:blank's its creator's (`creator_coop`).
+      def document_coop(realm)
+        top = @runtime.top_level_realm(realm)
+        (top.zero? ? @page_coop : @runtime.window_realm_meta.dig(top, :coop)) || 'unsafe-none'
+      end
+      # …the one a new window's initial about:blank takes of the document of realm `creator` that opened it: its top-level
+      # document's, where its origin is that one's (HTML "create a new browsing context and document" step 19), else none.
+      private def creator_coop(creator)
+        origin = document_origin(creator)
+        origin != 'null' && origin == document_origin(@runtime.top_level_realm(creator)) ? document_coop(creator) : 'unsafe-none'
+      end
+      # Whether a navigation of the top-level traversable whose document is realm `realm`'s — the page's, a window's — to a
+      # response at `url` of headers `headers` needs a browsing context group switch (coop.rs `switch_needed`, HTML
+      # "check if COOP values require a browsing context group switch": that document's opener policy and origin against
+      # the response's, a popup's own check where it is its initial about:blank). Judged on the response a document is
+      # made of, not each redirect's — a gap.
+      # (…none asked of the engine where both are "unsafe-none", which match: every navigation of a page that sets none)
+      def coop_switch?(realm, url, headers)
+        response = response_coop(headers)
+        document = document_coop(realm)
+        return false if response == 'unsafe-none' && document == 'unsafe-none'
+
+        Native.coop_switch(@runtime.realm_call(realm, '__csimInitialAboutBlank') == true, document_origin(realm).to_s, document, url_origin(url).to_s, response)
+      end
+      # The page's browsing context group left for a new one (HTML "obtain a browsing context to use for a navigation
+      # response"): the next document a new browsing context's, of a group of its own — named anew, which its realms are
+      # made in — and the windows the documents before it opened none of its: their `opener` null (navigables.rs
+      # `forget_page_openings`), of the group the page leaves, which they keep (v8_runtime.rb `window_group`).
+      private def leave_browsing_context_group
+        @runtime.call('__csimForgetPageOpenings')
+        @browsing_context_group = "g#{object_id}.#{@group_seq = @group_seq.to_i + 1}"
+      end
       private def cross_origin_isolated_response?
         policy = ->(name) { (@last_response_headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last.then { header_text(_1).split(';').first.to_s.strip } }
         policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
@@ -12296,6 +12368,8 @@ module Capybara
         # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
         # its creator's policy container, the policies with it)
         @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
+        # (…and its opener policy, what a navigation of the page after is judged by: `coop_switch?`)
+        @page_coop = @current_url.to_s.match?(ABOUT_BLANK) ? 'unsafe-none' : response_coop(@last_response_headers)
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         @runtime.rebuild_ctx

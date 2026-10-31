@@ -545,7 +545,7 @@ module Capybara
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, entry: entry,
+          opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, entry: entry, group: meta[:group],
           **{about_base: meta[:about_base], window_name: meta[:window_name]}.merge(made)
         )
       end
@@ -897,10 +897,14 @@ module Capybara
       # the browser's to set as a document commits).
       # (…and in its window's browsing context group — realm_location.rs `agent_cluster_key` — and of its session history,
       # which `history.length` reads: session_history.rs `HISTORIES`)
-      def init_realm(c)
-        c.call('__csimSetBrowsingContextGroup', @browser.browsing_context_group, "w#{@browser.object_id}")
+      # (…`group` the browsing context group and its cross-origin isolation of a window `window.open` made in this isolate
+      # and of its frames — the one it was opened in, which its host's page may have left since: `window_group` — else
+      # the page's)
+      def init_realm(c, group = nil)
+        name, isolated = group || page_group
+        c.call('__csimSetBrowsingContextGroup', name, "w#{@browser.object_id}")
         c.call('__csimSetSessionHistory', @browser.session_history_id)
-        c.call('__csimInitRealm', @cross_origin_isolated == true)
+        c.call('__csimInitRealm', isolated == true)
         c.call('__csimSetUserAgent', @browser.default_user_agent) if @browser.default_user_agent
       end
 
@@ -1052,13 +1056,36 @@ module Capybara
       # ctx they were first attached to, so a realm script routing through them
       # (leading-lexical, ≥64KB, or `type=module`) would run against the main
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
-      def seed_realm_bridge(realm)
+      def seed_realm_bridge(realm, group = nil)
         has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
         realm.eval_void(RuntimeShared.snapshot_src) unless has_bridge
         attach_run_script_with_cache(realm)
         attach_realm_esm_entry(realm)
-        reseed_realm_js(realm)
+        reseed_realm_js(realm, group)
         realm
+      end
+      # The page's browsing context group and whether it is cross-origin isolated: what a window `window.open` made in
+      # this isolate is opened in (`window_group`), its page's group left by a navigation since (Browser#coop_switch?)
+      # keeping it.
+      def page_group = [@browser.browsing_context_group, @cross_origin_isolated == true]
+      # …and that of the top-level document realm `realm`'s is in: a window's its own, the page's otherwise.
+      def window_group(realm)
+        return page_group if window_realm_meta.empty?
+
+        window_realm_meta.dig(top_level_realm(realm), :group) || page_group
+      end
+      # The realm of the top-level document realm `realm`'s is in: a window's `window.open` made in this isolate, or the
+      # page's, 0.
+      def top_level_realm(realm)
+        realm = realm.to_i
+        return 0 if window_realm_meta.empty?
+
+        (MAX_FRAME_DEPTH + 2).times do
+          return realm if realm.zero? || window_realm_meta.key?(realm)
+
+          realm = frame_realm_parent(realm)
+        end
+        0
       end
 
       def create_frame_realm(
@@ -1091,7 +1118,7 @@ module Capybara
         # the frame's own scripts run during __csimLoadDocument below and may synchronously build NESTED frames, whose
         # depth is one more than this one's)
         loading_frame_realms[realm.id] = realm           # (…its URL asked for while it loads: loading_frame_realm_url)
-        seed_realm_bridge(realm)
+        seed_realm_bridge(realm, window_group(parent_id))
         # Wire `parent` / `top` to the realm that owns this iframe (its context
         # id passed from `__csimFrameWindow`), BEFORE the frame's scripts run —
         # `top` propagates up the chain (the main realm's `top` is itself). A
@@ -1354,9 +1381,10 @@ module Capybara
         refresh: nil,
         sandbox: nil,
         entry: nil,
-        viewport: nil
+        viewport: nil,
+        group: page_group
       )
-        realm = seed_realm_bridge(ctx.create_context)
+        realm = seed_realm_bridge(ctx.create_context, group)
         # (…its viewport the window's — the one it was made with, a navigation's the document's before it had — which its
         # document loads at: viewport.rs)
         realm.eval_void("globalThis.__dom.viewportSet(#{viewport[0].to_i}, #{viewport[1].to_i}, true);") if viewport
@@ -1398,7 +1426,7 @@ module Capybara
         # Remember the window's opener / name so a self-navigation (reload_window_realm
         # builds a FRESH realm) can carry them across — a real popup keeps window.opener
         # and window.name through its own navigation.
-        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key}
+        window_realm_meta[realm.id] = {opener_id: opener_id, window_name: window_name, about_base: about_base, window_key: window_key, group: group}
         window_realms_changed
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial
@@ -1979,8 +2007,8 @@ module Capybara
       # (`__csimInitRealm()`: its document, the Worker
       # constructors); the `__csim_runScript` dispatcher comes from
       # `attach_run_script_with_cache` (realm-bound).
-      def reseed_realm_js(c)
-        init_realm(c)
+      def reseed_realm_js(c, group = nil)
+        init_realm(c, group)
         seed_layout(c)
       end
 

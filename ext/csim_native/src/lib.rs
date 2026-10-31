@@ -190,6 +190,7 @@ mod popovers;
 mod port_channels;
 mod activation;
 mod cookie_jar;
+mod coop;
 mod http_auth;
 mod http_cache;
 mod keepalive;
@@ -325,6 +326,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("message_length", magnus::function!(headers::message_length_for_ruby, 1))?;
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;
     native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
+    native.define_module_function("coop_value", magnus::function!(coop::value_for_ruby, 2))?;
+    native.define_module_function("coop_switch", magnus::function!(coop::switch_for_ruby, 5))?;
     // What a request says of where it came from — its Referer, Origin and Sec-Fetch-Site, over its redirects too
     // (referrer.rs).
     native.define_module_function("request_referrer", magnus::function!(referrer::request_referrer_for_ruby, 3))?;

@@ -592,6 +592,29 @@ impl RealmArena {
         }
     }
     // (…HTML's opener browsing context is the browsing context's, null once disowned whatever document it shows next)
+    // The page's browsing context left for another group (HTML "obtain a browsing context to use for a navigation
+    // response", a cross-origin opener policy's switch): the windows its documents opened have no opener from then on —
+    // that browsing context discarded, whose WindowProxy none of theirs reaches (browser.rb `leave_browsing_context_group`).
+    pub(crate) fn forget_page_openings(&mut self) {
+        let nav = &self.navigables;
+        let of_page: Vec<i32> = nav
+            .openers
+            .iter()
+            .filter(|&(key, &opener)| {
+                let realm = match nav.frame_openers.get(key) {
+                    Some(&navigable) => self.navigable_active_realm(navigable).unwrap_or(0),
+                    None => opener,
+                };
+                self.top_level_realm(realm) == 0
+            })
+            .map(|(&key, _)| key)
+            .collect();
+        let nav = &mut self.navigables;
+        for key in of_page {
+            nav.openers.remove(&key);
+            nav.frame_openers.remove(&key);
+        }
+    }
     pub(crate) fn disown_opener(&mut self, key: i32) {
         self.navigables.disowned.insert(key);
     }
@@ -1195,6 +1218,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
     crate::dom::register(scope, ns, "closeWindow", close_window, context_id);
     crate::dom::register(scope, ns, "closeAllowed", close_allowed_op, context_id);
+    crate::dom::register(scope, ns, "forgetPageOpenings", forget_page_openings_op, context_id);
     crate::dom::register(scope, ns, "discardWindow", discard_window, context_id);
     crate::dom::register(scope, ns, "windowClosed", window_closed, context_id);
     crate::dom::register(scope, ns, "windowOpener", window_opener, context_id);
@@ -1528,6 +1552,11 @@ fn close_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let (Some(source), Some(target)) = (args.get(0).int32_value(scope), args.get(1).int32_value(scope)) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).close_allowed(source, target));
+}
+// __dom.forgetPageOpenings() — `forget_page_openings`.
+fn forget_page_openings_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).forget_page_openings();
 }
 // __dom.discardWindow(key) — the window a script closed discarded (`discard_window`).
 fn discard_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

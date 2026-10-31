@@ -357,6 +357,41 @@ RSpec.describe 'Structured clone of platform objects' do
     expect(s.evaluate_script('got').sort).to eq(['message true', 'messageerror'])
   end
 
+  # …and so is a SharedArrayBuffer's memory, read back in the agent cluster it was serialized in alone (HTML
+  # StructuredDeserialize: another's a DataCloneError, the message's `messageerror`).
+  it 'shares a SharedArrayBuffer with the agent cluster it was serialized in alone' do
+    isolated = {
+      'cross-origin-opener-policy'   => 'same-origin',
+      'cross-origin-embedder-policy' => 'require-corp',
+      'cross-origin-resource-policy' => 'cross-origin'
+    }
+    coi_app = lambda do |env|
+      case env['PATH_INFO']
+      when '/child'
+        [200, {'content-type' => 'text/html', **isolated}, [<<~HTML]]
+          <!doctype html><script>
+            addEventListener('message', (e) => { new Int32Array(e.data)[0] = 7; parent.postMessage('message', '*'); });
+            addEventListener('messageerror', () => parent.postMessage('messageerror', '*'));
+          </script>
+        HTML
+      else
+        [200, {'content-type' => 'text/html', **isolated}, [<<~HTML]]
+          <!doctype html><script>window.got = []; addEventListener('message', (e) => got.push(e.data));</script>
+          <iframe id="same" src="/child"></iframe><iframe id="sibling" src="http://other.example.com/child"></iframe>
+        HTML
+      end
+    end
+    s = simulated_session(coi_app)
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.sab = new SharedArrayBuffer(8);
+      for (const id of ['same', 'sibling']) document.getElementById(id).contentWindow.postMessage(sab, '*');
+    JS
+    poll_until { s.evaluate_script('got.length') == 2 }
+
+    expect(s.evaluate_script('[got.sort(), new Int32Array(sab)[0]]')).to eq([%w[message messageerror], 7])
+  end
+
   # …in its browsing context group alone (HTML keeps an agent cluster map per group): a pop-up opened with an opener
   # shares the page's, one opened `noopener` is a group of its own — its BroadcastChannel gets a `messageerror`.
   it 'shares a WebAssembly.Module with a pop-up of its browsing context group alone' do
