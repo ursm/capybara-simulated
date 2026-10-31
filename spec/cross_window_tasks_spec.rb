@@ -88,6 +88,20 @@ RSpec.describe 'a task one window asks of another' do
     expect(session.windows.size).to eq(2)
   end
 
+  # (…and the primary window — the session's own, which every later command addresses — to none, at its one entry,
+  # where HTML would close it: a justified gap, CLAUDE.md — its `closed` false, its document not unloaded, a window the
+  # driver opened at one entry closing as HTML has it)
+  it "leaves the primary window to no script's `close()`, even at its one entry" do
+    session.execute_script("addEventListener('pagehide', () => sessionStorage.setItem('hid', '1'))")
+    expect(read('[history.length, (close(), closed)]')).to eq([1, false])
+    expect(read("[closed, sessionStorage.getItem('hid')]")).to eq([false, nil])
+    expect(session.windows.size).to eq(1)
+    window = session.open_new_window
+    session.switch_to_window(window)
+    session.visit('http://a.test/closes')
+    expect(read('closeSelf()')).to be(true)
+  end
+
   # WPT html/browsers/windows/auxiliary-browsing-contexts/opener-closed.html: a pop-up closing its opener — itself a
   # pop-up, whose load opened it — as that one's load runs; the opener discarded after, its `opener` null to the pop-up.
   # (…every window stepped, as the WPT runner steps them: the pop-up's own load a task of its opener's, the second's its)

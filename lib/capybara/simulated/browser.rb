@@ -7753,8 +7753,14 @@ module Capybara
 
       # `close()` of this window's page by its script (HTML's Window `close()`, whose checks — one script-closable — are its
       # traversable's: session_history.rs `ask_close`): set closing at once, which its `closed` reports, its close a task
-      # of its own event loop (`take_window_tasks`) and its discard the driver's after (Driver#reap_closed_windows).
-      def script_close = @session_history.ask_close
+      # of its own event loop (`take_window_tasks`) and its discard the driver's after (Driver#reap_closed_windows). None
+      # of the session's primary window, which no script closes — its `closed` false, its document not unloaded — where
+      # HTML makes one whose session history has one entry closable (CLAUDE.md's justified gap: Driver#primary_window?).
+      def script_close
+        return if @driver.respond_to?(:primary_window?) && @driver.primary_window?(self)
+
+        @session_history.ask_close
+      end
 
       # Fire the window `load` for a document that has finished booting — once the
       # navigation that produced it is over AND the driver is back between calls.

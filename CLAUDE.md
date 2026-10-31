@@ -202,7 +202,7 @@ non-configurable through it outlives the navigation that replaces its window
 (`frameWindowProxyFor`, platform-globals.js); and the primary window —
 the Capybara session's own — is never script-closable, where HTML makes a
 window whose session history has one entry closable by its script
-(`Browser#script_close`): closing it would end the session under the
+(`Driver#primary_window?`, `Browser#script_close`): closing it would end the session under the
 test that every later command addresses, for a page that merely called
 `close()` on itself; and a function of a document that has since navigated
 away still runs, in its own realm, as a browser runs it, but reads an empty

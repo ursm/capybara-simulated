@@ -480,6 +480,9 @@ module Capybara
       # ops route through `current_browser`. sessionStorage + DOM +
       # history + the JS VM stay per-window.
       PRIMARY_HANDLE = 'csim-window-0'
+      # Whether `browser` hosts the session's primary window — the Capybara session's own, which every later command
+      # addresses: no script closes it (Browser#script_close).
+      def primary_window?(browser) = browser.equal?(@browser)
       def current_window_handle    = @active_handle || PRIMARY_HANDLE
       def window_handles
         reap_closed_windows
