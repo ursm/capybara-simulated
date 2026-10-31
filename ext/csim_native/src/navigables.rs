@@ -1246,6 +1246,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "steppedRealms", stepped_realms, context_id);
     crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
+    crate::dom::register(scope, ns, "isSteppedWindow", is_stepped_window, context_id);
     crate::dom::register(scope, ns, "closeWindow", close_window, context_id);
     crate::dom::register(scope, ns, "closeAllowed", close_allowed_op, context_id);
     crate::dom::register(scope, ns, "forgetPageOpenings", forget_page_openings_op, context_id);
@@ -1579,6 +1580,12 @@ fn set_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let key = realm_arg(scope, args.get(3)).unwrap_or(realm);
     let cid = realm_id(scope, &args);
     crate::dom::realm(scope, cid).set_stepped_window(realm, on, opener, key);
+}
+
+// __dom.isSteppedWindow() -> whether the calling realm is such a window's: one whose tasks the page's event loop runs.
+fn is_stepped_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::dom(scope).arena.navigables.windows.contains(&cid));
 }
 
 // The ops below take a window by its key (`window_keys`): the one the host told its realm (realm_identity.rs

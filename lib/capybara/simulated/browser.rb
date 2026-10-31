@@ -624,18 +624,23 @@ module Capybara
         @find_cache_dirty = true
       end
 
-      # The navigation of the page a document planned as it loaded — its location set, a form submitted, a link followed,
-      # by its parse, its `load` handlers or the tasks its load ran — taken as the driver's action that loaded it ends (a
+      # The navigation of the page or of a frame a document planned as it loaded — its location set, a form submitted, a
+      # link followed, by its parse, its `load` handlers or the tasks its load ran — taken as the driver's action that loaded it ends (a
       # visit, a click, a submit, a refresh, a traversal: `RecordedActions`), as a browser starts it then: a matcher that
       # reads only the URL or the text (`have_current_path`, `has_text?`) takes none, and an auto-submitting page (an
       # OAuth `form_post`) stayed put. Due where a document booted since (`@load_navigations_due`), the one it navigates
       # to booting the next; bounded as a load handler's chain is. (A `window.open` of the load opened its window as the
       # load ran; a link's or a form's to a new window is opened here as any of its plans is.)
+      # A page whose `load` handler navigates gets another document, which owes another load — legitimate, and finite in
+      # every real page. This caps the chain.
+      WINDOW_LOAD_CHAIN_MAX = 8
       def take_load_navigations
         WINDOW_LOAD_CHAIN_MAX.times do
           break unless @load_navigations_due
 
           @load_navigations_due = false
+          consume_pending_frame_nav
+          consume_pending_frame_submit
           consume_pending_location
           consume_pending_page_submission
           consume_pending_navigation
@@ -1009,11 +1014,6 @@ module Capybara
       end
 
       def find_with_timer_fallback(kind, arg, ctx)
-        # OUTSIDE the timer gate below: a page with no active timer never ticks, and a
-        # server-rendered page that wires itself up on `load` is exactly that page — it
-        # would have answered every `find` / `has_css?` from a document whose load had
-        # never fired, while `page.html` showed the handler's work. One ivar test.
-        flush_pending_window_load
         # A read since the last query owes the clock a step — pay it here, where
         # moving the clock can't strand a snapshot mid-walk (`tick_for_read`).
         settle_read_debt
@@ -1193,15 +1193,15 @@ module Capybara
       # crosses to it from one (a message, a storage event) changes this one's as it is delivered — a pop-up's clock
       # redrawing its own DOM keeps no failing matcher here waiting out its wait.
       def background_steps_pending? = background_windows.any?(&:steps_pending?)
-      # …this window's: its timers; a `load` its document still owes, held for its images in flight (a pop-up's, whose
-      # opener's listeners wait on it — `flush_pending_window_load`); a navigation a service worker asked of a client of
+      # …this window's: its timers — a `load` its document still owes among its tasks, one its images in flight delay
+      # queued as they land (a pop-up's, whose opener's listeners wait on it); a navigation a service worker asked of a client of
       # its, or one deferred on its activation, due (`consume_pending_sw_client_nav`, `consume_sw_deferred_navigations`);
       # and the work its own channels have under way — a BroadcastChannel post or a `storage` event another window sent, a
       # worker's answer, a socket's frame (`own_work_pending?`): every window's event loop runs, a background one's with no
       # command sent to it, as a browser's does — but never on what is open-ended (a worker that only listens, a long poll),
       # which would keep every failing matcher of the active window waiting out its wait.
       def steps_pending?
-        @timers_active == true || @window_load_due == true || !@sw_navigations_due.empty? || own_work_pending? ||
+        @timers_active == true || !@sw_navigations_due.empty? || own_work_pending? ||
           (sw_registered? && Native.sw_client_navs_queued(@sw_partition, @window_number))
       end
 
@@ -2465,7 +2465,7 @@ module Capybara
 
       # A traversal a page's `history` asked for, appended to the traversable's session history traversal queue as it
       # asked (session_history.rs `historyTraverse`), applied as the task it is runs (`apply_planned_traversal`) — or,
-      # before that, as the driver takes what the page planned (`drain_pending_navigation_once`): ahead of any navigation
+      # before that, as the driver takes what the page planned (`drain_pending_navigation`): ahead of any navigation
       # planned with it, which a traversal making a document again cancels (`cancel_navigations_for`). The traversal of
       # `token` applied, and those queued before it: none where the driver took them already.
       def apply_planned_traversal(token)
@@ -2875,9 +2875,6 @@ module Capybara
         s
       end
       def evaluate_script(code, args = [])
-        # The page a script is about to read must have had its `load` — see
-        # `flush_pending_window_load`; the tick below is gated and may not run at all.
-        flush_pending_window_load
         # Drain timers first so ready handlers (jQuery `$(handler)`,
         # framework `DOMContentLoaded` listeners) run before the
         # user's script. Without this, `execute_script` can fire
@@ -3631,10 +3628,6 @@ module Capybara
       end
 
       def reset!
-        # A load marked by the outgoing page's boot belongs to a document this reset
-        # is discarding — firing it against the next one would be a load event for a
-        # document that never loaded.
-        @window_load_due = false
         @font_file_failed = nil   # a 404'd @font-face refetches on the next navigation (Chrome)
         # Background app requests must not cross the session boundary — QUIESCE them
         # before touching anything else. Diagnosed on Discourse (2026-08-22): a
@@ -7708,58 +7701,6 @@ module Capybara
         @session_history.ask_close
       end
 
-      # Fire the window `load` for a document that has finished booting — once the
-      # navigation that produced it is over AND the driver is back between calls.
-      # Both halves matter: a `load` handler may navigate (submit a form, point an
-      # iframe somewhere), and those intents are stashed for
-      # `drain_pending_navigation`, which applies them only when nothing else is on
-      # the stack. Firing from inside `navigate` instead — even from its `ensure` —
-      # left a frame navigation stranded (WPT's
-      # event-global-is-still-set-when-coercing-beforeunload-result).
-      #
-      # The invariant the call sites buy: the load has fired by the time anything can
-      # observe the new page.
-      #   - `drain_pending_navigation`, which both the driver-initiated navigations
-      #     (`visit` / `refresh` / history) and every page-initiated one end in;
-      #   - `find_with_timer_fallback`, ahead of its timer gate — the backstop for a
-      #     page that never ticks at all.
-      # Returns whether this call fired (the drain chains on it).
-      private def flush_pending_window_load
-        return unless @window_load_due
-        # `load` waits for the document's subresources, and images are now fetched async —
-        # deliver any that have landed and hold the event while some are still in flight. The
-        # settle loop stays alive on `image_loads_pending?` (with a brief GVL-yielding park when
-        # images are the only pending work) and the tick gates re-check every poll, so this is a
-        # short deferral, never a stall. Matches a real browser: window `load` fires after every
-        # <img> settles — one its server delayed too, which the realm holds on a page timer until
-        # its virtual arrival (the timer keeps the settle loop going meanwhile) — and after every frame's
-        # document fired its own, which the frame's images delay likewise (`__csimPageLoadDelayed`).
-        deliver_image_loads
-        return false if image_loads_pending? || (@runtime.call('__csimPageLoadDelayed') rescue false)
-
-        @window_load_due = false
-        fire_own_window_load
-        # A `load` handler's own navigation is stashed like any other page-initiated
-        # one; apply it here rather than leaving the page half-way through what its
-        # load asked for. Only what a HANDLER can queue — this window's own location,
-        # and a frame it navigated or submitted. Not the whole drain: that one chains
-        # back into this method (they recursed until the Ruby stack gave out on two
-        # pages whose load handlers navigate to each other), and it also opens the
-        # auxiliary windows a page asked for, which a `visit` must leave pending.
-        consume_pending_frame_nav
-        consume_pending_frame_submit
-        consume_pending_page_submission
-        true
-      end
-
-      # A throwing `load` handler (or a frame build that throws while the document's
-      # subresources are flushed) is the page's problem, not the driver's — but it has
-      # to be VISIBLE, or the page simply looks half-wired with no explanation.
-      private def fire_own_window_load
-        @runtime.call('__csimFireWindowLoad')
-      rescue StandardError => e
-        log_console('warn', "window load failed: #{e.class}: #{e.message}")
-      end
       # The session history out of a page's reach while `block` runs a handler of its whose document is on its way out
       # (`history_state` / `history_push` ignore what it asks).
       private def frozen_history
@@ -11379,32 +11320,7 @@ module Capybara
           @runtime.realm_call(parent_realm_id, fn, *args)
         end
       end
-      # A page whose `load` handler navigates gets another document, which owes another
-      # load — legitimate, and finite in every real page. This caps the chain.
-      WINDOW_LOAD_CHAIN_MAX = 8
-
       def drain_pending_navigation
-        drain_pending_navigation_once
-        # AFTER the consumes, not before: a page-initiated navigation (a link click, a
-        # form submit) BOOTS its document in one of them, so the marker it leaves is
-        # only there to act on once they have run — firing first meant a clicked link
-        # never fired a load at all.
-        #
-        # ITERATIVE, not recursive: a `load` handler may navigate again, and that
-        # navigation's own document owes another load. Bounded, because a pair of
-        # pages whose load handlers navigate to each other would otherwise recurse
-        # until the Ruby stack gives out (measured: ~5900 document boots).
-        WINDOW_LOAD_CHAIN_MAX.times do
-          break unless flush_pending_window_load
-
-          drained = pending_nav_intent?
-          drain_pending_navigation_once
-          break unless drained
-        end
-      end
-
-      # One pass of the intent drain, without the window-load chaining above.
-      def drain_pending_navigation_once
         take_window_tasks
         apply_planned_traversals_before_navigations
         consume_pending_sw_client_nav
@@ -12425,22 +12341,6 @@ module Capybara
           break if @runtime.call('__csimPendingExternalScriptCount').to_i.zero?
           @runtime.run_loop_step(0, SETTLE_MAX_ITER_TASKS, yield_on_gen: false)
         end
-        # The document and everything it deferred are in, so the window `load`
-        # event fires — which for the MAIN document nothing ever did. Frames and
-        # auxiliary windows each fired their own; a page's own
-        # `window.onload` / `$(window).on('load')` init simply never ran, and an
-        # app that defers its wiring to `load` (rather than DOMContentLoaded)
-        # looked inert to a test.
-        #
-        # HERE and not inside `__csimLoadDocument`, because `load` waits for a
-        # document's subresources: the deferred / async chunk scripts drained just
-        # above are exactly those, and a handler that expects them has to run
-        # after they do. Idempotent JS-side, so the WPT harness's own call after a
-        # visit is a no-op rather than a second event.
-        # A document's style sheets are part of what `load` waits for; the JS side
-        # flushes their pending load tasks before dispatching (`sheetLoadTask`),
-        # which is why nothing here advances the clock.
-        #
         # The document, loaded, refreshes its service-worker client record (its URL may have moved since it reported
         # itself as it began loading), as a frame's does (V8Runtime).
         @runtime.call('__csim_swReportClient')
@@ -12450,23 +12350,13 @@ module Capybara
           @runtime.call('__csimCompleteInitialDocument')
           return
         end
-        # Marked, not fired: a `load` handler may navigate — submit a form, point an
-        # iframe somewhere — and a navigation started while THIS one is still in
-        # flight (`@navigating`) is not the same thing as one started from an idle
-        # page. `flush_pending_window_load` fires it from the drain that ends every
-        # navigation, and failing that from the next find.
-        @window_load_due = true
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
-        # …and fired HERE, before anything pumps the task queue: a browser's `load` precedes the page's own `setTimeout(0)`,
-        # and deferring it to the next drain put every page's load AFTER the init it is supposed to precede — an auxiliary
-        # window's too, in the task of its own its navigation is, the listeners another window put on it told then
-        # (session_history.rs `traversableLoaded`).
-        # The window `load` this boot owes waits for the images the parse just started (HTML:
-        # load fires after subresources). Give their fetch threads a short GVL-yielding window
-        # to land: they overlap the boot's JS (rusty releases the GVL) and are usually done
-        # already, but one that is not would slip its page's `load` past the visit and leave
-        # what a post-visit read sees to thread timing. Bounded — a genuinely slow endpoint defers `load` to a
-        # later drain instead of stalling the visit.
+        # Its `load` is a task its parse queued as it ended (bridge.entry.js `queueLoadOfTheEnd`, HTML "the end"), which
+        # the page's due tasks run below — delayed, where its images are still in flight, until they land. Give their
+        # fetch threads a short GVL-yielding window to land first: they overlap the boot's JS (rusty releases the GVL) and
+        # are usually done already, but one that is not would slip its page's `load` past the visit and leave what a
+        # post-visit read sees to thread timing. Bounded — a genuinely slow endpoint delays `load` to a later step
+        # instead of stalling the visit.
         # Delivery runs INSIDE the wait: `image_loads_pending?` counts undelivered results (it
         # only falls at delivery, deliberately — the tick gates key on it), so a park that only
         # sleeps until the deadline burns the whole budget even when every fetch landed in
@@ -12479,7 +12369,6 @@ module Capybara
             sleep 0.005
           end
         end
-        flush_pending_window_load
         flush_page_init
         @load_navigations_due = true
       end
@@ -12497,19 +12386,11 @@ module Capybara
       #
       # `maxMs: 0` fires only what is ALREADY due, so a `setTimeout(fn, 50)` stays
       # pending and a test can still observe the state before it.
-      # KNOWN DIVERGENCE, measured: this runs BEFORE the window `load` event, and a
-      # browser runs it after. Chrome 151 on a page that logs each step gives
-      # `microtask, DCL, load, timeout0`; we give `microtask, DCL, timeout0, load`.
-      # Both orders were tried against the conformance gate and only this one is
-      # green — firing `load` here instead costs
-      # `shadow-dom/…/inert-html-elements/test-001` and
-      # `…/the-input-element/range-restore-oninput-onchange-event`, and draining
-      # after the load event costs `…/form-submission-0/form-data-set-usv` and
-      # `dom/events/event-global-is-still-set-when-coercing-beforeunload-result`.
-      # The page's STATE at the end of the load is right either way; it is the
-      # ordering between the two that is wrong, and the load event's own placement
-      # (deferred out of the commit, see `@window_load_due`) is the knot to untie
-      # before this can move.
+      # The document's `load` is one of those tasks — "the end" queued it as its parse ended (bridge.entry.js
+      # `queueLoadOfTheEnd`) — so it runs in queue order with the page's own: a `setTimeout(0)` its parse or its
+      # DOMContentLoaded handlers queued runs before it, one its load handlers queue after. (HTML leaves the order of
+      # two task sources to the UA: Chrome 156 runs a DCL handler's `setTimeout(0)` after the load, Firefox a frame's
+      # before it, both a parse-time one before it — measured 2026-11-01.)
       def flush_page_init
         return unless @timers_active
 
@@ -12636,7 +12517,7 @@ module Capybara
         # leave the page sitting on a redirect it has already asked for.
         @restoring_flushed_nav_intents = true
         begin
-          drain_pending_navigation_once
+          drain_pending_navigation
         ensure
           @restoring_flushed_nav_intents = false
         end

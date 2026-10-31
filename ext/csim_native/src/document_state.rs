@@ -43,6 +43,8 @@ const INSERTIONS: u32 = 3;
 const DESTRUCTIVE_IGNORED: u32 = 4;
 // …and the flag that says a document has no browsing context (`FLAGS`'s first).
 const NO_BROWSING_CONTEXT: u32 = 1;
+// …and the one that says its load fired (dom-nodes.js `DOC_LOAD_FIRED`).
+const LOAD_FIRED: u32 = 8;
 const READY_COMPLETE: u32 = 2;
 
 // …its texts, as the bindings number them (`DOC_TEXT_*`): none until set — a document's URL then its realm's, its
@@ -89,6 +91,10 @@ impl DocumentStates {
     // A document's mode: 0 no-quirks, 1 limited-quirks, 2 quirks.
     pub(crate) fn mode(&self, doc: NodeId) -> u32 {
         self.0.get(&doc).map_or(0, |s| s.mode)
+    }
+    // Whether `doc`'s load event fired: HTML "the end" ran to its load (the bindings' flag, dom-nodes.js `_loadFired`).
+    pub(crate) fn load_fired(&self, doc: NodeId) -> bool {
+        self.0.get(&doc).is_some_and(|s| s.flags & LOAD_FIRED != 0)
     }
     pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)

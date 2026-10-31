@@ -66,6 +66,9 @@ struct FrameNavigation {
     planned: u32,
     // …and the navigation the host plans to make of it, by the order it was planned in (`HostNavigation`).
     host: Option<(u64, HostNavigation)>,
+    // Whether the navigation it plans now was planned while its document was loading, before that one's load fired:
+    // the container's load is then the document that navigation makes's to fire, not the one loading's (`frameLoadDue`).
+    planned_loading: bool,
     contents: [Option<Content>; CONTENT_SLOTS],
     // While its navigable has no realm made: the user activation the window of its initial about:blank document has
     // had (user_activation.rs) — its last activation, on the container's realm's clock, and the activation notifications
@@ -489,6 +492,7 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let (Some(container), Some(form)) = (nid_arg(scope, &args, 0), nid_arg(scope, &args, 1)) else { return rv.set_uint32(0) };
     let interactive = args.get(2).is_true();
     let cid = realm_id(scope, &args);
+    let loading = frame_document_loading(scope, container);
     let navs = &mut crate::dom::realm(scope, cid).frame_navigations;
     // (…its plan on this same navigable is replaced below, as any other is)
     if interactive {
@@ -505,6 +509,7 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     let nav = navs.0.entry(container).or_default();
     nav.planned = token;
     nav.host = None;
+    nav.planned_loading = loading;
     navs.1.last.insert(form, (token, container));
     // (…and the submission of the frame's document the host routes taken out with its route: navigation_plan.rs)
     if let Some(frame) = crate::dom::dom(scope).arena.frame_realm(container) {
@@ -615,6 +620,17 @@ fn frame_navigation_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     rv.set_bool(token != 0 && navs.0.get(&container).is_some_and(|n| n.planned == token));
 }
 
+// Whether frame realm `realm`'s document is loading still: its load not fired (none for a realm with no document).
+fn document_loading(arena: &crate::dom::RealmArena, realm: i32) -> bool {
+    arena.realm_document(realm).is_some_and(|doc| !arena.document_states.load_fired(doc))
+}
+// …the document of the container's navigable's: none where it has no realm made yet (its initial about:blank, which a
+// navigation replaces as no document that loaded).
+fn frame_document_loading(scope: &mut v8::PinScope<'_, '_>, container: NodeId) -> bool {
+    let arena = &crate::dom::dom(scope).arena;
+    arena.frame_realm(container).is_some_and(|realm| document_loading(arena, realm))
+}
+
 // __dom.planFrameLocation(realm, url, replace, initiatorRealm, policy, activated) -> PLANNED_*: a navigation of frame
 // realm `realm`'s navigable — the calling realm's for undefined — to `url` planned for the host (`HostNavigation`),
 // replacing the one it planned (a form's of its parent's document among them), its Referer that of the document of
@@ -637,7 +653,9 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     }
     let referrer = crate::referrer::navigation_referrer(arena, initiator, &policy);
     let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
+    let loading = document_loading(arena, target);
     let nav = arena.frame_navigation(container);
+    nav.planned_loading = loading;
     // (…a form's of its parent's document cancelled: its response loads into nothing, its pending `load` this one's)
     nav.planned = 0;
     let host = HostNavigation::Navigate { url, replace, initiator, referrer, sandbox, activated };
@@ -652,7 +670,10 @@ fn plan_frame_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let cid = realm_id(scope, &args);
     let arena = &mut crate::dom::dom(scope).arena;
     let Some(container) = arena.live_container(cid) else { return };
-    arena.frame_navigation(container).host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { mark: None }));
+    let loading = document_loading(arena, cid);
+    let nav = arena.frame_navigation(container);
+    nav.planned_loading = loading;
+    nav.host = Some((crate::navigation_plan::next_planned(), HostNavigation::Reload { mark: None }));
     crate::navigation_plan::supersede_routed(scope, cid);
 }
 // __dom.dropFrameNavigation(realm): the navigation the host planned of frame realm `realm`'s navigable let go of, and the
@@ -862,16 +883,14 @@ fn owe_container_load_of(scope: &mut v8::PinScope<'_, '_>, realm: i32) -> bool {
     delayed
 }
 
-// __dom.loadDelayedHere(page) -> whether something delays the calling realm's document's load event now: its images
-// (image_requests.rs `images_delay_load`; `page`, as the host asks before it fires the page's load, those whose
-// arrival the host's own count does not hold), its containers' loads still owed (`frame_loads_owed`; not for the page's: the load the host
-// asks for flushes their builds first), and its child navigables' documents whose own load is delayed.
+// __dom.loadDelayedHere() -> whether something delays the calling realm's document's load event now: its images
+// (image_requests.rs `images_delay_load`), its containers' loads still owed (`frame_loads_owed`), and its child
+// navigables' documents whose own load is delayed.
 fn load_delayed_here(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let page = args.get(0).is_true();
     let cid = realm_id(scope, &args);
     let arena = &crate::dom::dom(scope).arena;
-    let delayed = arena.images_delay_load(cid, page)
-        || (!page && frame_loads_owed(arena, cid))
+    let delayed = arena.images_delay_load(cid)
+        || frame_loads_owed(arena, cid)
         || arena.child_realms(cid).into_iter().any(|kid| arena.realm_state(kid).is_some_and(|s| s.load_delay != 0));
     rv.set_bool(delayed);
 }
@@ -1157,6 +1176,13 @@ fn frame_load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     }
     if arena.frame_nav_has(container, NAV_PENDING) {
         return rv.set_uint32(DUE_PAID);
+    }
+    // (…none for a document whose navigable planned another navigation while it was loading — its location set, a form
+    // submitted to it, its reload — before its load fired: that navigation's document owes the container its load, which
+    // the container's document's load waits for meanwhile. One planned by its load's handlers once it loaded leaves its
+    // load the container's to fire: HTML "completely finish loading" queues it as the load task ends.)
+    if arena.frame_navigations.0.get(&container).is_some_and(|n| n.planned_loading && (n.planned != 0 || n.host.is_some())) {
+        return;
     }
     // (…none yet where the frame's document has its load delayed — its images fetched — which fires this one with its
     // own, after it: the container's load comes after its document's)

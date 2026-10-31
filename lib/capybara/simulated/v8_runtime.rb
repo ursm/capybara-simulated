@@ -1338,8 +1338,6 @@ module Capybara
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
-        # (…its load a task to come: window.js `__csimQueueWindowLoad`)
-        ctx.call('__csimQueueWindowLoad', realm.id) rescue nil
       end
 
       # Navigate window realm `id` from its initial about:blank to a document of that one's origin: loaded into the same

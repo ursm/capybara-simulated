@@ -2899,13 +2899,8 @@ html/browsers/browsing-the-web/navigating-across-documents/009.html:
 html/browsers/browsing-the-web/navigating-across-documents/012.html:
 - 'Link with onclick navigation to javascript url with delayed document.write and
   href navigation '
-html/browsers/browsing-the-web/navigating-across-documents/013.html:
-- 'Link with onclick navigation to javascript url with delayed document.write and
-  href navigation '
 html/browsers/browsing-the-web/navigating-across-documents/014.html:
 - " Link with javascript onclick form submission script order "
-html/browsers/browsing-the-web/navigating-across-documents/015.html:
-- " Link with javascript onclick and href script order "
 html/browsers/browsing-the-web/navigating-across-documents/abort-document-load.html:
 - Aborting a Document load
 html/browsers/browsing-the-web/navigating-across-documents/abort-document-window-stop.sub.window.js:
@@ -3016,8 +3011,6 @@ html/browsers/browsing-the-web/navigating-across-documents/refresh/subresource.a
 - Refresh does not affect XMLHttpRequest.
 - "[dedicatedworker] Refresh does not affect Fetch API."
 - "[dedicatedworker] Refresh does not affect XMLHttpRequest."
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/a-click.html:
-- aElement.click() before the load event must NOT replace
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit-during-load.html:
 - Replace during the load event, triggered by formElement.submit()
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/form-requestsubmit-during-pageshow.html:
@@ -3045,13 +3038,6 @@ html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/i
 html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/iframe-src.html:
 - Replace before load, triggered by setting iframeElement.src
 - "[harness] TIMEOUT"
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-assign.html:
-- Replace before load, triggered by location.assign()
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/location-setter.html:
-- href
-- search
-html/browsers/browsing-the-web/navigating-across-documents/replace-before-load/window-open-self.html:
-- No replace before load, triggered by window.open(_self) on an iframe
 html/browsers/browsing-the-web/navigating-across-documents/source/navigate-child-src-about-blank.html:
 - Set the src attribute to about:blank and check referrer
 html/browsers/browsing-the-web/navigating-across-documents/top-level-data-url.window.js:
@@ -6850,8 +6836,6 @@ shadow-dom/scroll-to-the-fragment-in-shadow-tree.html:
   an open shadow tree earlier in tree order
 shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
-shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
-- A_08_01_01_T01
 # IN SCOPE, against the test: it asserts that both of two `javascript:` URL navigations begun in one task run
 # ("Property is ... once the navigation happened" after a second `anchor.click()` to
 # `javascript:globalThis.verify()`). Current HTML "navigate" sets the ongoing navigation before its `javascript:`
