@@ -113,10 +113,15 @@ RSpec.describe 'the cookie store' do
   # request's origin is not same site with lastURL's origin". So a request a page makes through another site and back
   # to its own is cross-site at home — no SameSite cookie for its image (one the HTTP cache's redirect answers too) or
   # its fetch(), the Lax one alone for its top-level navigation (a GET of a document) — as one another site's page makes
-  # there is; a user's, of no initiating document, is untainted. Sec-Fetch-Site, which Fetch Metadata judges over the
-  # whole URL list, is `cross-site` alike. Firefox 159 sends these cookies as this does (measured 2026-10-31, over http:
-  # an image, a no-cors fetch() and a script's navigation, a→b→a and b→b→a); Chrome 156 sends a→b→a's every one, Strict
-  # included, as RFC 6265bis-14 (A.14, httpwg/http-extensions#2750) dropped its own redirect-chain rule.
+  # there is. A user's navigation, of no client, is tainted alike, its request's origin a new opaque one (HTML "create
+  # navigation params by fetching": "If request's client is null … Set request's origin to a new opaque origin"): b→a
+  # typed sends a the Lax cookie alone, though its Sec-Fetch-Site is `none`. A traversal back to that entry is walked by
+  # the origin of the document it leaves — HTML "apply the history step" makes the navigable's active document its
+  # client, "as if navigable navigated itself" — so from b's page b→a is untainted. Sec-Fetch-Site, which Fetch Metadata
+  # judges over the whole URL list, is `cross-site` alike. Firefox 159 sends these cookies as this does (measured
+  # 2026-10-31, over http: an image, a no-cors fetch() and a script's navigation, a→b→a and b→b→a, and b→a typed); Chrome
+  # 156 sends a→b→a's every one, Strict included, as RFC 6265bis-14 (A.14, httpwg/http-extensions#2750) dropped its own
+  # redirect-chain rule, and b→a typed's Strict cookie too.
   it 'taints a request redirected through another site cross-site' do
     seen = []
     app = lambda {|env|
@@ -146,6 +151,8 @@ RSpec.describe 'the cookie store' do
       s.click_link 'go'
     end
     s.visit 'https://b.test/bounce?to=https://a.test/echo-user'
+    s.visit 'https://b.test/set'
+    s.go_back
     expect(seen.uniq.sort).to eq([
       ['/echo-a-fetch', '', 'cross-site'],
       ['/echo-a-img', '', 'cross-site'],
@@ -153,6 +160,7 @@ RSpec.describe 'the cookie store' do
       ['/echo-b-fetch', '', 'cross-site'],
       ['/echo-b-img', '', 'cross-site'],
       ['/echo-b-nav', 'l=1', 'cross-site'],
+      ['/echo-user', 'l=1', 'none'],
       ['/echo-user', 's=1; l=1', 'none']
     ])
   end

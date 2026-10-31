@@ -151,7 +151,7 @@ pub(crate) enum RedirectTaint {
 }
 impl RedirectTaint {
     // …moved on by a hop from `last` to `url` of a request whose origin is `origin` (serialized: `null` an opaque one,
-    // same origin and same site with none; '' none — a request no document began, a user's, which no hop taints).
+    // same origin and same site with none; '' none — a request of no origin at all, which no hop taints).
     pub(crate) fn step(self, origin: &str, last: &str, url: &str) -> Self {
         if origin.is_empty() {
             return self;
@@ -428,7 +428,8 @@ mod tests {
     fn a_redirect_taints_a_request_off_its_own_origin_and_site() {
         let taint = |origin: &str, urls: &[&str]| urls.windows(2).fold(RedirectTaint::SameOrigin, |t, w| t.step(origin, w[0], w[1]));
         // (…a→b untainted, a→b→a cross-site; a request of b's going b→b→a untainted; b→a of a's cross-site, its first URL
-        // off its site; `null` tainted by any cross-origin step; a user's, of no origin, never)
+        // off its site; `null` tainted by any cross-origin step — a user's navigation's, a new opaque origin — one of no
+        // origin at all never)
         assert_eq!(taint("http://a.test", &["http://a.test/1", "http://b.test/2"]), RedirectTaint::SameOrigin);
         assert_eq!(taint("http://a.test", &["http://a.test/1", "http://b.test/2", "http://a.test/3"]), RedirectTaint::CrossSite);
         assert_eq!(taint("http://b.test", &["http://b.test/1", "http://b.test/2", "http://a.test/3"]), RedirectTaint::SameOrigin);

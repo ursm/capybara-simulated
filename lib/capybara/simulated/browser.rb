@@ -2671,7 +2671,10 @@ module Capybara
       # a re-post's Origin and its cookies' site that document's, as any of its navigations' (`navigate_top_from`: one of an
       # opaque origin cross-site to every URL, its Origin `null`). Chrome, measured 2026-10-30: `same-origin` and the page's
       # own Origin, a page a cross-site link or form led to too; a sandboxed page's `cross-site`. A user's traversal or
-      # reload is made by none: Sec-Fetch-Site 'none', a re-post's Origin the one it was first sent with.)
+      # reload is made by none: Sec-Fetch-Site 'none', a re-post's Origin the one it was first sent with — its request's
+      # client the page's document all the same, by whose origin its redirect-taint is walked (`navigate_top_level`): the
+      # same step of HTML's, the navigable's active document's source snapshot params, "as if navigable navigated
+      # itself".)
       def replay_history_entry(id, is_reload: false, user_activated: false, through_ui: false)
         return unless id
 
@@ -11768,7 +11771,9 @@ module Capybara
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           top_level:                     true,
-          reloaded_cross_site:           reloaded_cross_site
+          reloaded_cross_site:           reloaded_cross_site,
+          # (…a traversal's or a user's reload's, of no initiator, its client the document it leaves: `replay_history_entry`)
+          client_origin:                 (leaving_document_origin if from_history && !initiator)
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
