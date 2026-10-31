@@ -1,6 +1,6 @@
 // A request as a chain of hops carries it (Fetch "main fetch" → "HTTP-redirect fetch"): its method, its URL, its header
 // list, whether its body is gone, the origin its hops send (`null` once a redirect tainted it), its redirect-taint
-// (referrer.rs `RedirectTaint`), its referrer source and policy, whether it has been redirected and how many times it has
+// (referrer.rs `RedirectTaint`), its referrer source and policy, the URLs it was redirected from and how many times it has
 // been dispatched — and the two steps every chain takes
 // whatever fetches it: the Referer a hop sends (its policy over the source the previous hop left), and a redirect
 // followed (the request moved on to the Location: its method and body, its `Authorization`, its origin). A subresource
@@ -23,7 +23,8 @@ pub(crate) struct RequestChain {
     pub(crate) taint: RedirectTaint,
     pub(crate) ref_policy: Option<String>,
     pub(crate) ref_source: Option<String>,
-    pub(crate) redirected: bool,
+    // The URLs before `target` in its URL list (Fetch "request's URL list"): those it was redirected from, in order.
+    pub(crate) passed: Vec<String>,
     pub(crate) dispatches: u32,
 }
 
@@ -53,6 +54,15 @@ fn url_text(bytes: &[u8]) -> String {
 }
 
 impl RequestChain {
+    // Whether it has been redirected: its URL list holds more than its current URL.
+    pub(crate) fn redirected(&self) -> bool {
+        !self.passed.is_empty()
+    }
+    // Its URL list: the URLs it was redirected from, then its current one.
+    pub(crate) fn url_list(&self) -> Vec<String> {
+        self.passed.iter().cloned().chain([self.target.clone()]).collect()
+    }
+
     // Another dispatch, None where it would be the 22nd — past the 20 redirects a chain follows (a network error).
     pub(crate) fn dispatch(&mut self) -> Option<()> {
         self.dispatches += 1;
@@ -93,7 +103,7 @@ impl RequestChain {
             Redirected::Follow(step) => step,
         };
         let from = std::mem::replace(&mut self.target, step.url);
-        self.redirected = true;
+        self.passed.push(from.clone());
         self.taint = step.taint;
         if step.taint.origin_tainted() {
             self.effective_origin = Some("null".to_owned());
@@ -133,7 +143,7 @@ mod tests {
             taint: RedirectTaint::default(),
             ref_policy: None,
             ref_source: Some("http://a.test/page".to_owned()),
-            redirected: false,
+            passed: Vec::new(),
             dispatches: 0,
         }
     }
@@ -143,7 +153,7 @@ mod tests {
     fn a_303_makes_a_post_a_get_and_drops_its_body() {
         let mut c = chain("POST", "http://a.test/form");
         assert!(matches!(c.follow(303, &[b"/done".to_vec()], &SAME), Followed::Follow(_, true)));
-        assert_eq!((c.method.as_str(), c.target.as_str(), c.body_empty, c.redirected), ("GET", "http://a.test/done", true, true));
+        assert_eq!((c.method.as_str(), c.target.as_str(), c.body_empty, c.redirected()), ("GET", "http://a.test/done", true, true));
         assert!(!c.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(b"content-type")));
     }
 

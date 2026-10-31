@@ -57,6 +57,35 @@ RSpec.describe 'HTTP cache across sessions' do
     expect(s.find('#p').style('color')).to eq('color' => 'rgb(0, 0, 255)')
   end
 
+  # A script reached through a redirect is kept across visits only as long as EVERY hop would be answered from the
+  # cache: a fresh 302 lends its lifetime to none of what it leads to, nor a fresh body to an uncacheable 302 — whose
+  # next answer may lead elsewhere.
+  it 'keeps a redirected script only while every hop is fresh' do
+    version = 1
+    target  = '/w.js'
+    app = lambda {|env|
+      case env['PATH_INFO']
+      when '/fresh-302.js' then [302, {'location' => '/v.js', 'cache-control' => 'max-age=3600'}, []]
+      when '/plain-302.js' then [302, {'location' => target}, []]
+      when '/v.js'         then [200, {'content-type' => 'text/javascript'}, ["window.v = #{version}"]]
+      when '/w.js'         then [200, {'content-type' => 'text/javascript', 'cache-control' => 'max-age=3600'}, ["window.v = 'w#{version}'"]]
+      else [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><script src=\"#{env['QUERY_STRING']}\"></script>"]]
+      end
+    }
+    s = simulated_session(app)
+    s.visit '/?/fresh-302.js'
+    expect(s.evaluate_script('window.v')).to eq(1)
+    version = 2
+    s.visit '/?/fresh-302.js'
+    expect(s.evaluate_script('window.v')).to eq(2)
+
+    s.visit '/?/plain-302.js'
+    expect(s.evaluate_script('window.v')).to eq('w2')
+    target = '/v.js'
+    s.visit '/?/plain-302.js'
+    expect(s.evaluate_script('window.v')).to eq(2)
+  end
+
   it 'decodes the new bytes when an image behind a no-store URL changes' do
     image = png(80, 40)
     app = lambda {|env|

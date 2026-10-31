@@ -224,7 +224,7 @@ impl FetchPlan {
                     taint: RedirectTaint::named(text("redirect_taint")?.as_deref()),
                     ref_policy: text("referrer_policy")?,
                     ref_source,
-                    redirected: false,
+                    passed: Vec::new(),
                     dispatches: 0,
                 },
                 crossed: false,
@@ -239,7 +239,7 @@ impl FetchPlan {
         }))
     }
 
-    // #target / #request_method / #redirected?: the request as it stands.
+    // #target / #request_method / #redirected? / #url_list: the request as it stands.
     fn target(&self) -> String {
         self.st.borrow().chain.target.clone()
     }
@@ -247,7 +247,10 @@ impl FetchPlan {
         self.st.borrow().chain.method.clone()
     }
     fn redirected(&self) -> bool {
-        self.st.borrow().chain.redirected
+        self.st.borrow().chain.redirected()
+    }
+    fn url_list(&self) -> Vec<String> {
+        self.st.borrow().chain.url_list()
     }
     // Whether the HTTP cache may be read for this hop: a GET, no author conditional, a mode that reads it, and the chain
     // at its client's origin still (a cross-origin hop always goes to the network, so the mode filtering runs).
@@ -521,6 +524,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("target", method!(FetchPlan::target, 0))?;
     class.define_method("request_method", method!(FetchPlan::request_method, 0))?;
     class.define_method("redirected?", method!(FetchPlan::redirected, 0))?;
+    class.define_method("url_list", method!(FetchPlan::url_list, 0))?;
     class.define_method("begin_hop", method!(FetchPlan::begin_hop, 2))?;
     class.define_method("preflight_answer", method!(FetchPlan::preflight_answer, 2))?;
     class.define_method("response", method!(FetchPlan::response, 3))?;

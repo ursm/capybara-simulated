@@ -327,6 +327,27 @@ impl HttpCache {
         let url = crate::fetch_rules::ruby_bytes(url);
         self.lock().get(&url).cloned().map(Entry)
     }
+    // #fresh_until(url_list) -> the time (seconds since the epoch) a response fetched through `url_list` — a chain of
+    // redirects ending in its final URL, each hop's response stored for its URL — would be answered from the store until,
+    // every hop's served fresh (RFC 9111 §4.2): the earliest of their freshness deadlines. Nil where a hop has no stored
+    // response, or one with no lifetime, or a stale one — a redirect the store does not answer is fetched again, and what
+    // it leads to with it.
+    fn fresh_until(&self, url_list: RArray) -> Result<Option<f64>, Error> {
+        let urls = url_list.into_iter().map(|u| RString::try_convert(u).map(crate::fetch_rules::ruby_bytes)).collect::<Result<Vec<_>, _>>()?;
+        let entries = self.lock();
+        let at = now();
+        let mut until = f64::INFINITY;
+        for url in urls {
+            let Some(stored) = entries.get(&url) else { return Ok(None) };
+            let kept = stored.kept();
+            let Some(max_age) = kept.policy.max_age else { return Ok(None) };
+            if !fresh(kept.stored_at, Some(max_age), kept.policy.no_cache, at) {
+                return Ok(None);
+            }
+            until = until.min(kept.stored_at + max_age);
+        }
+        Ok(until.is_finite().then_some(until))
+    }
     // #clear: every response gone.
     fn clear(&self) {
         self.lock().clear();
@@ -432,12 +453,6 @@ impl Entry {
     fn no_cache(&self) -> bool {
         self.0.kept().policy.no_cache
     }
-    // #fresh_until -> the time (seconds since the epoch) it stays fresh until — nil for one with no lifetime, or stale.
-    fn fresh_until(&self) -> Option<f64> {
-        let kept = self.0.kept();
-        let max_age = kept.policy.max_age?;
-        fresh(kept.stored_at, Some(max_age), kept.policy.no_cache, now()).then(|| kept.stored_at + max_age)
-    }
     // #revalidation_headers -> the conditional request header fields a revalidation of it sends: its validators.
     fn revalidation_headers(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
         let kept = rb_self.0.kept();
@@ -457,6 +472,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &Ruby) -> Result<(), Error> 
     let class = native.define_class("HttpCache", ruby.class_object())?;
     class.define_singleton_method("new", function!(HttpCache::new, 0))?;
     class.define_method("lookup", method!(HttpCache::lookup, 1))?;
+    class.define_method("fresh_until", method!(HttpCache::fresh_until, 1))?;
     class.define_method("clear", method!(HttpCache::clear, 0))?;
     class.define_method("clear_volatile", method!(HttpCache::clear_volatile, 0))?;
     class.define_method("store", method!(HttpCache::store, 5))?;
@@ -468,7 +484,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &Ruby) -> Result<(), Error> 
     entry.define_method("headers", method!(Entry::headers, 0))?;
     entry.define_method("fresh?", method!(Entry::is_fresh, -1))?;
     entry.define_method("no_cache?", method!(Entry::no_cache, 0))?;
-    entry.define_method("fresh_until", method!(Entry::fresh_until, 0))?;
     entry.define_method("revalidation_headers", method!(Entry::revalidation_headers, 0))?;
     Ok(())
 }

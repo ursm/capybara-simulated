@@ -74,6 +74,20 @@ RSpec.describe Capybara::Simulated::Native::HttpCache do
     expect(cache.lookup('http://app/twice').fresh?(now + 30)).to be(true)
     expect(cache.lookup('http://app/expired').fresh?(now)).to be(false)
   end
+
+  # (…and a chain of redirects answered from it as long as every hop is: the earliest hop's deadline, none where a hop
+  # has no fresh stored response — RFC 9111 §4.2, each hop's own freshness)
+  it 'keeps a chain fresh until its earliest hop goes stale' do
+    cache = described_class.new
+    cache.store('http://app/r', 302, {'cache-control' => 'max-age=3600', 'location' => '/a'}, '', nil)
+    cache.store('http://app/a', 200, {'cache-control' => 'max-age=60'}, 'body', nil)
+    cache.store('http://app/n', 200, {'cache-control' => 'no-cache'}, 'body', nil)
+    now = Time.now.to_f
+    expect(cache.fresh_until(['http://app/r', 'http://app/a'])).to be_within(5).of(now + 60)
+    expect(cache.fresh_until(['http://app/a'])).to be_within(5).of(now + 60)
+    expect(cache.fresh_until(['http://app/r', 'http://app/n'])).to be_nil
+    expect(cache.fresh_until(['http://app/gone', 'http://app/a'])).to be_nil
+  end
 end
 
 # …and the same contract seen from a session: a `reset!` between visits keeps an immutable

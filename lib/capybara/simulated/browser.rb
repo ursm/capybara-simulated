@@ -3801,6 +3801,8 @@ module Capybara
         # …the URL it was fetched from at last, its redirects followed (a worker's global scope takes it: HTML "run a worker"
         # sets its url to the response's)…
         Thread.current[:csim_asset_url] = result && result['url']
+        # (…and the URLs its redirects went through before it, which `durable_source` judges its freshness by)
+        Thread.current[:csim_asset_url_list] = result && result['url_list']
         # What the asset's Resource Timing entry reports — kept beside the cached body (see
         # `external_asset_response`), since the body alone is what the loader hands back.
         Thread.current[:csim_asset_meta] = result && resource_timing_meta(result)
@@ -3940,7 +3942,9 @@ module Capybara
         body = rack_fetch_body(url, cors_mode: mode, credentials: credentials, client_url: client[:url], referrer: client[:referrer], referrer_policy: client[:policy],
                                     client_origin: client[:origin], client_realm: client[:realm], initiator: client[:initiator], dest: dest)
         return [nil, nil] unless body
-        [body, @@asset_cache.lookup(url)&.fresh_until]
+        # (…fresh as long as its every hop's stored response is — a fresh redirect lends no lifetime to the response it
+        # leads to, nor that response to an uncacheable redirect)
+        [body, @@asset_cache.fresh_until(Thread.current[:csim_asset_url_list] || [url])]
       end
 
       # Cross-visit cache of external asset bodies (classic `<script src>` bundles
@@ -9854,7 +9858,7 @@ module Capybara
             # Cached asset — log headers/type/size but skip the (boring) body.
             trace_network(method, target, cache_entry.status, headers, body, cache_headers, nil, t0, false)
             out = response_hash(cache_entry.status, cache_headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'cache', encoded: cache_entry.encoded)
-            return tainted_response(out, args[0])
+            return chain_response(out, plan, args[0])
           when 'cache_follow'
             # (…a redirect the cache answered followed through it, to the next hop the cache may answer too)
             trace_network(method, args[0], cache_entry.status, headers, body, cache_headers, nil, t0, true)
@@ -9929,7 +9933,7 @@ module Capybara
             expose, tainted = args
             cached_headers = expose.nil? ? cache_headers : cors_exposed_headers(cache_headers, expose)
             out = response_hash(cache_entry.status, cached_headers, cache_entry.body, target, plan.redirected?, body_raw: body_raw, cached: 'validated', raw_headers: cache_headers, encoded: cache_entry.encoded)
-            return tainted_response(out, tainted)
+            return chain_response(out, plan, tainted)
           when 'error'
             message, store_redirect = args
             # (…a redirect that fails to be followed logged and stored all the same: HTTP-network-or-cache fetch stores
@@ -10001,7 +10005,7 @@ module Capybara
             out['method']   = nav[0]
             out['referrer'] = nav[1] if nav[1]
           end
-          return tainted_response(out, tainted)
+          return chain_response(out, plan, tainted)
         end
       rescue StandardError => e
         warn "[capybara-simulated] rack_fetch failed: #{e.class}: #{e.message[0, 200]}"
@@ -13291,11 +13295,15 @@ module Capybara
           location_fields(headers)
         ]
       end
-      # A response the fetch answers with marked tainted, where its chain left its client's origin though its mode makes
-      # it no CORS one: what a mode-less load's resource is not CORS-same-origin by (a sheet's origin-clean flag unset,
-      # sheet_fetch.rs `fetch`).
-      def tainted_response(out, tainted)
-        out['tainted'] = true if out && tainted
+      # A response `plan`'s chain of hops ended in, as its host reads it: marked tainted where the chain left its client's
+      # origin though its mode makes it no CORS one — what a mode-less load's resource is not CORS-same-origin by (a sheet's
+      # origin-clean flag unset, sheet_fetch.rs `fetch`) — and carrying the URLs its redirects went through to it (its URL
+      # list, where it holds more than the final one).
+      def chain_response(out, plan, tainted)
+        return out unless out
+
+        out['tainted']  = true if tainted
+        out['url_list'] = plan.url_list if plan.redirected?
         out
       end
 

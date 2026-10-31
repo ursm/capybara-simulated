@@ -64,7 +64,7 @@ impl WorkerScriptFetch {
                     taint: RedirectTaint::default(),
                     ref_policy: None,
                     ref_source: None,
-                    redirected: false,
+                    passed: Vec::new(),
                     dispatches: 0,
                 },
                 workers_may_answer: true,
@@ -127,7 +127,7 @@ impl WorkerScriptFetch {
         self.st.borrow().chain.target.clone()
     }
     fn redirected(&self) -> bool {
-        self.st.borrow().chain.redirected
+        self.st.borrow().chain.redirected()
     }
 }
 

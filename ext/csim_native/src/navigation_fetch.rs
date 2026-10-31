@@ -154,7 +154,7 @@ impl NavigationFetch {
                     taint: RedirectTaint::default(),
                     ref_policy: text("referrer_policy")?,
                     ref_source: text("referrer")?.filter(|u| !u.is_empty()),
-                    redirected: false,
+                    passed: Vec::new(),
                     dispatches: 0,
                 },
                 initiator,
@@ -244,7 +244,7 @@ impl NavigationFetch {
         self.st.borrow().chain.method.clone()
     }
     fn redirected(&self) -> bool {
-        self.st.borrow().chain.redirected
+        self.st.borrow().chain.redirected()
     }
     fn referrer(&self) -> Option<String> {
         self.st.borrow().chain.referer()
@@ -282,7 +282,7 @@ mod tests {
                 taint: RedirectTaint::default(),
                 ref_policy: None,
                 ref_source: Some(initiator.to_owned()),
-                redirected: false,
+                passed: Vec::new(),
                 dispatches: 0,
             },
             initiator: Some(initiator.to_owned()),
