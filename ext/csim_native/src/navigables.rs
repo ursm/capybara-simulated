@@ -638,6 +638,10 @@ impl RealmArena {
         }
         (nav.parents.get(&realm).copied().unwrap_or(0), depth, nav.navigable_ids.get(&realm).copied().unwrap_or(0), nav.firsts.contains(&realm))
     }
+    // The child navigable of container `container`, by its number (`Child::id`) — none for an element that has none.
+    pub(crate) fn child_navigable(&self, container: NodeId) -> Option<u32> {
+        self.navigables.children.get(&container).map(|c| c.id)
+    }
     // …the realms whose documents navigable `id` had, in the order they were made — those not dropped yet.
     pub(crate) fn navigable_realms(&self, id: u32) -> Vec<i32> {
         let mut realms: Vec<i32> = self.navigables.navigable_ids.iter().filter(|&(_, &n)| n == id).map(|(&r, _)| r).collect();

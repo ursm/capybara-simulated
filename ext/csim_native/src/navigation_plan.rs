@@ -11,6 +11,7 @@
 // reloads for `location.href = '/b'; location.reload()`). A frame's are its container's (frame_navigation.rs).
 
 use crate::dom::{realm, realm_id, register};
+use crate::session_history::{begin_navigation_of, navigation_ongoing_of};
 
 pub(crate) struct Navigation {
     url: String,
@@ -121,9 +122,6 @@ pub(crate) struct NavigationPlan {
     // the navigation commits no document after all (`flushRestore`).
     saved: Option<Own>,
     flushed: Option<Own>,
-    // How many times a navigation planned superseded what was planned before it: what a `javascript:` URL's task, which
-    // one planned after it ends, asks (`javascriptOngoing`).
-    superseded: u64,
 }
 
 // A form's submission a frame's document made that the host routes, as the task ends, to the navigable its target
@@ -252,9 +250,10 @@ impl Own {
 }
 
 impl NavigationPlan {
+    // What was planned let go, a navigation planned after it — which begins the navigable's ongoing navigation, as the
+    // caller has the traversable record (session_history.rs `begin_navigation_of`).
     fn supersede(&mut self) {
         self.let_go();
-        self.superseded += 1;
     }
     // …what was planned let go, by a reload (`planReload`): which is no navigation that ends a `javascript:` URL's —
     // HTML "reload a navigable" sets no ongoing navigation, its "apply the reload history step" queued on the traversal
@@ -345,11 +344,11 @@ fn plan_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let name = if target_keyword(&target) == TARGET_BLANK { String::new() } else { target };
     let page = arena.is_page(cid);
     let activated = arena.transiently_activated(cid);
-    let plan = &mut arena.navigation_plan;
     if page && !opens_window {
-        plan.supersede();
+        arena.navigation_plan.supersede();
+        begin_navigation_of(arena, cid, None);
     }
-    plan.navigation = Some(Navigation { url, opens_window, name, opener, referrer_policy, blob, activated });
+    arena.navigation_plan.navigation = Some(Navigation { url, opens_window, name, opener, referrer_policy, blob, activated });
 }
 
 // __dom.planSubmission(request): a form's submission planned, its request as the bindings made it as it was submitted
@@ -386,6 +385,7 @@ fn supersede_planned(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let arena = realm(scope, cid);
     if !page_only || arena.is_page(cid) {
         arena.navigation_plan.supersede();
+        begin_navigation_of(arena, cid, None);
     }
 }
 
@@ -459,11 +459,13 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         let (source, policy) = crate::referrer::navigation_referrer(&mut crate::dom::dom(scope).arena, r, &policy);
         (r, source, policy)
     });
-    let plan = &mut realm(scope, cid).navigation_plan;
-    if plan.traversal_planned() {
+    let arena = realm(scope, cid);
+    if arena.navigation_plan.traversal_planned() {
         return;
     }
-    plan.supersede();
+    arena.navigation_plan.supersede();
+    begin_navigation_of(arena, cid, None);
+    let plan = &mut arena.navigation_plan;
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
     plan.own.planned = next_planned();
 }
@@ -481,28 +483,34 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // (`Reload::mark`). (Chrome and Firefox go on with a location navigation set before it — whatwg/html#2590 — the spec's
 // text the ruling here.)
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let plan = plan(scope, &args);
+    let cid = realm_id(scope, &args);
+    let arena = realm(scope, cid);
+    let plan = &mut arena.navigation_plan;
     if plan.traversal_planned() {
         return rv.set_double(-1.0);
     }
     let (submission, reload) = (plan.own.submission.take(), plan.own.reload.take());
     plan.navigation = plan.navigation.take().filter(|n| n.opens_window);
     plan.own = Own { submission, reload, ..Own::default() };
-    plan.superseded += 1;
-    rv.set_double(plan.superseded as f64);
+    rv.set_double(begin_navigation_of(arena, cid, None) as f64);
 }
 // __dom.navigationBegun() — a navigation of the calling realm's navigable planned elsewhere than in its plan (a frame's,
 // whose container's plan holds it: frame_navigation.rs), which ends a `javascript:` URL's begun before it as the ones its
 // plan holds do (`supersede`).
 fn navigation_begun(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    plan(scope, &args).superseded += 1;
+    let cid = realm_id(scope, &args);
+    begin_navigation_of(realm(scope, cid), cid, None);
 }
 // __dom.javascriptOngoing(at) -> whether a `javascript:` URL's navigation begun at supersession count `at` goes on as
 // its task runs: no navigation planned since superseded it ("if targetNavigable's ongoing navigation is no longer
 // navigationId, then return").
+// (…of realm `realm`'s navigable where one is given: the frame whose `javascript:` URL ran, its document to replace — the
+// calling realm its container's — url-parse.js `evaluateJavascriptURL`)
 fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let at = args.get(0).number_value(scope).map_or(0, |n| n as u64);
-    rv.set_bool(plan(scope, &args).superseded == at);
+    let cid = realm_id(scope, &args);
+    let of = if args.get(1).is_int32() { args.get(1).int32_value(scope).unwrap_or(cid) } else { cid };
+    rv.set_bool(navigation_ongoing_of(realm(scope, cid), of, at));
 }
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
@@ -712,9 +720,10 @@ fn route_frame_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     }
     if matches!(route, Route::Top) {
         realm(scope, cid).navigation_plan.submission = None;
-        let top = &mut realm(scope, 0).navigation_plan;
-        top.supersede();
-        top.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
+        let top = realm(scope, 0);
+        top.navigation_plan.supersede();
+        begin_navigation_of(top, 0, None);
+        top.navigation_plan.own.submission = Some(FrameSubmission { realm: cid, request, referrer });
         return;
     }
     arena.routed_submissions.entries.push(RoutedSubmission { planned: next_planned(), source: cid, own, taken: None });

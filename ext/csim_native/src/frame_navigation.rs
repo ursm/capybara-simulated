@@ -41,6 +41,9 @@ struct FrameNavigation {
     flags: u32,
     // …the turn its build was parked in (`DEFERRED_SW`), its replay's place among the others'.
     deferred_at: u32,
+    // (…which of its navigations a `load` it queued is of: one another superseded fires for nothing — the element's
+    // bookkeeping of its loads, `frameLoadBegin` / `frameLoadDue`; whether a navigation is the navigable's ongoing one is
+    // its traversable's record, session_history.rs `begin_navigation_of`)
     generation: u32,
     // The URL the navigation started with — the `src` attribute's value then, none where it had none (`Some(None)`):
     // what a beforeunload handler rewriting the attribute does not change.
@@ -240,7 +243,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "setLoadDelay", set_load_delay, context_id);
     crate::dom::register(scope, ns, "oweContainerLoad", owe_container_load, context_id);
     crate::dom::register(scope, ns, "loadDelayedHere", load_delayed_here, context_id);
-    crate::dom::register(scope, ns, "frameNavGeneration", frame_nav_generation, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
@@ -915,20 +917,16 @@ impl RealmArena {
     }
 }
 
-// __dom.frameNavGeneration(containerNid) -> which navigation of the container's is its latest.
-fn frame_nav_generation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_uint32(0) };
-    let cid = realm_id(scope, &args);
-    rv.set_uint32(crate::dom::realm(scope, cid).frame_navigations.0.get(&container).map_or(0, |n| n.generation));
-}
-
 // __dom.supersedeFrameNav(containerNid) — another navigation of the container's is its latest: the one under way
 // superseded, by a navigation of its own or a host's that committed first — and the element `load` it owed with it, the
 // latest one owing its own as it queues it.
+// (…and its child navigable's navigation begun, its ongoing one: session_history.rs `begin_navigation_of`)
 fn supersede_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(container) = nid_arg(scope, &args, 0) else { return };
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).supersede_frame_nav(container);
+    let arena = crate::dom::realm(scope, cid);
+    arena.supersede_frame_nav(container);
+    crate::session_history::begin_navigation_of(arena, cid, Some(container));
 }
 impl RealmArena {
     pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {

@@ -198,9 +198,12 @@ struct Traversable {
     // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
     saved: [Option<State>; 2],
     frames_saved: HashMap<u32, FrameSaved>,
-    // Each navigable's ongoing navigation (HTML "set the ongoing navigation"), by its number: one begun replaces the one
-    // before it, and a traversal applied makes it "traversal" (`go_to`) — which a navigation waiting to be made again
-    // (one deferred on an activating service worker: browser.rb `await_sw_activation`) is judged by.
+    // Each navigable's ongoing navigation (HTML "set the ongoing navigation"), by its number — the one record of it, every
+    // way a navigation begins writing it: a location, hyperlink or form navigation planned, a `javascript:` URL's
+    // (navigation_plan.rs), a frame's `src` (frame_navigation.rs), the host's own (browser.rb, `#begin_navigation`) —
+    // one begun replacing the one before it, a traversal applied making it "traversal" (`go_to`). What a `javascript:`
+    // URL's task (navigation_plan.rs `javascriptOngoing`) and a navigation waiting to be made again (one deferred on an
+    // activating service worker: browser.rb `await_sw_activation`) are judged by.
     ongoing: HashMap<u32, u64>,
     next_ongoing: u64,
     // How many times its history has changed — an entry committed, a step gone to or held at, a navigable destroyed, a
@@ -798,6 +801,16 @@ impl Traversable {
     fn queued_documents(&self) -> bool {
         self.queued.iter().any(|q| q.documents && !q.asked)
     }
+    // A navigation of navigable `nav` begun, its ongoing one now (HTML "set the ongoing navigation"): its number — and
+    // whether the one numbered `id` still is.
+    fn begin_navigation(&mut self, nav: u32) -> u64 {
+        self.next_ongoing += 1;
+        self.ongoing.insert(nav, self.next_ongoing);
+        self.next_ongoing
+    }
+    fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
+        self.ongoing.get(&nav) == Some(&id)
+    }
     // The traversal to `step` applied — the step a plan gave.
     fn go_to(&mut self, step: i64) {
         self.version += 1;
@@ -1132,14 +1145,10 @@ impl SessionHistory {
     // #begin_navigation(navigable) -> the number of the navigation of `navigable` begun now, its ongoing one — and
     // #navigation_ongoing?(navigable, number): whether it still is, no navigation begun nor traversal applied since.
     fn begin_navigation(&self, nav: u32) -> u64 {
-        let mut t = self.lock();
-        t.next_ongoing += 1;
-        let id = t.next_ongoing;
-        t.ongoing.insert(nav, id);
-        id
+        self.lock().begin_navigation(nav)
     }
     fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
-        self.lock().ongoing.get(&nav) == Some(&id)
+        self.lock().navigation_ongoing(nav, id)
     }
     // #clear: no entries at all, nor traversals queued.
     // (…a reset's: a fresh window's, what it knew of its opener and its documents gone with them)
@@ -2136,6 +2145,23 @@ fn traversable_of(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mut
         return histories().1.get(&arena.navigables.history)?.upgrade().map(|t| (t, None));
     }
     arena.window_history(realm).map(|(h, window)| (h.traversable.clone(), Some(window)))
+}
+// The navigation of the navigable realm `realm`'s document is the active document of begun, its ongoing one now (HTML
+// "set the ongoing navigation", of its traversable: `Traversable::begin_navigation`) — or, `container` given, of that
+// container's child navigable in realm `realm`'s document (a frame's `src`): its number, 0 for a realm of no traversable
+// (a frame removed, a window navigated away from) — and whether the one numbered `id` still is.
+pub(crate) fn begin_navigation_of(arena: &crate::dom::RealmArena, realm: i32, container: Option<crate::dom::NodeId>) -> u64 {
+    let nav = match container {
+        Some(c) => arena.child_navigable(c),
+        None => Some(arena.realm_tree(realm).2),
+    };
+    match (traversable_of(arena, realm), nav) {
+        (Some((t, _)), Some(nav)) => lock(&t).begin_navigation(nav),
+        _ => 0,
+    }
+}
+pub(crate) fn navigation_ongoing_of(arena: &crate::dom::RealmArena, realm: i32, id: u64) -> bool {
+    traversable_of(arena, realm).map_or(id == 0, |(t, _)| lock(&t).navigation_ongoing(arena.realm_tree(realm).2, id))
 }
 // …and that of a window of this isolate's alone, with its document's realm.
 fn window_traversable(arena: &crate::dom::RealmArena, realm: i32) -> Option<(Arc<Mutex<Traversable>>, i32)> {

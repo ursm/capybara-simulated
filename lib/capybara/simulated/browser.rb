@@ -6055,14 +6055,13 @@ module Capybara
       # stack; the worker is parked with nothing of its own to do (waiting on something only another document can give
       # it); or SW_ACTIVATION_VIRTUAL_MS of the session's time, or SW_ACTIVATION_HANG_GUARD of wall time, passed — the
       # navigation (`remake`, which makes it again) is deferred until the worker activates or dies (the registry's
-      # `retry_navs`: `sw_navigations_due!`), and made again then only where it is still `navigable`'s ongoing navigation
-      # (`[session history, navigable]`: session_history.rs `begin_navigation`) — a navigation begun since, a traversal
-      # or a reload applied, replaced it, as HTML "navigate" aborts the one ongoing. Whether it was deferred. (…none
+      # `retry_navs`: `sw_navigations_due!`), and made again then only where it is still its navigable's ongoing
+      # navigation (`ongoing`, `[session history, navigable, number]` as the caller began it: session_history.rs
+      # `begin_navigation`) — a navigation begun since, a `javascript:` URL's among them, a traversal or a reload applied,
+      # replaced it, as HTML "navigate" aborts the one ongoing. Whether it was deferred. (…none
       # given — a redirect's hop, which no deferral makes again — the hop waits what it can, and goes on; a caller asks
       # `sw_registered?` first, which spares it the site)
-      private def await_sw_activation(url, site, navigable: nil, &remake)
-        history, nav = navigable
-        ongoing = history&.begin_navigation(nav)
+      private def await_sw_activation(url, site, ongoing: nil, &remake)
         return false unless http_url?(url) && sw_activating_controller_for(url, site)
 
         waited = 0
@@ -6073,7 +6072,7 @@ module Capybara
           return false unless remake
 
           Native.sw_defer_navigation(@sw_partition)
-          @sw_deferred_navigations << [history, nav, ongoing, remake]
+          @sw_deferred_navigations << [ongoing, remake]
           return true
         end
         false
@@ -6103,9 +6102,18 @@ module Capybara
         end
       end
       # Whether every live service worker is parked on its inbox, nothing in it — its event loop with no task running —
-      # and the soonest time, on the window's clock, one has a timer set for (nil for none).
+      # and nothing reading for it off its thread: an EventSource's or a WebSocket's reader, which pushes what it reads
+      # into that inbox — and the soonest time, on the window's clock, one has a timer set for (nil for none).
       private def sw_workers_parked?
-        @workers.each_value.all? {|w| !w[:service] || !w[:thread]&.alive? || (w[:inbox].empty? && w[:inbox].num_waiting.positive?) }
+        @workers.all? {|handle, w|
+          next true if !w[:service] || !w[:thread]&.alive?
+
+          w[:inbox].empty? && w[:inbox].num_waiting.positive? && !worker_reading?(handle)
+        }
+      end
+      private def worker_reading?(handle)
+        @event_source_lock.synchronize { @event_source_workers.any? {|id, h| h == handle && @event_source_threads[id]&.alive? } } ||
+          @websocket_lock.synchronize { @websocket_workers.value?(handle) }
       end
       private def sw_next_timer_at = @workers.each_value.filter_map {|w| w[:next_timer_at] if w[:service] && w[:thread]&.alive? }.min
 
@@ -6118,8 +6126,8 @@ module Capybara
       end
       def consume_sw_deferred_navigations
         until @sw_navigations_due.empty?
-          history, nav, ongoing, remake = @sw_navigations_due.shift
-          remake.call if history.nil? || history.navigation_ongoing?(nav, ongoing)
+          (history, nav, number), remake = @sw_navigations_due.shift
+          remake.call if history.nil? || history.navigation_ongoing?(nav, number)
         end
       end
 
@@ -10700,8 +10708,11 @@ module Capybara
           log_console('warn', "window-realm navigation to #{url} not modeled; ignoring") unless top_level_data_refused?(url)
           return
         end
+        # (…its navigation begun, its window's ongoing one: session_history.rs `begin_navigation`)
+        history = window_history(realm_id)
+        ongoing = history && [history, 0, history.begin_navigation(0)]
         if body.nil? && sw_registered?
-          deferred = await_sw_activation(url, Native.site(url).to_s, navigable: [window_history(realm_id), 0]) do
+          deferred = await_sw_activation(url, Native.site(url).to_s, ongoing:) do
             navigate_window_realm(realm_id, kind, plan, by_user:, post:, initiator_document:)
           end
           return if deferred
@@ -11386,9 +11397,11 @@ module Capybara
         entry: nil,
         commit: {}
       )
+        # (…its navigation begun, the frame's ongoing one: session_history.rs `begin_navigation`)
+        nav, _, _, history = frame_navigable(realm_id)
+        ongoing = history && [history, nav, history.begin_navigation(nav)]
         if sw_registered?
-          nav, _, _, history = frame_navigable(realm_id)
-          deferred = await_sw_activation(url, blob_partition_site(realm_id), navigable: (history && [history, nav])) do
+          deferred = await_sw_activation(url, blob_partition_site(realm_id), ongoing:) do
             navigate_realm_self(
               realm_id,
               url,
@@ -12130,8 +12143,10 @@ module Capybara
         blob: nil,
         origin: nil
       )
+        # (…its navigation begun, the page's ongoing one: session_history.rs `begin_navigation`)
+        ongoing = [@session_history, 0, @session_history.begin_navigation(0)]
         if sw_registered?
-          deferred = await_sw_activation(url, Native.site(url).to_s, navigable: [@session_history, 0]) do
+          deferred = await_sw_activation(url, Native.site(url).to_s, ongoing:) do
             navigate_top_level(
               url,
               body,
