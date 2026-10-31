@@ -11407,13 +11407,14 @@ module Capybara
         csp: nil,
         referrer: nil,
         referrer_policy: nil,
-        refresh: nil
+        refresh: nil,
+        doc_origin: nil
       )
         parent = @runtime.frame_realm_parent(realm_id)
         handle = frame_container_handle(realm_id, parent)
         return if handle.zero?
         # (…none where its container is gone: no document of it made unsandboxed, as an empty seed would)
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp) or return
+        seed = frame_seed(parent, handle, url, csp, doc_origin) or return
         return unless unload_frame_document(parent, realm_id)
 
         new_id = @runtime.reload_frame_realm(
@@ -11874,11 +11875,11 @@ module Capybara
       # bounded per-test leak, only reachable by re-entering a sibling subframe
       # before an ancestor `_parent` nav; not worth a JS descendant walk on this
       # path's perf budget.
-      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil, refresh: nil)
+      def reload_current_frame_realm(url, bytes, content_type, entry: @frame_stack.last, client_id: nil, csp: nil, referrer: nil, referrer_policy: nil, refresh: nil, doc_origin: nil)
         return unless entry
         old_id = entry[:realm_id]
         parent = entry[:parent_realm_id]
-        seed = frame_realm_host_call(parent, '__csimFrameSeed', entry[:iframe_handle], url.to_s, csp) or return
+        seed = frame_seed(parent, entry[:iframe_handle], url, csp, doc_origin) or return
         return unless unload_frame_document(parent, old_id)
 
         # (…the bytes a reload of it loads again none but a blob document's, which the container kept as it took them:
@@ -11904,6 +11905,14 @@ module Capybara
         frame_realm_host_call(parent, '__csimFireFrameElementLoad', entry[:iframe_handle])
         invalidate_find_cache
         settle
+      end
+
+      # What the container `handle` in realm `parent` gives the document it is to hold at `url` (`__csimFrameSeed`) — its
+      # origin `doc_origin` where the caller decides it (an error document's, a new opaque one: 'null').
+      private def frame_seed(parent, handle, url, csp, doc_origin)
+        seed = frame_realm_host_call(parent, '__csimFrameSeed', handle, url.to_s, csp) or return
+        seed['docOrigin'] = doc_origin if doc_origin
+        seed
       end
 
       def rebind_frame_realm(parent_realm_id, iframe_handle, old_id, new_id)
@@ -13030,9 +13039,10 @@ module Capybara
 
       # A frame's navigation that FAILED — a network error: the frame commits an error document at the target URL (an empty
       # one, as a failed `src` does), not keeping the document it unloaded — one of inline content, made with no reserved
-      # client (HTML "create a document for inline content"), so no service worker's client nor one it controls.
+      # client (HTML "create a document for inline content"), so no service worker's client nor one it controls, and of a
+      # new opaque origin, as a top-level one's is (`commit_error_document`).
       def commit_frame_error_document(realm_id, url, entry: nil)
-        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html')
+        commit_frame_document(realm_id, entry, url.to_s, '', 'text/html', doc_origin: 'null')
       end
       # The document a frame's navigation makes, committed into it — an entered one's (`entry`) through its scope.
       private def commit_frame_document(realm_id, entry, url, bytes, content_type, **response)

@@ -59,6 +59,9 @@ struct Response<'s> {
     policy: Option<String>,
     refresh: Option<String>,
     csp: Option<String>,
+    // (…a network error's: no response, its document an error document of a new opaque origin — HTML "create a document
+    // for inline content", as a top-level one's is)
+    error: bool,
 }
 
 fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, doc: Option<NodeId>) -> Result<v8::Local<'s, v8::Value>, Terminated> {
@@ -68,7 +71,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     };
     let (source, reload) = realm(scope, cid).frame_source(container, doc);
     let empty = v8::String::empty(scope).into();
-    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None };
+    let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, error: false };
     let (carried, srcdoc) = (matches!(source, FrameSource::Navigation(_)), matches!(source, FrameSource::Srcdoc(_)));
     match source {
         // (…a scripted navigation's: its response's as it carried it)
@@ -127,7 +130,10 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     // The document's origins and sandboxing flags, as this realm — its creator's — makes them.
     let arena = realm(scope, cid);
     let sandbox = arena.take_frame_sandbox(container);
-    let created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref());
+    let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref());
+    if r.error {
+        created.document = Some("null".to_owned());
+    }
     // The response is in: the URL the navigation started with let go of.
     arena.take_frame_src_url(container);
     // The URL its location reports — about:srcdoc for a srcdoc, about:blank for none and for a javascript: URL's, whose
@@ -167,7 +173,7 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
 // The network's response to the frame's navigation — ONE host call owning the whole chain, a service worker's per hop
 // across every window's registrations (a redirect out of one's scope entering another's) with the network after
 // (browser.rb `frame_navigation_fetch`) — filed as its Resource Timing entry, and what it says of the document: none
-// for a failed navigation (a worker's network error, a redirect loop), the empty document. A build parked on a worker
+// for a failed navigation (a worker's network error, a redirect loop), the empty document of a new opaque origin. A build parked on a worker
 // still activating (`FRAME_DEFERRED`) — HTML "Handle Fetch" waits for it — loads nothing and owes no `load`, its replay
 // the full build and load; a response that makes no document (a 204 / 205: HTML "navigate" aborted) leaves the frame at
 // the document it is at, its navigation over with no `load` (`FRAME_KEPT`) — one with none yet at its initial
@@ -239,7 +245,10 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         entry.set(scope, k, v);
     }
     call(scope, host, H_FILE, &[entry.into()])?;
-    let Some(resp) = resp else { return Ok(FRAME_BUILD) };
+    let Some(resp) = resp else {
+        r.error = true;
+        return Ok(FRAME_BUILD);
+    };
     let string = |scope: &mut v8::PinScope<'_, '_>, k: &str| member(scope, resp, k).map(|v| v.to_rust_string_lossy(scope)).filter(|s| !s.is_empty());
     r.client_id = string(scope, "resulting_client_id");
     r.referrer = string(scope, "referrer");

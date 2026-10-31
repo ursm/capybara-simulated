@@ -242,7 +242,8 @@ RSpec.describe 'a nested document navigating itself' do
 
   # A frame's navigation redirected as no fetch follows ends as a top-level one does: a fetch scheme's that is no HTTP(S)
   # one, or one past the redirect limit, a network error committed at the URL that redirected (Chrome: an error page
-  # there); one of no fetch scheme handed off, the frame's document left as it is.
+  # there) — of a new opaque origin, HTML "create a document for inline content", which the page reaches no member of
+  # but the cross-origin ones; one of no fetch scheme handed off, the frame's document left as it is.
   {
     'about:blank'      => ['/r?to=about:blank', '/r'],
     'data:'            => ['/r?to=data:text/html,x', '/r'],
@@ -262,8 +263,10 @@ RSpec.describe 'a nested document navigating itself' do
       s.visit '/'
       poll_until { s.evaluate_script('frames[0].document.body?.textContent') == 'o' }
       s.execute_script("frames[0].location.href = '#{start}'")
-      poll_until { s.evaluate_script('frames[0].location.pathname') == landed }
-      expect(s.evaluate_script('[frames[0].location.pathname, frames[0].document.body?.textContent || ""]')).to eq([landed, landed == '/o' ? 'o' : ''])
+      read = -> { s.within_frame(0) { s.evaluate_script('[location.pathname, document.body?.textContent || ""]') } }
+      poll_until { read.().first == landed }
+      expect(read.()).to eq([landed, landed == '/o' ? 'o' : ''])
+      expect(s.evaluate_script('(() => { try { return frames[0].location.pathname; } catch (e) { return e.name; } })()')).to eq(landed == '/o' ? '/o' : 'SecurityError')
     end
 
     # (…an entered one's as well, which goes on in the frame its error document is committed into)
@@ -468,9 +471,26 @@ RSpec.describe 'a nested document navigating itself' do
     s.execute_script(%q{frames[0].eval('location = "http://www.example.com/r0"')})
     poll_until { seen.include?('/r20') }
     seen.clear
-    s.execute_script('frames[0].location.reload()')
+    # (…by the error document's own script: of a new opaque origin, its Location's `reload` is no member another origin
+    # reaches)
+    s.within_frame(0) { s.execute_script('location.reload()') }
     poll_until { seen.any? }
 
     expect(seen.first).to eq('/r20')
+  end
+
+  # …and a frame's FIRST navigation, its `src`'s, a network error alike: its error document of a new opaque origin, as a
+  # navigation of it later makes (HTML "create a document for inline content").
+  it "makes the error document of a frame's src a network error answers of a new opaque origin" do
+    s = simulated_session(lambda {|env|
+      if (n = env['PATH_INFO'][%r{\A/r(\d+)\z}, 1])
+        next [302, {'location' => "/r#{n.to_i + 1}"}, []]
+      end
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><iframe src="/r0"></iframe>']]
+    })
+    s.visit '/'
+    expect(s.evaluate_script('(() => { try { return frames[0].location.pathname; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+    expect(s.within_frame(0) { s.evaluate_script('origin') }).to eq('null')
   end
 end
