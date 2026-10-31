@@ -3420,6 +3420,11 @@ module Capybara
       private def pending_nav_intent?
         !@pending_history_traverse.nil? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
       end
+      # Whether a window `window.open` made in this isolate has a navigation of its own planned, or a traversal queued that
+      # plans one (`consume_pending_window_nav`) — none asked where it made none.
+      private def windows_planned?
+        !@runtime.window_realm_meta.empty? && @runtime.call('__csimWindowsPlanned') == true
+      end
       private def pending_navigation_besides_traversals?
         !own_planned.zero?
       end
@@ -11424,6 +11429,9 @@ module Capybara
         consume_pending_reload
         consume_pending_history_traverse
         consume_pending_aux_window
+        # (…and what the windows `window.open` made in this isolate planned meanwhile — a traversal a frame of one queued
+        # as its document loaded above — taken in the same pass, as the page's frames' traversal is just before)
+        consume_pending_window_nav if windows_planned?
       end
 
       # A script-driven `anchor.click()` / `target=_blank` navigation with no

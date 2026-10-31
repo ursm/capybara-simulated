@@ -22,6 +22,7 @@ RSpec.describe 'the joint session history' do
              when '/top' then '<iframe src="/f1"></iframe><script>addEventListener("popstate", () => document.title += "P")</script>'
              when '/f1' then 'F1<script>addEventListener("popstate", () => parent.document.title += "F")</script>'
              when '/f2' then 'F2'
+             when '/fb' then 'FB<script>if (!top.backed) { top.backed = 1; history.back() }</script>'
              when '/b' then 'B'
              else 'START'
              end
@@ -402,6 +403,16 @@ RSpec.describe 'the joint session history' do
       # (…and two asked by tasks of its own that run before the host applies the first)
       session.execute_script('w.eval("setTimeout(() => history.forward()); setTimeout(() => history.forward())")')
       expect(popup_frame_path).to eq('/b')
+    end
+
+    # …one its frame's document asks for as it parses applied as that document loads, the frame's container, its
+    # WindowProxy and its document all the entry's it goes back to.
+    it 'takes its frame back from a document that asks to as it parses' do
+      session.execute_script('w.frames[0].location = "/f2"')
+      expect(popup_frame_path).to eq('/f2')
+      session.execute_script('w.frames[0].location = "/fb"')
+      probe = '[w.frames[0].location.pathname, w.document.querySelector("iframe").contentDocument.body.textContent, w.backed]'
+      expect(session.evaluate_script(probe)).to eq(['/f2', 'F2', 1])
     end
 
     # …a traversal moving its frame alone being no ongoing navigation of its own: a location set after it goes on (HTML

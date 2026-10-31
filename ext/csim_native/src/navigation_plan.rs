@@ -303,6 +303,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
+    register(scope, ns, "windowsPlanned", windows_planned, context_id);
     register(scope, ns, "routeFrameSubmission", route_frame_submission, context_id);
     register(scope, ns, "takeRoutedSubmission", take_routed_submission, context_id);
     register(scope, ns, "holdRoutedSubmission", hold_routed_submission, context_id);
@@ -551,6 +552,22 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
         v8::Boolean::new(scope, l.activated).into(),
         l.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
     ]
+}
+// __dom.windowsPlanned() -> whether a window `window.open` made in this isolate has a navigation of its own planned —
+// a location's, a reload's, a traversal's, one moving a frame of it — or a traversal queued that makes a document again,
+// its task still to plan it: what the host's drain takes (`takeWindowNavigations`, history.js
+// `__csimApplyWindowTraversals`) as it takes the page's, round after round while any is left.
+fn windows_planned(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    for w in crate::dom::dom(scope).arena.stepped_windows() {
+        if crate::dom::dom(scope).arena.window_history(w).is_some_and(|(h, _)| h.queued_documents()) {
+            return rv.set_bool(true);
+        }
+        let plan = &realm(scope, w).navigation_plan;
+        if plan.frame_traversal.is_some() || plan.own.location.is_some() || plan.own.reload.is_some() || plan.own.traversal.is_some() {
+            return rv.set_bool(true);
+        }
+    }
+    rv.set_bool(false);
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
 // in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]`, `[realm, "reload",
