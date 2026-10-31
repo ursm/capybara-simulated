@@ -202,3 +202,88 @@ fn channel_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         None => rv.set_null(),
     }
 }
+
+// ── A window's inbox of posts from beyond its isolate ──
+// The BroadcastChannel posts another window or a worker sent, which this window's isolate takes as its event loop next
+// runs (browser.rb `deliver_window_messages`: each queued on the isolate's queue, `__csimBcQueueInbound`) — and whether
+// that queue may hold a delivery since it was last drained (`queued`). Written from whichever window posts, the host's;
+// read with no lock where nothing waits (`pending?`), as a background window is asked whether to step.
+#[magnus::wrap(class = "Capybara::Simulated::Native::BroadcastInbox", free_immediately)]
+pub(crate) struct BroadcastInbox {
+    posts: std::sync::Mutex<Vec<Inbound>>,
+    count: std::sync::atomic::AtomicUsize,
+    queued: std::sync::atomic::AtomicBool,
+}
+// …one: the channel name, the serialized message, the realm of this isolate that posted it (none for another isolate's
+// post), and the poster's storage key (realm_location.rs `bcKey`).
+type Inbound = (String, String, Option<i32>, Option<String>);
+impl BroadcastInbox {
+    fn new() -> Self {
+        BroadcastInbox { posts: Default::default(), count: Default::default(), queued: Default::default() }
+    }
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Inbound>> {
+        self.posts.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    // #push(name, data, source, key)
+    fn push(&self, name: String, data: String, source: Option<i32>, key: Option<String>) {
+        let mut posts = self.lock();
+        posts.push((name, data, source, key));
+        self.count.store(posts.len(), std::sync::atomic::Ordering::Release);
+    }
+    // #take -> every post, `[name, data, source, key]` each, in the order sent.
+    fn take(&self) -> Vec<Inbound> {
+        if self.count.load(std::sync::atomic::Ordering::Acquire) == 0 {
+            return Vec::new();
+        }
+        let mut posts = self.lock();
+        self.count.store(0, std::sync::atomic::Ordering::Release);
+        std::mem::take(&mut *posts)
+    }
+    // #queued = flag — the isolate's queue may hold a delivery (a post of its own queued there, or one taken in).
+    fn set_queued(&self, queued: bool) {
+        self.queued.store(queued, std::sync::atomic::Ordering::Release);
+    }
+    fn is_queued(&self) -> bool {
+        self.queued.load(std::sync::atomic::Ordering::Acquire)
+    }
+    // #pending? — a post to take, or the queue to drain.
+    fn is_pending(&self) -> bool {
+        self.count.load(std::sync::atomic::Ordering::Acquire) > 0 || self.is_queued()
+    }
+    // #clear — none of either: the isolate's realms, its queue among them, made anew.
+    fn clear(&self) {
+        self.lock().clear();
+        self.count.store(0, std::sync::atomic::Ordering::Release);
+        self.set_queued(false);
+    }
+}
+
+pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
+    use magnus::{function, method, Module, Object};
+    let class = native.define_class("BroadcastInbox", ruby.class_object())?;
+    class.define_singleton_method("new", function!(BroadcastInbox::new, 0))?;
+    class.define_method("push", method!(BroadcastInbox::push, 4))?;
+    class.define_method("take", method!(BroadcastInbox::take, 0))?;
+    class.define_method("queued=", method!(BroadcastInbox::set_queued, 1))?;
+    class.define_method("queued?", method!(BroadcastInbox::is_queued, 0))?;
+    class.define_method("pending?", method!(BroadcastInbox::is_pending, 0))?;
+    class.define_method("clear", method!(BroadcastInbox::clear, 0))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod inbox_tests {
+    use super::*;
+
+    #[test]
+    fn an_inbox_is_pending_while_its_queue_may_hold_a_delivery() {
+        let inbox = BroadcastInbox::new();
+        inbox.push("c".into(), "{}".into(), None, Some("k".into()));
+        assert_eq!(inbox.take(), vec![("c".into(), "{}".into(), None, Some("k".into()))]);
+        assert!(!inbox.is_pending());
+        inbox.set_queued(true);
+        assert!(inbox.is_pending());
+        inbox.clear();
+        assert!(!inbox.is_pending());
+    }
+}

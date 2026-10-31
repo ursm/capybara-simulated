@@ -208,3 +208,70 @@ mod copy_tests {
         assert!(!lock().areas.contains_key(&(to, key.0, key.1)));
     }
 }
+
+// ── A window's `storage` events to fire ──
+// The changes to an area its documents share made by another document — of another window (localStorage spans the
+// session), or of this one's isolate — each to fire as a `storage` event at the documents of that area there were as it
+// was made, the one that made it excepted (HTML "broadcast"), as this window's event loop next runs
+// (browser.rb `deliver_window_messages`). Written from whichever window changed it, the host's; read with no lock where
+// nothing waits (`pending?`).
+#[magnus::wrap(class = "Capybara::Simulated::Native::StorageEventInbox", free_immediately)]
+pub(crate) struct StorageEventInbox {
+    events: Mutex<Vec<StorageEvent>>,
+    count: std::sync::atomic::AtomicUsize,
+}
+// …one: its area's kind ('local', 'session'), the key changed (none for a `clear()`), its old and new values, the URL of
+// the document that changed it, its area's storage key (storage_areas.rs `storageAreaKey`), and the realms to fire at.
+type StorageEvent = (String, Option<String>, Option<String>, Option<String>, String, String, Vec<i32>);
+impl StorageEventInbox {
+    fn new() -> Self {
+        StorageEventInbox { events: Default::default(), count: Default::default() }
+    }
+    fn lock(&self) -> MutexGuard<'_, Vec<StorageEvent>> {
+        self.events.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    // #push(kind, key, old, new, url, area, targets)
+    #[allow(clippy::too_many_arguments)]
+    fn push(&self, kind: String, key: Option<String>, old: Option<String>, new: Option<String>, url: String, area: String, targets: Vec<i32>) {
+        let mut events = self.lock();
+        events.push((kind, key, old, new, url, area, targets));
+        self.count.store(events.len(), std::sync::atomic::Ordering::Release);
+    }
+    // #take -> every event, `[kind, key, old, new, url, area, targets]` each, in the order the changes were made.
+    fn take(&self) -> Vec<StorageEvent> {
+        if self.count.load(std::sync::atomic::Ordering::Acquire) == 0 {
+            return Vec::new();
+        }
+        let mut events = self.lock();
+        self.count.store(0, std::sync::atomic::Ordering::Release);
+        std::mem::take(&mut *events)
+    }
+    fn is_pending(&self) -> bool {
+        self.count.load(std::sync::atomic::Ordering::Acquire) > 0
+    }
+}
+
+pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
+    use magnus::{function, method, Module, Object};
+    let class = native.define_class("StorageEventInbox", ruby.class_object())?;
+    class.define_singleton_method("new", function!(StorageEventInbox::new, 0))?;
+    class.define_method("push", method!(StorageEventInbox::push, 7))?;
+    class.define_method("take", method!(StorageEventInbox::take, 0))?;
+    class.define_method("pending?", method!(StorageEventInbox::is_pending, 0))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod inbox_tests {
+    use super::*;
+
+    #[test]
+    fn an_inbox_hands_its_events_over_once() {
+        let inbox = StorageEventInbox::new();
+        assert!(!inbox.is_pending());
+        inbox.push("local".into(), Some("k".into()), None, Some("v".into()), "http://a.test/".into(), "a".into(), vec![0, 3]);
+        assert!(inbox.is_pending());
+        assert_eq!(inbox.take().len(), 1);
+        assert!(!inbox.is_pending() && inbox.take().is_empty());
+    }
+}

@@ -295,6 +295,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
     worker_host::define(native, ruby)?;
+    broadcast_channels::define(native, ruby)?;
+    storage_areas::define(native, ruby)?;
     http_cache::define(native, ruby)?;
     // A fetch the host makes, step by step: its hops, their headers and cookie site (fetch_plan.rs, fetch_hop.rs), its
     // CORS (cors.rs), HTTP authentication (http_auth.rs) and HTTP cache policy (http_cache.rs).

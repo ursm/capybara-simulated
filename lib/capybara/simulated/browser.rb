@@ -514,15 +514,13 @@ module Capybara
         # process-wide too, read by every import that names one — a broadcast's — and dropped the same way)
         @module_tokens        = []
         @transfer_tokens_lock = Mutex.new
-        # Cross-window BroadcastChannel messages from OTHER windows, delivered to
-        # this window's matching channels on settle. [{name, data}] (same thread).
-        @broadcast_inbox      = []
-        # Whether the isolate's BroadcastChannel queue may hold a delivery (`broadcast_queued`).
-        @bc_queued            = false
-        # Storage `storage` events queued for the OTHER documents of the area's storage key (a
-        # change fires at every one EXCEPT the one that made it), delivered on settle.
-        # [{kind, key, old, new, url, area, targets}] (same thread).
-        @storage_inbox        = []
+        # Cross-window BroadcastChannel posts from OTHER windows and workers, delivered to this window's matching
+        # channels on settle, and whether the isolate's BroadcastChannel queue may hold a delivery (`broadcast_queued`) —
+        # the engine's (broadcast_channels.rs `BroadcastInbox`).
+        @broadcast_inbox      = Native::BroadcastInbox.new
+        # Storage `storage` events queued for the OTHER documents of the area's storage key (a change fires at every one
+        # EXCEPT the one that made it), delivered on settle — the engine's (storage_areas.rs `StorageEventInbox`).
+        @storage_inbox        = Native::StorageEventInbox.new
       end
 
       # Max BroadcastChannel deliveries drained per `deliver_broadcast_queue` call — a safety bound on a
@@ -2447,8 +2445,8 @@ module Capybara
           # (…each of a task's, in order, each step judged as the one before it is applied: two `history.back()` that move
           # a frame alone both apply — HTML "traverse the history by a delta", Chrome and Firefox measured 2026-11-01 —
           # where one that makes the page's document again lets those asked of that document after it go,
-          # session_history.rs `take_due`)
-          (@pending_history_traversals ||= []) << delta
+          # session_history.rs `take_due` — kept by the traversable, `stash_traversal`)
+          @session_history.stash_traversal(delta)
         end
       end
 
@@ -2480,8 +2478,9 @@ module Capybara
       end
 
       def consume_pending_history_traverse
-        return unless (deltas = @pending_history_traversals)
-        @pending_history_traversals = nil
+        deltas = @session_history.take_stashed
+        return if deltas.empty?
+
         invalidate_find_cache
         deltas.each {|delta| perform_history_traverse(delta) }
       rescue StandardError => e
@@ -3384,7 +3383,7 @@ module Capybara
       # fired-timer signals can't see. Aux-window opens are intentionally excluded:
       # they build a separate Browser, not a hop in a same-page chain.
       private def pending_nav_intent?
-        !@pending_history_traversals.nil? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
+        @session_history.stashed? || @session_history.queued? || pending_navigation_besides_traversals? || window_asked?
       end
       # Whether a window `window.open` made in this isolate has a navigation of its own planned, or a traversal queued that
       # plans one (`consume_pending_window_nav`) — none asked where it made none.
@@ -3676,10 +3675,6 @@ module Capybara
         reset_frame_scope
         @session_history.clear
         Native.cors_preflight_cache_clear(@cors_preflight_cache)   # the window's CORS-preflight cache: a test's grants none of the next's
-        # A JS-driven history.back()/go() that scheduled a deferred traverse but
-        # never drained (the page navigated away first) must not survive the reset
-        # — otherwise the stale target replays against the NEXT page's fresh history.
-        @pending_history_traversals = nil
         @file_picks      = {} if @file_picks
         # Hand the live trace off to `@pending_trace` so an after-hook
         # running after `reset_session!` (Capybara's per-test teardown
@@ -3697,9 +3692,8 @@ module Capybara
         reset_hijacked_fetches
         reset_workers
         reset_websockets
+        # (…and the isolate's BroadcastChannel queue, with the realms the rebuild drops: `forgetRealmObjects`)
         @broadcast_inbox.clear
-        # (…the isolate's BroadcastChannel queue goes with the realms the rebuild drops: `forgetRealmObjects`)
-        @bc_queued = false
         # Free any zero-copy transfer backing stores that went unimported
         # (worker killed before draining its inbox, etc.) before the rebuild.
         drop_pending_transfers
@@ -7755,9 +7749,9 @@ module Capybara
       def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)
 
       # Covers BroadcastChannel and `storage` — the cross-window event channels share these drain/pending hooks.
-      # (…the isolate's BroadcastChannel queue where a post may have filled it since it was last drained: `@bc_queued`)
+      # (…the isolate's BroadcastChannel queue where a post may have filled it since it was last drained: `BroadcastInbox#queued?`)
       def window_message_pending?
-        !@broadcast_inbox.empty? || !@storage_inbox.empty? || @bc_queued
+        @broadcast_inbox.pending? || @storage_inbox.pending?
       end
       # Whether something was asked of another window of the session (`window_asked?`) that can be taken now, which this
       # window's step takes for it — any while that one is not busy (`take_window_tasks_in_background`).
@@ -7887,7 +7881,7 @@ module Capybara
       # main), or nil when the post came from ANOTHER isolate (the Driver's cross-
       # window fanout) — a nil source matches no local realm, so it reaches every one.
       def enqueue_broadcast(name, data, source_realm_id = nil, origin = nil)
-        @broadcast_inbox << {'name' => name.to_s, 'data' => data, 'source' => source_realm_id, 'origin' => origin}
+        @broadcast_inbox.push(name.to_s, data.to_s, source_realm_id, origin&.to_s)
       end
 
       # A Storage change (setItem/removeItem/clear) in realm `source_realm_id`: fire a `storage`
@@ -7910,7 +7904,7 @@ module Capybara
       # HTML "broadcast": each Document whose storage area is the changed one, as the change is made)
       def enqueue_storage_event(kind, key, old, new, url, area, source_realm_id = nil)
         targets = [0, *@runtime.frame_realm_ids].reject {|id| id == source_realm_id }
-        @storage_inbox << {'kind' => kind.to_s, 'key' => key, 'old' => old, 'new' => new, 'url' => url.to_s, 'area' => area.to_s, 'targets' => targets}
+        @storage_inbox.push(kind.to_s, key, old, new, url.to_s, area.to_s, targets)
       end
 
       # What was asked of the session's other windows, which no step of their own takes while this one is the active
@@ -7937,22 +7931,24 @@ module Capybara
       # two messages sees the second.
       def deliver_window_messages
         n = deliver_asked_tasks
-        unless @broadcast_inbox.empty?
+        posts = @broadcast_inbox.take
+        unless posts.empty?
           # A BroadcastChannel post from another window or a worker reaches this isolate's channels of its name and
           # origin — the posting realm's excepted — as one of this isolate's own does: one queue, in creation order
           # (HTML "postMessage" sorts its destinations by creation), which `deliver_broadcast_queue` drains below.
-          @broadcast_inbox.slice!(0, @broadcast_inbox.length).each do |event|
-            @runtime.call('__csimBcQueueInbound', event['name'], event['data'], event['origin'], event['source'])
-            n += 1
+          posts.each do |name, data, source, origin|
+            @runtime.call('__csimBcQueueInbound', name, data, origin, source)
           end
-          @bc_queued = true
+          n += posts.size
+          @broadcast_inbox.queued = true
         end
-        unless @storage_inbox.empty?
-          events = @storage_inbox.slice!(0, @storage_inbox.length)
+        events = @storage_inbox.take
+        unless events.empty?
           # The `storage` event fires at every document of the area's EXCEPT the one that changed it: the realms there
           # were as the change was made (`targets`), the source's skipped, those still alive.
-          events.each do |event|
-            event.delete('targets').each do |target_id|
+          events.each do |kind, key, old, new, url, area, targets|
+            event = {'kind' => kind, 'key' => key, 'old' => old, 'new' => new, 'url' => url, 'area' => area}
+            targets.each do |target_id|
               next unless target_id.zero? || @runtime.frame_realm_alive?(target_id)
               @runtime.realm_call(target_id, '__csim_deliverStorageEvents', event)
             end
@@ -7961,7 +7957,7 @@ module Capybara
         end
         # Drain the ordered BroadcastChannel queue LAST, so a `message`/`storage` handler above that
         # re-posts (multi-realm mode: the isolate's queue) is picked up in this same pass.
-        n += deliver_broadcast_queue if @bc_queued
+        n += deliver_broadcast_queue if @broadcast_inbox.queued?
         n
       end
 
@@ -8025,7 +8021,7 @@ module Capybara
         n = 0
         while n < BROADCAST_DRAIN_CAP
           realm_id, id, data, origin, inbound = @runtime.call('__csimBcTakeQueued')
-          break @bc_queued = false unless realm_id
+          break @broadcast_inbox.queued = false unless realm_id
           # (…a channel closed since the post receives nothing: the realm's delivery asks the registry)
           next unless realm_id.zero? || @runtime.frame_realm_alive?(realm_id)
 
@@ -8036,10 +8032,10 @@ module Capybara
         n
       end
       # A post of this isolate's queued in its own queue (broadcast-channel.js, where another realm of it is live): drained
-      # as the queue is next (`@bc_queued`, which a realm gone since leaves set), and fanned out to the other windows and
+      # as the queue is next (`BroadcastInbox#queued?`, which a realm gone since leaves set), and fanned out to the other windows and
       # the workers.
       def broadcast_queued(name, data, key)
-        @bc_queued = true
+        @broadcast_inbox.queued = true
         broadcast_external(name, data, key)
       end
 
@@ -12292,7 +12288,7 @@ module Capybara
         # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving
         # one's pagehide wrote its own)
         @session_history.show
-        @flushed_nav_intents = nil
+        @session_history.flush_restore(false)
         # (…and the traversals it asked for that no task of it applied: its realm's tasks are gone)
         @session_history.clear_queued
         # The outgoing page's raced fetches die with its VM (fetch ids are per-VM) —
@@ -12553,13 +12549,9 @@ module Capybara
       # (The page's own plan — its location navigation, its reload, a frame's submission to it — its windows', the
       # host's navigations of its frames and the frames' submissions it routes are stashed alike, in the engine:
       # navigation_plan.rs `flushBegin`.)
-      NAV_INTENT_SLOTS = %i[@pending_history_traversals].freeze
-      private_constant :NAV_INTENT_SLOTS
-
       def flush_outgoing_page_init
         @flush_traversal_mark = @session_history.last_token
-        saved = NAV_INTENT_SLOTS.to_h {|slot| [slot, instance_variable_get(slot)] }
-        NAV_INTENT_SLOTS.each {|slot| instance_variable_set(slot, nil) }
+        saved = @session_history.flush_begin
         # A same-document `history.back()` from the flushed page takes effect INLINE
         # (`history_go`), moving the history step under the navigation now committing —
         # the document would end up being the incoming page while the step pointed at
@@ -12583,42 +12575,28 @@ module Capybara
           # What the flush itself stashed, kept for the paths that DON'T commit a new
           # document (a `Content-Disposition: attachment` response, a raise mid-fetch):
           # there the page lives on, so its `location.href = …` must still happen.
-          @flushed_nav_intents = NAV_INTENT_SLOTS.each_with_object({}) {|slot, h|
-            v = instance_variable_get(slot)
-            h[slot] = v unless v.nil?
-          }
-          saved.each {|slot, value| instance_variable_set(slot, value) }
+          @session_history.flush_end(saved)
           @runtime.call('__csimFlushEnd')
         end
       end
 
       # Put back what `flush_outgoing_page_init` took from a page that turned out to
       # be staying (see above). `boot_response_into_ctx` drops the stash instead — a
-      # committed navigation really does discard the document that stashed it. An
-      # intent the live page has set since wins; the per-realm Hash / Array slots
-      # merge, so neither side's entries are lost.
+      # committed navigation really does discard the document that stashed it. The
+      # traversals the flush stashed go ahead of those the live page asked for since,
+      # in the order asked (session_history.rs `flush_restore`).
       def restore_flushed_nav_intents
-        intents = @flushed_nav_intents
-        @flushed_nav_intents = nil
-        return if intents.nil?
         # (…the page's own plan's, the engine's — let go with the rest where a restore is under way: navigation_plan.rs
         # `flushRestore`)
-        return @runtime.call('__csimFlushRestore', true) if @restoring_flushed_nav_intents
+        if @restoring_flushed_nav_intents
+          @runtime.call('__csimFlushRestore', true) if @session_history.flush_restore(false)
+          return
+        end
+        return unless (traversals = @session_history.flush_restore(true))
 
         own = @runtime.call('__csimFlushRestore', false) == true
-        return if intents.empty? && !own
+        return if traversals.zero? && !own
 
-        intents.each do |slot, flushed|
-          current = instance_variable_get(slot)
-          merged =
-            case current
-            when nil   then flushed
-            when Hash  then flushed.is_a?(Hash) ? flushed.merge(current) : current
-            when Array then flushed.is_a?(Array) ? flushed + current : current
-            else            current
-            end
-          instance_variable_set(slot, merged)
-        end
         # And run them. The flush consumed the task that stashed them, so the
         # settle that follows a user action sees nothing left to do and would
         # leave the page sitting on a redirect it has already asked for.

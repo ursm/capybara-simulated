@@ -214,6 +214,12 @@ struct Traversable {
     // its task runs, in order — and the token the next one is given.
     queued: Vec<Queued>,
     tokens: u64,
+    // …and those taken off it that make a document again, which the host applies once the script that asked returns —
+    // their deltas, in order, each step judged as it is applied (`stashed`) — and those a page's flush took from it as a
+    // navigation away began (`flushed`, none where no flush is pending): given back ahead of what was asked since where
+    // the page stays after all, let go of where the navigation commits (browser.rb `flush_outgoing_page_init`).
+    stashed: Vec<i64>,
+    flushed: Option<Vec<i64>>,
     // Whether it closed: its window's browsing context discarded, which no opener of another window is then
     // (navigables.rs `opener_now`).
     closed: bool,
@@ -1027,6 +1033,39 @@ impl SessionHistory {
     fn last_token(&self) -> u64 {
         self.lock().tokens
     }
+    // #stash_traversal(delta) — a traversal making a document again taken off the queue, to apply once the script returns.
+    fn stash_traversal(&self, delta: i64) {
+        self.lock().stashed.push(delta);
+    }
+    // #take_stashed -> those, in order; #stashed? -> whether there are any.
+    fn take_stashed(&self) -> Vec<i64> {
+        std::mem::take(&mut self.lock().stashed)
+    }
+    fn has_stashed(&self) -> bool {
+        !self.lock().stashed.is_empty()
+    }
+    // #flush_begin -> those set aside as a page's flush begins, given back as it ends (`flush_end`), which keeps what the
+    // flush itself stashed apart (`flushed`).
+    fn flush_begin(&self) -> Vec<i64> {
+        self.take_stashed()
+    }
+    fn flush_end(&self, saved: Vec<i64>) {
+        let mut t = self.lock();
+        let flushed = std::mem::replace(&mut t.stashed, saved);
+        t.flushed = Some(flushed);
+    }
+    // #flush_restore(keep) -> how many the flush stashed, given back ahead of those stashed since (`keep`) or let go of
+    // (not `keep`: the navigation committed, or a restore is under way) — nil where no flush is pending.
+    fn flush_restore(&self, keep: bool) -> Option<usize> {
+        let mut t = self.lock();
+        let mut flushed = t.flushed.take()?;
+        let n = flushed.len();
+        if keep {
+            flushed.append(&mut t.stashed);
+            t.stashed = flushed;
+        }
+        Some(n)
+    }
     // #clear_queued: the page's traversals let go — its document gone, whose traversals go with it.
     fn clear_queued(&self) {
         self.lock().queued.clear();
@@ -1108,6 +1147,8 @@ impl SessionHistory {
         t.ongoing.clear();
         (t.closed, t.by_web_content, t.popup_sandbox) = (false, false, 0);
         t.queued.clear();
+        t.stashed.clear();
+        t.flushed = None;
         asking(&mut t, |t| t.asked = Asked::default());
     }
     // #session_storage = shed: its session storage's (`session_storage`), its Browser's.
@@ -1289,6 +1330,12 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
     class.define_method("take_all_queued", method!(SessionHistory::take_all_queued, 0))?;
+    class.define_method("stash_traversal", method!(SessionHistory::stash_traversal, 1))?;
+    class.define_method("take_stashed", method!(SessionHistory::take_stashed, 0))?;
+    class.define_method("stashed?", method!(SessionHistory::has_stashed, 0))?;
+    class.define_method("flush_begin", method!(SessionHistory::flush_begin, 0))?;
+    class.define_method("flush_end", method!(SessionHistory::flush_end, 1))?;
+    class.define_method("flush_restore", method!(SessionHistory::flush_restore, 1))?;
     class.define_method("queued?", method!(SessionHistory::is_queued, 0))?;
     class.define_method("queued_documents?", method!(SessionHistory::queued_documents, 0))?;
     class.define_method("last_token", method!(SessionHistory::last_token, 0))?;
@@ -1315,6 +1362,26 @@ mod tests {
 
     fn history() -> SessionHistory {
         SessionHistory::new()
+    }
+
+    // A page's flush sets aside the traversals stashed before it and keeps what it stashed apart: given back ahead of
+    // those stashed since where the page stays, let go of where the navigation commits.
+    #[test]
+    fn a_flush_keeps_its_traversals_apart() {
+        let h = history();
+        h.stash_traversal(-1);
+        let saved = h.flush_begin();
+        h.stash_traversal(-2);
+        h.flush_end(saved);
+        h.stash_traversal(1);
+        assert_eq!(h.flush_restore(true), Some(1));
+        assert_eq!(h.take_stashed(), vec![-2, -1, 1]);
+        assert_eq!(h.flush_restore(true), None);
+        let saved = h.flush_begin();
+        h.stash_traversal(-3);
+        h.flush_end(saved);
+        assert_eq!(h.flush_restore(false), Some(1));
+        assert!(!h.has_stashed());
     }
 
     // Chrome, measured 2026-10-24: a frame navigated adds the page a step; the page's back takes the frame back, its
