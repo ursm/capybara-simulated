@@ -584,8 +584,8 @@ module Capybara
         # its initial about:blank made with it (HTML "create a new auxiliary browsing context"), and the navigation it was
         # opened for, if any, its own: planned as a task of its event loop where a script asked for it (`planned`, the
         # script that called `open()` still on the stack), else begun now (a hyperlink followed, a form submitted).
-        # (…one of the isolate's storage partition: `hosts_partition?` — a Browser of its own where the isolate makes no
-        # realm for it)
+        # (…one of the page's top-level site: `hosts_partition?` — a Browser of its own where the isolate makes no realm for
+        # it)
         if opener_handle && source && hosts_partition?(source, url.to_s)
           opened = open_realm_window(
             source,
@@ -691,10 +691,10 @@ module Capybara
         window.window_handle
       end
 
-      # Whether a window opened at `url` is of the storage partition `host`'s isolate keeps its registries by — its page's
-      # top-level site (Browser#blob_partition_site), which its service workers' registrations are kept under
-      # (Browser#sw_partition) — that a window of another top-level site would share: one of another site is a Browser of
-      # its own, in its opener's browsing context group, until those are kept by top-level site. (…one at about:blank, or
+      # Whether a window opened at `url` is of `host`'s page's top-level site (Browser#blob_partition_site): one of another
+      # site is a Browser of its own, in its opener's browsing context group — a split its reason is gone from (the
+      # isolate's service worker registrations, kept for one site once, are each kept by its storage key now:
+      # sw_registry.rs), kept until the cross-site pop-up is a realm too (CLAUDE.md's gap list). (…one at about:blank, or
       # to run a javascript: URL, its creator's)
       private def hosts_partition?(host, url)
         return true if url.empty? || url.match?(Browser::ABOUT_BLANK) || url.match?(/\Ajavascript:/i)
@@ -1112,15 +1112,15 @@ module Capybara
       # closed (searched newest-parked first: a re-registered scope's newest worker is
       # the active registration). Returns the owner's respondWith wire hash, or nil
       # (uncontrolled → load from the network).
-      # (…`except` a Browser whose registry is not to handle it: Browser#any_window_sw_navigation_fetch)
-      def sw_navigation_fetch(url, except: nil, **kw)
+      # (…`site` the top-level site of the navigation's environment, whose storage key's registrations alone match)
+      def sw_navigation_fetch(url, site:, **kw)
         sweep_dead_parked
         owner = (window_browsers + @sw_parked.reverse).find {|b|
-          !b.equal?(except) && b.sw_controls_navigation?(url)
+          b.sw_controls_navigation?(url, site)
         }
         return nil unless owner
 
-        resp = owner.service_worker_navigation_fetch(url, **kw)
+        resp = owner.service_worker_navigation_fetch(url, site: site, **kw)
         # Nobody pumps a parked browser — drop what the handler queued for its dead
         # clients so the outbox can't grow across a long test.
         owner.drop_dead_letter_worker_messages if @sw_parked.include?(owner)

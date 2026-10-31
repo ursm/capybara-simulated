@@ -211,20 +211,18 @@ snapshot, so the function went with the old one (handle ids are
 process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — of
 a pop-up whose `open()` (or link, or form) named a URL of another top-level
 site than its opener's page, judged then, on that URL (`Driver#hosts_partition?`):
-an isolate of its own for good, until the isolate keeps its registries (its
-service workers') by top-level site, so one that comes back to its opener's
-origin is reached whole, through the RPC, and has the gap; a pop-up opened at
+an isolate of its own for good, so one that comes back to its opener's
+origin is reached whole, through the RPC, and has the gap — a split nothing
+needs any more, its reason (an isolate's service worker registrations, kept
+for one top-level site) gone now that every registration and client is kept
+by its storage key, top-level site and origin (sw_registry.rs), and so a
+backlog item, not a design choice; a pop-up opened at
 a URL of the page's site, or at about:blank, is a realm of its opener's
 isolate, where the function runs as a browser runs it (a `noopener` window is
 another isolate always, rightly: a browsing context group of its own, which no
-function reaches); and a realm pop-up a redirect or a navigation takes to
-another top-level site stays a realm — HTML keeps its browsing context group —
-but its documents there are of a storage partition whose service worker
-registrations the isolate keeps none of: `register()` rejects with a
-SecurityError, `getRegistrations()` is empty and no worker of the isolate's
-handles its navigations (blob_rules.rs `registryPartition`), until the registry is kept by
-top-level site; and such a cross-site pop-up's WindowProxy, of another
-isolate, cross-origin has no child frame by index — `w[0]` a SecurityError,
+function reaches), and stays one wherever a redirect or a navigation takes it,
+as HTML keeps its browsing context group; and the WindowProxy of a pop-up
+opened cross-site, of another isolate, cross-origin has no child frame by index — `w[0]` a SecurityError,
 where HTML, Chrome and Firefox give that frame's WindowProxy — the RPC
 reaching that window's page alone (`csimWindowProxy`), gone with it; and a window
 `window.open` made in its opener's isolate keeps its Window when its initial

@@ -136,10 +136,11 @@ module Capybara
         '__csim_workerSpawn'         => ->(b, *a) { b.worker_spawn(a[0], shared: !!a[1], creator_key: a[2], realm_id: a[3].to_i, controller_handle: a[4].to_i, script_type: a[5], name: a[6].to_s, cluster_key: a[7]) },
         # A register(), update() or unregister(), scheduled as a job at its scope (see sw_schedule_job), and the job run, the task
         # queued for it — and the registration's updateViaCache mode, REGISTRATION-wide state (a frame's
-        # registration object must see the mode the top window set).
-        '__csim_swScheduleJob'         => ->(b, *a) { b.sw_schedule_job(*a.first(10)) },
+        # registration object must see the mode the top window set). (…each of the storage key whose top-level site the
+        # last argument is, the caller's: sw_registry.rs)
+        '__csim_swScheduleJob'         => ->(b, *a) { b.sw_schedule_job(*a.first(11)) },
         '__csim_swRunJob'              => ->(b, *a) { b.sw_run_job(a[0]); nil },
-        '__csim_swScopeUpdateViaCache' => ->(b, *a) { b.sw_scope_update_via_cache(a[0]) },
+        '__csim_swScopeUpdateViaCache' => ->(b, *a) { b.sw_scope_update_via_cache(a[0], a[1].to_s) },
         '__csim_swNoteImport'          => ->(b, *a) { b.sw_note_import(a[0].to_i, a[1], a[2]) },
         '__csim_workerPostToWorker'  => ->(b, *a) { b.worker_post_to_worker(a[0], a[1]); nil },
         # ServiceWorker.postMessage from a client window → the SW's `message` event (source = client).
@@ -157,7 +158,7 @@ module Capybara
         # This realm is a service-worker client: reported at document load and again whenever
         # control is installed, by the realm, because only it knows its own URL, frame type and
         # controller. `a[3]` is the controlling worker's handle, 0 when uncontrolled.
-        '__csimNoteClient' => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4]); nil },
+        '__csimNoteClient' => ->(b, *a) { b.sw_note_client(a[0], a[1], a[2], a[3], a[4], site: a[5].to_s); nil },
         # A worker client's controller changed (claim adoption inside the worker isolate) —
         # update the HOST-owned record (a worker must not take the realm-style report path).
         '__csim_workerNoteController' => ->(b, *a) { b.sw_note_worker_controller(a[0], a[1]); nil },
@@ -178,17 +179,17 @@ module Capybara
         '__csim_swStep'               => ->(b, *a) { b.sw_step(a[0]); nil },
         # The worker serving an EXACT scope (0 if none) — a service worker's own registration is live while it is one of
         # its versions.
-        '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0]) },
+        '__csim_swActiveHandleForScope' => ->(b, *a) { b.sw_active_handle_for_scope(a[0], a[1].to_s) },
         # The registration map as a client of an origin reads it — `[id, scope]` each, in registration order — the
         # registration a URL matches, and the one at a scope (see sw_registrations_of).
-        '__csim_swRegistrations'        => ->(b, *a) { b.sw_registrations_of(a[0]) },
-        '__csim_swMatchRegistration'    => ->(b, *a) { b.sw_match_registration(a[0], a[1]) },
-        '__csim_swRegisteredAt'         => ->(b, *a) { b.sw_registered_at(a[0]) },
+        '__csim_swRegistrations'        => ->(b, *a) { b.sw_registrations_of(a[0], a[1].to_s) },
+        '__csim_swMatchRegistration'    => ->(b, *a) { b.sw_match_registration(a[0], a[1], a[2].to_s) },
+        '__csim_swRegisteredAt'         => ->(b, *a) { b.sw_registered_at(a[0], a[1].to_s) },
         # Navigation Preload state (NavigationPreloadManager), keyed by the registration's scope —
         # reached identically from the client's registration and the worker's own. Get returns
         # {enabled, headerValue}; set leaves a nil field as-is.
-        '__csim_swNavPreloadState'    => ->(b, *a) { b.nav_preload_state(a[0]) },
-        '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2]); nil },
+        '__csim_swNavPreloadState'    => ->(b, *a) { b.nav_preload_state(a[0], a[1].to_s) },
+        '__csim_swNavPreloadSet'      => ->(b, *a) { b.nav_preload_set(a[0], a[1], a[2], a[3].to_s); nil },
         # A navigation (iframe/document load) → its controlling SW's `fetch` event, awaited
         # synchronously. Returns the response wire hash, or nil to load from the network.
         '__csim_frameNavigationFetch' => ->(b, *a) { b.frame_navigation_fetch(a[0], a[2], is_reload: !!a[1], secure_ancestors: a[3].nil? || !!a[3], method: a[4] || 'GET', body: a[5], content_type: a[6], defer_ok: !!a[7], dest: a[8] || 'iframe', container_realm: a[9], referrer_policy: a[10], initiator_realm: a[11], sandbox: [a[12]], user_activated: a[13] == true, link_policy: a[14]) },

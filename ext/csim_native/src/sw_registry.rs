@@ -1,5 +1,8 @@
 // Service workers' registrations (Service Workers §2.2), one registry for the process: each driver browsing session's
-// its own partition, holding its registrations and the service workers they are made of.
+// its own partition, holding its registrations and the service workers they are made of — each registration, and each
+// client, of a storage key (Storage "obtain a storage key": its origin and the top-level site of the environment that
+// made it, `site`), which every lookup a client or a navigation makes is of: a registration a third-party frame of a
+// site made is none a first-party document of that site sees, nor one under another top-level site.
 //
 // A registration is named by a number, and the registration MAP names it by its scope: from a Register job's first
 // step until an unregister takes it out of the map — which leaves the registration itself in place, its versions
@@ -23,6 +26,7 @@ use magnus::{IntoValue, IntoValueFromNative, Ruby, Value};
 #[derive(Default)]
 pub(crate) struct Registration {
     id: u32,
+    site: String,
     scope: String,
     mapped: bool,
     registered: bool,
@@ -61,6 +65,8 @@ impl Registration {
 }
 
 struct Worker {
+    // (…the top-level site of the storage key it is of: its registration's, its job's as it is spawned)
+    site: String,
     script_url: String,
     script_type: String,
     state: String,
@@ -134,6 +140,7 @@ enum Step {
 pub(crate) struct Job {
     id: u32,
     kind: String,
+    site: String,
     scope: String,
     script_url: String,
     update_via_cache: Option<String>,
@@ -171,6 +178,7 @@ struct Outcome {
 // one the host could not tell) and the worker controlling it.
 pub(crate) struct Client {
     id: String,
+    site: String,
     url: String,
     kind: String,
     frame_type: String,
@@ -220,16 +228,21 @@ impl Partition {
         }
         &mut list[i]
     }
-    // The registration the map holds at `scope`.
-    fn mapped(&mut self, scope: &str) -> Option<&mut Registration> {
-        self.registrations.iter_mut().find(|r| r.mapped && r.scope == scope)
+    // The registration the map holds at `scope`, of top-level site `site` (its storage key's: the scope its origin).
+    fn mapped(&mut self, site: &str, scope: &str) -> Option<&mut Registration> {
+        self.registrations.iter_mut().find(|r| r.mapped && r.site == site && r.scope == scope)
     }
     fn by_id(&mut self, id: u32) -> Option<&mut Registration> {
         self.registrations.iter_mut().find(|r| r.id == id)
     }
     // …the one a Register job made there: its number, 0 for none.
-    fn registered_at(&mut self, scope: &str) -> u32 {
-        self.mapped(scope).filter(|r| r.registered).map_or(0, |r| r.id)
+    fn registered_at(&mut self, site: &str, scope: &str) -> u32 {
+        self.mapped(site, scope).filter(|r| r.registered).map_or(0, |r| r.id)
+    }
+    // The top-level site of the storage key the worker `handle`'s registration is of — the clients it sees, controls and
+    // claims that key's alone — none for a worker of none.
+    fn worker_site(&self, handle: u32) -> Option<&str> {
+        self.workers.get(&handle).map(|w| w.site.as_str())
     }
 }
 
@@ -256,13 +269,13 @@ impl Registry {
         self.partitions.get_mut(&partition)
     }
     // The registration the map holds at `scope`, made (and mapped) where it holds none.
-    fn at(&mut self, partition: u64, scope: &str) -> &mut Registration {
-        let id = match self.partition(partition).mapped(scope).map(|r| r.id) {
+    fn at(&mut self, partition: u64, site: &str, scope: &str) -> &mut Registration {
+        let id = match self.partition(partition).mapped(site, scope).map(|r| r.id) {
             Some(id) => id,
             None => {
                 self.next_registration += 1;
                 let id = self.next_registration;
-                let registration = Registration { id, scope: scope.to_owned(), mapped: true, ..Registration::default() };
+                let registration = Registration { id, site: site.to_owned(), scope: scope.to_owned(), mapped: true, ..Registration::default() };
                 self.partition(partition).registrations.push(registration);
                 id
             }
@@ -271,8 +284,8 @@ impl Registry {
     }
     // …which a Register job made: one made earlier only to hold its job's updateViaCache mode takes its place in the
     // registration order now, as the registration it then becomes (the job of one that failed left it behind).
-    fn registered(&mut self, partition: u64, scope: &str) -> &mut Registration {
-        let id = self.at(partition, scope).id;
+    fn registered(&mut self, partition: u64, site: &str, scope: &str) -> &mut Registration {
+        let id = self.at(partition, site, scope).id;
         self.partition(partition).register(id)
     }
 }
@@ -288,12 +301,12 @@ pub(crate) fn partition_new_for_ruby() -> u64 {
 pub(crate) fn clear_for_ruby(partition: u64) {
     lock().partitions.remove(&partition);
 }
-// Every registration the map of `partition` holds, in the order made: `[scope, registered, activating, serving, id]`, a
-// handle nil for none.
-pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Option<u32>, Option<u32>, u32)> {
+// Every registration the map of `partition` holds, in the order made: `[scope, registered, activating, serving, id,
+// top-level site]`, a handle nil for none.
+pub(crate) fn registrations_for_ruby(partition: u64) -> Vec<(String, bool, Option<u32>, Option<u32>, u32, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
-    p.registrations.iter().filter(|r| r.mapped).map(|r| (r.scope.clone(), r.registered, r.activating, r.serving, r.id)).collect()
+    p.registrations.iter().filter(|r| r.mapped).map(|r| (r.scope.clone(), r.registered, r.activating, r.serving, r.id, r.site.clone())).collect()
 }
 // The registration `id`'s versions, `[installing, waiting, active]` — none for a registration gone.
 pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option<u32>, Option<u32>) {
@@ -301,8 +314,9 @@ pub(crate) fn versions_for_ruby(partition: u64, id: u32) -> (Option<u32>, Option
     (installing, waiting, active)
 }
 // A service worker of the session, spawned: its script's URL and type, 'parsed' until a registration holds it.
-pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, script_url: String, script_type: String) {
+pub(crate) fn worker_new_for_ruby(partition: u64, handle: u32, site: String, script_url: String, script_type: String) {
     let worker = Worker {
+        site,
         script_url,
         script_type,
         state: "parsed".to_owned(),
@@ -370,6 +384,7 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
 pub(crate) fn note_client_for_ruby(
     partition: u64,
     id: String,
+    site: String,
     url: String,
     kind: String,
     frame_type: String,
@@ -378,7 +393,7 @@ pub(crate) fn note_client_for_ruby(
 ) {
     let mut reg = lock();
     let clients = &mut reg.partition(partition).clients;
-    let client = Client { id, url, kind, frame_type, origin, controller };
+    let client = Client { id, site, url, kind, frame_type, origin, controller };
     match clients.iter_mut().find(|c| c.id == client.id) {
         Some(c) => *c = client,
         None => clients.push(client),
@@ -405,23 +420,25 @@ pub(crate) fn client_entry_for_ruby(partition: u64, id: String) -> Option<(Strin
     let c = reg.existing(partition)?.clients.iter().find(|c| c.id == id)?;
     Some((c.url.clone(), c.controller))
 }
-// Every client, `[id, url, controller]` each, in creation order — and the ids of those that count as focused, set.
-pub(crate) fn clients_for_ruby(partition: u64) -> Vec<(String, String, Option<u32>)> {
+// Every client, `[id, url, controller, top-level site]` each, in creation order — and the ids of those that count as
+// focused, set.
+pub(crate) fn clients_for_ruby(partition: u64) -> Vec<(String, String, Option<u32>, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
-    p.clients.iter().map(|c| (c.id.clone(), c.url.clone(), c.controller)).collect()
+    p.clients.iter().map(|c| (c.id.clone(), c.url.clone(), c.controller, c.site.clone())).collect()
 }
 pub(crate) fn set_focused_for_ruby(partition: u64, ids: Vec<String>) {
     lock().partition(partition).focused = ids;
 }
 // The client `id` as the service worker `handle` of `origin` sees it — `[id, url, type, frame type, controlled by it,
-// focused]` — nil where it is none, or of another origin: Clients are origin-scoped (Query Service Worker Client
-// Objects filters on the service worker's origin; one whose origin is unknown is none of its).
+// focused]` — nil where it is none, or of another storage key: Clients are of the service worker's (Query Service Worker
+// Client Objects filters on its origin and its top-level site; one whose origin is unknown is none of its).
 #[allow(clippy::type_complexity)]
 pub(crate) fn client_for_ruby(partition: u64, handle: u32, origin: String, id: String) -> Option<(String, String, String, String, bool, bool)> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
-    let c = p.clients.iter().find(|c| c.id == id && c.origin.as_deref() == Some(origin.as_str()))?;
+    let site = p.worker_site(handle)?;
+    let c = p.clients.iter().find(|c| c.id == id && c.site == site && c.origin.as_deref() == Some(origin.as_str()))?;
     Some(client_seen(p, c, handle))
 }
 // …and Clients.matchAll(): every such client of the worker's origin — of `kind` ("all" for every one), controlled by it
@@ -436,8 +453,10 @@ pub(crate) fn match_clients_for_ruby(
 ) -> Vec<(String, String, String, String, bool, bool)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
+    let Some(site) = p.worker_site(handle) else { return Vec::new() };
     let matched = p.clients.iter().filter(|c| {
-        c.origin.as_deref() == Some(origin.as_str())
+        c.site == site
+            && c.origin.as_deref() == Some(origin.as_str())
             && (include_uncontrolled || c.controller == Some(handle))
             && (kind == "all" || c.kind == kind)
     });
@@ -515,17 +534,17 @@ impl Partition {
     fn run_job(&mut self, id: u32, out: &mut Vec<Cmd>) {
         let Some(j) = self.job(id) else { return };
         j.queued = None;
-        let (kind, scope, script_url, script_type, mode) =
-            (j.kind.clone(), j.scope.clone(), j.script_url.clone(), j.script_type.clone(), j.update_via_cache.clone());
+        let (kind, site, scope, script_url, script_type, mode) =
+            (j.kind.clone(), j.site.clone(), j.scope.clone(), j.script_url.clone(), j.script_type.clone(), j.update_via_cache.clone());
         if kind == "unregister" {
             // (…Unregister's order: the promises resolved, then Try Clear Registration, then Finish Job)
             let mut clear = Vec::new();
-            let unregistered = self.unregister(&scope, &mut clear);
+            let unregistered = self.unregister(&site, &scope, &mut clear);
             self.answer(id, Outcome { unregistered, ..Outcome::default() }, out);
             out.extend(clear);
             return self.finish(id, out);
         }
-        let registration = self.registered_at(&scope);
+        let registration = self.registered_at(&site, &scope);
         if kind == "update" && registration == 0 {
             return self.fail(id, "TypeError", "the registration has been unregistered.", out);
         }
@@ -536,7 +555,7 @@ impl Partition {
         }
         let same_script = script.as_ref().is_some_and(|(url, ty)| *url == script_url && *ty == script_type);
         if kind == "register" && same_script {
-            let current = self.mapped(&scope).and_then(|r| r.update_via_cache.clone());
+            let current = self.mapped(&site, &scope).and_then(|r| r.update_via_cache.clone());
             if mode.is_some() && current.or_else(|| Some("imports".to_owned())) == mode {
                 return self.conclude(id, Outcome { registration, ..Outcome::default() }, out);
             }
@@ -583,14 +602,14 @@ impl Registry {
     fn job_fetched(&mut self, partition: u64, id: u32, error: Option<&str>, changed: bool, out: &mut Vec<Cmd>) -> bool {
         let Some(p) = self.existing(partition) else { return false };
         let Some(j) = p.job(id) else { return false };
-        let (scope, mode, registration, realm) = (j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
+        let (site, scope, mode, registration, realm) = (j.site.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration, j.realm);
         match error {
             Some("mime") => p.fail(id, "SecurityError", "the script has an unsupported MIME type.", out),
             Some("scope") => p.fail(id, "SecurityError", "the scope is outside the script's max scope.", out),
             Some(_) => p.fail(id, "TypeError", "the script fetch failed.", out),
             None if !changed => {
                 if let Some(mode) = mode {
-                    self.at(partition, &scope).update_via_cache = Some(mode);
+                    self.at(partition, &site, &scope).update_via_cache = Some(mode);
                 }
                 self.partition(partition).conclude(id, Outcome { registration, ..Outcome::default() }, out);
             }
@@ -615,11 +634,11 @@ impl Registry {
             return p.fail(id, "TypeError", &format!("the script evaluation failed. {message}"), out);
         }
         let Some(j) = p.job(id) else { return };
-        let (kind, scope, mode, registration) = (j.kind.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration);
+        let (kind, site, scope, mode, registration) = (j.kind.clone(), j.site.clone(), j.scope.clone(), j.update_via_cache.clone(), j.registration);
         j.waits = Some(JobWait::Install(handle));
-        let registration = if kind == "register" { self.registered(partition, &scope).id } else { registration };
+        let registration = if kind == "register" { self.registered(partition, &site, &scope).id } else { registration };
         if let Some(mode) = mode {
-            self.at(partition, &scope).update_via_cache = Some(mode);
+            self.at(partition, &site, &scope).update_via_cache = Some(mode);
         }
         let p = self.partition(partition);
         p.install(registration, handle, out);
@@ -636,6 +655,7 @@ impl Registry {
 pub(crate) fn schedule_job_for_ruby(
     partition: u64,
     kind: String,
+    site: String,
     scope: String,
     script_url: String,
     update_via_cache: Option<String>,
@@ -653,7 +673,7 @@ pub(crate) fn schedule_job_for_ruby(
         (script_url, script_type)
     };
     let asking_workers: Vec<u32> = (realm < 0).then(|| realm.unsigned_abs() as u32).into_iter().collect();
-    let last = p.jobs.iter_mut().rev().find(|j| j.scope == scope);
+    let last = p.jobs.iter_mut().rev().find(|j| j.site == site && j.scope == scope);
     let runs = last.is_none();
     if let Some(last) = last.filter(|j| {
         !j.settled
@@ -668,6 +688,7 @@ pub(crate) fn schedule_job_for_ruby(
     let job = Job {
         id,
         kind,
+        site,
         scope,
         script_url,
         update_via_cache,
@@ -698,11 +719,12 @@ pub(crate) fn run_job_for_ruby(partition: u64, id: u32) -> Vec<Cmd> {
     out
 }
 // What the host fetches for it: `[scope, script URL, mode, type, creator key, the worker an update fetches against (0
-// for none)]`, nil for one finished.
-pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, Option<String>, String, String, u32)> {
+// for none), the top-level site of its storage key]`, nil for one finished.
+#[allow(clippy::type_complexity)]
+pub(crate) fn job_for_ruby(partition: u64, id: u32) -> Option<(String, String, Option<String>, String, String, u32, String)> {
     let mut reg = lock();
     let j = reg.existing(partition)?.job(id)?;
-    Some((j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.creator_key.clone(), j.against))
+    Some((j.scope.clone(), j.script_url.clone(), j.update_via_cache.clone(), j.script_type.clone(), j.creator_key.clone(), j.against, j.site.clone()))
 }
 // …its script fetched (`job_fetched`): [whether the host spawns its worker, what the host does].
 pub(crate) fn job_fetched_for_ruby(partition: u64, id: u32, error: Option<String>, changed: bool) -> (bool, Vec<Cmd>) {
@@ -748,24 +770,25 @@ pub(crate) fn queued_jobs_for_ruby(partition: u64) -> Vec<u32> {
 // The registrations a Register job made that the map holds for a client of `origin` (its storage key: an opaque one has
 // none) — `[id, scope]` each, in the order made — and Match Service Worker Registration: of those, the one whose scope is
 // the longest prefix of `url` (plain string starts-with on the serialized scope), nil for none.
-pub(crate) fn registrations_of_origin_for_ruby(partition: u64, origin: String) -> Vec<(u32, String)> {
+pub(crate) fn registrations_of_origin_for_ruby(partition: u64, site: String, origin: String) -> Vec<(u32, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
-    of_origin(p, &origin).map(|r| (r.id, r.scope.clone())).collect()
+    of_key(p, &site, &origin).map(|r| (r.id, r.scope.clone())).collect()
 }
-pub(crate) fn match_registration_for_ruby(partition: u64, origin: String, url: String) -> Option<(u32, String)> {
+pub(crate) fn match_registration_for_ruby(partition: u64, site: String, origin: String, url: String) -> Option<(u32, String)> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
-    let matched = of_origin(p, &origin).filter(|r| url.starts_with(&r.scope));
+    let matched = of_key(p, &site, &origin).filter(|r| url.starts_with(&r.scope));
     matched.max_by_key(|r| r.scope.len()).map(|r| (r.id, r.scope.clone()))
 }
-fn of_origin<'a>(p: &'a Partition, origin: &'a str) -> impl Iterator<Item = &'a Registration> {
+// …of the storage key whose top-level site is `site` and whose origin is `origin`.
+fn of_key<'a>(p: &'a Partition, site: &'a str, origin: &'a str) -> impl Iterator<Item = &'a Registration> {
     let same = move |scope: &str| origin != "null" && ada_url::Url::parse(scope, None).is_ok_and(|u| u.origin() == origin);
-    p.registrations.iter().filter(move |r| r.mapped && r.registered && same(&r.scope))
+    p.registrations.iter().filter(move |r| r.mapped && r.registered && r.site == site && same(&r.scope))
 }
-// The registration a Register job made at `scope` that the map holds: its number, 0 for none.
-pub(crate) fn registered_at_for_ruby(partition: u64, scope: String) -> u32 {
-    lock().existing(partition).map_or(0, |p| p.registered_at(&scope))
+// The registration a Register job made at `scope` that the map holds for top-level site `site`: its number, 0 for none.
+pub(crate) fn registered_at_for_ruby(partition: u64, site: String, scope: String) -> u32 {
+    lock().existing(partition).map_or(0, |p| p.registered_at(&site, &scope))
 }
 
 // The worker `handle` finished a phase of its own: its install ('install', `ok` whether every `waitUntil` fulfilled) or
@@ -815,8 +838,11 @@ impl Partition {
 // deterministic — a client's controller is re-reported by realms and can read stale for a moment (the activation.https
 // flake), its URL and the scope do not. (Try Clear's "using" is the controller alone: `clearable`.)
 fn controls_clients(p: &Partition, handle: u32) -> bool {
-    let scope = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle)).map(|r| r.scope.as_str());
-    p.clients.iter().any(|c| c.controller == Some(handle) || scope.is_some_and(|s| scope_match(p, &c.url, false).is_some_and(|(_, m)| m == s)))
+    let serving = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle));
+    p.clients.iter().any(|c| {
+        c.controller == Some(handle)
+            || serving.is_some_and(|r| c.site == r.site && scope_match(p, &c.site, &c.url, false).is_some_and(|(_, m)| m == r.scope))
+    })
 }
 // Try Activate's verdict for the worker `candidate` of its registration: no outgoing active worker to displace, or one
 // not still activating (whose successor's activation is delayed) with no events pending — which holds an installed
@@ -865,8 +891,8 @@ impl Partition {
     // made at the scope later is a new one), which every realm's registration object of it sees at once — one with no
     // version left gone at once, another's Clear Registration waiting (`try_clear`) — and a navigation parked on its
     // activation, which now never comes, replayed against the network. Whether the map held one.
-    fn unregister(&mut self, scope: &str, out: &mut Vec<Cmd>) -> bool {
-        let Some(r) = self.mapped(scope) else { return false };
+    fn unregister(&mut self, site: &str, scope: &str, out: &mut Vec<Cmd>) -> bool {
+        let Some(r) = self.mapped(site, scope) else { return false };
         r.mapped = false;
         let id = r.id;
         if r.workers().is_empty() {
@@ -912,15 +938,15 @@ pub(crate) fn retry_navs_for_ruby(partition: u64) -> Vec<Cmd> {
 // scope is the longest to cover it — its worker serving it (its active one, activated), or one activating at a scope
 // as long (Activate has made it the registration's active worker: an update wins the tie over the outgoing one) whose
 // thread is alive and, unless `activating`, whose activation finished.
-fn scope_match<'p>(p: &'p Partition, url: &str, activating: bool) -> Option<(u32, &'p str)> {
+fn scope_match<'p>(p: &'p Partition, site: &str, url: &str, activating: bool) -> Option<(u32, &'p str)> {
     let mut best: Option<(u32, &str)> = None;
     let longer = |best: &Option<(u32, &str)>, scope: &str, tie: bool| best.is_none_or(|(_, b)| scope.len() > b.len() || (tie && scope.len() == b.len()));
-    for r in p.registrations.iter().filter(|r| r.mapped) {
+    for r in p.registrations.iter().filter(|r| r.mapped && r.site == site) {
         if let Some(h) = r.serving.filter(|_| url.starts_with(&r.scope) && longer(&best, &r.scope, false)) {
             best = Some((h, &r.scope));
         }
     }
-    for r in p.registrations.iter().filter(|r| r.mapped) {
+    for r in p.registrations.iter().filter(|r| r.mapped && r.site == site) {
         let Some(h) = r.activating.filter(|_| url.starts_with(&r.scope) && longer(&best, &r.scope, true)) else { continue };
         if p.workers.get(&h).is_some_and(|w| !w.dead && (activating || w.lifecycle.activated)) {
             best = Some((h, &r.scope));
@@ -928,23 +954,24 @@ fn scope_match<'p>(p: &'p Partition, url: &str, activating: bool) -> Option<(u32
     }
     best
 }
-// The worker that controls what `url` names, for the host: `mode` "served" — the registration matched, its worker as it
+// The worker that controls what `url` names, for an environment of top-level site `site`, for the host: `mode` "served" — the registration matched, its worker as it
 // stands; "navigation" — the worker a navigation to it goes to
 // through its fetch event, one that intercepts and is alive; "client" — the controller of a client made at it, an
 // activating worker's too (Handle Fetch sets a reserved client's active service worker before it asks whether that
 // handles fetches at all, let alone waits for it); "activating" — the still-activating worker a request to it is to
 // wait for, where its registration is the one matched, it intercepts and is alive. `[handle, intercepts, script URL,
 // scope]`, nil for none.
-pub(crate) fn match_worker_for_ruby(partition: u64, url: String, mode: String) -> Option<(u32, bool, String, String)> {
+pub(crate) fn match_worker_for_ruby(partition: u64, site: String, url: String, mode: String) -> Option<(u32, bool, String, String)> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
     let (handle, scope) = match mode.as_str() {
-        "served" => scope_match(p, &url, false)?,
-        "navigation" => scope_match(p, &url, false).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead && w.intercepts()))?,
-        "client" => scope_match(p, &url, true).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead))?,
+        "served" => scope_match(p, &site, &url, false)?,
+        "navigation" => scope_match(p, &site, &url, false).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead && w.intercepts()))?,
+        "client" => scope_match(p, &site, &url, true).filter(|(h, _)| p.workers.get(h).is_some_and(|w| !w.dead))?,
         "activating" => {
-            let r = p.registrations.iter().filter(|r| r.mapped && r.activating.is_some() && url.starts_with(&r.scope)).max_by_key(|r| r.scope.len())?;
-            if scope_match(p, &url, false).is_some_and(|(_, s)| s.len() > r.scope.len()) {
+            let covering = |r: &&Registration| r.mapped && r.site == site && r.activating.is_some() && url.starts_with(&r.scope);
+            let r = p.registrations.iter().filter(covering).max_by_key(|r| r.scope.len())?;
+            if scope_match(p, &site, &url, false).is_some_and(|(_, s)| s.len() > r.scope.len()) {
                 return None;
             }
             let h = r.activating?;
@@ -1043,8 +1070,8 @@ impl Partition {
             w.registration = id;
         }
     }
-    fn mapped_scope(&self, id: u32) -> Option<String> {
-        self.registrations.iter().find(|r| r.id == id && r.mapped).map(|r| r.scope.clone())
+    fn mapped_scope(&self, id: u32) -> Option<(String, String)> {
+        self.registrations.iter().find(|r| r.id == id && r.mapped).map(|r| (r.site.clone(), r.scope.clone()))
     }
     // A version retired: redundant, and its isolate ended.
     fn retire(handle: u32, out: &mut Vec<Cmd>) {
@@ -1124,8 +1151,8 @@ impl Partition {
             self.set_version(id, "installing", None);
         }
         Self::retire(handle, out);
-        if let Some(scope) = self.mapped_scope(id).filter(|_| self.by_id(id).is_some_and(|r| r.workers().is_empty())) {
-            self.unregister(&scope, out);
+        if let Some((site, scope)) = self.mapped_scope(id).filter(|_| self.by_id(id).is_some_and(|r| r.workers().is_empty())) {
+            self.unregister(&site, &scope, out);
         } else {
             // (…one unregistered already, which only its install's event held, cleared now)
             out.push(Cmd::TryClear);
@@ -1255,20 +1282,20 @@ pub(crate) fn forget_activating_for_ruby(partition: u64, handle: u32) {
     }
 }
 // The mapped registration's updateViaCache mode — nil where none was set — and setting it.
-pub(crate) fn update_via_cache_for_ruby(partition: u64, scope: String) -> Option<String> {
-    lock().existing(partition).and_then(|p| p.mapped(&scope)).and_then(|r| r.update_via_cache.clone())
+pub(crate) fn update_via_cache_for_ruby(partition: u64, site: String, scope: String) -> Option<String> {
+    lock().existing(partition).and_then(|p| p.mapped(&site, &scope)).and_then(|r| r.update_via_cache.clone())
 }
 // Its navigation preload state: `[enabled, header value]`, the spec's default (false, "true") where none was set — and
 // setting either (a nil one left as it is).
-pub(crate) fn navigation_preload_for_ruby(partition: u64, scope: String) -> (bool, String) {
+pub(crate) fn navigation_preload_for_ruby(partition: u64, site: String, scope: String) -> (bool, String) {
     let mut reg = lock();
-    let r = reg.existing(partition).and_then(|p| p.mapped(&scope));
+    let r = reg.existing(partition).and_then(|p| p.mapped(&site, &scope));
     let r = r.as_deref();
     (r.and_then(|r| r.preload_enabled).unwrap_or(false), r.and_then(|r| r.preload_header.clone()).unwrap_or_else(|| "true".to_owned()))
 }
-pub(crate) fn set_navigation_preload_for_ruby(partition: u64, scope: String, enabled: Option<bool>, header: Option<String>) {
+pub(crate) fn set_navigation_preload_for_ruby(partition: u64, site: String, scope: String, enabled: Option<bool>, header: Option<String>) {
     let mut reg = lock();
-    let r = reg.at(partition, &scope);
+    let r = reg.at(partition, &site, &scope);
     if enabled.is_some() {
         r.preload_enabled = enabled;
     }
@@ -1287,7 +1314,7 @@ mod tests {
     }
     // (…a Register job made the registration at `scope`: its number)
     fn note_registered(p: u64, scope: String) -> u32 {
-        lock().registered(p, &scope).id
+        lock().registered(p, "", &scope).id
     }
     // (…the registration `id`'s installing worker, its job's worker evaluated)
     fn install(p: u64, id: u32, handle: u32) -> Vec<Cmd> {
@@ -1298,11 +1325,11 @@ mod tests {
     // (…the Unregister job at `scope`: whether the map held one)
     fn unregister(p: u64, scope: String) -> (bool, Vec<Cmd>) {
         let mut out = Vec::new();
-        let had = part(p, |q| q.unregister(&scope, &mut out));
+        let had = part(p, |q| q.unregister("", &scope, &mut out));
         (had, out)
     }
     fn set_update_via_cache(p: u64, scope: String, mode: String) {
-        lock().at(p, &scope).update_via_cache = Some(mode);
+        lock().at(p, "", &scope).update_via_cache = Some(mode);
     }
     fn set_version(p: u64, id: u32, slot: String, handle: Option<u32>) {
         part(p, |q| q.set_version(id, &slot, handle));
@@ -1317,20 +1344,47 @@ mod tests {
         part(p, |q| q.workers.get(&handle).is_some_and(|w| w.lifecycle.step == Step::Activating))
     }
     fn note_activating(p: u64, scope: String, handle: u32) {
-        lock().at(p, &scope).activating = Some(handle);
+        lock().at(p, "", &scope).activating = Some(handle);
     }
     fn activated(p: u64, scope: String, handle: u32) {
         let mut reg = lock();
-        let r = reg.registered(p, &scope);
+        let r = reg.registered(p, "", &scope);
         r.serving = Some(handle);
         r.activating = None;
+    }
+
+    // A registration is of a storage key: one a third-party frame of other.test made under a.test is none a first-party
+    // other.test document sees — its lookups, its navigations, its clients — and the other way round.
+    #[test]
+    fn keeps_each_registration_and_client_by_its_storage_key() {
+        let p = partition_new_for_ruby();
+        let (a, other) = ("https://a.test".to_owned(), "https://other.test".to_owned());
+        let id = {
+            let mut reg = lock();
+            let r = reg.registered(p, &a, "https://other.test/");
+            r.serving = Some(1);
+            r.id
+        };
+        worker_new_for_ruby(p, 1, a.clone(), "https://other.test/sw.js".into(), "classic".into());
+        part(p, |q| q.workers.get_mut(&1).expect("a worker made").registration = id);
+        assert_eq!(registrations_of_origin_for_ruby(p, a.clone(), other.clone()), [(id, "https://other.test/".to_owned())]);
+        assert_eq!(registrations_of_origin_for_ruby(p, other.clone(), other.clone()), []);
+        assert_eq!(match_registration_for_ruby(p, other.clone(), other.clone(), "https://other.test/x".into()), None);
+        assert_eq!(registered_at_for_ruby(p, other.clone(), "https://other.test/".into()), 0);
+        let navigation = |site: &str| match_worker_for_ruby(p, site.into(), "https://other.test/x".into(), "navigation".into()).map(|m| m.0);
+        assert_eq!((navigation(&a), navigation(&other)), (Some(1), None));
+        note_client_for_ruby(p, "third".into(), a.clone(), "https://other.test/f".into(), "window".into(), "nested".into(), Some(other.clone()), None);
+        note_client_for_ruby(p, "first".into(), other.clone(), "https://other.test/".into(), "window".into(), "top-level".into(), Some(other.clone()), None);
+        let seen: Vec<String> = match_clients_for_ruby(p, 1, other.clone(), true, "all".into()).into_iter().map(|c| c.0).collect();
+        assert_eq!(seen, ["third"]);
+        assert!(client_for_ruby(p, 1, other.clone(), "first".into()).is_none());
     }
 
     #[test]
     fn has_the_host_take_each_lifecycle_step_in_order() {
         let p = partition_new_for_ruby();
         let id = note_registered(p, "https://a.test/".into());
-        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into());
         assert_eq!(install(p, id, 1), [Cmd::State(1, "installing"), Cmd::QueueStep(1)]);
         // (…one step a task: updatefound, then the install phase waited for, then installed and Try Activate)
         assert_eq!(step_for_ruby(p, 1), [Cmd::UpdateFound(id), Cmd::QueueStep(1)]);
@@ -1345,9 +1399,9 @@ mod tests {
         assert!(step_for_ruby(p, 1).is_empty());
         note_phase_for_ruby(p, 1, "activated".into(), true);
         assert_eq!(resume_for_ruby(p, 1, "activation".into()), [Cmd::State(1, "activated"), Cmd::TryClear, Cmd::TryActivate]);
-        assert_eq!(match_worker_for_ruby(p, "https://a.test/x".into(), "navigation".into()).map(|m| m.0), Some(1));
+        assert_eq!(match_worker_for_ruby(p, String::new(), "https://a.test/x".into(), "navigation".into()).map(|m| m.0), Some(1));
         // (…an update replacing it: the outgoing worker retired before the versions move, the rest continued after)
-        worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into());
         install(p, id, 2);
         step_for_ruby(p, 2);
         note_phase_for_ruby(p, 2, "install".into(), true);
@@ -1368,10 +1422,10 @@ mod tests {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
         let id = note_registered(p, scope());
-        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(1));
         activated(p, scope(), 1);
-        note_client_for_ruby(p, "c".into(), "https://a.test/".into(), "window".into(), "top-level".into(), None, Some(1));
+        note_client_for_ruby(p, "c".into(), String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), None, Some(1));
         defer_navigation_for_ruby(p);
         // (…out of the map at once, the parked navigation replayed, the clear waiting on the client)
         let (had, cmds) = unregister(p, scope());
@@ -1394,8 +1448,8 @@ mod tests {
         let p = partition_new_for_ruby();
         let scope = || "https://a.test/".to_owned();
         let id = note_registered(p, scope());
-        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
-        worker_new_for_ruby(p, 2, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 2, String::new(), "https://a.test/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(1));
         activated(p, scope(), 1);
         set_version(p, id, "waiting".into(), Some(2));
@@ -1403,7 +1457,7 @@ mod tests {
         // (…no client using the registration: it may)
         assert!(verdict());
         // (…an in-scope client holds it, controlled or not — unless the candidate skipped waiting)
-        note_client_for_ruby(p, "c".into(), "https://a.test/page".into(), "window".into(), "top-level".into(), None, None);
+        note_client_for_ruby(p, "c".into(), String::new(), "https://a.test/page".into(), "window".into(), "top-level".into(), None, None);
         assert!(!verdict());
         hold_for_ruby(p, 2, "skip_waiting".into(), true);
         assert!(verdict());
@@ -1429,9 +1483,9 @@ mod tests {
     #[test]
     fn matches_a_request_to_the_worker_its_longest_scope_routes_to() {
         let p = partition_new_for_ruby();
-        let m = |url: &str, mode: &str| match_worker_for_ruby(p, url.into(), mode.into()).map(|r| (r.0, r.3));
-        worker_new_for_ruby(p, 1, "https://a.test/sw.js".into(), "classic".into());
-        worker_new_for_ruby(p, 2, "https://a.test/app/sw.js".into(), "classic".into());
+        let m = |url: &str, mode: &str| match_worker_for_ruby(p, String::new(), url.into(), mode.into()).map(|r| (r.0, r.3));
+        worker_new_for_ruby(p, 1, String::new(), "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 2, String::new(), "https://a.test/app/sw.js".into(), "classic".into());
         activated(p, "https://a.test/".into(), 1);
         note_activating(p, "https://a.test/app/".into(), 2);
         // (…the longer scope's worker still activating: a client takes it, a navigation waits for it)
@@ -1443,7 +1497,7 @@ mod tests {
         assert_eq!(m("https://a.test/app/x", "navigation"), Some((2, "https://a.test/app/".into())));
         assert_eq!(m("https://a.test/app/x", "activating"), None);
         // (…an update activating at the same scope wins the tie over the outgoing one; a dead one routes nothing)
-        worker_new_for_ruby(p, 3, "https://a.test/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 3, String::new(), "https://a.test/sw.js".into(), "classic".into());
         note_activating(p, "https://a.test/".into(), 3);
         assert_eq!(m("https://a.test/y", "client"), Some((3, "https://a.test/".into())));
         set_worker_flag_for_ruby(p, 3, "dead".into(), true);
@@ -1460,11 +1514,15 @@ mod tests {
     #[test]
     fn keeps_the_clients_a_service_worker_sees() {
         let p = partition_new_for_ruby();
+        // (…the worker's registration's storage key the clients' it sees: theirs, of no top-level site here)
+        let id = note_registered(p, "https://a.test/".into());
+        worker_new_for_ruby(p, 5, String::new(), "https://a.test/sw.js".into(), "classic".into());
+        part(p, |q| q.workers.get_mut(&5).expect("a worker made").registration = id);
         let a = || Some("https://a.test".to_owned());
-        note_client_for_ruby(p, "w".into(), "https://a.test/".into(), "window".into(), "top-level".into(), a(), Some(5));
-        note_client_for_ruby(p, "f".into(), "https://a.test/f".into(), "window".into(), "nested".into(), a(), None);
-        note_client_for_ruby(p, "x".into(), "https://b.test/".into(), "window".into(), "nested".into(), Some("https://b.test".into()), None);
-        note_client_for_ruby(p, "k".into(), "https://a.test/k.js".into(), "worker".into(), "none".into(), a(), Some(5));
+        note_client_for_ruby(p, "w".into(), String::new(), "https://a.test/".into(), "window".into(), "top-level".into(), a(), Some(5));
+        note_client_for_ruby(p, "f".into(), String::new(), "https://a.test/f".into(), "window".into(), "nested".into(), a(), None);
+        note_client_for_ruby(p, "x".into(), String::new(), "https://b.test/".into(), "window".into(), "nested".into(), Some("https://b.test".into()), None);
+        note_client_for_ruby(p, "k".into(), String::new(), "https://a.test/k.js".into(), "worker".into(), "none".into(), a(), Some(5));
         let ids = |v: Vec<(String, String, String, String, bool, bool)>| v.into_iter().map(|c| c.0).collect::<Vec<_>>();
         assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), false, "window".into())), ["w"]);
         assert_eq!(ids(match_clients_for_ruby(p, 5, "https://a.test".into(), true, "all".into())), ["w", "f", "k"]);
@@ -1474,8 +1532,8 @@ mod tests {
         assert!(set_client_controller_for_ruby(p, "f".into(), Some(5)));
         assert_eq!(client_for_ruby(p, 5, "https://a.test".into(), "f".into()).map(|c| (c.4, c.5)), Some((true, true)));
         // Refreshed in place, gone when forgotten.
-        note_client_for_ruby(p, "w".into(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), Some(5));
-        assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/2".into(), Some(5)));
+        note_client_for_ruby(p, "w".into(), String::new(), "https://a.test/2".into(), "window".into(), "top-level".into(), a(), Some(5));
+        assert_eq!(clients_for_ruby(p)[0], ("w".into(), "https://a.test/2".into(), Some(5), String::new()));
         assert!(forget_client_for_ruby(p, "w".into()));
         assert!(!forget_client_for_ruby(p, "w".into()));
         clear_for_ruby(p);
@@ -1485,7 +1543,7 @@ mod tests {
     fn queues_jobs_by_scope_and_joins_an_equivalent_one() {
         let p = partition_new_for_ruby();
         let schedule = |kind: &str, scope: &str, url: &str, registration: u32, realm: i64| {
-            schedule_job_for_ruby(p, kind.into(), scope.into(), url.into(), Some("imports".into()), "classic".into(), registration, realm, String::new())
+            schedule_job_for_ruby(p, kind.into(), String::new(), scope.into(), url.into(), Some("imports".into()), "classic".into(), registration, realm, String::new())
         };
         let (a, cmds) = schedule("register", "s/", "s/a.js", 0, 0).expect("scheduled");
         assert_eq!(cmds, [Cmd::QueueJob(a)]);
@@ -1502,15 +1560,15 @@ mod tests {
         assert!(job_for_ruby(p, c).is_none());
         // (…a Register job fetches its script, a changed one announcing its client and spawning its worker, which it waits on)
         assert_eq!(run_job_for_ruby(p, a), [Cmd::Fetch(a)]);
-        assert_eq!(job_for_ruby(p, a), Some(("s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), String::new(), 0)));
+        assert_eq!(job_for_ruby(p, a), Some(("s/".into(), "s/a.js".into(), Some("imports".into()), "classic".into(), String::new(), 0, String::new())));
         assert_eq!(job_fetched_for_ruby(p, a, None, true), (true, vec![Cmd::ReportClient(0)]));
-        worker_new_for_ruby(p, 4, "s/a.js".into(), "classic".into());
+        worker_new_for_ruby(p, 4, String::new(), "s/a.js".into(), "classic".into());
         assert!(job_spawned_for_ruby(p, a, Some(4)).is_empty());
-        assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);
+        assert_eq!(registered_at_for_ruby(p, String::new(), "s/".into()), 0);
         // (…evaluated, Install resolves its promises — and a register() now no longer joins it — and finishes it only once
         // the install ends: the next job queued then)
         let cmds = job_evaluated_for_ruby(p, 4, true, String::new());
-        let id = registered_at_for_ruby(p, "s/".into());
+        let id = registered_at_for_ruby(p, String::new(), "s/".into());
         assert_eq!(cmds, [Cmd::State(4, "installing"), Cmd::QueueStep(4), Cmd::Settled(a, id, "s/".into(), None, None, false)]);
         let (a2, cmds) = schedule("register", "s/", "s/a.js", 0, 0).expect("scheduled");
         assert_ne!(a2, a);
@@ -1543,17 +1601,17 @@ mod tests {
         assert_eq!(cmds[..2], [Cmd::Settled(r, 0, "s/".into(), None, None, true), Cmd::Answer(4, true)]);
         clear_for_ruby(p);
         let p = partition_new_for_ruby();
-        assert_eq!(registered_at_for_ruby(p, "s/".into()), 0);
+        assert_eq!(registered_at_for_ruby(p, String::new(), "s/".into()), 0);
         note_registered(p, "s/".into());
-        assert_ne!(registered_at_for_ruby(p, "s/".into()), 0);
+        assert_ne!(registered_at_for_ruby(p, String::new(), "s/".into()), 0);
         let short = note_registered(p, "https://a.test/".into());
         let long = note_registered(p, "https://a.test/x/".into());
         note_registered(p, "https://b.test/".into());
         let a = || "https://a.test".to_owned();
-        assert_eq!(match_registration_for_ruby(p, a(), "https://a.test/x/y".into()), Some((long, "https://a.test/x/".into())));
-        assert_eq!(match_registration_for_ruby(p, a(), "https://a.test/y".into()), Some((short, "https://a.test/".into())));
-        assert_eq!(match_registration_for_ruby(p, "null".into(), "https://a.test/y".into()), None);
-        let of_a: Vec<u32> = registrations_of_origin_for_ruby(p, "https://a.test".into()).into_iter().map(|r| r.0).collect();
+        assert_eq!(match_registration_for_ruby(p, String::new(), a(), "https://a.test/x/y".into()), Some((long, "https://a.test/x/".into())));
+        assert_eq!(match_registration_for_ruby(p, String::new(), a(), "https://a.test/y".into()), Some((short, "https://a.test/".into())));
+        assert_eq!(match_registration_for_ruby(p, String::new(), "null".into(), "https://a.test/y".into()), None);
+        let of_a: Vec<u32> = registrations_of_origin_for_ruby(p, String::new(), "https://a.test".into()).into_iter().map(|r| r.0).collect();
         assert_eq!(of_a, [short, long]);
         clear_for_ruby(p);
     }
@@ -1561,7 +1619,7 @@ mod tests {
     #[test]
     fn steps_a_version_from_installing_to_activated() {
         let p = partition_new_for_ruby();
-        worker_new_for_ruby(p, 3, "a/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 3, String::new(), "a/sw.js".into(), "classic".into());
         assert_eq!(advance(p, 3), "done");
         begin_lifecycle(p, 3);
         assert_eq!(advance(p, 3), "updatefound");
@@ -1571,10 +1629,10 @@ mod tests {
         assert!(awaits_activation(p, 3));
         // (…held at Try Activate while the active worker it replaces controls a client, let go once that one goes)
         let id = note_registered(p, "https://a.test/".into());
-        worker_new_for_ruby(p, 9, "a/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 9, String::new(), "a/sw.js".into(), "classic".into());
         set_version(p, id, "active".into(), Some(9));
         set_version(p, id, "waiting".into(), Some(3));
-        note_client_for_ruby(p, "c".into(), "https://b.test/".into(), "window".into(), "top-level".into(), None, Some(9));
+        note_client_for_ruby(p, "c".into(), String::new(), "https://b.test/".into(), "window".into(), "top-level".into(), None, Some(9));
         assert_eq!(advance(p, 3), "try_activate");
         forget_client_for_ruby(p, "c".into());
         assert_eq!(advance(p, 3), "activating");
@@ -1583,13 +1641,13 @@ mod tests {
         assert_eq!(advance(p, 3), "activated");
         assert_eq!(advance(p, 3), "done");
         // A failed install ends it; a redundant worker takes no step.
-        worker_new_for_ruby(p, 4, "a/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 4, String::new(), "a/sw.js".into(), "classic".into());
         begin_lifecycle(p, 4);
         assert_eq!(advance(p, 4), "updatefound");
         note_phase_for_ruby(p, 4, "install".into(), false);
         assert_eq!(advance(p, 4), "install_failed");
         assert_eq!(advance(p, 4), "done");
-        worker_new_for_ruby(p, 5, "a/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 5, String::new(), "a/sw.js".into(), "classic".into());
         begin_lifecycle(p, 5);
         set_worker_state_for_ruby(p, 5, "redundant".into());
         assert_eq!(advance(p, 5), "done");
@@ -1600,20 +1658,20 @@ mod tests {
     fn keeps_a_registration_from_its_job_to_its_clear() {
         let p = partition_new_for_ruby();
         let id = note_registered(p, "a/".into());
-        worker_new_for_ruby(p, 7, "a/sw.js".into(), "classic".into());
+        worker_new_for_ruby(p, 7, String::new(), "a/sw.js".into(), "classic".into());
         set_version(p, id, "installing".into(), Some(7));
         note_activating(p, "a/".into(), 7);
-        assert_eq!(registrations_for_ruby(p), [("a/".into(), true, Some(7), None, id)]);
+        assert_eq!(registrations_for_ruby(p), [("a/".into(), true, Some(7), None, id, String::new())]);
         activated(p, "a/".into(), 7);
         activated(p, "b/".into(), 7);
-        set_navigation_preload_for_ruby(p, "a/".into(), Some(true), None);
-        assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (true, "true".into()));
+        set_navigation_preload_for_ruby(p, String::new(), "a/".into(), Some(true), None);
+        assert_eq!(navigation_preload_for_ruby(p, String::new(), "a/".into()), (true, "true".into()));
         note_activating(p, "a/".into(), 8);
         forget_worker_for_ruby(p, 7);
         forget_worker_for_ruby(p, 8);
-        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, Some(8), None, id));
+        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, Some(8), None, id, String::new()));
         forget_activating_for_ruby(p, 8);
-        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, None, None, id));
+        assert_eq!(registrations_for_ruby(p)[0], ("a/".into(), true, None, None, id, String::new()));
         // A scope its job only set a mode on is no registration yet, and takes its place when one is made there.
         set_update_via_cache(p, "c/".into(), "all".into());
         note_registered(p, "b/".into());
@@ -1625,7 +1683,7 @@ mod tests {
         assert!(had);
         assert_eq!(cmds, [Cmd::State(7, "redundant"), Cmd::Terminate(7)]);
         assert_eq!(unregister(p, "a/".into()), (false, Vec::new()));
-        assert_eq!(navigation_preload_for_ruby(p, "a/".into()), (false, "true".into()));
+        assert_eq!(navigation_preload_for_ruby(p, String::new(), "a/".into()), (false, "true".into()));
         assert_eq!(versions_for_ruby(p, id), (None, None, None));
         let again = note_registered(p, "a/".into());
         assert_ne!(again, id);

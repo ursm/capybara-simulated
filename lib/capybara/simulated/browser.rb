@@ -5016,7 +5016,7 @@ module Capybara
       # (…`cluster_key` the agent cluster key of the context making it, which a dedicated worker's is: realm_location.rs
       # `agent_cluster_key`)
       def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
-                       sw_body: nil, sw_imports: nil)
+                       sw_body: nil, sw_imports: nil, site: nil)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -5049,7 +5049,10 @@ module Capybara
         # its script URL, or the creator's controller for an opaque blob:/data: script).
         # Computed once here on the registry-owning thread; run_worker installs it into the
         # isolate and the registry records it below.
-        ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle).to_i
+        # (…of its storage key: its owner's top-level site — the creating document's, a nested worker's parent's, a service
+        # worker's its registration's, `site`)
+        site ||= parent_worker ? @workers.dig(parent_worker, :partition) : blob_partition_site(realm_id.to_i)
+        ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle, site).to_i
         # A worker whose MAIN SCRIPT a fetch-handling SW controls fetches it THROUGH that SW
         # (worker-client-id: the SW synthesizes the script), deferred to run_worker
         # (`body: nil` + `sw_script:`) — the spawn runs inside a JS host callback where a
@@ -5057,7 +5060,7 @@ module Capybara
         # deferred fetch runs, @worker_initializing keeps the drain loops pumping
         # (worker_drive_pending?); the runner's post-idle-bail grace window covers the
         # POST-init autonomous worker work the counters can't see.
-        sw_script = !service && http_url?(target) ? sw_controller_for_navigation(target) : nil
+        sw_script = !service && http_url?(target) ? sw_controller_for_navigation(target, site) : nil
         # Resolve the worker script body on the main thread before
         # handing off to the worker. `blob:` URLs need the main VM's
         # blob registry; calling into the main runtime from a
@@ -5120,7 +5123,7 @@ module Capybara
         record[:module] = script_type.to_s == 'module' if service
         # (…its storage partition its owner document's — a nested worker's its parent's — as it was made: blob_rules.rs
         # `partition_site`)
-        record[:partition] = parent_worker ? @workers.dig(parent_worker, :partition) : blob_partition_site(realm_id.to_i)
+        record[:partition] = site
         # (…a dedicated worker's site for cookies its owner document's, kept as it was made — HTML's worker settings —
         # which its fetches, on its own thread, are judged by; a nested worker's its parent's)
         unless service
@@ -5136,7 +5139,7 @@ module Capybara
         end
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
-        Native.sw_worker_new(@sw_partition, handle, target, script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
+        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
         @workers[handle] = record
         thread = Thread.new do
           Thread.current.report_on_exception = false
@@ -5163,13 +5166,13 @@ module Capybara
             creator_client: parent_worker ? sw_worker_client_id(parent_worker) : sw_client_id(realm_id.to_i),
             # The registration's updateViaCache mode — its job's, which commits only once this
             # evaluation ran — a SERVICE worker's importScripts reads ('none' bypasses the HTTP cache).
-            sw_uvc: service ? update_via_cache || sw_scope_update_via_cache(sw_scope) : nil,
+            sw_uvc: service ? update_via_cache || sw_scope_update_via_cache(sw_scope, site) : nil,
             sw_imports_map: sw_imports,
             # The registration's CURRENT active version at spawn time — its script URL and handle, the new
             # worker's `self.registration.active` snapshot during its own install phase (registration-attribute's
             # newer worker) and what its navigation preload is keyed by. Resolved here, on the registry-owning
             # thread.
-            sw_prev_active: service && (ah = sw_serving[sw_scope.to_s]) && (prev = sw_controller(ah, live: false)) ? {url: prev[2], handle: ah} : nil
+            sw_prev_active: service && (ah = sw_serving(site)[sw_scope.to_s]) && (prev = sw_controller(ah, live: false)) ? {url: prev[2], handle: ah} : nil
           )
         end
         # A nested spawn runs THIS method on a worker thread, so other threads can observe
@@ -5273,13 +5276,14 @@ module Capybara
       # Returns nil when the final response is no script (an HTTP error, a redirect it cannot follow: the worker fails to
       # load), or :error when the load is BLOCKED (network-error respondWith, a response type same-origin mode forbids, a
       # cross-origin / non-http Location, a redirect loop) — it must fail the worker start, never fall back to the network.
-      def worker_main_script_fetch(sw_handle, url, client_handle, shared: false, creator_client: nil)
+      # (…`site` the top-level site of its storage key: its record's)
+      def worker_main_script_fetch(sw_handle, url, client_handle, site:, shared: false, creator_client: nil)
         fetch   = Native::WorkerScriptFetch.new(url.to_s)
         sw      = sw_handle.to_i
         last_sw = nil
         loop do
           current, workers_may_answer = fetch.begin_hop
-          sw = sw_controller_for_navigation(current) if fetch.redirected? && workers_may_answer
+          sw = sw_controller_for_navigation(current, site) if fetch.redirected? && workers_may_answer
           if workers_may_answer && sw
             last_sw = sw
             r = sw_script_fetch_event(sw, current, client_handle, shared:, creator_client:)
@@ -5792,13 +5796,14 @@ module Capybara
       end
 
       # The active worker handle at an EXACT scope (0 if none) — see __csim_swActiveHandleForScope.
-      def sw_active_handle_for_scope(scope) = sw_serving[scope.to_s].to_i
+      def sw_active_handle_for_scope(scope, site) = sw_serving(site)[scope.to_s].to_i
 
-      # The registrations the session's map holds (sw_registry.rs), `[scope, registered, activating, serving, id]` in the
-      # order made — and the worker serving and the one activating each scope that has one.
+      # The registrations the session's map holds (sw_registry.rs), `[scope, registered, activating, serving, id, top-level
+      # site]` in the order made — and the worker serving each scope of the storage keys of top-level site `site` that has
+      # one, and the scope the worker `handle` serves or activates at.
       private def sw_regs = Native.sw_registrations(@sw_partition)
-      private def sw_serving = sw_regs.each_with_object({}) {|(scope, _, _, serving), out| out[scope] = serving if serving }
-      private def sw_activatings = sw_regs.each_with_object({}) {|(scope, _, activating), out| out[scope] = activating if activating }
+      private def sw_serving(site) = sw_regs.each_with_object({}) {|(scope, _, _, serving, _, s), out| out[scope] = serving if serving && s == site }
+      private def sw_scope_of(handle) = sw_regs.find {|_, _, activating, serving| serving == handle || activating == handle }&.first
 
       # Whether a service worker's response `r` (its wire form) may answer a request in `mode` with `redirect` (Fetch
       # "HTTP fetch" step 5.5 — the engine's).
@@ -5809,9 +5814,10 @@ module Capybara
       # The registration map as a client of `origin` reads it — `[id, scope]` of each registration, in the order made —
       # the registration `url` matches there (its longest scope covering it), `[id, scope]` or nil, and the number of the
       # one the map holds at `scope` (0 for none).
-      def sw_registrations_of(origin) = Native.sw_registrations_of_origin(@sw_partition, origin.to_s)
-      def sw_match_registration(origin, url) = Native.sw_match_registration(@sw_partition, origin.to_s, url.to_s)
-      def sw_registered_at(scope) = Native.sw_registered_at(@sw_partition, scope.to_s)
+      # (…each of the storage key of `origin` and top-level site `site`, the client's: sw_registry.rs)
+      def sw_registrations_of(origin, site) = Native.sw_registrations_of_origin(@sw_partition, site.to_s, origin.to_s)
+      def sw_match_registration(origin, url, site) = Native.sw_match_registration(@sw_partition, site.to_s, origin.to_s, url.to_s)
+      def sw_registered_at(scope, site) = Native.sw_registered_at(@sw_partition, site.to_s, scope.to_s)
 
       # The registration `id`'s versions, `[installing, waiting, active]` (each a worker's handle, nil for none).
       def sw_versions(id) = Native.sw_versions(@sw_partition, id.to_i).to_a
@@ -5845,7 +5851,8 @@ module Capybara
       # Service Workers are modeled only in a universal-server context (the WPT runner, where every host is served
       # in-process): a real app keeps the "not supported" rejection, so its registration-failed branch runs rather than
       # a half-modeled success path.
-      def sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm_id, creator_key)
+      # (…`site` the top-level site of the caller's storage key, its registration's: sw_registry.rs)
+      def sw_schedule_job(kind, script_url, scope, update_via_cache, script_type, registration_id, base, origin, realm_id, creator_key, site)
         return ['SecurityError', 'Service Workers not supported'] unless all_hosts_local?
 
         if kind == 'register'
@@ -5855,6 +5862,7 @@ module Capybara
         scheduled = Native.sw_schedule_job(
           @sw_partition,
           kind.to_s,
+          site.to_s,
           scope.to_s,
           script_url.to_s,
           update_via_cache&.to_s,
@@ -5876,10 +5884,10 @@ module Capybara
       # …its script fetched and byte-checked (sw_registration_update_fetch), and a changed one's worker spawned, the job
       # waiting for its evaluation (sw_job_evaluated).
       private def sw_fetch_job(id)
-        scope, script_url, update_via_cache, script_type, creator_key, against = Native.sw_job(@sw_partition, id)
+        scope, script_url, update_via_cache, script_type, creator_key, against, site = Native.sw_job(@sw_partition, id)
         return unless scope
 
-        fetched = sw_registration_update_fetch(scope, script_url, against, update_via_cache)
+        fetched = sw_registration_update_fetch(scope, site, script_url, against, update_via_cache)
         spawn, cmds = Native.sw_job_fetched(@sw_partition, id, fetched['error'], !!fetched['changed'])
         sw_run(cmds)
         return unless spawn
@@ -5888,6 +5896,7 @@ module Capybara
           script_url,
           service:          true,
           creator_key:      creator_key,
+          site:             site,
           sw_scope:         scope,
           script_type:      script_type,
           update_via_cache: update_via_cache,
@@ -5952,7 +5961,7 @@ module Capybara
       # dispatches at once — covers `url`, which it handles fetches for, so a request to it waits for its activation; nil
       # for none, for one whose activated marker is processed already, and for a dead one, which can't answer (the
       # engine's: sw_registry.rs `match_worker`, "activating").
-      private def sw_activating_controller_for(url) = Native.sw_match_worker(@sw_partition, url.to_s, 'activating')&.first
+      private def sw_activating_controller_for(url, site) = Native.sw_match_worker(@sw_partition, site.to_s, url.to_s, 'activating')&.first
 
       # Release the subresource fetches Handle Fetch parked while `handle` was 'activating'
       # (or, for a worker that died without activating, fall them through to the network so
@@ -6018,8 +6027,12 @@ module Capybara
         # candidate; comparing against the active registrations alone lets a shorter scope's
         # claim transiently seize a client the longer one matches
         # (claim-not-using-registration under CI load).
-        candidate_scopes = sw_regs.filter_map {|s, registered, activating, serving| s if registered || activating || serving } | [scope.to_s]
-        Native.sw_clients(@sw_partition).each do |id, url, _controller|
+        # (…of the claiming registration's storage key alone, its top-level site the worker's: sw_registry.rs)
+        site = @workers.dig(handle.to_i, :partition).to_s
+        candidate_scopes = sw_regs.filter_map {|s, registered, activating, serving, _, of| s if of == site && (registered || activating || serving) } | [scope.to_s]
+        Native.sw_clients(@sw_partition).each do |id, url, _controller, of|
+          next unless of == site
+
           matched = candidate_scopes.select {|s| url.start_with?(s) }.max_by(&:length)
           # A claim from a still-ACTIVATING worker: it isn't its scope's active worker
           # yet, so the host record must be written here for exactly this path too, or
@@ -6029,25 +6042,25 @@ module Capybara
           Native.sw_set_client_controller(@sw_partition, id, handle.to_i) if matched == scope
         end
         all_scopes = candidate_scopes
-        @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes)
+        @runtime.call('__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes, site)
         @runtime.frame_realm_ids.each do |rid|
-          @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes) if @runtime.frame_realm_alive?(rid)
+          @runtime.realm_call(rid, '__csim_swClaimClient', handle, has_fetch, script_url, scope, all_scopes, site) if @runtime.frame_realm_alive?(rid)
         end
         # Worker CLIENTS too (a dedicated/shared worker whose script URL is in scope adopts
         # the claiming SW): same self-check, run in the worker's isolate via its inbox.
         # Snapshot: a live worker thread can insert into @workers (a nested spawn) mid-walk.
         @workers.to_a.each do |_h, w|
-          next if w[:service] || !w[:thread]&.alive?
+          next if w[:service] || !w[:thread]&.alive? || w[:partition].to_s != site
 
-          w[:inbox] << {kind: 'claim_client', handle: handle, has_fetch: has_fetch, script_url: script_url, scope: scope, all_scopes: all_scopes}
+          w[:inbox] << {kind: 'claim_client', handle: handle, has_fetch: has_fetch, script_url: script_url, scope: scope, all_scopes: all_scopes, site: site}
         end
         nil
       end
       # Navigation Preload state of the registration at `scope`. Returns the spec default
       # {enabled:false, headerValue:'true'} when never set. Read by the client- and worker-side
       # NavigationPreloadManager (getState) and at navigation time (nav_preload_enabled?).
-      def nav_preload_state(scope)
-        enabled, header = Native.sw_navigation_preload(@sw_partition, scope.to_s)
+      def nav_preload_state(scope, site)
+        enabled, header = Native.sw_navigation_preload(@sw_partition, site.to_s, scope.to_s)
         {'enabled' => enabled, 'headerValue' => header}
       end
 
@@ -6055,15 +6068,15 @@ module Capybara
       # unchanged (enable/disable set only enabled; setHeaderValue sets only the header — the JS side has
       # already validated the header value). The InvalidStateError "no active worker" gate lives in the
       # JS manager.
-      def nav_preload_set(scope, enabled, header)
-        Native.sw_set_navigation_preload(@sw_partition, scope.to_s, enabled.nil? ? nil : !!enabled, header&.to_s)
+      def nav_preload_set(scope, enabled, header, site)
+        Native.sw_set_navigation_preload(@sw_partition, site.to_s, scope.to_s, enabled.nil? ? nil : !!enabled, header&.to_s)
         nil
       end
 
       # Whether the registration at `scope` has navigation preload enabled — gates the parallel preload
       # request during a navigation.
-      def nav_preload_enabled?(scope)
-        scope ? Native.sw_navigation_preload(@sw_partition, scope.to_s).first : false
+      def nav_preload_enabled?(scope, site)
+        scope ? Native.sw_navigation_preload(@sw_partition, site.to_s, scope.to_s).first : false
       end
 
       # A service worker's own `registration.unregister()` (rode the outbox as
@@ -6074,10 +6087,11 @@ module Capybara
         return unless w && w[:service]
 
         scope = w[:sw_scope].to_s
-        scope = sw_serving.key(handle).to_s if scope.empty?
+        scope = sw_scope_of(handle).to_s if scope.empty?
         return w[:inbox] << {kind: 'unregister_result', ok: false} if scope.empty?
 
-        _id, cmds = Native.sw_schedule_job(@sw_partition, 'unregister', scope, '', nil, '', 0, -handle, '')
+        # (…of its registration's storage key: its top-level site the worker's own)
+        _id, cmds = Native.sw_schedule_job(@sw_partition, 'unregister', w[:partition].to_s, scope, '', nil, '', 0, -handle, '')
         sw_run(cmds)
       end
 
@@ -6090,7 +6104,7 @@ module Capybara
       # The registration's updateViaCache mode, or nil when the scope holds none (never
       # set, or unregistered — the CLIENT defaults to 'imports' and keeps its last echo
       # on a dead registration, so the host must not synthesize a default here).
-      def sw_scope_update_via_cache(scope) = Native.sw_update_via_cache(@sw_partition, scope.to_s)
+      def sw_scope_update_via_cache(scope, site) = Native.sw_update_via_cache(@sw_partition, site.to_s, scope.to_s)
 
       # A SERVICE worker's importScripts, recorded on its worker registry entry
       # (URL → bytes) so the Update algorithm can byte-check the imports when the main
@@ -6116,8 +6130,8 @@ module Capybara
       # failing register must leave the stored mode untouched ("updateViaCache is not
       # updated if register() rejects"), so the fetch reads the override, and the job
       # stores it only once its worker evaluated.
-      private def sw_registration_update_fetch(scope, script_url, newest_handle, uvc_override = nil)
-        uvc = uvc_override || sw_scope_update_via_cache(scope) || 'imports'
+      private def sw_registration_update_fetch(scope, site, script_url, newest_handle, uvc_override = nil)
+        uvc = uvc_override || sw_scope_update_via_cache(scope, site) || 'imports'
         # The MAIN script request carries `Service-Worker: script` (Update algorithm —
         # servers gate SW scripts on it); imported scripts must NOT (service-worker-header).
         # (…its request of destination "serviceworker", mode "same-origin": the Update algorithm's — the job's client of
@@ -6191,7 +6205,8 @@ module Capybara
       # navigation variant this keeps a controller whose fetch-handler snapshot is still UNKNOWN (racing the
       # SW's initial eval) — so the frame is controlled and routes; a controlled subresource fetch simply
       # falls through to the network if no handler materializes. [handle, intercepts, script_url, scope] or nil.
-      def sw_client_controller_for(url) = Native.sw_match_worker(@sw_partition, url.to_s, 'client')
+      # (…for a client of top-level site `site`: sw_registry.rs)
+      def sw_client_controller_for(url, site) = Native.sw_match_worker(@sw_partition, site.to_s, url.to_s, 'client')
       # …and worker `handle` as a client's controller, in that shape — nil for none, and (`live`) for one whose thread is
       # gone: reaped, or ended on its own.
       def sw_controller(handle, live: true) = Native.sw_controller(@sw_partition, handle.to_i, live)
@@ -6211,8 +6226,8 @@ module Capybara
       # the creating realm's LIVE controller, handed over at `new Worker(…)` time: control usually
       # arrives after load via `clients.claim()`, so a controller snapshotted when the realm was
       # BUILT is stale by then, and would report such a worker uncontrolled.
-      private def worker_controller_handle(url, shared, creator_controller)
-        return sw_client_controller_for(url)&.first if http_url?(url)
+      private def worker_controller_handle(url, shared, creator_controller, site)
+        return sw_client_controller_for(url, site)&.first if http_url?(url)
         # A SHARED worker has no single creating context to inherit from.
         return nil if shared
 
@@ -6291,8 +6306,9 @@ module Capybara
       # (js/src/sw-client.js) at document load and whenever control is installed, because only the
       # realm knows its own URL and frame type. The client id is realm-scoped and stable for the
       # realm's life.
-      def sw_note_client(realm_id, url, frame_type, controller_handle = nil, origin = nil)
-        note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle, origin)
+      # (…`site` the top-level site of its storage key: its top-level traversable's)
+      def sw_note_client(realm_id, url, frame_type, controller_handle = nil, origin = nil, site: '')
+        note_client(sw_client_id(realm_id), url, 'window', frame_type, controller_handle, origin, site)
       end
 
       # A dedicated / shared WORKER that a service worker controls is a client too — with no
@@ -6308,7 +6324,7 @@ module Capybara
           else
             url_origin(url)
           end
-        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin)
+        note_client(sw_worker_client_id(handle), url, shared ? 'sharedworker' : 'worker', 'none', controller_handle, origin, @workers.dig(handle, :partition).to_s)
       end
 
       # A worker CLIENT's controller changed (a clients.claim() the worker isolate adopted): its
@@ -6321,7 +6337,7 @@ module Capybara
 
       # (…`origin` the client's own — a window's its document's, which an about:blank one inherits — what a service worker
       # filters the clients it sees by)
-      private def note_client(client_id, url, type, frame_type, controller_handle, origin)
+      private def note_client(client_id, url, type, frame_type, controller_handle, origin, site)
         ctrl = controller_handle.to_i
         ctrl = nil if ctrl.zero?
         # Within one document a controller is only ever GAINED (a claim / register
@@ -6333,7 +6349,7 @@ module Capybara
         if ctrl.nil? && prev_ctrl && prev_url == url.to_s && sw_live?(prev_ctrl)
           ctrl = prev_ctrl
         end
-        Native.sw_note_client(@sw_partition, client_id.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
+        Native.sw_note_client(@sw_partition, client_id.to_s, site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
         # (…and, a window's, the focused ids recomputed: its id is the one it adopted, which may be new)
         Native.sw_set_focused(@sw_partition, focused_client_ids) if type.to_s == 'window'
         nil
@@ -6617,13 +6633,14 @@ module Capybara
 
       # Whether THIS browser hosts the registration controlling a navigation to `url`
       # (Driver#sw_navigation_fetch probes each window's Browser with this).
-      def sw_controls_navigation?(url) = !!sw_controller_for_navigation(url)
+      # (…`site` the top-level site of the navigation's environment: the URL's own for a top-level one)
+      def sw_controls_navigation?(url, site) = !!sw_navigation_match(url, site)
 
       # The scopes whose registered service worker thread is still alive — what a
       # navigation can actually be routed to (Driver#sw_navigation_fetch dedup +
       # parked-browser reclaim read this).
       def sw_live_scopes
-        sw_serving.select {|_scope, h| sw_live?(h) }.keys
+        sw_regs.filter_map {|scope, _, _, serving| scope if serving && sw_live?(serving) }.uniq
       end
 
       # Whether this browser still hosts a live service-worker registration — a closing
@@ -6668,12 +6685,12 @@ module Capybara
 
       # Route a navigation through the controlling SW across the WHOLE window set (the
       # registration may live in another window's Browser — or a parked one). Falls back
-      # to this browser's own registry when driverless (unit specs build bare Browsers). (…`own` false: none of this
-      # browser's — a document of another storage partition than its page's, whose registrations it keeps none of)
-      def any_window_sw_navigation_fetch(url, own: true, **kw)
-        return @driver.sw_navigation_fetch(url, except: (self unless own), **kw) if @driver.respond_to?(:sw_navigation_fetch)
+      # to this browser's own registry when driverless (unit specs build bare Browsers). (…`site` the top-level site of the
+      # navigation's environment, whose storage key's registrations alone match)
+      def any_window_sw_navigation_fetch(url, site:, **kw)
+        return @driver.sw_navigation_fetch(url, site: site, **kw) if @driver.respond_to?(:sw_navigation_fetch)
 
-        service_worker_navigation_fetch(url, **kw) if own
+        service_worker_navigation_fetch(url, site: site, **kw)
       end
 
       # One navigation fetch for a FRAME load — the bridge's __csimFrameWindow build
@@ -6689,11 +6706,9 @@ module Capybara
       # navigation (respondWith network error / redirect loop).
       # (…`initiator_document` the initiating document as another isolate's Browser describes it — Browser#navigation_initiator:
       # its URL, opacity and cross-site ancestor — where no realm of this isolate is it, its Referer `referrer_source`)
-      # (…`registry_site` a top-level navigation's of a window of this isolate: the site the isolate's service worker
-      # registry is kept for, whose workers handle none of its hops to another site — another window's may)
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
                                  referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false,
-                                 initiator_document: nil, registry_site: nil)
+                                 initiator_document: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6701,7 +6716,10 @@ module Capybara
         # cleanly) gets a deferral marker: the builder shelves the frame element and the
         # activated marker replays the build (__csim_swRetryDeferredNavs). Other callers
         # (form POST to a named frame) dispatch immediately, as before.
-        if defer_ok && sw_activating_controller_for(url)
+        # (…the top-level site of the environment it navigates: the URL's own for a window's document, the frame's
+        # container's top-level traversable's for a frame's)
+        navigation_site = dest == 'document' ? ->(target) { Native.site(target).to_s } : ->(_) { blob_partition_site(container_realm.to_i) }
+        if defer_ok && sw_activating_controller_for(url, navigation_site.(url))
           Native.sw_defer_navigation(@sw_partition)
           return {'deferred' => true}
         end
@@ -6761,7 +6779,7 @@ module Capybara
           # isSecureContext is hard-true) as secure by fiat. The JS caller computes
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
-             (sw = any_window_sw_navigation_fetch(target, own: registry_site.nil? || Native.site(target).to_s == registry_site, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
+             (sw = any_window_sw_navigation_fetch(target, site: navigation_site.(target), method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy, site_seed: site_seed,
                                                           origin_null: origin_null, resulting_client_id: rid, cookie_cross_site: cookie_cross,
                                                           navigation_cross_site: fetch.cross_site?, cookie_context: cookies))
@@ -6841,7 +6859,7 @@ module Capybara
 
       # The active fetch-handling worker controlling a navigation to `url`. nil when uncontrolled
       # or the SW is known to have no fetch listener (→ load from the network).
-      private def sw_controller_for_navigation(url) = sw_navigation_match(url)&.first
+      private def sw_controller_for_navigation(url, site) = sw_navigation_match(url, site)&.first
 
       # …and the scope of the registration it is of, [handle, scope] — whose navigation preload state applies: the
       # engine's (sw_registry.rs `match_worker`, "navigation"). A worker whose fetch-handler snapshot is still unknown
@@ -6849,8 +6867,8 @@ module Capybara
       # beat) routes — the dispatch falls through if it turns out to have none; one known to have none (messaging/push
       # only) doesn't, unless it registered Static Routing rules (static-router-no-fetch-handler), nor does a dead one,
       # which would stall the navigation for the full round-trip budget with no one to answer.
-      private def sw_navigation_match(url)
-        handle, _, _, scope = Native.sw_match_worker(@sw_partition, url.to_s, 'navigation')
+      private def sw_navigation_match(url, site)
+        handle, _, _, scope = Native.sw_match_worker(@sw_partition, site.to_s, url.to_s, 'navigation')
         handle && [handle, scope]
       end
 
@@ -6865,6 +6883,7 @@ module Capybara
       # — whose origin is the request's initiator and whose site the preload's Sec-Fetch-Site compares)
       def service_worker_navigation_fetch(
         url,
+        site:,
         is_reload: false,
         is_history: false,
         referrer_source: nil,
@@ -6881,7 +6900,7 @@ module Capybara
         resulting_client_id: nil,
         origin_url: referrer_source
       )
-        match = sw_navigation_match(url) or return nil
+        match = sw_navigation_match(url, site) or return nil
         handle, preload_scope = match
         w      = @workers[handle] or return nil
         fetch_id = (@sw_nav_seq -= 1)
@@ -6896,14 +6915,14 @@ module Capybara
         # `dest` distinguishes a TOP-LEVEL navigation ('document') from a frame's ('iframe'):
         # the preload request must report the navigation's own Sec-Fetch-Dest; its cookies are
         # the navigation hop's (`cookie_context`).
-        preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(preload_scope)
+        preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(preload_scope, site)
           navigation_preload_response(
             url,
             referrer_source,
             referrer_policy,
             site_seed,
             origin_null,
-            nav_preload_state(preload_scope)['headerValue'],
+            nav_preload_state(preload_scope, site)['headerValue'],
             dest:           dest,
             cookie_context: cookie_context,
             origin_url:     origin_url
@@ -7288,8 +7307,7 @@ module Capybara
         # An ACTIVATING worker's claim applies immediately too (claim is valid from state
         # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
         # controlled — its fetches then park on the activation, not the claim).
-        actives, activatings = sw_serving, sw_activatings
-        claims.map {|e| [e, actives.key(e[:handle].to_i) || activatings.key(e[:handle].to_i)] }
+        claims.map {|e| [e, sw_scope_of(e[:handle].to_i)] }
               .sort_by {|_e, scope| -(scope ? scope.length : -1) }
               .each do |e, scope|
           broadcast_claim(e[:handle], e[:has_fetch], scope) if scope
@@ -9168,7 +9186,7 @@ module Capybara
         # script URL): fetch it through the SW redirect chain NOW, on this worker's own thread
         # (worker_main_script_fetch) — per-hop interception, network fall-back included.
         if body.nil? && sw_script
-          fetched = worker_main_script_fetch(sw_script, url, handle, shared: shared, creator_client: creator_client)
+          fetched = worker_main_script_fetch(sw_script, url, handle, site: record[:partition].to_s, shared: shared, creator_client: creator_client)
           raise "worker script blocked: #{url}" if fetched == :error
           raise "worker script not found: #{url}" unless fetched
 
@@ -9485,7 +9503,7 @@ module Capybara
               # clients.claim() reaches worker clients too: adopt the claiming SW as this
               # isolate's controller when this worker's script URL is in scope (the same
               # self-check pages run — __csim_swClaimClient compares against location).
-              rt.call('__csim_swClaimClient', msg[:handle], msg[:has_fetch], msg[:script_url], msg[:scope], msg[:all_scopes])
+              rt.call('__csim_swClaimClient', msg[:handle], msg[:has_fetch], msg[:script_url], msg[:scope], msg[:all_scopes], msg[:site])
             elsif msg.is_a?(Hash) && msg[:kind] == 'fetch_cancel'
               # The client cancelled this streaming respondWith body — cancel the reader
               # streamDeliver is draining, firing the SW source stream's `cancel()`. Fire-and-forget:
@@ -10534,17 +10552,7 @@ module Capybara
                  else {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
                  end
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          # (…no service worker of the isolate's registry handling it where it is of another top-level site, whose
-          # registrations the isolate keeps none of: `registry_site`)
-          resp = frame_navigation_fetch(
-            url,
-            referred || source,
-            dest:           'document',
-            download_realm: initiator,
-            user_activated: activated,
-            registry_site:  blob_partition_site(0),
-            **by
-          )
+          resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, **by)
           return if resp.nil? || resp['no_document']
 
           headers = resp['headers'] || {}
@@ -11248,7 +11256,7 @@ module Capybara
           meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross, cookies = fetch.begin_hop
           resp_body = nil
           if (!target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
-             (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
+             (sw = any_window_sw_navigation_fetch(target, site: blob_partition_site(realm_id), method: meth, body: req_body.empty? ? nil : req_body, content_type: content_type, is_reload: is_reload, is_history: is_history,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy,
                                                           site_seed: seed, origin_null: tainted, cookie_cross_site: cookie_cross, navigation_cross_site: fetch.cross_site?,
                                                           cookie_context: cookies, resulting_client_id: rid))
@@ -12031,7 +12039,7 @@ module Capybara
             end
             hop_body = req_body.to_s.empty? ? nil : req_body
             resp_body = nil
-            if (sw = any_window_sw_navigation_fetch(target, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
+            if (sw = any_window_sw_navigation_fetch(target, site: Native.site(target).to_s, method: meth, body: hop_body, content_type: content_type, is_reload: is_reload, is_history: from_history && !is_reload,
                                                             dest: 'document', referrer_source: ref_source, origin_url: origin || initiator, referrer_policy: ref_policy,
                                                             site_seed: seed, origin_null: tainted, navigation_cross_site: fetch.cross_site?, cookie_context: cookies))
               return error_document.(target) if sw['networkError']
@@ -12281,7 +12289,7 @@ module Capybara
         # (…the worker controlling it: its navigation's — not one still activating that would have handled it, whose
         # navigation went to the network, as a navigation does not yet wait for its activation)
         if http_url?(@current_url)
-          controller = sw_client_controller_for(@current_url.to_s)
+          controller = sw_client_controller_for(@current_url.to_s, Native.site(@current_url.to_s).to_s)
           controller = nil if controller && controller[1] && !Native.sw_worker_activated(@sw_partition, controller[0])
           opts['controller'] = controller if controller
         end

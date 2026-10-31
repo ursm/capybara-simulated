@@ -57,7 +57,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "blobSliceRange", slice_range_op, context_id);
     crate::dom::register(scope, ns, "blobUrlUsable", usable_op, context_id);
     crate::dom::register(scope, ns, "blobPartitionSite", partition_site_op, context_id);
-    crate::dom::register(scope, ns, "registryPartition", registry_partition_op, context_id);
 }
 
 // The storage partition of realm `cid`'s blob URLs (File API's "check for same-partition blob URL usage", Storage's
@@ -86,16 +85,6 @@ fn partition_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     if let Some(s) = v8::String::new(scope, &site) {
         rv.set(s.into());
     }
-}
-
-// __dom.registryPartition() -> whether the calling realm's storage partition (`partition_site`) is its isolate's page's:
-// the one the isolate keeps its service worker registrations by (browser.rb `@sw_partition`) — not that of a window of
-// another top-level site it holds (a same-site pop-up a redirect, or a navigation, took to another site), whose
-// registrations it keeps none of until its registry is kept by top-level site.
-fn registry_partition_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = crate::dom::realm_id(scope, &args);
-    let arena = crate::dom::realm(scope, cid);
-    rv.set_bool(partition_site(arena, cid) == partition_site(arena, 0));
 }
 
 // __dom.blobText(text, native) -> `blob_text`, as a byte string (each byte a code unit).

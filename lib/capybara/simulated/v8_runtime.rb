@@ -1192,7 +1192,7 @@ module Capybara
         # page"). allow-same-origin restores the parent origin, and a real-URL frame carries no
         # explicit origin at all (nil = its own location origin) — both are controlled normally.
         if frame_doc_origin.to_s != 'null'
-          ctrl   = @browser.sw_client_controller_for(url.to_s)
+          ctrl   = @browser.sw_client_controller_for(url.to_s, @browser.blob_partition_site(parent_id))
           ctrl ||= @browser.sw_inherited_controller_for(parent_id) if opaque
           if ctrl
             # Wiring the controller is what registers this frame as a client — the realm reports
