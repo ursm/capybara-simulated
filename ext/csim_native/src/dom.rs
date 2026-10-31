@@ -329,18 +329,8 @@ pub(crate) const STATE_LINK_MEDIA_SKIPPED: u32 = 1 << 21;
 // model: "fallback"): its resource failed to load, or it has none to process — the bindings' to note
 // (`setObjectFallback`).
 pub(crate) const STATE_OBJECT_FALLBACK: u32 = 1 << 22;
-// …and, on a document, that it is its browsing context's initial about:blank (HTML "is initial about:blank"): the one a
-// navigation to a document of its origin keeps the Window of, until `document.open()` makes it none — the bindings' to
-// note as the document is made (`__csimCompleteInitialDocument`).
-pub(crate) const STATE_INITIAL_ABOUT_BLANK: u32 = 1 << 23;
-// …and that its visibility state is "hidden" (HTML "update the visibility state", as "unload a document" makes it after
-// its `pagehide`): the bindings' to note (`__csimHideDocument`), and to clear where the document is renewed for the next
-// one its Window is kept for (dom-nodes.js `__csimRenewDocument`).
-pub(crate) const STATE_HIDDEN: u32 = 1 << 24;
-// …and that its page is showing (HTML "page showing"): set as "the end" of its parse fires `pageshow` (`reactivate`, the
-// other place HTML sets it, unmodeled), reset as "unload a document" fires `pagehide` — which none is fired of, nor is it
-// hidden, where it was never shown: an initial about:blank, which no parse ends, or a document left before its load.
-pub(crate) const STATE_PAGE_SHOWING: u32 = 1 << 25;
+// (…bits 23-25 a document's, the bindings' alone, which nothing here reads: native-query-shadow.js
+// `STATE_INITIAL_ABOUT_BLANK`, `STATE_HIDDEN`, `STATE_PAGE_SHOWING`)
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
