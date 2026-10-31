@@ -539,15 +539,23 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq([['/home', ''], ['/pushed', ''], ['/pushed', ''], ['/fail', ''], ['/fail', '']])
   end
 
-  # A user's traversal of a frame is made by no document of its: not by the sandboxed one the frame is at, of an opaque
-  # origin — so it is no cross-site request for its cookies, nor for Fetch Metadata, which reads it as the user's
-  # (Sec-Fetch-Site `none`).
-  it "judges a user's traversal of a sandboxed frame as made by no document" do
+  # A user's traversal of a frame is begun by no document — Fetch Metadata reads it as the user's, Sec-Fetch-Site `none` —
+  # but its request's client is the document the frame is at: HTML "apply the history step" takes the navigable's active
+  # document's source snapshot params where none is given ("We treat this situation as if navigable navigated itself").
+  # Back from a sandboxed frame's /f2, that client is the sandboxed document, whose opaque origin is not same site with
+  # its parent's, so it "has cross-site ancestor" (HTML), and Fetch's "determine the same-site mode" gives the frame's
+  # GET "unset-or-less": step 2 reads a top-level navigation's initiator origin alone, step 3 a destination "document"
+  # alone (a frame's is "iframe"), and step 4 — "If request's client's has cross-site ancestor is true, then return
+  # 'unset-or-less'" — returns. So /f1 is sent its SameSite=None cookie and the one of no SameSite attribute, no Strict
+  # or Lax one. Chrome 156 and Firefox 159 both send every cookie, Sec-Fetch-Site `same-origin` (measured 2026-10-31: the
+  # same frames, the traversal the browser's own — CDP Page.navigateToHistoryEntry, WebDriver BiDi
+  # browsingContext.traverseHistory); the spec's text is explicit, and the spec wins.
+  it "judges a user's traversal of a frame by the document the frame is at" do
     seen = []
     app = lambda {|env|
       req = Rack::Request.new(env)
       case req.path
-      when '/set' then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/', 'n=1; SameSite=None; Secure; Path=/']}, ['set']]
+      when '/set' then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/', 'n=1; SameSite=None; Secure; Path=/', 'u=1; Path=/']}, ['set']]
       when '/top' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe sandbox="allow-scripts" src="/f1"></iframe>']]
       else
         seen << [req.path, env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']]
@@ -561,7 +569,7 @@ RSpec.describe 'the cookie store' do
     poll_until { seen.size == 2 }
     s.go_back
     poll_until { seen.size == 3 }
-    expect(seen.last).to eq(['/f1', 's=1; l=1; n=1', 'none'])
+    expect(seen.last).to eq(['/f1', 'n=1; u=1', 'none'])
   end
 
   # Fetch "HTTP-network fetch": a response's cookies are stored only where its request included credentials — so a

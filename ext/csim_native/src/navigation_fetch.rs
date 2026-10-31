@@ -92,10 +92,10 @@ impl Nav {
 
 #[magnus::wrap(class = "Capybara::Simulated::Native::NavigationFetch", free_immediately)]
 pub(crate) struct NavigationFetch {
-    // The origin a redirect judges its request by and walks its redirect-taint with (fetch_chain.rs): its request's
-    // origin — its initiator's, `null` an opaque one's — or, where it has none of its own, its client's (a traversal's:
-    // `client_origin`), else a new opaque one's, `null`: a navigation of the user's, of no client (HTML "create
-    // navigation params by fetching": "If request's client is null … Set request's origin to a new opaque origin").
+    // The origin a redirect judges its request by and walks its redirect-taint with (fetch_chain.rs): a traversal's its
+    // client's (`client_origin`), else its request's origin — its initiator's, `null` an opaque one's — else a new opaque
+    // one's, `null`: a navigation of the user's, of no client (HTML "create navigation params by fetching": "If request's
+    // client is null … Set request's origin to a new opaque origin").
     origin: String,
     st: RefCell<Nav>,
 }
@@ -112,11 +112,11 @@ impl NavigationFetch {
     // cross-site ancestor: referrer.rs `requestClient`), `ancestors` (the document origins above the navigable its cookies
     // are judged by — nil none, each nil for one not known), `top_level` (whether it navigates a top-level navigable),
     // `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it reloads was
-    // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation), `client_origin` (where it has
-    // no initiator nor `origin`, its request's client's origin serialized — a traversal's or a user's reload's, its
-    // navigable's active document's, as HTML "apply the history step" snapshots that document's source snapshot params
-    // where none is given, "as if navigable navigated itself" — which its redirect-taint alone is walked with: its
-    // Origin and Sec-Fetch-Site still a user's; nil none, a navigation of the user's).
+    // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation), `client_origin` (a traversal's
+    // or a user's reload's, of no initiator: its request's client's origin serialized — its navigable's active
+    // document's, as HTML "apply the history step" snapshots that document's source snapshot params where none is given,
+    // "as if navigable navigated itself" — which its redirect-taint is walked with in place of `origin`: its Origin, a
+    // re-post's the one it was first sent with, and its Sec-Fetch-Site still a user's; nil none).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -124,10 +124,10 @@ impl NavigationFetch {
         let origin = text("origin")?.filter(|o| !o.is_empty()).or_else(|| initiator.as_deref().and_then(http_origin));
         let initiator_opaque = get("origin_null")?.to_bool();
         let opaque = initiator_opaque || origin.as_deref() == Some("null");
-        let judged_origin = if initiator_opaque {
-            "null".to_owned()
-        } else {
-            origin.clone().or(text("client_origin")?.filter(|o| !o.is_empty())).unwrap_or_else(|| "null".to_owned())
+        let judged_origin = match text("client_origin")?.filter(|o| !o.is_empty()) {
+            Some(client) => client,
+            None if initiator_opaque => "null".to_owned(),
+            None => origin.clone().unwrap_or_else(|| "null".to_owned()),
         };
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;

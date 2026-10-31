@@ -11051,10 +11051,15 @@ module Capybara
         commit: {}
       )
         invalidate_find_cache
-        # (…a traversal's made by no document — a user's, as the page's is: `replay_history_entry` — so the document the
-        # frame is at gives it no opaque origin nor a cross-site ancestor; the entry's `origin_null` its re-post's Origin
-        # alone)
-        initiating  = is_history && !is_reload ? {} : initiating_document(initiator || realm_id)
+        # (…a traversal's begun by no document — a user's, as the page's is: `replay_history_entry` — its Sec-Fetch-Site
+        # `none`; but its request's client the document the frame is at, HTML "apply the history step" taking that one's
+        # source snapshot params where none is given, "as if navigable navigated itself": whose cross-site ancestor makes
+        # its cookies cross-site (Fetch's step 4) and whose origin its redirect-taint is walked with (`client_origin`) —
+        # a sandboxed one's, opaque, has one. Its own opacity no initiator's: the entry's `origin_null` its re-post's
+        # Origin alone)
+        traversal   = is_history && !is_reload
+        initiating  = initiating_document(initiator || realm_id)
+        initiating  = initiating.slice(:initiator_cross_site_ancestor) if traversal
         opaque      = initiating[:origin_null] == true
         origin_null = true if opaque
         source, referrer_policy = referrer
@@ -11078,7 +11083,8 @@ module Capybara
           initiator_cross_site_ancestor: initiating[:initiator_cross_site_ancestor] == true,
           # (…its cookies cross-site by the frame's ancestors' documents — a property of the frame the document commits
           # into, so it rides the SW fetch event too: a rewritten request keeps it)
-          ancestors:                     @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i)
+          ancestors:                     @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i),
+          client_origin:                 (document_origin(realm_id) if traversal)
         })
         rid = mint_resulting_client_id
         loop do
@@ -11777,7 +11783,7 @@ module Capybara
           top_level:                     true,
           reloaded_cross_site:           reloaded_cross_site,
           # (…a traversal's or a user's reload's, of no initiator, its client the document it leaves: `replay_history_entry`)
-          client_origin:                 (leaving_document_origin if from_history && !initiator)
+          client_origin:                 (document_origin(0) if from_history && !initiator)
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
@@ -11927,8 +11933,14 @@ module Capybara
       private def leaving_document_origin
         return @creator&.fetch(:origin) || :initial unless @session_history.active(0)
 
-        url, _, opaque = request_client(0)
-        opaque ? nil : url_origin(url)
+        origin = document_origin(0)
+        origin unless origin == 'null'
+      end
+      # The origin of realm `realm`'s document, serialized — `null` an opaque one's: the origin of the client a traversal
+      # of its navigable is made by (HTML "apply the history step": its active document's source snapshot params).
+      private def document_origin(realm)
+        url, _, opaque = request_client(realm)
+        opaque ? 'null' : url_origin(url)
       end
       # HTML "finalize a cross-document navigation": the target name of the document state a top-level navigation made
       # (`window.name` of its document: session_history.rs) cleared where that document's origin (`origin`, none an opaque
