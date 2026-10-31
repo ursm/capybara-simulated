@@ -1092,4 +1092,47 @@ RSpec.describe 'a window of another site made in its opener\'s isolate', :every_
     expect(session.evaluate_async_script('indexedDB.databases().then((d) => arguments[0](d.map((x) => x.name)))')).to eq(['db'])
     expect(session.driver.window_browsers.size).to eq(1)
   end
+
+  # (…HTML's Window `close()`: past script-closable, the caller's browsing context familiar with the window's and allowed
+  # by sandboxing to navigate it — navigables.rs `close_allowed`)
+  it "closes no window of another origin it is not familiar with — its opener's none of its own" do
+    session.execute_script("window.w = open('/page')")
+    session.execute_script("window.x = w.open('http://b.example/page')")
+    session.has_css?('#none', wait: 0.2)
+    session.within_window(session.windows.last) do
+      expect(session.evaluate_script('[location.host, (opener.close(), opener.closed)]')).to eq(['b.example', false])
+    end
+    expect(session.evaluate_script('[w.closed, x.closed]')).to eq([false, false])
+    session.execute_script('x.close()')
+    expect(session.evaluate_script('[w.closed, x.closed]')).to eq([false, true])
+  end
+
+  it 'closes no top-level window from a frame sandboxed against navigating it' do
+    session.execute_script(<<~JS)
+      window.ws = ['allow-scripts', 'allow-scripts allow-top-navigation'].map((flags) => {
+        const w = open();
+        const f = w.document.createElement('iframe');
+        f.sandbox = flags;
+        f.srcdoc = '<script>top.close()<\/script>';
+        w.document.body.appendChild(f);
+        return w;
+      });
+    JS
+    session.has_css?('#none', wait: 0.2)
+    expect(session.evaluate_script('ws.map((w) => w.closed)')).to eq([false, true])
+  end
+
+  # (…its realms let go of once its script's close ran — as the next command begins, as a user's close lets them go — a
+  # pop-up of its opener's site or of another alike: Driver#reap_changed_windows)
+  %w[http://a.test/page http://b.example/page].each do |url|
+    it "lets go of a pop-up's realms once its own script closed it: #{url}" do
+      runtime = session.driver.browser.instance_variable_get(:@runtime)
+      session.execute_script("window.w = open(#{url.to_json})")
+      session.has_css?('#none', wait: 0.1)
+      expect(runtime.window_realm_meta.size).to eq(1)
+      session.execute_script('w.close()')
+      expect(session.evaluate_script('w.closed')).to be(true)
+      expect(runtime.window_realm_meta).to be_empty
+    end
+  end
 end

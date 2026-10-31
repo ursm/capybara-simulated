@@ -425,7 +425,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("port_channels_clear", magnus::function!(port_channels::clear, 1))?;
     native.define_module_function("storage_partition_new", magnus::function!(storage_areas::partition_new, 0))?;
     native.define_module_function("storage_clear", magnus::function!(storage_areas::clear, 1))?;
-    native.define_module_function("storage_copy", magnus::function!(storage_areas::copy, 2))?;
     Ok(())
 }
 

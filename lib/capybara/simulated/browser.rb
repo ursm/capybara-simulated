@@ -10390,9 +10390,9 @@ module Capybara
             nil
           elsif initiator
             realm, referrer = initiator
-            navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing.to_i)
+            navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
           else
-            navigate_top_from(0, realm_referrer_initiator(0), url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing.to_i)
+            navigate_top_from(0, realm_referrer_initiator(0), url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
           end
         end
       end
@@ -10513,7 +10513,7 @@ module Capybara
         # one its plan began: navigation_plan.rs `Location::ongoing`; a reload's a fresh one, standing in for HTML's
         # "traversal" as the page's does: `navigate_top_level`)
         history = window_history(realm_id)
-        ongoing = history && [history, 0, begun&.to_i || history.begin_navigation(0)]
+        ongoing = history && [history, 0, begun&.to_i&.nonzero? || history.begin_navigation(0)]
         if body.nil? && sw_registered?
           deferred = await_sw_activation(url, Native.site(url).to_s, ongoing:) do
             navigate_window_realm(realm_id, kind, plan, by_user:, post:)
@@ -11596,9 +11596,9 @@ module Capybara
       def delete_all_cookies = Native.cookie_jar_clear(@cookie_jar)
 
       # `document.cookie` reads/writes the cookies of a document's cookie URL (`url`, Chrome's: its own, or an about:blank
-      # / srcdoc frame's creator's, which the bindings find); a top-level window's about:blank one its opener's (realm
-      # `realm`'s, a window realm's; this window's, another window's browser), else the session's default host's — a
-      # frame's that comes to none, none (nil: no cookies).
+      # / srcdoc frame's creator's, which the bindings find); a pop-up's about:blank one its opener's (realm `realm`'s, a
+      # window realm's), else the session's default host's — the page's, whose window has no opener (a window a Browser
+      # hosts is of a browsing context group of its own) — a frame's that comes to none, none (nil: no cookies).
       def document_cookie_url(url = nil, realm = nil)
         url = opener_cookie_url(realm) unless http_url?(url)
         return url if cookie_host(url)
@@ -11606,14 +11606,11 @@ module Capybara
         realm.to_i.positive? && !@runtime.window_realm_meta.key?(realm.to_i) ? nil : @default_host
       end
       private def opener_cookie_url(realm)
-        rid = realm.to_i
-        if rid.positive?
-          meta = @runtime.window_realm_meta[rid] or return nil
-          opener = meta[:opener_id].to_i
-          return opener.positive? ? frame_realm_url(opener) : @current_url
-        end
-        handle = opener_handle
-        handle && @driver.window_browser(handle)&.current_url
+        meta = @runtime.window_realm_meta[realm.to_i] if realm.to_i.positive?
+        return unless meta
+
+        opener = meta[:opener_id].to_i
+        opener.positive? ? frame_realm_url(opener) : @current_url
       end
 
       # (…its text: HTML's UTF-8 decode of the bytes) — in `context`, the one the page's engine gave its document's cookie
@@ -11640,9 +11637,6 @@ module Capybara
       # areas (storage_areas.rs), which outlive the per-visit `rebuild_ctx` (Forem caches user data in `localStorage` on
       # one page for the next).
       def storage_partitions = [@local_storage, @session_storage]
-      # …the sessionStorage shed of the top-level traversable realm `realm`'s document is of — the page's, or a window's
-      # `window.open` made in this isolate — which a pop-up its script opens copies (Driver#open_aux_window).
-      def session_storage_shed(realm = 0) = (realm.zero? ? @session_storage : @runtime.realm_direct_call(realm, '__csimSessionStorageShed').to_i)
 
       # Push a one-shot handler onto the modal-dialog stack — the next
       # modal that fires consumes the topmost handler. Block exit pops

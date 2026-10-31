@@ -88,6 +88,19 @@ RSpec.describe 'a task one window asks of another' do
     expect(session.windows.size).to eq(2)
   end
 
+  # (…and one opened without its opener, a browsing context group — a Browser — of its own, by its own `close()` at its
+  # one entry: web content made it)
+  it 'closes a window opened without its opener by its own `close()`' do
+    session.execute_script("open('/closes', '', 'noopener')")
+    popup = session.windows.last
+    expect(session.driver.window_browsers.size).to eq(2)
+    session.switch_to_window(popup)
+    expect(read('[opener, closeSelf()]')).to eq([nil, true])
+    session.switch_to_window(session.windows.first)
+    expect(session.windows.size).to eq(1)
+    expect(session.driver.window_browsers.size).to eq(1)
+  end
+
   # (…and the primary window — the session's own, which every later command addresses — to none, at its one entry,
   # where HTML would close it: a justified gap, CLAUDE.md — its `closed` false, its document not unloaded, a window the
   # driver opened at one entry closing as HTML has it)

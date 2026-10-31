@@ -189,7 +189,20 @@ module Capybara
       # `no_such_window_error` until another window is switched to (Capybara::Window#close), as WebDriver's "no such
       # window": none falls back to the primary, nor reaches the unloaded document.
       def current_browser
+        reap_changed_windows
         active_browser or raise Capybara::WindowError, "Window #{@active_handle} is closed; switch to another window"
+      end
+      # The windows whose close ran let go of as the next command begins (`reap_closed_windows`) — a pop-up its script
+      # closed holding its realms, megabytes a page, no longer than that — where a window of the session changed since
+      # the last time (a host's window generation, Browser#window_realm_gen): a session of one window pays nothing.
+      private def reap_changed_windows
+        return if @aux_windows.empty?
+
+        gens = window_browsers.map {|b| [b.object_id, b.window_realm_gen] }
+        return if gens == @reaped_gens
+
+        reap_closed_windows
+        @reaped_gens = window_browsers.map {|b| [b.object_id, b.window_realm_gen] }
       end
       # …nil for one closed: its close run (Browser#discard_due?), or discarded.
       private def active_browser
@@ -740,8 +753,9 @@ module Capybara
         # opaque origins, and no opaque origin spans separate top-level windows here, so a cross-
         # WINDOW post from an opaque origin reaches no one: drop it rather than risk a cross-isolate
         # token collision. (Same-isolate opaque peers are reached in-VM / via enqueue_broadcast; an
-        # inherited-origin blob worker via its own inbox — neither goes through this cross-window path.)
-        return if key.to_s.split(' ').last.to_s.start_with?('opaque:')
+        # inherited-origin blob worker via its own inbox — neither goes through this cross-window path.) Its top-level site
+        # alike: an opaque top-level origin is its own site, by that token (blob_rules.rs `partition_site`).
+        return if key.to_s.split(' ').any? {|part| part.start_with?('opaque:') }
 
         window_browsers.each do |b|
           b.enqueue_broadcast(name, data, nil, key) unless b.equal?(source_browser)

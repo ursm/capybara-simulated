@@ -61,16 +61,18 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // The storage partition of realm `cid`'s blob URLs (File API's "check for same-partition blob URL usage", Storage's
 // storage key's top-level site): the site of its top-level traversable's active document — a frame's its page's or its
-// window's, a window `window.open` made in this isolate its own, of another site than its opener's where it is — '' for
-// an opaque one; a worker's its owner document's, which the host told it (`realmIdentify('partition', …)`).
-pub(crate) fn partition_site(arena: &crate::dom::RealmArena, cid: i32) -> String {
+// window's, a window `window.open` made in this isolate its own, of another site than its opener's where it is — and,
+// for an origin that has no site (HTML "obtain a site": an opaque origin is its own site), that origin, by its key: an
+// opaque one's token, unique to it, so two documents under two sandboxed top-level documents share no partition; a
+// worker's its owner document's, which the host told it (`realmIdentify('partition', …)`).
+pub(crate) fn partition_site(arena: &mut crate::dom::RealmArena, cid: i32) -> String {
     if let Some(site) = arena.realm_state(cid).and_then(|s| s.identity.partition().map(str::to_owned)) {
         return site;
     }
     // (…read off its state where it is, entering none: a realm the arena never had gives none)
     let top = arena.top_level_realm(cid);
-    let origin = arena.realm_state(top).map(|s| s.location.origin().to_owned()).unwrap_or_default();
-    crate::realm_location::site(&origin).unwrap_or_default()
+    let Some(location) = arena.realm_state_mut(top).map(|s| &mut s.location) else { return String::new() };
+    crate::realm_location::site(location.origin()).unwrap_or_else(|| location.origin_key(top))
 }
 // …and whether a blob URL of the partition `site` (its maker's, as the registry recorded it: none for one it keeps no
 // partition of, a copy's) is usable from realm `cid`'s.

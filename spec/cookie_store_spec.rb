@@ -683,4 +683,14 @@ RSpec.describe 'the cookie store' do
     expect(poll_until { s.evaluate_script('window.got') }).to eq('error')
     expect(seen.map {|_, path, _| path }).not_to include('/w.js')
   end
+
+  # (…the page's own document of no http(s) URL its bindings name a creator of: the session's default host's cookie URL,
+  # its window of no opener — a browsing context group of its own — Browser#document_cookie_url; a pop-up's its opener's)
+  it "reads the default host's cookies for the page's document of no cookie URL of its own, and a pop-up's opener's" do
+    s = simulated_session(app)
+    s.visit('http://a.test/set')
+    browser = s.driver.browser
+    expect(browser.document_cookie_url('about:blank', 0)).to eq(browser.class.default_host)
+    expect(s.evaluate_script("open('about:blank').document.cookie")).to eq('here=2')
+  end
 end

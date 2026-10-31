@@ -533,6 +533,13 @@ impl RealmArena {
         let nav = &mut self.navigables;
         nav.opened.contains(&key) && nav.closed.insert(key)
     }
+    // Whether the script of realm `source`'s document may close the window whose document is realm `target`'s (HTML's
+    // Window `close()`, past "script-closable", the window's own to say): `source`'s browsing context familiar with its
+    // one, and allowed by sandboxing to navigate it — a cross-site pop-up closes no opener of another origin it did not
+    // open, a sandboxed frame without `allow-top-navigation` no top.
+    pub(crate) fn close_allowed(&self, source: i32, target: i32) -> bool {
+        self.familiar_with(source, target, 0) && self.navigation_allowed(source, target)
+    }
     // …and its browsing context discarded, the close's task run: stepped no more, gone as a WindowProxy of it reads it
     // (`lost_navigable`) — no `opener`, `closed` — its realm lingering inert.
     pub(crate) fn discard_window(&mut self, key: i32) {
@@ -1187,6 +1194,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "realmInTree", realm_in_tree, context_id);
     crate::dom::register(scope, ns, "setSteppedWindow", set_stepped_window, context_id);
     crate::dom::register(scope, ns, "closeWindow", close_window, context_id);
+    crate::dom::register(scope, ns, "closeAllowed", close_allowed_op, context_id);
     crate::dom::register(scope, ns, "discardWindow", discard_window, context_id);
     crate::dom::register(scope, ns, "windowClosed", window_closed, context_id);
     crate::dom::register(scope, ns, "windowOpener", window_opener, context_id);
@@ -1514,6 +1522,12 @@ fn close_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(realm) = args.get(0).int32_value(scope) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).close_window(realm));
+}
+// __dom.closeAllowed(source, target) -> `close_allowed`.
+fn close_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let (Some(source), Some(target)) = (args.get(0).int32_value(scope), args.get(1).int32_value(scope)) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).close_allowed(source, target));
 }
 // __dom.discardWindow(key) — the window a script closed discarded (`discard_window`).
 fn discard_window(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
