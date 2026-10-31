@@ -198,8 +198,9 @@ struct Traversable {
     // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
     saved: [Option<State>; 2],
     frames_saved: HashMap<u32, FrameSaved>,
-    // How many times its history has changed shape — an entry committed, a step gone to or held at, a navigable
-    // destroyed, a document made anew: what a frame's kept history is judged by as it is restored (`restore_frame`).
+    // How many times its history has changed — an entry committed, a step gone to or held at, a navigable destroyed, a
+    // document made anew, an entry's URL or fields or the target name written: what a frame's kept history is judged by
+    // as it is restored (`restore_frame`), which gives back the whole of it only where none of these happened since.
     version: u64,
     // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
     // its task runs, in order — and the token the next one is given.
@@ -932,8 +933,11 @@ impl SessionHistory {
     }
     // #set_url(entry, url): its URL made `url` (a redirect's, a replaceState's).
     fn set_url(&self, id: u64, url: String) {
-        if let Some(e) = self.lock().state.entry_mut(id) {
+        let mut guard = self.lock();
+        let t = &mut *guard;
+        if let Some(e) = t.state.entry_mut(id) {
             e.url = url;
+            t.version += 1;
         }
     }
     // #entry(entry) -> {url:, body:, content_type:, origin:, referer:, referrer_policy:, referrer:, cross_site:, name:,
@@ -964,6 +968,7 @@ impl SessionHistory {
         let mut t = self.lock();
         let build = t.build;
         t.state.set_name(build, &name.encode_utf16().collect::<Vec<_>>());
+        t.version += 1;
     }
     // #show: the top-level navigable's document committed (`State::show`), its current entry's.
     fn show(&self) {
@@ -979,12 +984,14 @@ impl SessionHistory {
     // #clear_name: the navigable target name of the document state the navigation in flight made (its current entry's)
     // the empty string — HTML "finalize a cross-document navigation", the shown document's left as it is.
     fn clear_name(&self) {
-        let mut t = self.lock();
+        let mut guard = self.lock();
+        let t = &mut *guard;
         let build = t.build;
         let Some(doc) = t.state.current_entry(TOP, build).map(|e| e.doc) else { return };
         for entry in t.state.entries.iter_mut().filter(|e| e.doc == doc) {
             Arc::make_mut(&mut entry.data).name = Some(Vec::new());
         }
+        t.version += 1;
     }
     // #update(entry, fields): the fields of what a replay of it sends and restores `fields` names made what it gives
     // them (`Data::merge`) — a history saved before keeping the ones it had.
@@ -992,8 +999,11 @@ impl SessionHistory {
     fn update(ruby: &magnus::Ruby, rb_self: &Self, id: u64, fields: RHash) -> Result<(), magnus::Error> {
         let Some(mut data) = rb_self.lock().state.entry(id).map(|e| Data::clone(&e.data)) else { return Ok(()) };
         data.merge(ruby, fields)?;
-        if let Some(e) = rb_self.lock().state.entry_mut(id) {
+        let mut guard = rb_self.lock();
+        let t = &mut *guard;
+        if let Some(e) = t.state.entry_mut(id) {
             e.data = Arc::new(data);
+            t.version += 1;
         }
         Ok(())
     }
@@ -1628,6 +1638,14 @@ mod tests {
         assert!(h.restore_frame(1));
         assert_eq!((h.active(1), h.active(2), h.length()), (Some(f1), g2, 2));
         assert!(!h.restore_frame(1));
+
+        // (…and another navigable's entry written meanwhile — a replaceState's URL — keeps what was written)
+        let g1 = h.active(2).unwrap();
+        h.save_frame(1);
+        h.push(1, TOP, "/f204".into(), false, Data::default());
+        h.set_url(g1, "/g-replaced".into());
+        assert!(h.restore_frame(1));
+        assert_eq!((h.active(1), h.url(g1).as_deref()), (Some(f1), Some("/g-replaced")));
 
         // (…none to give back once the frame is destroyed)
         h.save_frame(2);
