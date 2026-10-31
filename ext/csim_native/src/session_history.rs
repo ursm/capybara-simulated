@@ -176,6 +176,19 @@ struct State {
     shown_name: Option<Vec<u16>>,
 }
 
+// The history a frame's navigation kept as it began (`save_frame`): as it stood, the `version` it was at, and what the
+// navigation's own entry did to it (`made`, as it is committed).
+struct FrameSaved {
+    state: State,
+    version: u64,
+    made: Option<FrameMade>,
+}
+// …its entry added after the current one, which was `before` — or the one it replaced.
+enum FrameMade {
+    Pushed { id: u64, before: i64 },
+    Replaced(Entry),
+}
+
 #[derive(Default)]
 struct Traversable {
     state: State,
@@ -184,7 +197,10 @@ struct Traversable {
     // The history as it stood before a navigation that may end in no document (a download, a hand-off), by slot: the
     // page's (0) and a traversal's of its frames (1) — and before a frame's, by the frame's navigable (`save_frame`).
     saved: [Option<State>; 2],
-    frames_saved: HashMap<u32, State>,
+    frames_saved: HashMap<u32, FrameSaved>,
+    // How many times its history has changed shape — an entry committed, a step gone to or held at, a navigable
+    // destroyed, a document made anew: what a frame's kept history is judged by as it is restored (`restore_frame`).
+    version: u64,
     // The session history traversal queue (HTML §7.4.1.2): the traversals a page's `history` asked for, each applied as
     // its task runs, in order — and the token the next one is given.
     queued: Vec<Queued>,
@@ -628,6 +644,7 @@ impl Traversable {
                 let at = list.iter().position(|e| e.id == old.id)?;
                 list[at] = Entry { id, step: old.step, url: url.to_owned(), doc, data: Arc::new(data) };
                 self.state.collect_docs();
+                self.made_frame_entry(nav, FrameMade::Replaced(old));
                 return Some(id);
             }
         }
@@ -635,7 +652,48 @@ impl Traversable {
         list.push(Entry { id, step, url: url.to_owned(), doc, data: Arc::new(data) });
         self.state.current = step;
         self.state.drop_stale_holds(build);
+        self.made_frame_entry(nav, FrameMade::Pushed { id, before: current });
         Some(id)
+    }
+    // …the entry a frame's navigation it kept the history of commits (`save_frame`): what undoing it takes, should the
+    // navigation make no document after all.
+    fn made_frame_entry(&mut self, nav: u32, made: FrameMade) {
+        self.version += 1;
+        if let Some(saved) = self.frames_saved.get_mut(&nav).filter(|s| s.made.is_none()) {
+            saved.made = Some(made);
+        }
+    }
+    // The history kept for a navigation of frame `nav` as it began, given back, the navigation having made no document
+    // (a 204, a download): as it stood, where nothing else changed it since; else that navigation's own entry alone undone
+    // — the one it added taken out, the step back where it was, or the one it replaced put back — the rest as it is.
+    fn restore_frame(&mut self, nav: u32) -> bool {
+        let Some(saved) = self.frames_saved.remove(&nav) else { return false };
+        let own = u64::from(saved.made.is_some());
+        if self.version == saved.version + own {
+            self.state = saved.state;
+            return true;
+        }
+        let build = self.build;
+        match saved.made {
+            Some(FrameMade::Pushed { id, before }) => {
+                let Some(list) = self.state.list_mut(nav, build) else { return true };
+                let Some(at) = list.iter().position(|e| e.id == id) else { return true };
+                let step = list.remove(at).step;
+                if self.state.current == step && !self.state.used_steps().contains(&step) {
+                    self.state.current = before;
+                }
+            }
+            Some(FrameMade::Replaced(old)) => {
+                let Some(list) = self.state.list_mut(nav, build) else { return true };
+                if let Some(at) = list.iter().position(|e| e.step == old.step) {
+                    list[at] = old;
+                }
+            }
+            None => {}
+        }
+        self.state.collect_docs();
+        self.version += 1;
+        true
     }
 
     // HTML "traverse the history by a delta": the step `delta` used steps from the current one, and each navigable's
@@ -736,6 +794,7 @@ impl Traversable {
     }
     // The traversal to `step` applied — the step a plan gave.
     fn go_to(&mut self, step: i64) {
+        self.version += 1;
         let build = self.build;
         self.state.release_moved(step, build);
         self.state.current = step;
@@ -764,6 +823,7 @@ impl Traversable {
     // Its top-level navigable's document made anew — the page's, a window's — whose frames are new navigables: the nested
     // histories the document state kept from before none of them, though they still count their steps.
     fn rebuilt(&mut self) {
+        self.version += 1;
         self.build += 1;
         self.state.held.clear();
     }
@@ -771,6 +831,9 @@ impl Traversable {
     // HTML "destroy a child navigable": navigable `nav`'s nested history removed from its parent's document state — its
     // steps, and its own frames' with it, counted no more.
     fn destroy(&mut self, nav: u32) {
+        self.version += 1;
+        // (…a navigation of it that kept the history, to give it back should it make no document, now nothing to restore)
+        self.frames_saved.remove(&nav);
         let build = self.build;
         let Some(doc) = self.state.parent_doc_of(nav, build) else { return };
         if let Some(nested) = self.state.docs.get_mut(&doc) {
@@ -1007,6 +1070,7 @@ impl SessionHistory {
     fn hold(&self, nav: u32, id: u64, step: i64) {
         let mut t = self.lock();
         let build = t.build;
+        t.version += 1;
         t.state.held.insert(nav, (id, step));
         t.state.drop_stale_holds(build);
     }
@@ -1038,14 +1102,11 @@ impl SessionHistory {
     // a navigation of frame `navigable` — each frame's its own, whichever traversable's history it is of.
     fn save_frame(&self, nav: u32) {
         let mut t = self.lock();
-        let state = t.state.clone();
-        t.frames_saved.insert(nav, state);
+        let saved = FrameSaved { state: t.state.clone(), version: t.version, made: None };
+        t.frames_saved.insert(nav, saved);
     }
     fn restore_frame(&self, nav: u32) -> bool {
-        let mut t = self.lock();
-        let Some(state) = t.frames_saved.remove(&nav) else { return false };
-        t.state = state;
-        true
+        self.lock().restore_frame(nav)
     }
     fn forget_frame(&self, nav: u32) {
         self.lock().frames_saved.remove(&nav);
@@ -1546,6 +1607,32 @@ mod tests {
         assert_eq!(h.active(TOP), Some(a));
         assert_eq!(h.length(), 1);
         assert!(!h.restore(0));
+    }
+
+    // A frame's navigation that made no document gives back the history as it was where nothing else changed it — and,
+    // another navigable's entry committed meanwhile, undoes its own entry alone, that one's kept.
+    #[test]
+    fn a_frame_history_kept_undoes_its_own_entry_alone() {
+        let h = history();
+        h.push(TOP, TOP, "/top".into(), false, Data::default());
+        let f1 = h.seed(1, TOP, "/f1".into()).unwrap();
+        h.seed(2, TOP, "/g1".into());
+        h.save_frame(1);
+        h.push(1, TOP, "/f204".into(), false, Data::default());
+        assert!(h.restore_frame(1));
+        assert_eq!((h.active(1), h.length()), (Some(f1), 1));
+
+        h.save_frame(1);
+        h.push(1, TOP, "/f204".into(), false, Data::default());
+        let g2 = h.push(2, TOP, "/g2".into(), false, Data::default());
+        assert!(h.restore_frame(1));
+        assert_eq!((h.active(1), h.active(2), h.length()), (Some(f1), g2, 2));
+        assert!(!h.restore_frame(1));
+
+        // (…none to give back once the frame is destroyed)
+        h.save_frame(2);
+        h.lock().destroy(2);
+        assert!(!h.restore_frame(2));
     }
 
     #[test]

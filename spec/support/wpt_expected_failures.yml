@@ -3248,8 +3248,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects-on-new-window.htm
 - Cross-origin object identity preserved across document.domain
 html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
 - Basic sanity-checking (same-origin + document.domain)
-- Can only enumerate safelisted enumerable properties (cross-origin)
-- Can only enumerate safelisted enumerable properties (cross-site)
 - Can only enumerate safelisted enumerable properties (same-origin + document.domain)
 - Cross-origin Window accessors get local Function.prototype (same-origin + document.domain)
 - Cross-origin functions get local Function.prototype (same-origin + document.domain)
@@ -3282,10 +3280,6 @@ html/browsers/origin/cross-origin-objects/cross-origin-objects.html:
 - "[[Delete]] Should throw on cross-origin objects (same-origin + document.domain)"
 - "[[GetOwnProperty]] - Property descriptors for cross-origin properties should be
   set up correctly (same-origin + document.domain)"
-- "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
-  property only if it corresponds to a child window. (cross-origin)"
-- "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
-  property only if it corresponds to a child window. (cross-site)"
 - "[[GetOwnProperty]] - Should be able to get a property descriptor for an indexed
   property only if it corresponds to a child window. (same-origin + document.domain)"
 - "[[GetOwnProperty]] - Subframe named 'then' should shadow the default 'then' value
@@ -3643,8 +3637,6 @@ html/browsers/the-window-object/self-et-al.window.js:
 - popupWindow.globalThis before, after closing, and after discarding
 - popupWindow.self before, after closing, and after discarding
 - popupWindow.window before, after closing, and after discarding
-html/browsers/the-window-object/window-aliases.html:
-- frames should be the global object
 html/browsers/the-window-object/window-indexed-access-vs-named-access.html:
 - 'Window prototype: document-tree child navigable with target name 1 (named access)'
 - 'Window prototype: document-tree child navigable with target name 2 (named access)'
@@ -3706,7 +3698,6 @@ html/browsers/the-window-object/window-properties.https.html:
 - 'Window readonly getter in iframe: frames'
 - 'Window readonly getter in iframe: self'
 - 'Window readonly getter in iframe: window'
-- 'Window readonly getter: frames'
 html/browsers/the-windowproxy-exotic-object/document-tree-child-browsing-context-name-property-set.sub.html:
 - Cross origin child window's name shadows the second candidate of a same origin iframe
 html/browsers/the-windowproxy-exotic-object/windowproxy-prevent-extensions.html: HARNESS_ERROR
