@@ -19,6 +19,8 @@ use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError, Weak};
 
 use magnus::{value::ReprValue, RHash, RString, Symbol, TryConvert};
 
+use crate::navigation_plan::Traversal;
+
 #[derive(Clone)]
 struct Entry {
     id: u64,
@@ -754,6 +756,13 @@ impl Traversable {
         self.origin = Some(key);
     }
 
+    // Its top-level navigable's document made anew — the page's, a window's — whose frames are new navigables: the nested
+    // histories the document state kept from before none of them, though they still count their steps.
+    fn rebuilt(&mut self) {
+        self.build += 1;
+        self.state.held.clear();
+    }
+
     // HTML "destroy a child navigable": navigable `nav`'s nested history removed from its parent's document state — its
     // steps, and its own frames' with it, counted no more.
     fn destroy(&mut self, nav: u32) {
@@ -769,11 +778,15 @@ impl Traversable {
 }
 
 // A window's session history: the host's handle on it, and the realms' (`__dom.historyLength`), by its number — the
-// process's, as the isolates that read it and the host thread that writes it are.
+// process's, as the isolates that read it and the host thread that writes it are. The one its window was made with
+// owns it: the window gone with it (`Drop`). Another, `SessionHistory.of` its number, is a handle the host borrows of a
+// window `window.open` made in an isolate — whose session history the isolate's arena owns — to record its frames'
+// navigations in it and apply its traversals (browser.rb `traversable_history`).
 #[magnus::wrap(class = "Capybara::Simulated::Native::SessionHistory", free_immediately)]
 pub(crate) struct SessionHistory {
     id: u64,
     traversable: Arc<Mutex<Traversable>>,
+    owned: bool,
 }
 
 static HISTORIES: LazyLock<Mutex<(u64, HashMap<u64, Weak<Mutex<Traversable>>>)>> = LazyLock::new(Default::default);
@@ -783,6 +796,9 @@ fn histories() -> MutexGuard<'static, (u64, HashMap<u64, Weak<Mutex<Traversable>
 
 impl Drop for SessionHistory {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
         histories().1.remove(&self.id);
         asking(&mut self.lock(), |t| {
             t.asked = Asked::default();
@@ -800,7 +816,12 @@ impl SessionHistory {
         registry.0 += 1;
         let id = registry.0;
         registry.1.insert(id, Arc::downgrade(&traversable));
-        SessionHistory { id, traversable }
+        SessionHistory { id, traversable, owned: true }
+    }
+    // SessionHistory.of(id) -> a handle on the session history numbered `id`, nil where it is gone.
+    fn of(id: u64) -> Option<Self> {
+        let traversable = histories().1.get(&id)?.upgrade()?;
+        Some(SessionHistory { id, traversable, owned: false })
     }
     fn lock(&self) -> MutexGuard<'_, Traversable> {
         self.traversable.lock().unwrap_or_else(PoisonError::into_inner)
@@ -935,6 +956,12 @@ impl SessionHistory {
     pub(crate) fn queued_documents(&self) -> bool {
         self.lock().queued_documents()
     }
+    // …and whether one makes its top-level navigable's document again (`Queued::replaces`), its page's task still to
+    // apply it: what a window's own navigation planned before it gives way to (navigation_plan.rs
+    // `takeWindowNavigations`), which one moving a frame of it alone is not.
+    pub(crate) fn queued_replacing(&self) -> bool {
+        self.lock().queued.iter().any(|q| q.replaces && !q.asked)
+    }
     // …and its current entry's document state's navigable target name made `name`: a window's of this isolate, whose
     // `window.name` was set (navigables.rs `set_window_name`) — what a traversal back to that entry brings back.
     pub(crate) fn set_current_name(&self, name: &[u16]) {
@@ -978,16 +1005,9 @@ impl SessionHistory {
         t.state.held.insert(nav, (id, step));
         t.state.drop_stale_holds(build);
     }
-    // #destroyed(navigable): a frame's container removed from its document — its navigable gone, its session history
-    // with it.
-    fn destroyed(&self, nav: u32) {
-        self.lock().destroy(nav);
-    }
-    // #rebuilt: the page's document made anew — its frames' navigables new ones.
+    // #rebuilt: the page's document made anew — its frames' navigables new ones (`Traversable::rebuilt`).
     fn rebuilt(&self) {
-        let mut t = self.lock();
-        t.build += 1;
-        t.state.held.clear();
+        self.lock().rebuilt();
     }
     // #save(slot) / #restore(slot) -> whether there was one / #forget(slot): the history as it stands, kept for a
     // navigation that may end in no document.
@@ -1237,6 +1257,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     native.define_module_function("window_tasks_pending", function!(window_tasks_pending, 0))?;
     let class = native.define_class("SessionHistory", ruby.class_object())?;
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
+    class.define_singleton_method("of", function!(SessionHistory::of, 1))?;
     class.define_method("id", method!(SessionHistory::id, 0))?;
     class.define_method("seed", method!(SessionHistory::seed, 3))?;
     class.define_method("push", method!(SessionHistory::push_for_ruby, 5))?;
@@ -1284,7 +1305,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("go_to", method!(SessionHistory::go_to, 1))?;
     class.define_method("hold", method!(SessionHistory::hold, 3))?;
     class.define_method("step", method!(SessionHistory::step, 0))?;
-    class.define_method("destroyed", method!(SessionHistory::destroyed, 1))?;
     class.define_method("rebuilt", method!(SessionHistory::rebuilt, 0))?;
     class.define_method("save", method!(SessionHistory::save, 1))?;
     class.define_method("restore", method!(SessionHistory::restore, 1))?;
@@ -1422,7 +1442,7 @@ mod tests {
         h.push(1, TOP, "/f2".into(), false, Data::default());
         h.seed(2, 1, "/in".into());
         assert_eq!(h.length(), 2);
-        h.destroyed(1);
+        h.lock().destroy(1);
         assert_eq!(h.length(), 1);
         assert_eq!(h.active(1), None);
         assert_eq!(h.plan(-1).map(|p| p.1), None);
@@ -1836,6 +1856,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "applyWindowTraversal", apply_window_traversal_op, context_id);
     crate::dom::register(scope, ns, "windowsTraversing", windows_traversing_op, context_id);
     crate::dom::register(scope, ns, "traversableId", traversable_id_op, context_id);
+    crate::dom::register(scope, ns, "destroyNavigableHistory", destroy_navigable_history_op, context_id);
     crate::dom::register(scope, ns, "windowEntryPost", window_entry_post_op, context_id);
     crate::dom::register(scope, ns, "commitWindowEntry", commit_window_entry_op, context_id);
     crate::dom::register(scope, ns, "windowHistoryUpdate", window_history_update_op, context_id);
@@ -2044,9 +2065,27 @@ fn window_entry_post_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 // `window_traversable_id`, SessionHistory#opener_id=).
 fn traversable_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = crate::dom::realm_id(scope, &args);
+    rv.set_double(traversable_id_of(crate::dom::realm(scope, cid), cid) as f64);
+}
+// …that of realm `realm`'s document, whose navigable's entries it keeps (`traversable_of`): the one the host records a
+// frame's navigations in and applies its traversals to (navigables.rs `realmTree`).
+pub(crate) fn traversable_id_of(arena: &crate::dom::RealmArena, realm: i32) -> u64 {
+    if of_page(arena, realm) { arena.navigables.history } else { arena.window_history(realm).map_or(0, |(h, _)| h.id) }
+}
+// __dom.destroyNavigableHistory(realm) — the navigable realm `realm`'s document is the active document of destroyed, its
+// container removed (HTML "destroy a child navigable"): its nested history taken out of its traversable's session
+// history (`Traversable::destroy`), its own frames' with it.
+fn destroy_navigable_history_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let id = if of_page(arena, cid) { arena.navigables.history } else { arena.window_history(cid).map_or(0, |(h, _)| h.id) };
-    rv.set_double(id as f64);
+    let nav = arena.realm_tree(realm).2;
+    if nav == TOP {
+        return;
+    }
+    if let Some((traversable, _)) = traversable_of(arena, realm) {
+        lock(&traversable).destroy(nav);
+    }
 }
 // __dom.windowsTraversing() -> the realms of the windows `window.open` made in this isolate a traversal queued of which
 // makes a document again, its task still to apply it: what the host applies as the task that asked ends, as it does the
@@ -2065,35 +2104,64 @@ fn windows_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
 // window's), then of each traversal that moves it within its document its entry's URL and state and whether its
 // fragment changed (HTML "update document for history step application": its location the URL, then `popstate` with
 // the state, then a `hashchange`, which the bindings do); one that makes its document again planned in that document's
-// navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those asked of it after it let
-// go. Null for a realm of no such window: the page's traversals are the host's to apply. (…token 0: those up to the last
-// that makes a document again, `take_documents_queued`)
+// navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those asked of it after it
+// let go — and one that moves a frame of it planned there too (`FrameTraversal`), those taken with it queued again for the
+// host to apply after it. Null for a realm of no such window: the page's traversals are the host's to apply.
+// (…token 0: those up to the last that makes a document again, `take_documents_queued`; `all`, every one queued — the
+// host's, once it applied one that moved a frame)
 fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    let all = args.get(1).is_true();
     let cid = crate::dom::realm_id(scope, &args);
     let Some((traversable, window)) = window_traversable(crate::dom::realm(scope, cid), cid) else { return rv.set_null() };
+    // (…none while one taken before waits for the host to apply it: those queued after it judged from the step it goes
+    // to, the host applying them after it — `all` — or letting them go with the document it replaces)
+    if crate::dom::realm(scope, window).navigation_plan.traversal_waiting() {
+        let items = [v8::Integer::new(scope, window).into()];
+        return rv.set(v8::Array::new_with_elements(scope, &items).into());
+    }
     let mut moves = Vec::new();
     let mut planned = None;
+    let mut frames_planned = None;
     {
         let mut t = lock(&traversable);
-        let due = if token == 0 { t.take_documents_queued() } else { t.take_queued(token) };
-        for q in due {
+        let due = if all {
+            t.take_all_queued()
+        } else if token == 0 {
+            t.take_documents_queued()
+        } else {
+            t.take_queued(token)
+        };
+        let mut due = due.into_iter();
+        while let Some(q) = due.next() {
             let Some((step, changes)) = t.traversal(q.delta) else { continue };
             let from = t.state.current_entry(TOP, t.build).map(|e| e.url.clone()).unwrap_or_default();
-            let Some((entry, same_document)) = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2))) else {
-                t.go_to(step);
-                continue;
-            };
-            if same_document {
-                t.go_to(step);
+            let top = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2)));
+            if let Some((entry, false)) = top {
+                let referrer = entry.data.text("referer").map(str::to_owned);
+                planned = Some(Traversal { step, url: entry.url, referrer, post: entry.data.post.clone() });
+                break;
+            }
+            // (…one that moves a frame of it — its document made again, or moved within — the host's, as the page's
+            // frames' are, the window's own move within its document with them: those taken with it put back ahead of the
+            // rest, for the host to apply after it, from the step it goes to)
+            if changes.iter().any(|c| c.0 != TOP) {
+                let rest: Vec<Queued> = due.collect();
+                asking(&mut t, |t| {
+                    t.queued.splice(0..0, rest);
+                });
+                frames_planned = Some(crate::navigation_plan::FrameTraversal { step, changes });
+                break;
+            }
+            t.go_to(step);
+            if let Some((entry, _)) = top {
                 let hashchange = fragment(&from) != fragment(&entry.url);
                 moves.push((entry.url, entry.data.state.clone(), hashchange));
-                continue;
             }
-            let referrer = entry.data.text("referer").map(str::to_owned);
-            planned = Some(crate::navigation_plan::Traversal { step, url: entry.url, referrer, post: entry.data.post.clone() });
-            break;
         }
+    }
+    if let Some(traversal) = frames_planned {
+        crate::dom::realm(scope, window).navigation_plan.plan_frame_traversal(traversal);
     }
     if let Some(traversal) = planned {
         crate::dom::realm(scope, window).navigation_plan.plan_traversal(traversal);
@@ -2140,6 +2208,8 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         // (…the traversals the document it replaces queued let go with it — one its `unload` asked for among them (WPT
         // traverse-during-unload.html) — as the page's are: `clear_queued`)
         t.queued.retain(|q| q.asked);
+        // (…and its frames new navigables, as the page's are: `rebuilt`)
+        t.rebuilt();
         match how.as_str() {
             "push" | "replace" => {
                 // (…its document state's navigable target name the window's as its document begins: HTML keeps it there)
@@ -2167,14 +2237,20 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 // __dom.windowHistoryUpdate(url, state, push) -> whether the calling realm's `history.pushState` (`push`) or
 // `replaceState` is its window's — one `window.open` made in this isolate — whose session history it then updates (HTML
 // "URL and history update steps"): an entry of the document's after the current one, or the current one's URL and state
-// made the new ones — none at its initial about:blank, which no entry is of yet. False for the page's, which the host
-// records — and for a frame's of such a window, whose own session history is not modeled (it records none).
+// made the new ones — none at its initial about:blank, which no entry is of yet, nor while its document is being
+// unloaded or asked whether it may be: what a handler of it would do to the session history ignored, as the page's is
+// (browser.rb `frozen_history`). False for the page's, and a frame's of either, which the host records (browser.rb
+// `frame_history_state`).
 fn window_history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let state = state_arg(args.get(1));
     let push = args.get(2).is_true();
     let cid = crate::dom::realm_id(scope, &args);
-    let Some((traversable, _)) = window_traversable(crate::dom::realm(scope, cid), cid).filter(|&(_, window)| window == cid) else { return rv.set_bool(false) };
+    let arena = crate::dom::realm(scope, cid);
+    let Some((traversable, _)) = window_traversable(arena, cid).filter(|&(_, window)| window == cid) else { return rv.set_bool(false) };
+    if arena.unloading(cid) {
+        return rv.set_bool(true);
+    }
     let mut t = lock(&traversable);
     let build = t.build;
     if t.state.current_entry(TOP, build).is_some() {

@@ -415,8 +415,9 @@ module Capybara
 
       # Where nested realm `realm_id` sits in the navigable tree as it was made, the engine's (navigables.rs
       # `realm_tree`): [the realm whose document its container was in — 0 the page's, or none: a window's — its depth,
-      # the navigable it was the active document of (0 for none), whether its document was that navigable's first].
-      def frame_realm_tree(realm_id) = realm_direct_call(0, '__csimRealmTree', realm_id.to_i) || [0, 0, 0, false]
+      # the navigable it was the active document of (0 for none), whether its document was that navigable's first, the
+      # number of the top-level traversable whose session history its navigable's entries are in (0 for none)].
+      def frame_realm_tree(realm_id) = realm_direct_call(0, '__csimRealmTree', realm_id.to_i) || [0, 0, 0, false, 0]
       # …the realm that OWNS its container, which a form/navigation that reaches a frame via `contentWindow` (so it never
       # entered `within_frame` and has no `@frame_stack` entry) rebuilds + rebinds it through.
       def frame_realm_parent(realm_id)
@@ -597,6 +598,8 @@ module Capybara
         # A dedicated worker is owned by the context that created it — discarding the context
         # terminates it (and unregisters its own client record).
         @browser.terminate_realm_workers(id) rescue nil
+        # …and the session history entry a navigation of it was leaving let go of (Browser#leave_frame_entry).
+        @browser.frame_realm_disposed(id)
         @realm_module_handles&.delete(id)
         @module_sw_ctxs&.delete(id)
         @module_fetch_options&.delete(id)
@@ -994,11 +997,6 @@ module Capybara
         })
         c.attach('__csim_lostWindowProxies', -> {
           evict_lost_window_proxies
-          nil
-        })
-        # …and a frame's container removed: its navigable destroyed, its session history with it (session_history.rs).
-        c.attach('__csim_navigableDestroyed', ->(id) {
-          @browser.frame_navigable_destroyed(id.to_i)
           nil
         })
       end

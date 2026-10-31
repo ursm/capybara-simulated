@@ -23,6 +23,9 @@ RSpec.describe 'a window open() made, navigated' do
       when '/dl' then [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename=x.txt'}, ['x']]
       when '/i.png' then (seen << env['HTTP_REFERER']) && [200, {'content-type' => 'image/png'}, ['']]
       when '/r' then (seen << env['PATH_INFO']) && html.('<!DOCTYPE html><title>R</title>')
+      when '/u'
+        log = %w[beforeunload pagehide unload].map {|type| "addEventListener('#{type}', () => opener.log.push('#{type}'))" }
+        html.("<!DOCTYPE html><title>U</title><script>#{log.join(';')}</script>")
       else html.('')
       end
     })
@@ -85,6 +88,22 @@ RSpec.describe 'a window open() made, navigated' do
     session.execute_script('window.second = w.document; w.document.body.innerHTML = "written"; w.location = "about:blank"')
     expect(poll_until { session.evaluate_script('w.document !== second') }).to be(true)
     expect(session.evaluate_script(probe)).to eq(['', 'about:blank', true, 'http://www.example.com/', 'http://www.example.com/'])
+  end
+
+  # …the document it leaves unloaded, as the page's is: asked first whether it may be, then its pagehide and unload
+  # (HTML "navigate", "unload a document") — a traversal's and a reload's alike (WPT traverse_the_history_unload_1.html).
+  it 'unloads the document it leaves' do
+    session.visit '/'
+    session.execute_script('window.log = []; w.location.href = "/u"')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'U' }).to be(true)
+    session.execute_script('w.location.href = "/p2"')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'P2' }).to be(true)
+    expect(session.evaluate_script('log')).to eq(%w[beforeunload pagehide unload])
+    session.execute_script('log = []; w.history.back()')
+    expect(poll_until { session.evaluate_script('w.document.title') == 'U' }).to be(true)
+    session.execute_script('w.location.reload()')
+    expect(poll_until { session.evaluate_script('log.length') == 3 }).to be(true)
+    expect(session.evaluate_script('log')).to eq(%w[beforeunload pagehide unload])
   end
 
   it 'stays at its document for a download, and navigates no more once closed' do

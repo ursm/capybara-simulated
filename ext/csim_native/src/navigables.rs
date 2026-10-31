@@ -1272,16 +1272,21 @@ fn realm_navigable(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set_uint32(crate::dom::realm(scope, cid).realm_navigable(realm));
 }
 
-// __dom.realmTree(realm) -> [parent realm, depth, navigable, first] (`Navigables::realm_tree`).
+// __dom.realmTree(realm) -> [parent realm, depth, navigable, first] (`Navigables::realm_tree`), and the number of the
+// top-level traversable whose session history its navigable's entries are in, 0 for none (session_history.rs
+// `traversable_id_of`).
 fn realm_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let (parent, depth, navigable, first) = crate::dom::realm(scope, cid).realm_tree(realm);
+    let arena = crate::dom::realm(scope, cid);
+    let (parent, depth, navigable, first) = arena.realm_tree(realm);
+    let traversable = crate::session_history::traversable_id_of(arena, realm);
     let items = [
         v8::Integer::new(scope, parent).into(),
         v8::Integer::new_from_unsigned(scope, depth).into(),
         v8::Integer::new_from_unsigned(scope, navigable).into(),
         v8::Boolean::new(scope, first).into(),
+        v8::Number::new(scope, traversable as f64).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }

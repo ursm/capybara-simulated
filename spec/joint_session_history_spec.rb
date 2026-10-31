@@ -345,4 +345,72 @@ RSpec.describe 'the joint session history' do
     session.go_back
     expect(session.current_path).to eq('/top')
   end
+
+  # A pop-up — a window `window.open` made in its opener's isolate — has a joint history of its own, of it and its
+  # frames, which its opener's is not (WPT joint_session_history/001.html, discard_iframe_history_3/_4.html).
+  context 'of a pop-up' do
+    before do
+      session.visit '/b'
+      session.execute_script('window.w = open(); w.location = "/top"')
+      expect(session.evaluate_script('w.frames[0]?.location.pathname')).to eq('/f1')
+    end
+
+    def popup_frame_path = session.evaluate_script('w.frames[0].location.pathname')
+    def popup_length = session.evaluate_script('w.history.length')
+
+    it "counts its frame's navigation a step of its own" do
+      session.execute_script('w.frames[0].location = "/f2"')
+      expect(popup_frame_path).to eq('/f2')
+      expect([popup_length, length]).to eq([2, 1])
+    end
+
+    it "takes its frame back on its back, and forth on its frame's forward" do
+      session.execute_script('w.frames[0].location = "/f2"')
+      expect(popup_frame_path).to eq('/f2')
+      session.execute_script('w.history.back()')
+      expect(popup_frame_path).to eq('/f1')
+      expect(session.evaluate_script('w.location.pathname')).to eq('/top')
+      session.execute_script('w.frames[0].history.forward()')
+      expect(popup_frame_path).to eq('/f2')
+    end
+
+    it "moves its frame within its document on a traversal of a pushState's step" do
+      session.execute_script('w.frames[0].history.pushState(null, "", "/f1b")')
+      expect(popup_length).to eq(2)
+      session.execute_script('w.history.back()')
+      expect(popup_frame_path).to eq('/f1')
+      expect(session.evaluate_script('w.document.title')).to eq('F')
+    end
+
+    it "drops a removed frame's steps" do
+      session.execute_script('w.frames[0].location = "/f2"')
+      expect(popup_frame_path).to eq('/f2')
+      expect(popup_length).to eq(2)
+      session.execute_script('w.document.querySelector("iframe").remove()')
+      expect(popup_length).to eq(1)
+    end
+
+    # …each of two traversals asked in one task applied, the second from the step the first went to.
+    it 'goes back twice over its frame' do
+      session.execute_script('w.frames[0].location = "/f2"')
+      expect(popup_frame_path).to eq('/f2')
+      session.execute_script('w.frames[0].location = "/b"')
+      expect(popup_frame_path).to eq('/b')
+      session.execute_script('w.history.back(); w.history.back()')
+      expect(popup_frame_path).to eq('/f1')
+      expect(popup_length).to eq(3)
+      # (…and two asked by tasks of its own that run before the host applies the first)
+      session.execute_script('w.eval("setTimeout(() => history.forward()); setTimeout(() => history.forward())")')
+      expect(popup_frame_path).to eq('/b')
+    end
+
+    # …a traversal moving its frame alone being no ongoing navigation of its own: a location set after it goes on (HTML
+    # "apply the history step" sets the ongoing navigation of the navigables whose documents it changes).
+    it 'goes on to a location set after its frame was taken back' do
+      session.execute_script('w.frames[0].location = "/f2"')
+      expect(popup_frame_path).to eq('/f2')
+      session.execute_script('w.history.back(); w.location = "/b"')
+      expect(session.evaluate_script('w.location.pathname')).to eq('/b')
+    end
+  end
 end

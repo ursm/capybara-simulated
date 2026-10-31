@@ -77,6 +77,16 @@ pub(crate) struct Traversal {
     pub(crate) post: Option<crate::session_history::Post>,
 }
 
+// …and one that keeps its document, moving a frame of it: the step it goes to, each navigable whose active entry the step
+// moves with the entry and whether that is of the document it is at — what the host applies as it applies the page's
+// (browser.rb `traverse_navigables`), the traversals queued after it applied then, from the step it went to. No ongoing
+// navigation of the window's own: HTML "apply the history step" sets that of the navigables whose documents it changes
+// alone (the host cancels the frames').
+pub(crate) struct FrameTraversal {
+    pub(crate) step: i64,
+    pub(crate) changes: Vec<crate::session_history::Change>,
+}
+
 // A reload: whether the document had transient activation as it began, and — one of a document at a `blob:` URL — the
 // blob it was made of, taken then (a window's, whose document no session history entry of the host keeps).
 pub(crate) struct Reload {
@@ -104,6 +114,8 @@ pub(crate) struct NavigationPlan {
     download: Option<(String, String, String)>,
     // (…its own: a location navigation, a reload, a frame's submission to it)
     own: Own,
+    // (…a window's: a traversal of its session history moving a frame of it, which none of those lets go — `FrameTraversal`)
+    frame_traversal: Option<FrameTraversal>,
     // What the plan was as the host began running the tasks due before a navigation of the document — kept apart while
     // they run (`flushBegin`) — and what they planned, kept once they ran (`flushEnd`): for the host to put back where
     // the navigation commits no document after all (`flushRestore`).
@@ -263,6 +275,14 @@ impl NavigationPlan {
         self.supersede();
         self.own.traversal = Some(traversal);
         self.own.planned = next_planned();
+    }
+    pub(crate) fn plan_frame_traversal(&mut self, traversal: FrameTraversal) {
+        self.frame_traversal = Some(traversal);
+    }
+    // …and whether a traversal of either kind waits for the host to apply it: those queued after it wait for it, their
+    // steps judged from the one it goes to (session_history.rs `applyWindowTraversal`).
+    pub(crate) fn traversal_waiting(&self) -> bool {
+        self.own.traversal.is_some() || self.frame_traversal.is_some()
     }
 }
 
@@ -534,20 +554,28 @@ fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::
 }
 // __dom.takeWindowNavigations() -> the navigations the windows `window.open` made in this isolate planned of their own,
 // in the order they were planned, which they plan no more: `[realm, "location", …takeLocation's]`, `[realm, "reload",
-// activated, blob]` and `[realm, "traverse", step, url, referrer]` (`Traversal`). A window closed is stepped no more,
+// activated, blob]` and `[realm, "traverse", step, url, referrer, body, contentType]` (`Traversal`) — after the
+// traversals that move a frame of one, whose tasks ran before them: `[realm, "traverse_navigables", step,
+// navigable, entry, same document, …]` (`FrameTraversal`). A window closed is stepped no more,
 // and plans none the host takes — nor one closing, whose navigation the task its close queued aborts (HTML "destroy a
 // top-level traversable"): taken, and let go.
 fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
     let mut waiting = Vec::new();
+    let mut frames = Vec::new();
     for w in windows {
+        let closing = crate::dom::dom(scope).arena.window_closing(w);
+        if let Some(t) = realm(scope, w).navigation_plan.frame_traversal.take().filter(|_| !closing) {
+            frames.push((w, t));
+        }
         let mut own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
         // (…a location's or a reload's let go where a traversal its window queued makes its document again: its task,
         // which plans that traversal, goes ahead of them — HTML "apply the history step" sets the ongoing navigation to
-        // "traversal", as the page's does: browser.rb `apply_planned_traversals_before_navigations`)
+        // "traversal", as the page's does: browser.rb `apply_planned_traversals_before_navigations` — not one that makes
+        // a frame's document again alone)
         let arena = &crate::dom::dom(scope).arena;
-        if own.traversal.is_none() && arena.window_history(w).is_some_and(|(h, _)| h.queued_documents()) {
+        if own.traversal.is_none() && arena.window_history(w).is_some_and(|(h, _)| h.queued_replacing()) {
             own = Own::default();
         }
         // (…a reload's left planned while a task queued on the window's event loop before it is still to run — which the
@@ -568,6 +596,19 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     }
     taken.sort_by_key(|&(planned, ..)| planned);
     let mut items = Vec::new();
+    for (w, t) in frames {
+        let mut item = vec![
+            v8::Integer::new(scope, w).into(),
+            v8::String::new(scope, "traverse_navigables").unwrap().into(),
+            v8::Number::new(scope, t.step as f64).into(),
+        ];
+        for (nav, id, same_document) in t.changes {
+            item.push(v8::Integer::new_from_unsigned(scope, nav).into());
+            item.push(v8::Number::new(scope, id as f64).into());
+            item.push(v8::Boolean::new(scope, same_document).into());
+        }
+        items.push(v8::Array::new_with_elements(scope, &item).into());
+    }
     for (w, queued) in waiting {
         let item = [v8::Integer::new(scope, w).into(), v8::String::new(scope, "queued").unwrap().into(), v8::Integer::new_from_unsigned(scope, queued).into()];
         items.push(v8::Array::new_with_elements(scope, &item).into());
