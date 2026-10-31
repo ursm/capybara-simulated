@@ -1240,7 +1240,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "exitRealm", exit_realm, context_id);
     crate::dom::register(scope, ns, "entryRealm", entry_realm, context_id);
     crate::dom::register(scope, ns, "enteredGlobal", entered_global, context_id);
-    crate::dom::register(scope, ns, "withIncumbent", with_incumbent, context_id);
+    crate::dom::register(scope, ns, "incumbentOperation", incumbent_operation, context_id);
     crate::dom::register(scope, ns, "disownOpener", disown_opener, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
@@ -1626,25 +1626,41 @@ fn entered_global(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     let global = context.global(scope);
     rv.set(global.into());
 }
+// __dom.incumbentOperation(steps, name, length) -> an operation `name` of `length` arguments, a native function of this
+// realm, whose call is `steps.call(this, incumbent, ...args)` — `incumbent` the global of the incumbent realm, HTML's
+// incumbent settings object's: the realm of the script that called it, V8's incumbent context (that of the topmost
+// JavaScript function on the stack). A native function pushes no JavaScript frame of its own, so V8 finds its caller —
+// where `steps`, a function of the realm that made the operation, would find themselves. Where no JavaScript function
+// is on the stack — a job that is the operation itself, `queueMicrotask(w.postMessage.bind(w, …))` — V8 answers the
+// job's own context (`GetEnteredOrMicrotaskContext`): that of the function queued, a bound one's the realm that bound
+// it, where HTML's HostMakeJobCallback keeps the incumbent of the call that queued it. The two differ only for a function
+// bound in one realm and queued from another, which V8, recording no incumbent with a job, cannot tell apart. (What
+// `postMessage`'s source is: HTML "window post message steps" 8.)
+fn incumbent_operation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(steps) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let name = args.get(1).to_rust_string_lossy(scope);
+    let length = args.get(2).int32_value(scope).unwrap_or(0);
+    let operation = v8::Function::builder(call_with_incumbent)
+        .data(steps.into())
+        .length(length)
+        .constructor_behavior(v8::ConstructorBehavior::Throw)
+        .build(scope);
+    let (Some(operation), Some(name)) = (operation, v8::String::new(scope, &name)) else { return };
+    operation.set_name(name);
+    rv.set(operation.into());
+}
 // src/v8_shim.cc: V8's incumbent context.
 unsafe extern "C" {
     fn csim_incumbent_context(isolate: v8::UnsafeRawIsolatePtr) -> *const v8::Context;
 }
-// __dom.withIncumbent(steps, ...args) -> `steps(incumbent, ...args)`, `incumbent` the global of the incumbent realm — HTML's
-// incumbent settings object's, the realm of the script that called: V8's incumbent context, its topmost JavaScript
-// function's. Called as a member a binding made of it bound to its steps (`withIncumbent.bind(null, steps)`), which
-// pushes no JavaScript frame of its own, so the caller of the member is the one V8 finds — where the steps, a function
-// of the realm that made the member, would find themselves. (What `postMessage`'s source is: HTML "window post message
-// steps" 8.)
-fn with_incumbent(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Ok(steps) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+fn call_with_incumbent(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(steps) = v8::Local::<v8::Function>::try_from(args.data()) else { return };
     // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation), never a null one: a
     // callback runs with a context entered.
     let incumbent: v8::Local<v8::Context> = unsafe { std::mem::transmute(csim_incumbent_context(scope.as_raw_isolate_ptr())) };
     let mut argv: Vec<v8::Local<v8::Value>> = vec![incumbent.global(scope).into()];
-    argv.extend((1..args.length()).map(|i| args.get(i)));
-    let receiver = v8::undefined(scope).into();
-    if let Some(result) = steps.call(scope, receiver, &argv) {
+    argv.extend((0..args.length()).map(|i| args.get(i)));
+    if let Some(result) = steps.call(scope, args.this().into(), &argv) {
         rv.set(result);
     }
 }
