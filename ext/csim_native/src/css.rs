@@ -176,7 +176,11 @@ impl Animations {
         let name = css.name();
         let queued: Vec<CssEvent> = events
             .iter()
-            .map(|&(kind, elapsed)| CssEvent {
+            // (…an interval end that is no number — an infinite iteration count's, its animation set iterating again
+            // after it ended (After → Active) — reported as the time it has run: an event's `elapsedTime` is a finite
+            // double, the AnimationEventInit conversion throws on any other)
+            .map(|&(kind, elapsed)| (kind, if elapsed.is_finite() { elapsed } else { ran }))
+            .map(|(kind, elapsed)| CssEvent {
                 animation: id,
                 kind,
                 elapsed: elapsed / 1000.0,

@@ -44,4 +44,25 @@ RSpec.describe 'animation frame callbacks' do
     JS
     expect(session.evaluate_script('log')).to eq(['frame', 'next frame true', 'timer'])
   end
+
+  # …and what a rendering update's callbacks queue is the next step's to run: a read after the step that ran the frame
+  # sees the frame's work, and not yet the task it queued — a lazy frame its intersection observations began fetching
+  # is answered after it, as a network's answer would be (Avo's has_one tab group read before its embedded frame loads).
+  it 'leaves the tasks a frame queued to the step after it' do
+    session.visit '/'
+    seen = session.evaluate_script(<<~JS)
+      (() => {
+        requestAnimationFrame(() => {
+          document.body.append(Object.assign(document.createElement('p'), { id: 'frame' }));
+          setTimeout(() => document.body.append(Object.assign(document.createElement('p'), { id: 'task' })), 0);
+        });
+        const seen = (id) => !!document.getElementById(id);
+        __drainTimers(50);
+        const once = [seen('frame'), seen('task')];
+        __drainTimers(50);
+        return [...once, seen('task')];
+      })()
+    JS
+    expect(seen).to eq([true, false, true])
+  end
 end
