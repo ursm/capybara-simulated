@@ -501,6 +501,46 @@ RSpec.describe 'the cookie store' do
     expect(seen).to eq([['GET', '/echo-get', 'l=1', 'cross-site'], ['POST', '/echo-post', '', 'cross-site']])
   end
 
+  # A user's traversal is begun by no document (Sec-Fetch-Site `none`), but its request's top-level navigation initiator
+  # origin is the one the entry's document state keeps — HTML "create navigation params by fetching": "set request's
+  # top-level navigation initiator origin to entry's document state's initiator origin" — which Fetch's "determine the
+  # same-site mode" reads at step 2. So back to a page another site's link led to, its Strict cookie stays withheld (its
+  # Lax one sent, a top-level GET's); back to one its own site's link led to, or one the user typed, it is sent.
+  # Chrome 156 (its back/forward cache off) and Firefox 159 both send the Lax cookie alone back to the page b's link led
+  # to (measured 2026-10-31, over http: CDP Page.navigateToHistoryEntry, WebDriver BiDi browsingContext.traverseHistory).
+  it 'judges a traversal by the initiator origin its entry keeps' do
+    seen = []
+    app = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'  then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/link' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><a href=\"https://a.test/home?#{req.host[0]}\">go</a>"]]
+      else
+        seen << [req.fullpath, env['HTTP_COOKIE'].to_s, env['HTTP_SEC_FETCH_SITE']]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>home']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    %w[b a].each do |host|
+      s.visit "https://#{host}.test/link"
+      s.click_link 'go'
+      s.visit 'https://a.test/other'
+      s.go_back
+    end
+    s.visit 'https://a.test/home?typed'
+    s.visit 'https://a.test/other'
+    s.go_back
+    expect(seen.reject {|path, _, _| path == '/other' }).to eq([
+      ['/home?b', 'l=1', 'cross-site'],
+      ['/home?b', 'l=1', 'none'],
+      ['/home?a', 's=1; l=1', 'same-origin'],
+      ['/home?a', 's=1; l=1', 'none'],
+      ['/home?typed', 's=1; l=1', 'none'],
+      ['/home?typed', 's=1; l=1', 'none']
+    ])
+  end
+
   # RFC 6265bis §5.2: a reload through a user interface element (the driver's `refresh`) is same-site where the
   # document it reloads was reached by a same-site request — a page a cross-site link led to sends its Strict cookies
   # on no reload of the user's — where the page's own `location.reload()` is judged by its document's site, as any of

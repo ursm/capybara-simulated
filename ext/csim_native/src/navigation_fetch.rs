@@ -25,6 +25,10 @@ struct Nav {
     initiator_opaque: bool,
     initiator_cross_site_ancestor: bool,
     site: Option<&'static str>,
+    // A traversal's top-level navigation initiator origin (Fetch's step 2): the origin of the document that began the
+    // navigation its entry was made by, which HTML keeps in the entry's document state — serialized, `null` an opaque
+    // one's; none for one no document began, or for any other navigation, whose initiator is the one above.
+    traversed_initiator: Option<String>,
     // The documents above the navigable it navigates — the one its container is in, and that one's up to the top — by
     // which its cookies are cross-site; none for a navigation no such document's site judges.
     ancestors: Option<Vec<Option<String>>>,
@@ -85,8 +89,13 @@ impl Nav {
     // 2026-10-31: a popup a's frame under b's page opens to a gets the Strict cookie in both); same-site for a navigation
     // no document began (a request of no client). A frame's navigation is cross-site by the documents above the frame
     // as well (`Nav::cookies`).
+    // A traversal's, begun by no document, by the initiator origin its entry's document state keeps (HTML "create
+    // navigation params by fetching": "set request's top-level navigation initiator origin to entry's document state's
+    // initiator origin").
     fn initiator_cross_site(&self, target: &str) -> bool {
-        self.initiator_opaque || fetch_site(self.initiator.as_deref().unwrap_or(""), target) == "cross-site"
+        self.initiator_opaque
+            || fetch_site(self.initiator.as_deref().unwrap_or(""), target) == "cross-site"
+            || self.traversed_initiator.as_deref().is_some_and(|origin| cross_site_for_cookies(Some(origin), target))
     }
 }
 
@@ -116,7 +125,9 @@ impl NavigationFetch {
     // or a user's reload's, of no initiator: its request's client's origin serialized — its navigable's active
     // document's, as HTML "apply the history step" snapshots that document's source snapshot params where none is given,
     // "as if navigable navigated itself" — which its redirect-taint is walked with in place of `origin`: its Origin, a
-    // re-post's the one it was first sent with, and its Sec-Fetch-Site still a user's; nil none).
+    // re-post's the one it was first sent with, and its Sec-Fetch-Site still a user's; nil none), `traversed_initiator`
+    // (a top-level traversal's, of no initiator: its entry's document state's initiator origin, serialized — which its
+    // cookies are judged by alone, Fetch's step 2; nil none).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -150,6 +161,7 @@ impl NavigationFetch {
                 initiator_opaque,
                 initiator_cross_site_ancestor: get("initiator_cross_site_ancestor")?.to_bool(),
                 site: initiator_opaque.then_some("cross-site"),
+                traversed_initiator: text("traversed_initiator")?.filter(|o| !o.is_empty()),
                 ancestors,
                 top_level: get("top_level")?.to_bool(),
                 reloaded_cross: Option::<bool>::try_convert(get("reloaded_cross_site")?)?,
@@ -277,6 +289,7 @@ mod tests {
             initiator_opaque: false,
             initiator_cross_site_ancestor: false,
             site: None,
+            traversed_initiator: None,
             ancestors: Some(vec![Some("http://a.test/top".to_owned())]),
             top_level: false,
             reloaded_cross: None,
@@ -337,6 +350,20 @@ mod tests {
         // (…a → a: no taint, the Strict cookie kept by a top-level GET, step 3 notwithstanding)
         let home = Nav { ancestors: None, top_level: true, ..nav("GET", "http://a.test/x", "http://a.test/page") };
         assert_eq!(home.cookies().1 & (CROSS_SITE | LAX_RETRIEVE), LAX_RETRIEVE);
+    }
+
+    #[test]
+    fn a_traversal_is_judged_by_its_entrys_initiator_origin() {
+        use crate::cookie_jar::{CROSS_SITE, LAX_RETRIEVE};
+        let context = |entry: Option<&str>| {
+            let st = Nav { ancestors: None, top_level: true, initiator: None, traversed_initiator: entry.map(str::to_owned), ..nav("GET", "http://a.test/home", "") };
+            st.cookies().1 & (CROSS_SITE | LAX_RETRIEVE)
+        };
+        // (…an entry another site's link made: Lax, no Strict; an opaque one's alike; its own site's, or a user's, Strict)
+        assert_eq!(context(Some("http://b.test")), CROSS_SITE | LAX_RETRIEVE);
+        assert_eq!(context(Some("null")), CROSS_SITE | LAX_RETRIEVE);
+        assert_eq!(context(Some("http://sub.a.test")), LAX_RETRIEVE);
+        assert_eq!(context(None), LAX_RETRIEVE);
     }
 
     #[test]

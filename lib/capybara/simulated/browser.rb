@@ -3536,6 +3536,11 @@ module Capybara
         picks && picks[entry['index'].to_i]
       end
 
+      # The origin of the document that begins a navigation — the one of URL `initiator`, `null` where it is opaque
+      # (`origin_null`) — serialized, none where no document begins it (a user's): its request's, and the initiator origin
+      # HTML keeps in its entry's document state.
+      private def initiator_origin(initiator, origin_null) = ((!origin_null && url_origin(initiator)) || 'null' unless initiator.to_s.empty?)
+
       # A top-level navigation's POST of `body` (`navigate`'s: `navigate_top_level`): its origin the initiating
       # document's — 'null' where that is opaque (`origin_null`), none where the initiator is unknown — or, re-posted from
       # its session history entry, the one it was first sent with (`origin`: the document state's initiator origin).
@@ -3555,7 +3560,7 @@ module Capybara
         user_activated: false,
         reloaded_cross_site: nil
       )
-        origin ||= (!origin_null && url_origin(initiator)) || 'null' if initiator && !initiator.to_s.empty?
+        origin ||= initiator_origin(initiator, origin_null)
         navigate_top_level(
           url,
           body,
@@ -11770,6 +11775,9 @@ module Capybara
         }
         referrer_policy ||= main_document_referrer_policy if referer
         req_body = body&.b
+        # (…a traversal's or a user's reload's, of no initiator: `replay_history_entry` — its client the document it leaves,
+        # and its top-level navigation initiator origin the one its entry's document state keeps, Fetch's step 2)
+        traversed = from_history && !initiator
         fetch = Native::NavigationFetch.new({
           method:                        body ? 'POST' : 'GET',
           url:                           url.to_s,
@@ -11782,8 +11790,8 @@ module Capybara
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
           top_level:                     true,
           reloaded_cross_site:           reloaded_cross_site,
-          # (…a traversal's or a user's reload's, of no initiator, its client the document it leaves: `replay_history_entry`)
-          client_origin:                 (document_origin(0) if from_history && !initiator)
+          client_origin:                 (document_origin(0) if traversed),
+          traversed_initiator:           (@session_history.entry(@session_history.active(0))[:origin] if traversed)
         })
         # A full-document navigate also clears the pushState transition
         # queue: any URLs we'd queued during the prior page's lifetime
@@ -11812,8 +11820,9 @@ module Capybara
             capture_outgoing_form_state
             # (…the request as it was sent — a POST's body and origin, its referrer and referrer policy — what a reload or
             # a traversal refers by again, a POST's re-posts: HTML's document state)
-            entry = {url: url, referer: referer, referrer_policy: referrer_policy}
-            entry.update(body: body, content_type: content_type, origin: origin) if body
+            # (…and its initiator origin, HTML's document state keeps, a traversal's step 2 reads: none of a user's)
+            entry = {url: url, referer: referer, referrer_policy: referrer_policy, origin: origin || initiator_origin(initiator, origin_null)}.compact
+            entry.update(body: body, content_type: content_type) if body
             record_history(entry, replace: replace)
           end
           # `about:blank` names an empty, network-less document — there's
