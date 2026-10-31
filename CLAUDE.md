@@ -199,7 +199,13 @@ framework array-iteration compat) forces `length` into
 `getOwnPropertyNames`; and a WindowProxy is a JS Proxy, which cannot commit
 HTML's willful invariant violation (tc39/ecma262#672), so a property defined
 non-configurable through it outlives the navigation that replaces its window
-(`frameWindowProxyFor`, platform-globals.js); and the primary window —
+(`frameWindowProxyFor`, platform-globals.js); and a promise reaction job whose
+handler is itself an incumbent-reading operation (`p.then(w.postMessage.bind(w, …))`,
+bound in one realm and handed to `then` in another) finds its incumbent in the
+handler's realm, where HTML's HostMakeJobCallback keeps the incumbent of the
+`then` that queued it: V8 records no incumbent with a promise reaction job, and
+the alternative is wrapping every `then` handler (`incumbent_operation`,
+navigables.rs) — Chrome agrees with V8, Firefox with the spec; and the primary window —
 the Capybara session's own — is never script-closable, where HTML makes a
 window whose session history has one entry closable by its script
 (`Driver#primary_window?`, `Browser#script_close`): closing it would end the session under the
