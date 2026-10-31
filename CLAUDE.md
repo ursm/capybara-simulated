@@ -209,7 +209,15 @@ away still runs, in its own realm, as a browser runs it, but reads an empty
 document there, where a browser's reads the document it was made with: each
 document is a realm, whose arena the engine drops as its navigable goes on to
 the next (one document per realm, as below) — a page's realm number, 0, the
-next document's too, whose `location` it then reads; and a window
+next document's too, whose `location` it then reads; and, of the same one
+document per realm, a WindowProxy a pop-up holds of a page that left its
+browsing context group (a cross-origin opener policy's switch) reads that
+window's members but its CrossOriginProperties as undefined, where HTML would
+still let same-origin code read the old Window's: realm 0's number and global
+are the next document's, so the proxy answers as a discarded browsing context's
+(`closed`, no `parent` / `top` / `opener`, `postMessage`, `close()` and its
+Location's navigations doing nothing) and reaches nothing of it
+(`__csimEvictWindowProxy`'s successor, platform-globals.js); and a window
 `window.open` made in its opener's isolate keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
 Document object too, renewed (its listeners, handlers, observer registrations,

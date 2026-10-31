@@ -32,6 +32,10 @@ RSpec.describe 'a window made in its opener\'s isolate' do
         '<!doctype html><html><head><meta charset="utf-8"><title>second</title></head><body><p id="second">SECOND</p></body></html>'
       when '/boom'
         raise 'boom'
+      when '/loop'
+        return [302, {'location' => '/loop'}, []]
+      when '/nocontent'
+        return [204, {}, []]
       when '/r307'
         return [307, {'location' => '/posted'}, []]
       when '/missing'
@@ -756,6 +760,23 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       session.has_css?('#none', wait: 0.2)
       session.execute_script("w.postMessage('ping', '*')")
       expect(session.evaluate_script('[w.document.title, got]')).to eq(['got:ping:main', [['pong', true]]])
+    end
+
+    # (…a network error an error document at its URL, of a new opaque origin — as the page's is (Browser#response_outcome)
+    # — not the document it was at; a 204 none, the window staying there)
+    it 'commits an error document for a network error, as the page does, and none for a 204' do
+      session.execute_script("window.w = window.open('/second')")
+      session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+      session.execute_script("w.location = '/nocontent'")
+      session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+      session.execute_script("w.location = '/loop'")
+      session.within_window(session.windows.last) do
+        expect(session).to have_no_css('#second')
+        expect(session.evaluate_script('[location.pathname, origin, document.body ? document.body.textContent : ""]')).to eq(['/loop', 'null', ''])
+      end
+      expect(session.evaluate_script('(() => { try { return w.document; } catch (e) { return e.name; } })()')).to eq('SecurityError')
+      session.visit('/loop')
+      expect(session.evaluate_script('[location.pathname, origin]')).to eq(['/loop', 'null'])
     end
 
     it 'loads a document of another origin into a Window of its own, which its opener reaches only through the cross-origin members' do

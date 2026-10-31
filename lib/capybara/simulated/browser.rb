@@ -2340,9 +2340,6 @@ module Capybara
         @last_response_status  = status
         @last_response_headers = headers.to_h
       end
-      # Whether the page is cross-origin isolated (`cross_origin_isolated_response?`, as its document committed) — which its
-      # workers are too.
-      def cross_origin_isolated? = @runtime&.cross_origin_isolated == true
       # The browsing context group this window is of — a new one, named by the window (`initialize`): a window a Browser
       # hosts is of a group of its own, its pop-ups with their opener realms of its isolate — which keys its agent clusters
       # (realm_location.rs `agent_cluster_key`): a WebAssembly.Module crosses to another group's realm as a `messageerror`.
@@ -5028,8 +5025,10 @@ module Capybara
       # main settle drains.
       # (…`cluster_key` the agent cluster key of the context making it, which a dedicated worker's is: realm_location.rs
       # `agent_cluster_key`)
+      # (…`isolated` whether the context that creates it is cross-origin isolated, which a dedicated or shared one is too:
+      # its realm's own — a window's of a browsing context group its page left keeping its group's)
       def worker_spawn(url, shared: false, service: false, creator_key: nil, realm_id: 0, controller_handle: 0, sw_scope: nil, script_type: nil, update_via_cache: nil, name: '', cluster_key: nil,
-                       sw_body: nil, sw_imports: nil, site: nil)
+                       sw_body: nil, sw_imports: nil, site: nil, isolated: false)
         # A NEGATIVE realm_id is the worker-parent convention (a NESTED worker — `new
         # Worker` inside a worker isolate tags -(its own handle)): the spawn runs on the
         # PARENT WORKER's thread, so record the creator, route the child's messages back
@@ -5127,7 +5126,7 @@ module Capybara
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
-        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, rt: nil, rt_lock: Mutex.new}
+        record = {thread: nil, inbox: inbox, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, rt: nil, rt_lock: Mutex.new}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -6960,18 +6959,20 @@ module Capybara
             rid = mint_resulting_client_id if new_client
             next
           end
-          # (…none made of a 204 / 205: the frame stays at the document it is at, `no_document` — `no_content_response?`)
-          if no_content_response?(status)
-            resp_body.close if resp_body.respond_to?(:close)
-            return {'no_document' => true}
-          end
+          # (…none made of a 204 / 205: the frame stays at the document it is at, `no_document` — `response_outcome`)
           # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
           # frame builder's, whose container's document `container_realm` is, alone — a named-frame form's navigation
           # still makes a document of it)
           # (…a window's navigation's alike, `download_realm` the document that navigated it)
-          if download_realm && download_response?(headers)
-            from_document(download_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
+          case response_outcome(status, headers)
+          when :no_content
+            resp_body.close if resp_body.respond_to?(:close)
             return {'no_document' => true}
+          when :download
+            if download_realm
+              from_document(download_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
+              return {'no_document' => true}
+            end
           end
           body ||= read_rack_body(resp_body)
           out = response_hash(status, headers, body, target, fetch.redirected?)
@@ -9118,7 +9119,7 @@ module Capybara
           port_post:      ->(end_id, data) { outbox << {handle: handle, kind: 'port_msg', end: end_id.to_s, data: data.to_s} }
         }
         worker_kind = if service then 'service' elsif shared then 'shared' else 'dedicated' end
-        rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name)
+        rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true)
         # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
@@ -10576,8 +10577,10 @@ module Capybara
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
           coop = coop_enforcement(realm_id)
           resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop: coop, **by)
-          return if resp.nil? || resp['no_document']
+          return if resp && resp['no_document']
 
+          # (…a network error an error document at the URL, of a new opaque origin, as the page's is: `response_outcome`)
+          resp ||= {'status' => 0, 'headers' => {'content-type' => 'text/html'}, 'body' => '', 'url' => url, 'error' => true}
           headers = resp['headers'] || {}
           response = [resp['status'], headers]
           # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
@@ -10591,6 +10594,7 @@ module Capybara
             client_id:       resp['resulting_client_id'],
             refresh:         refresh_header(headers)
           }
+          made[:doc_origin] = 'null' if resp['error']
           # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
           # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
           # use for a navigation response")
@@ -12127,7 +12131,6 @@ module Capybara
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
           coop = coop_enforcement(0)
-          @coop_switch_due = nil
           loop do
             meth, target, _, ref_source, ref_policy, seed, site, tainted, _, cookies = fetch.begin_hop
             @current_referer = fetch.referrer.to_s
@@ -12180,7 +12183,6 @@ module Capybara
             end
             # (…each response's opener policy enforced as it comes, a redirect's too: `enforce_coop`)
             return error_document.(target) unless enforce_coop(coop, target, headers)
-            @coop_switch_due = coop[:switch]
             if (loc = redirect_location(status, headers))
               resp_body.close if resp_body.respond_to?(:close)
               command, to_get = fetch.redirect(status, loc.to_s, referrer_policy_header(headers))
@@ -12195,11 +12197,13 @@ module Capybara
             # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
             # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
             # which within_window assertions read.
-            if no_content_response?(status)
+            case response_outcome(status, headers)
+            when :no_content
               resp_body.close if resp_body.respond_to?(:close)
               return navigation_made_no_content(target)
+            when :download
+              return download_in_place(target, headers, resp_body || [document])
             end
-            return download_in_place(target, headers, resp_body || [document]) if download_response?(headers)
 
             @current_url = target
             record_response(status, headers)
@@ -12209,7 +12213,7 @@ module Capybara
             # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
             # `$(document).on(...)` delegates) — snapshot warmup keeps the
             # rebuild itself cheap; app-bundle re-eval dominates.
-            return boot_response_into_ctx(document || read_rack_body(resp_body))
+            return boot_response_into_ctx(document || read_rack_body(resp_body), coop_switch: coop[:switch])
           end
         ensure
           @navigating = prior_navigating
@@ -12262,6 +12266,16 @@ module Capybara
       # the navigation aborted, the navigable at the document it is at, no `load` and no session history entry (Chrome,
       # measured 2026-10-24: the page's link and form, a frame's form, link, `location` and `src` alike).
       private def no_content_response?(status) = [204, 205].include?(status.to_i)
+      # What a top-level traversable's navigation response — the page's, a window's (`navigate_top_level`,
+      # `frame_navigation_fetch`) — makes, HTML "navigate": no document of a 204 / 205 (`:no_content`), nor of a download
+      # (`:download`), the navigable at the one it is at; else its document (`:document`) — a network error, of no
+      # response, an error document (`commit_error_document`, a window's `navigate_window_realm`).
+      private def response_outcome(status, headers)
+        return :no_content if no_content_response?(status)
+        return :download if download_response?(headers)
+
+        :document
+      end
       # A navigation's response that downloads makes no document: a window that has one stays at it — its URL and its
       # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a),
       # and what its flushed timers planned still stands, the page they ran in being the one that stays. One that has none
@@ -12363,11 +12377,10 @@ module Capybara
       end
       # The page's document committed, of opener policy `coop` — the one place every commit goes through (a response's, an
       # about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context group is left
-      # for a new one where needed: its navigation's enforcement result's switch, the one its responses made
-      # (`@coop_switch_due`, `enforce_coop`), or, of a document no response enforced made, its own policy against the
-      # document it replaces. (…`opaque` its origin a new opaque one: an error document's)
-      private def commit_coop(coop, opaque)
-        due, @coop_switch_due = @coop_switch_due, nil
+      # for a new one where needed: its navigation's enforcement result's switch, the one its responses made (`due`,
+      # `enforce_coop`), or, of a document no response enforced made, its own policy against the document it replaces.
+      # (…`opaque` its origin a new opaque one: an error document's)
+      private def commit_coop(coop, opaque, due)
         if due.nil? && !(coop == 'unsafe-none' && @page_coop.to_s.match?(/\A(unsafe-none)?\z/))
           origin = opaque ? 'null' : (@current_url.to_s.match?(ABOUT_BLANK) ? @creator&.fetch(:origin) : url_origin(@current_url)).to_s
           initial = @runtime.realm_call(0, '__csimInitialAboutBlank') == true
@@ -12390,7 +12403,9 @@ module Capybara
         policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
       end
 
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false)
+      # (…`coop_switch` the enforcement result's of the navigation whose response it is — whether its browsing context group
+      # is to be left — none for a document no response enforced made: `commit_coop`)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -12418,7 +12433,7 @@ module Capybara
         @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
         # (…and its opener policy, what a navigation of the page after is judged by — the page's browsing context group left
         # for a new one where it needs: `commit_coop`)
-        commit_coop(@current_url.to_s.match?(ABOUT_BLANK) ? 'unsafe-none' : response_coop(@last_response_headers), opaque_origin) unless initial
+        commit_coop(@current_url.to_s.match?(ABOUT_BLANK) ? 'unsafe-none' : response_coop(@last_response_headers), opaque_origin, coop_switch) unless initial
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         @runtime.rebuild_ctx

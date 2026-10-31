@@ -21,6 +21,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     simulated_session(lambda {|env|
       headers = {'content-type' => 'text/html'}.merge(policies.fetch(env['PATH_INFO'], {}))
       return [302, headers.merge('location' => 'http://a.test/plain'), []] if env['PATH_INFO'] == '/hop'
+      return [204, policies['/coi'], []] if env['PATH_INFO'] == '/nocontent'
 
       frame = '<iframe name="fr" src="http://b.test/plain"></iframe>' if env['PATH_INFO'] == '/framed'
       [200, headers, ["<!doctype html><meta charset=utf-8><title>#{env['PATH_INFO']}</title><p id=p>#{env['PATH_INFO']}</p>#{frame}"]]
@@ -86,6 +87,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
       expect(session.evaluate_script("(() => { try { return held.document.title; } catch (e) { return e.name; } })()")).not_to eq('/coi')
       # (…its messages delivered nowhere, its Location's navigations going nowhere: a browsing context gone)
       session.execute_script("held.postMessage('stale', '*'); held.location.href = 'http://a.test/plain#stale'; held.location = 'http://a.test/x'")
+      expect(session.evaluate_script("['close', 'focus', 'blur'].map((m) => (held[m](), typeof held[m]))")).to eq(%w[function function function])
     end
     session.has_css?('#none', wait: 0.2)
     expect(session.evaluate_script('[location.href, heard]')).to eq(['http://a.test/coi', []])
@@ -147,7 +149,8 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     JS
     session.has_css?('#none', wait: 0.3)
     expect(session.windows.size).to eq(2)
-    session.within_window(session.windows.last) { expect(session.evaluate_script('[location.href, document.title]')).to eq(['about:blank', '']) }
+    # (…an error document at its URL, of a new opaque origin, as a page's network error makes: Browser#response_outcome)
+    session.within_window(session.windows.last) { expect(session.evaluate_script('[location.href, document.title, origin]')).to eq(['http://b.test/coi', '', 'null']) }
   end
 
   # (…and a page's, by its response's own Content-Security-Policy sandbox: an error document)
@@ -155,5 +158,30 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     session.visit('http://a.test/sbx')
     expect(session).to have_no_css('#p')
     expect(session.evaluate_script('origin')).to eq('null')
+  end
+
+  # (…the switch a navigation's responses need its own, which a navigation that commits nothing — a 204's — leaves to none
+  # after it)
+  it "leaves no switch of a navigation that committed nothing to the next" do
+    session.visit('http://a.test/plain')
+    window = popup('http://a.test/plain')
+    session.execute_script("location = 'http://a.test/nocontent'")
+    session.has_css?('#none', wait: 0.2)
+    session.execute_script("location = 'about:blank'")
+    session.has_css?('#none', wait: 0.2)
+    session.within_window(window) { expect(session.evaluate_script('opener === null')).to be(false) }
+  end
+
+  # (…a worker cross-origin isolated as the context that made it is: a pop-up's of the group its page left, not)
+  it "makes a pop-up's worker as isolated as the pop-up, not as its page" do
+    session.visit('http://a.test/plain')
+    window = popup('http://a.test/plain')
+    session.visit('http://a.test/coi')
+    expect(session.evaluate_script('crossOriginIsolated')).to be(true)
+    session.within_window(window) do
+      source = 'postMessage([self.crossOriginIsolated, typeof SharedArrayBuffer])'
+      script = "const wk = new Worker(URL.createObjectURL(new Blob([#{source.to_json}]))); wk.onmessage = (e) => arguments[0](e.data)"
+      expect(session.evaluate_async_script(script)).to eq([false, 'undefined'])
+    end
   end
 end

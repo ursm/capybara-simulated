@@ -78,9 +78,8 @@ module Capybara
       # The modal handler its isolate's, the commands of the block each in the scope of the window it addresses.
       def with_modal(handler, &block) = host.with_modal(handler, &block)
 
-      # ── What it shares with its host: its browsing context group, its isolate's busy-ness
-      def browsing_context_group = host.browsing_context_group
-      def window_busy?           = host.window_busy?
+      # ── What it shares with its host: its isolate's busy-ness
+      def window_busy? = host.window_busy?
 
       private def realm! = realm || raise(Capybara::WindowError, "Window #{window_handle} is closed; switch to another window")
       private def state
