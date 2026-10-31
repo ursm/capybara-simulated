@@ -172,4 +172,13 @@ RSpec.describe 'BroadcastChannel delivery' do
     JS
     expect(poll_until { session.evaluate_script('window.got') unless session.evaluate_script('window.got').empty? }).to eq(%w[first listener:first])
   end
+
+  # (…a channel held while it has a listener, which nothing else may hold — HTML lets one with none be collected, which
+  # this one is not: broadcast-channel.js `listenedChannels`)
+  it 'delivers to a channel only its listener holds, through a collection' do
+    session.execute_script("new BroadcastChannel('held').onmessage = (e) => { window.got = e.data; }")
+    session.driver.browser.instance_variable_get(:@runtime).instance_variable_get(:@ctx).low_memory_notification
+    session.execute_script("new BroadcastChannel('held').postMessage('through')")
+    expect(poll_until { session.evaluate_script('window.got') }).to eq('through')
+  end
 end

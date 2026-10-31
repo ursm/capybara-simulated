@@ -430,6 +430,9 @@ module Capybara
       # can carry them across, the way a real popup keeps `window.opener` / `window.name`
       # through its own navigation.
       def window_realm_meta = (@window_realm_meta ||= {})
+      # The page's browsing context group left for another by the navigation whose document the next rebuild makes
+      # (`rebuild_ctx`).
+      def page_left_group! = (@page_left_group = true)
       # How many times a window `window.open` made in this isolate was made, navigated, closed or let go of — what a
       # driver's handle on one keys its cache on (RealmWindow).
       def window_gen = @window_gen || 0
@@ -567,8 +570,9 @@ module Capybara
         nil
       end
       # …and, its window gone, dropped: they would pin the dead global and be handed back stale.
-      def evict_window_proxies(id)
-        ctx.call('__csimEvictWindowProxies', proxy_holders, id)
+      # (…`successor` where the realm is another document's from now on: the page's, its group left — `rebuild_ctx`)
+      def evict_window_proxies(id, successor: false)
+        ctx.call('__csimEvictWindowProxies', proxy_holders, id, successor)
       rescue StandardError
         nil
       end
@@ -719,8 +723,14 @@ module Capybara
             attach_host_fns(@ctx)
             init_realm(@ctx)
             # (…the WindowProxies of the page's navigable the windows it kept hold — their `opener` — over its new
-            # document's window, as a navigable's are over each document it goes on to)
-            retarget_window_proxies(0, 0) unless kept.empty?
+            # document's window, as a navigable's are over each document it goes on to; none where the page left their
+            # browsing context group for another, its new document a new browsing context's, whose WindowProxy no window
+            # of theirs holds: theirs of the one discarded — `closed`, no `parent`, `top` nor `opener` — HTML "obtain a
+            # browsing context to use for a navigation response", Browser#leave_browsing_context_group)
+            unless kept.empty?
+              @page_left_group ? evict_window_proxies(0, successor: true) : retarget_window_proxies(0, 0)
+            end
+            @page_left_group = false
             return @ctx
           rescue StandardError => e
             warn "[capybara-simulated] warm context reset failed, falling back to cold rebuild: #{e.class}: #{e.message}"
@@ -1065,7 +1075,7 @@ module Capybara
         realm
       end
       # The page's browsing context group and whether it is cross-origin isolated: what a window `window.open` made in
-      # this isolate is opened in (`window_group`), its page's group left by a navigation since (Browser#coop_switch?)
+      # this isolate is opened in (`window_group`), its page's group left by a navigation since (Browser#enforce_coop)
       # keeping it.
       def page_group = [@browser.browsing_context_group, @cross_origin_isolated == true]
       # …and that of the top-level document realm `realm`'s is in: a window's its own, the page's otherwise.

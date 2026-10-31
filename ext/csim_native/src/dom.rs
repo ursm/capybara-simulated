@@ -2603,8 +2603,6 @@ pub(crate) struct Dom {
     // The WebAssembly promise resolutions queued as tasks and not yet run, by their numbers (wasm.rs).
     pub(crate) wasm_resolutions: std::collections::HashMap<u32, crate::wasm::Pending>,
     pub(crate) next_wasm_resolution: u32,
-    // The browsing context group of the isolate's window, and the window's name (realm_location.rs `agent_cluster_key`).
-    pub(crate) browsing_context_group: (String, String),
     // Every live range's boundary points (ranges.rs).
     pub(crate) ranges: crate::ranges::Ranges,
     // Each realm's hook a clone of a shadow host attaches the copy's shadow root through (cloning.rs

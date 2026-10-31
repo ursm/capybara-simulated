@@ -5,14 +5,16 @@
 // post in a frame reaches the page's channels as its own, and an inbound one, another window's or a worker's, reaches
 // every realm's.
 //
-// A channel's object is held weakly: one nothing holds receives nothing, and is let go of as the registry grows. What
+// A channel's object is held weakly: one nothing holds receives nothing, and is let go of as a collection takes it. What
 // stays with the bindings (broadcast-channel.js) is what is a call or a value — the serialized message, the task each
 // delivery is, the event — and with the host the windows and workers beyond the isolate, and the running of each
 // delivery, as a task of its own, from the queue the isolate's posts across its realms are delivered from (`queue`):
 // one delivery to one channel at a time, in the order they were queued — a post's to its channels in creation order,
 // a handler's re-post after them — the single global task queue HTML's "postMessage" queues them on.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::rc::Rc;
 
 use crate::dom::{dom, realm_id, register};
 
@@ -29,8 +31,9 @@ pub(crate) struct BroadcastChannels {
     of: BTreeMap<u64, Channel>,
     // The channels of each name and storage key, in creation order: what a post looks up.
     by_key: HashMap<(String, String), Vec<u64>>,
-    // The size at which the next sweep lets go of the channels nothing holds: twice what the last one left.
-    sweep_at: usize,
+    // The channels collected since they were last let go of, by their numbers: each weak handle's finalizer's, so a post
+    // looks up none a collection took (`sweep`).
+    collected: Rc<RefCell<Vec<u64>>>,
     queue: VecDeque<Delivery>,
 }
 
@@ -63,6 +66,23 @@ impl BroadcastChannels {
     // Keep the channels `keep` says, the others let go of.
     fn retain(&mut self, keep: impl Fn(&Channel) -> bool) {
         self.of.retain(|_, c| keep(c));
+        let of = &self.of;
+        self.by_key.retain(|_, ids| {
+            ids.retain(|id| of.contains_key(id));
+            !ids.is_empty()
+        });
+    }
+    // The channels collected since the last sweep let go of — a post's, a channel made — so what a post looks up is the
+    // channels that live: HTML lets a BroadcastChannel with no listener be collected (broadcast-channel.js holds it
+    // while it has one), and a page that makes one per action and drops it pays nothing for those after.
+    fn sweep(&mut self) {
+        let collected = std::mem::take(&mut *self.collected.borrow_mut());
+        if collected.is_empty() {
+            return;
+        }
+        for id in &collected {
+            self.of.remove(id);
+        }
         let of = &self.of;
         self.by_key.retain(|_, ids| {
             ids.retain(|id| of.contains_key(id));
@@ -131,18 +151,16 @@ fn id_arg(scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>) -> u64 
 // __dom.bcNew(channel, name) -> the number of `channel`, a new open one of the calling realm's, of that name and the
 // realm's storage key.
 fn new_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let object = v8::Weak::new(scope, args.get(0));
     let realm = realm_id(scope, &args);
     let name = args.get(1).to_rust_string_lossy(scope);
     let key = crate::realm_location::storage_key_text(&mut dom(scope).arena, realm);
     let channels = &mut dom(scope).broadcast_channels;
-    if channels.of.len() >= channels.sweep_at.max(64) {
-        // (…the collected ones: a closed one whose object lives on is still closed, its post a throw)
-        channels.retain(|c| !c.object.is_empty());
-        channels.sweep_at = channels.of.len() * 2;
-    }
+    channels.sweep();
     channels.next += 1;
     let id = channels.next;
+    let collected = Rc::clone(&channels.collected);
+    let object = v8::Weak::with_finalizer(scope, args.get(0), Box::new(move |_| collected.borrow_mut().push(id)));
+    let channels = &mut dom(scope).broadcast_channels;
     channels.by_key.entry((name, key)).or_default().push(id);
     channels.of.insert(id, Channel { realm, closed: false, object });
     rv.set_double(id as f64);
@@ -161,7 +179,9 @@ fn targets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let key = args.get(1).to_rust_string_lossy(scope);
     let except_realm = args.get(2).int32_value(scope).unwrap_or(-1);
     let except_id = id_arg(scope, args.get(3));
-    let targets = dom(scope).broadcast_channels.targets(&name, &key, except_realm, except_id);
+    let channels = &mut dom(scope).broadcast_channels;
+    channels.sweep();
+    let targets = channels.targets(&name, &key, except_realm, except_id);
     let flat: Vec<f64> = targets.into_iter().flat_map(|(realm, id)| [f64::from(realm), id as f64]).collect();
     rv.set(crate::dom::f64_array(scope, &flat).into());
 }

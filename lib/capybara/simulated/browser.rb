@@ -6831,7 +6831,8 @@ module Capybara
       # reads body / headers / url / redirected / charset), or nil for a failed
       # navigation (respondWith network error / redirect loop).
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
-                                 referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false)
+                                 referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false,
+                                 coop: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # A caller in a script (`defer_ok`: the iframe build, a form submission to a named frame
@@ -6945,6 +6946,8 @@ module Capybara
             status, headers, resp_body = response
             body = nil   # read only for the terminal hop, below
           end
+          # (…a top-level traversable's, each response's opener policy enforced as it comes, a redirect's too: `enforce_coop`)
+          return nil if coop && !enforce_coop(coop, target, headers)
           if (loc = redirect_location(status, headers))
             resp_body.close if resp_body.respond_to?(:close)
             # (…the next hop — a GET where the redirect makes one — or none: a Location no URL, a scheme no fetch goes to)
@@ -7745,14 +7748,25 @@ module Capybara
 
         document_origin(realm) != document_origin(@runtime.top_level_realm(realm))
       end
-      # A navigation response of window realm `realm`'s that left its browsing context group for a Browser of its own
-      # (Driver#move_window_to_new_group): its name and the sandboxing flags its navigable's documents are made with, which
-      # the new one takes (HTML: its popup sandboxing flag set the navigation's final sandboxing flags).
-      def window_realm_name(realm)    = @runtime.realm_call(realm, '__csimWindowName').to_s
-      def window_realm_sandbox(realm) = @runtime.realm_call(realm, '__csimPopupSandbox').to_i
+      # The top-level traversable of window realm `realm`, whose navigation response left its browsing context group for a
+      # Browser of its own (Driver#move_window_to_new_group) — kept by the switch, which replaces the browsing context, not
+      # the traversable: its session history, its target name, its session storage, the sandboxing its documents are made
+      # with — handed over (navigables.rs `release_window_history`): the handle that owns it from now on.
+      def hand_over_window_traversable(realm)
+        history = window_history(realm) or return
+        @runtime.realm_call(realm, '__csimReleaseWindowHistory')
+        history.own!
+        history
+      end
       # …and the document that response makes, made by this window — a Browser of its own, its first — at `url`: the
       # response's status and headers, its body, the Referer its request sent and its policy.
-      def adopt_navigation_response(url, response, body, referrer:, referrer_policy:)
+      # (…`traversable` the window's, kept across the switch: its session history and its session storage this one's)
+      def adopt_navigation_response(url, response, body, referrer:, referrer_policy:, traversable: nil)
+        if traversable
+          Native.storage_clear(@session_storage)
+          @session_history = traversable
+          @session_storage = traversable.session_storage
+        end
         @current_referer = referrer.to_s
         record_history({url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact)
         @current_url = url.to_s
@@ -10560,7 +10574,8 @@ module Capybara
         if body.nil? && http_url?(url)
           by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, **by)
+          coop = coop_enforcement(realm_id)
+          resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop: coop, **by)
           return if resp.nil? || resp['no_document']
 
           headers = resp['headers'] || {}
@@ -10579,7 +10594,7 @@ module Capybara
           # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
           # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
           # use for a navigation response")
-          if coop_switch?(realm_id, url, headers) && @driver.respond_to?(:move_window_to_new_group)
+          if coop[:switch] && @driver.respond_to?(:move_window_to_new_group)
             return @driver.move_window_to_new_group(self, realm_id, url, response, body, made)
           end
         end
@@ -12111,6 +12126,8 @@ module Capybara
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
+          coop = coop_enforcement(0)
+          @coop_switch_due = nil
           loop do
             meth, target, _, ref_source, ref_policy, seed, site, tainted, _, cookies = fetch.begin_hop
             @current_referer = fetch.referrer.to_s
@@ -12161,6 +12178,9 @@ module Capybara
               ) or return error_document.(target)
               status, headers, resp_body = response
             end
+            # (…each response's opener policy enforced as it comes, a redirect's too: `enforce_coop`)
+            return error_document.(target) unless enforce_coop(coop, target, headers)
+            @coop_switch_due = coop[:switch]
             if (loc = redirect_location(status, headers))
               resp_body.close if resp_body.respond_to?(:close)
               command, to_get = fetch.redirect(status, loc.to_s, referrer_policy_header(headers))
@@ -12181,7 +12201,6 @@ module Capybara
             end
             return download_in_place(target, headers, resp_body || [document]) if download_response?(headers)
 
-            leave_browsing_context_group if coop_switch?(0, target, headers)
             @current_url = target
             record_response(status, headers)
             commits.(url_origin(target))
@@ -12316,18 +12335,46 @@ module Capybara
         origin = document_origin(creator)
         origin != 'null' && origin == document_origin(@runtime.top_level_realm(creator)) ? document_coop(creator) : 'unsafe-none'
       end
-      # Whether a navigation of the top-level traversable whose document is realm `realm`'s — the page's, a window's — to a
-      # response at `url` of headers `headers` needs a browsing context group switch (coop.rs `switch_needed`, HTML
-      # "check if COOP values require a browsing context group switch": that document's opener policy and origin against
-      # the response's, a popup's own check where it is its initial about:blank). Judged on the response a document is
-      # made of, not each redirect's — a gap.
-      # (…none asked of the engine where both are "unsafe-none", which match: every navigation of a page that sets none)
-      def coop_switch?(realm, url, headers)
+      # HTML's opener policy enforcement result of a navigation of the top-level traversable whose document is realm
+      # `realm`'s — the page's, a window's — as it begins: that document's origin and opener policy, whether it is its
+      # initial about:blank, and whether a browsing context group switch is needed (none yet). Each of its responses, a
+      # redirect's too, enforced as it comes (`enforce_coop`, HTML "enforce a response's opener policy"): judged against the
+      # one before it — the document's for the first — by coop.rs `switch_needed` (HTML "check if COOP values require a
+      # browsing context group switch", a popup's check where the document is its initial about:blank), the switch, once
+      # needed, needed whatever comes after. (…the engine asked nothing where both are "unsafe-none", which match: every
+      # hop of a navigation of a page that sets none, its document's origin and its state read only where one sets one)
+      private def coop_enforcement(realm)
+        {realm: realm, coop: document_coop(realm), origin: nil, initial: nil, switch: false}
+      end
+      # …false for a response of a policy but "unsafe-none" to a navigation sandboxed — the navigable's sandboxing, its
+      # response's Content-Security-Policy's: HTML's finalSandboxFlags — which is a network error (HTML "create navigation
+      # params by fetching" step 12.3).
+      private def enforce_coop(result, url, headers)
         response = response_coop(headers)
-        document = document_coop(realm)
-        return false if response == 'unsafe-none' && document == 'unsafe-none'
-
-        Native.coop_switch(@runtime.realm_call(realm, '__csimInitialAboutBlank') == true, document_origin(realm).to_s, document, url_origin(url).to_s, response)
+        return false if response != 'unsafe-none' && @runtime.realm_call(result[:realm], '__csimNavigationSandbox', response_csp(headers)).to_i != 0
+        unless result[:coop] == 'unsafe-none' && response == 'unsafe-none'
+          result[:origin]  ||= document_origin(result[:realm]).to_s
+          result[:initial] = @runtime.realm_call(result[:realm], '__csimInitialAboutBlank') == true if result[:initial].nil?
+          result[:switch] ||= Native.coop_switch(result[:initial], result[:origin], result[:coop], url_origin(url).to_s, response)
+        end
+        result[:coop]   = response
+        result[:origin] = url_origin(url).to_s
+        true
+      end
+      # The page's document committed, of opener policy `coop` — the one place every commit goes through (a response's, an
+      # about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context group is left
+      # for a new one where needed: its navigation's enforcement result's switch, the one its responses made
+      # (`@coop_switch_due`, `enforce_coop`), or, of a document no response enforced made, its own policy against the
+      # document it replaces. (…`opaque` its origin a new opaque one: an error document's)
+      private def commit_coop(coop, opaque)
+        due, @coop_switch_due = @coop_switch_due, nil
+        if due.nil? && !(coop == 'unsafe-none' && @page_coop.to_s.match?(/\A(unsafe-none)?\z/))
+          origin = opaque ? 'null' : (@current_url.to_s.match?(ABOUT_BLANK) ? @creator&.fetch(:origin) : url_origin(@current_url)).to_s
+          initial = @runtime.realm_call(0, '__csimInitialAboutBlank') == true
+          due = Native.coop_switch(initial, document_origin(0).to_s, @page_coop || 'unsafe-none', origin, coop)
+        end
+        leave_browsing_context_group if due
+        @page_coop = coop
       end
       # The page's browsing context group left for a new one (HTML "obtain a browsing context to use for a navigation
       # response"): the next document a new browsing context's, of a group of its own — named anew, which its realms are
@@ -12335,6 +12382,7 @@ module Capybara
       # `forget_page_openings`), of the group the page leaves, which they keep (v8_runtime.rb `window_group`).
       private def leave_browsing_context_group
         @runtime.call('__csimForgetPageOpenings')
+        @runtime.page_left_group!
         @browsing_context_group = "g#{object_id}.#{@group_seq = @group_seq.to_i + 1}"
       end
       private def cross_origin_isolated_response?
@@ -12368,8 +12416,9 @@ module Capybara
         # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
         # its creator's policy container, the policies with it)
         @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
-        # (…and its opener policy, what a navigation of the page after is judged by: `coop_switch?`)
-        @page_coop = @current_url.to_s.match?(ABOUT_BLANK) ? 'unsafe-none' : response_coop(@last_response_headers)
+        # (…and its opener policy, what a navigation of the page after is judged by — the page's browsing context group left
+        # for a new one where it needs: `commit_coop`)
+        commit_coop(@current_url.to_s.match?(ABOUT_BLANK) ? 'unsafe-none' : response_coop(@last_response_headers), opaque_origin) unless initial
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         @runtime.rebuild_ctx

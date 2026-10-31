@@ -822,7 +822,7 @@ impl Traversable {
 pub(crate) struct SessionHistory {
     id: u64,
     traversable: Arc<Mutex<Traversable>>,
-    owned: bool,
+    owned: std::cell::Cell<bool>,
 }
 
 static HISTORIES: LazyLock<Mutex<(u64, HashMap<u64, Weak<Mutex<Traversable>>>)>> = LazyLock::new(Default::default);
@@ -832,7 +832,7 @@ fn histories() -> MutexGuard<'static, (u64, HashMap<u64, Weak<Mutex<Traversable>
 
 impl Drop for SessionHistory {
     fn drop(&mut self) {
-        if !self.owned {
+        if !self.owned.get() {
             return;
         }
         histories().1.remove(&self.id);
@@ -852,12 +852,25 @@ impl SessionHistory {
         registry.0 += 1;
         let id = registry.0;
         registry.1.insert(id, Arc::downgrade(&traversable));
-        SessionHistory { id, traversable, owned: true }
+        SessionHistory { id, traversable, owned: std::cell::Cell::new(true) }
     }
     // SessionHistory.of(id) -> a handle on the session history numbered `id`, nil where it is gone.
     fn of(id: u64) -> Option<Self> {
         let traversable = histories().1.get(&id)?.upgrade()?;
-        Some(SessionHistory { id, traversable, owned: false })
+        Some(SessionHistory { id, traversable, owned: std::cell::Cell::new(false) })
+    }
+    // A handle's ownership of the session history handed over: let go of by the one that had it (`release`, an isolate's
+    // window that leaves for a Browser of its own as its browsing context group switches — the traversable kept, its
+    // history and its session storage with it), taken by the one that is to keep it (#own!).
+    pub(crate) fn release(&self) {
+        self.owned.set(false);
+    }
+    fn own(&self) {
+        self.owned.set(true);
+    }
+    // #session_storage -> its session storage shed (`session_storage`).
+    fn session_storage(&self) -> u64 {
+        self.lock().session_storage
     }
     fn lock(&self) -> MutexGuard<'_, Traversable> {
         self.traversable.lock().unwrap_or_else(PoisonError::into_inner)
@@ -1263,6 +1276,8 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("by_web_content=", method!(SessionHistory::set_by_web_content, 1))?;
     class.define_method("popup_sandbox=", method!(SessionHistory::set_popup_sandbox, 1))?;
     class.define_method("session_storage=", method!(SessionHistory::set_session_storage, 1))?;
+    class.define_method("session_storage", method!(SessionHistory::session_storage, 0))?;
+    class.define_method("own!", method!(SessionHistory::own, 0))?;
     class.define_method("closing?", method!(SessionHistory::is_closing, 0))?;
     class.define_method("take_close", method!(SessionHistory::take_close, 0))?;
     class.define_method("plan_navigation", method!(SessionHistory::plan_navigation_for_ruby, 8))?;

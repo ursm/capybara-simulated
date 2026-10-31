@@ -8,7 +8,7 @@
 // and the key its origin is matched by (`originKey`), which for an opaque origin is the realm's own unless it inherited
 // one. The realm's for as long as it lives: a page load sets each anew.
 
-use crate::dom::{dom, nid_arg, realm, realm_id, register, NodeId, RealmArena};
+use crate::dom::{nid_arg, realm, realm_id, register, NodeId, RealmArena};
 
 pub(crate) struct RealmLocation {
     parts: [String; 11],
@@ -25,6 +25,11 @@ pub(crate) struct RealmLocation {
     // owner's, a shared or service one's its own.
     origin_keyed: bool,
     cluster_key: Option<String>,
+    // The browsing context group its window is of, and its window's own name (`setBrowsingContextGroup`): the page's, or
+    // a window's `window.open` made in the isolate — one its page left since keeping its own (v8_runtime.rb
+    // `window_group`) — which its agent cluster is keyed by and a name it looks up is found in (navigables.rs
+    // `find_navigable`).
+    pub(crate) group: (String, String),
 }
 
 const HREF: usize = 0;
@@ -48,6 +53,7 @@ impl Default for RealmLocation {
             sandbox: 0,
             origin_keyed: false,
             cluster_key: None,
+            group: Default::default(),
         }
     }
 }
@@ -493,17 +499,19 @@ fn agent_cluster_key_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
     let key = agent_cluster_key(scope, cid);
     rv.set(v8::String::new(scope, &key).unwrap().into());
 }
-// …realm `cid`'s, in its isolate's browsing context group.
+// …realm `cid`'s, in its window's browsing context group.
 pub(crate) fn agent_cluster_key(scope: &mut v8::PinScope<'_, '_>, cid: i32) -> String {
-    let (group, window) = dom(scope).browsing_context_group.clone();
-    realm(scope, cid).location.agent_cluster_key(cid, (&group, &window))
+    let location = &mut realm(scope, cid).location;
+    let (group, window) = location.group.clone();
+    location.agent_cluster_key(cid, (&group, &window))
 }
-// __dom.setBrowsingContextGroup(group, window) — the browsing context group of the isolate's window (its realms', its
-// frames' and pop-ups' that share it: a window the session opens, or one opened with no opener, is a new one), and
-// the window's own name.
+// __dom.setBrowsingContextGroup(group, window) — the browsing context group of the calling realm's window (the page's,
+// its frames' and its pop-ups' that share it: a window the session opens, or one opened with no opener, is a new one),
+// and the window's own name.
 fn set_browsing_context_group(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let (group, window) = (args.get(0).to_rust_string_lossy(scope), args.get(1).to_rust_string_lossy(scope));
-    dom(scope).browsing_context_group = (group, window);
+    let cid = realm_id(scope, &args);
+    realm(scope, cid).location.group = (group, window);
 }
 
 // __dom.locationPart(part) -> the realm's URL's part number `part` (url_ops.rs `parts`' order) — its origin the one a

@@ -592,6 +592,15 @@ impl RealmArena {
         }
     }
     // (…HTML's opener browsing context is the browsing context's, null once disowned whatever document it shows next)
+    // The window realm `realm`'s document is of let go of the session history it owns, which a Browser of its own takes as
+    // the window leaves this isolate (browser.rb `hand_over_window_traversable`) — kept here, unowned, until the window's
+    // discard lets it go.
+    pub(crate) fn release_window_history(&mut self, realm: i32) {
+        let key = self.window_key(realm);
+        if let Some(history) = self.navigables.window_histories.get(&key) {
+            history.release();
+        }
+    }
     // The page's browsing context left for another group (HTML "obtain a browsing context to use for a navigation
     // response", a cross-origin opener policy's switch): the windows its documents opened have no opener from then on —
     // that browsing context discarded, whose WindowProxy none of theirs reaches (browser.rb `leave_browsing_context_group`).
@@ -836,9 +845,13 @@ impl RealmArena {
         // targeting-cross-origin-nested-browsing-contexts.html)
         let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
         // (…none closing: its `close()` takes it out of every lookup by name at once, its discard a task later)
+        // (…and none of another browsing context group: HTML's search is of the group's set — a pop-up whose opener's page
+        // left the group for another, a cross-origin opener policy's switch, is no window that page's names find, nor it
+        // the page's)
+        let group = |r: i32| self.realm_state(r).map(|s| &s.location.group.0);
         let windows = std::iter::once(0)
             .chain(self.navigables.windows.iter().copied())
-            .filter(|&w| w != top && !self.is_dropped(w) && !self.navigables.closed.contains(&self.window_key(w)));
+            .filter(|&w| w != top && !self.is_dropped(w) && !self.navigables.closed.contains(&self.window_key(w)) && group(w) == group(top));
         let reachable = |w: i32| !sandboxed || self.opener_now(self.window_key(w)) == Some(current);
         for window in windows.filter(|&w| reachable(w)) {
             match self.find_in(window, None, name) {
@@ -1219,6 +1232,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "closeWindow", close_window, context_id);
     crate::dom::register(scope, ns, "closeAllowed", close_allowed_op, context_id);
     crate::dom::register(scope, ns, "forgetPageOpenings", forget_page_openings_op, context_id);
+    crate::dom::register(scope, ns, "releaseWindowHistory", release_window_history_op, context_id);
     crate::dom::register(scope, ns, "discardWindow", discard_window, context_id);
     crate::dom::register(scope, ns, "windowClosed", window_closed, context_id);
     crate::dom::register(scope, ns, "windowOpener", window_opener, context_id);
@@ -1552,6 +1566,11 @@ fn close_allowed_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
     let (Some(source), Some(target)) = (args.get(0).int32_value(scope), args.get(1).int32_value(scope)) else { return rv.set_bool(false) };
     let cid = realm_id(scope, &args);
     rv.set_bool(crate::dom::realm(scope, cid).close_allowed(source, target));
+}
+// __dom.releaseWindowHistory() — `release_window_history` of the calling realm's window.
+fn release_window_history_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).release_window_history(cid);
 }
 // __dom.forgetPageOpenings() — `forget_page_openings`.
 fn forget_page_openings_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

@@ -644,7 +644,7 @@ module Capybara
       end
 
       # A window `window.open` made in `host`'s isolate whose navigation response, at `url`, needs a browsing context group
-      # switch (Browser#coop_switch?): the browsing context it was discarded — its document unloaded, the opener's
+      # switch (Browser#enforce_coop): the browsing context it was discarded — its document unloaded, the opener's
       # WindowProxy of it `closed`, its own `opener` none — and the window a new browsing context of a group of its own, a
       # Browser of its own: its handle the same, its name and its sandboxing kept, the document it makes the response's
       # (`response` its status and headers, `body`, `made` the request's Referer and policy). HTML "obtain a browsing
@@ -653,13 +653,14 @@ module Capybara
         entry = @aux_windows.find {|w| w[:window].is_a?(RealmWindow) && w[:window].host.equal?(host) && w[:window].realm == realm } or return
         aux = build_window_browser
         aux.window_handle = entry[:handle]
-        aux.window_name = host.window_realm_name(realm)
-        aux.traversable.by_web_content = true
-        aux.traversable.popup_sandbox = host.window_realm_sandbox(realm)
+        # (…its traversable the window's still — its session history, its name, its session storage, the sandboxing its
+        # documents are made with: a switch replaces the browsing context, not the traversable — the Browser's from now on)
+        traversable = host.hand_over_window_traversable(realm) || aux.traversable
+        traversable.by_web_content = true
         host.close_window_realm(entry[:window].key)
         entry[:window] = aux
         window_browsers.each {|b| b.fill_blob_markers unless b.equal?(aux) }
-        aux.adopt_navigation_response(url, response, body, referrer: made[:referrer], referrer_policy: made[:referrer_policy])
+        aux.adopt_navigation_response(url, response, body, referrer: made[:referrer], referrer_policy: made[:referrer_policy], traversable: traversable)
         nil
       end
 
