@@ -337,6 +337,10 @@ pub(crate) const STATE_INITIAL_ABOUT_BLANK: u32 = 1 << 23;
 // its `pagehide`): the bindings' to note (`__csimHideDocument`), and to clear where the document is renewed for the next
 // one its Window is kept for (dom-nodes.js `__csimRenewDocument`).
 pub(crate) const STATE_HIDDEN: u32 = 1 << 24;
+// …and that its page is showing (HTML "page showing"): set as "the end" of its parse fires `pageshow` (`reactivate`, the
+// other place HTML sets it, unmodeled), reset as "unload a document" fires `pagehide` — which none is fired of, nor is it
+// hidden, where it was never shown: an initial about:blank, which no parse ends, or a document left before its load.
+pub(crate) const STATE_PAGE_SHOWING: u32 = 1 << 25;
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward

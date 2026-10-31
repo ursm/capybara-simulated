@@ -3368,6 +3368,20 @@ html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsi
 - Accessing child browsing contexts 3
 html/browsers/the-window-object/accessing-other-browsing-contexts/indexed-browsing-contexts-03.html:
 - Indexed child browsing contexts
+# IN SCOPE, against the test: it waits for a `pagehide` at a window `window.open()` made, closed while at its initial
+# about:blank ("const openee = window.open(); ... openee.onpagehide = t.step_func(...); openee.close();" —
+# self-et-al.window.js's `otherW` alike), which never comes. Current HTML "unload a document" step 10 fires it only
+# where the page is showing: "If oldDocument's page showing is true: Set oldDocument's page showing to false. Fire a
+# page transition event named pagehide at oldDocument's relevant global object ... Update the visibility state of
+# oldDocument to "hidden"." — and "page showing" is "initially false", set true only in parsing's "the end" ("Set the
+# Document's page showing to true") and in "reactivate", neither of which an initial about:blank goes through; its
+# `unload` fires. The text is not withdrawn, and no open whatwg/html issue proposes changing it (searched "pagehide",
+# "page showing", "initial about:blank pagehide" on 2026-10-31). Chrome and Firefox fire it (measured 2026-10-31);
+# the user ruled for the text over them. Re-check when the test or the text changes.
+html/browsers/the-window-object/close-method.window.js:
+- "[harness] TIMEOUT"
+- window.close() affects name targeting immediately
+- window.close() queues a task to discard, but window.closed knows immediately
 html/browsers/the-window-object/length-attribute.window.js:
 - Window object's length IDL attribute (and named access)
 html/browsers/the-window-object/named-access-on-the-window-object/cross-origin-named-access.sub.html:
@@ -3612,9 +3626,23 @@ html/browsers/the-window-object/open-close/open-features-tokenization-width-heig
 html/browsers/the-window-object/security-window/window-security.https.html:
 - A SecurityError exception must be thrown when window.onmousewheel is accessed from
   a different origin.
+# IN SCOPE, against the test: it waits for a `pagehide` at a window `window.open()` made, closed while at its initial
+# about:blank ("const openee = window.open(); ... openee.onpagehide = t.step_func(...); openee.close();" —
+# self-et-al.window.js's `otherW` alike), which never comes. Current HTML "unload a document" step 10 fires it only
+# where the page is showing: "If oldDocument's page showing is true: Set oldDocument's page showing to false. Fire a
+# page transition event named pagehide at oldDocument's relevant global object ... Update the visibility state of
+# oldDocument to "hidden"." — and "page showing" is "initially false", set true only in parsing's "the end" ("Set the
+# Document's page showing to true") and in "reactivate", neither of which an initial about:blank goes through; its
+# `unload` fires. The text is not withdrawn, and no open whatwg/html issue proposes changing it (searched "pagehide",
+# "page showing", "initial about:blank pagehide" on 2026-10-31). Chrome and Firefox fire it (measured 2026-10-31);
+# the user ruled for the text over them. Re-check when the test or the text changes.
 html/browsers/the-window-object/self-et-al.window.js:
+- "[harness] TIMEOUT"
 - iframeWindow.globalThis before and after removal
+- popupWindow.frames before, after closing, and after discarding
 - popupWindow.globalThis before, after closing, and after discarding
+- popupWindow.self before, after closing, and after discarding
+- popupWindow.window before, after closing, and after discarding
 html/browsers/the-window-object/window-aliases.html:
 - frames should be the global object
 html/browsers/the-window-object/window-indexed-access-vs-named-access.html:

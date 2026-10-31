@@ -100,18 +100,18 @@ RSpec.describe 'the load of a pop-up' do
     expect(read('[window.seen, w.foo]')).to eq(['43,43', 43])
   end
 
-  # (…its initial about:blank unloaded all the same, as the Window the next document keeps hears: its `pagehide`, its
-  # `visibilitychange`, its `unload` — Chrome and Firefox, measured 2026-10-31, and WPT close-method.window.js, which a
-  # `pagehide` of an `open()` window's closes; HTML's "unload a document" fires the first two only where the page is
-  # showing, which no parse made an initial about:blank — the next document visible all the same, a new one's)
-  it 'unloads the initial about:blank whose Window the next document keeps, which is visible' do
+  # (…its initial about:blank unloaded all the same, never shown: its `unload` alone, as the Window the next document
+  # keeps hears — HTML "unload a document" fires `pagehide` and hides the document only where its page is showing, which
+  # only "the end" of a parse (or a reactivation) makes it; Chrome and Firefox fire all three, measured 2026-10-31 — the
+  # next document visible)
+  it 'fires the unload alone of the initial about:blank whose Window the next document keeps, which is visible' do
     run(<<~JS)
       window.heard = [];
       window.w = open('/reads');
       for (const type of ['pagehide', 'visibilitychange', 'unload']) w.addEventListener(type, () => heard.push(type));
     JS
     probe = '[window.seen, heard, w.document.visibilityState, w.document.hidden]'
-    expect(read(probe)).to eq([',', %w[pagehide visibilitychange unload], 'visible', false])
+    expect(read(probe)).to eq([',', %w[unload], 'visible', false])
   end
 
   # (…as a browser's one event loop does: the opener's listener, put on the Window first, runs first, in the load's own

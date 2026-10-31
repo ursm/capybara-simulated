@@ -76,6 +76,19 @@ WICG_OUT = {
 # rule 1 ("Unratified specs default OUT"). Map: rel => reason.
 PROPOSAL_OUT = {}.freeze
 
+# …a `pagehide` an initial about:blank never fires: what close-method.window.js and self-et-al.window.js wait for.
+PAGEHIDE_OF_INITIAL_ABOUT_BLANK =
+  'IN SCOPE, against the test: it waits for a `pagehide` at a window `window.open()` made, closed while at its initial ' \
+  'about:blank ("const openee = window.open(); ... openee.onpagehide = t.step_func(...); openee.close();" — ' \
+  'self-et-al.window.js\'s `otherW` alike), which never comes. Current HTML "unload a document" step 10 fires it only ' \
+  'where the page is showing: "If oldDocument\'s page showing is true: Set oldDocument\'s page showing to false. Fire a ' \
+  'page transition event named pagehide at oldDocument\'s relevant global object ... Update the visibility state of ' \
+  'oldDocument to "hidden"." — and "page showing" is "initially false", set true only in parsing\'s "the end" ("Set the ' \
+  'Document\'s page showing to true") and in "reactivate", neither of which an initial about:blank goes through; its ' \
+  '`unload` fires. The text is not withdrawn, and no open whatwg/html issue proposes changing it (searched "pagehide", ' \
+  '"page showing", "initial about:blank pagehide" on 2026-10-31). Chrome and Firefox fire it (measured 2026-10-31); the ' \
+  'user ruled for the text over them. Re-check when the test or the text changes.'
+
 # In-scope files whose failures are the driver following the spec's CURRENT text where the test asserts otherwise, and
 # the text is not withdrawn — so no earned out-of-scope (CLAUDE.md rule 1, case 3, needs a withdrawn text), but no
 # backlog to chase either until one of the two changes. Each note is written above its file's entry in the in-scope
@@ -89,7 +102,9 @@ IN_SCOPE_NOTES = {
     'task ... to navigate to a javascript: URL"), and "navigate to a javascript: URL" step 2 returns: "If ' \
     'targetNavigable\'s ongoing navigation is no longer navigationId, then return." So the second ends the first, which ' \
     'runs nothing. The text is not withdrawn (whatwg/html#2590 is open); the user ruled for the text over Chrome and ' \
-    'Firefox. Re-check when the test or the text changes.'
+    'Firefox. Re-check when the test or the text changes.',
+  'html/browsers/the-window-object/close-method.window.js' => PAGEHIDE_OF_INITIAL_ABOUT_BLANK,
+  'html/browsers/the-window-object/self-et-al.window.js' => PAGEHIDE_OF_INITIAL_ABOUT_BLANK
 }.freeze
 
 files = WptRunner.test_files

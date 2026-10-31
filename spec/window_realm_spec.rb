@@ -39,7 +39,8 @@ RSpec.describe 'same-isolate window realms' do
 
     # …closing at once, its close a task of its event loop (HTML "close a top-level traversable"): its document asked
     # whether it may be unloaded and unloaded after the closing script's task, its browsing context then discarded — no
-    # `opener` — and no name finding it meanwhile. (Chrome: beforeunload with `closed` true, pagehide, unload.)
+    # `opener` — and no name finding it meanwhile. (Chrome: beforeunload with `closed` true, pagehide, unload. Its initial
+    # about:blank, which no parse ended, was never shown: no `pagehide` — HTML "unload a document" step 10.)
     it 'closes as a task of its own: prompted and unloaded after the closing task, then discarded' do
       s.execute_script(<<~JS)
         window.log = [];
@@ -51,7 +52,7 @@ RSpec.describe 'same-isolate window realms' do
         log.push('closed:' + w.closed);
         window.v = window.open('', 'nm');
       JS
-      expect(s.evaluate_script('[log, w.opener, v === w, v.closed]')).to eq([['closed:true', 'beforeunload:true', 'pagehide:true:true', 'unload'], nil, false, false])
+      expect(s.evaluate_script('[log, w.opener, v === w, v.closed]')).to eq([['closed:true', 'beforeunload:true', 'unload'], nil, false, false])
     end
 
     # The window is the same one across a navigation of its own, which replaces its realm: a reference held from before it
