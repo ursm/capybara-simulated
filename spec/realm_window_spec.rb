@@ -305,16 +305,65 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       .to eq(['1', nil, nil])
   end
 
-  it 'closes with the window that hosts it, its document unloaded' do
-    host = session.open_new_window
-    session.within_window(host) do
+  # (…its isolate kept for it, the opener's window gone: WPT opener-closed.html — its `opener` none then — and let go of
+  # with it)
+  it 'outlives the window that opened it, its opener none then' do
+    host  = session.open_new_window
+    popup = session.within_window(host) do
       session.visit('/')
-      session.execute_script("window.w = window.open(); w.onunload = () => localStorage.setItem('unloaded', '1');")
+      session.window_opened_by { session.execute_script("window.open().document.write('<p id=second>SECOND</p>')") }
     end
-    expect(session.windows.size).to eq(3)
     host.close
-    expect(session.windows.size).to eq(1)
-    expect(session.evaluate_script("localStorage.getItem('unloaded')")).to eq('1')
+    expect(session.windows.size).to eq(2)
+    session.within_window(popup) do
+      expect(session).to have_css('#second')
+      expect(session.evaluate_script('window.opener')).to be_nil
+    end
+    popup.close
+    expect([session.windows.size, session.driver.window_browsers.size]).to eq([1, 1])
+  end
+
+  # (…HTML's entry settings object: the realm a dispatch enters for its listener — navigables.rs `entryRealm` — not the
+  # window's whose Location it is, at its about:blank of its opener's base all the same: /dir/next, not /next)
+  it "is navigated by a listener of its opener's to a URL resolved against the opener's document" do
+    session.visit('/dir/page')
+    session.execute_script(<<~JS)
+      window.w = window.open();
+      w.location = '/form';
+    JS
+    session.within_window(session.windows.last) { expect(session).to have_title('form') }
+    session.execute_script("addEventListener('custom', () => { w.location.href = 'next'; }); dispatchEvent(new Event('custom'));")
+    session.within_window(session.windows.last) { expect(session).to have_current_path('/dir/next') }
+  end
+
+  # (…a form of its opener's posted to it by its name, a traversal back to that entry posting again: its entry's
+  # resource — session_history.rs `commitWindowEntry`)
+  it 'posts again for a traversal back to an entry a form posted to it' do
+    session.execute_script("window.w = window.open('', 'named'); w.location = '/second';")
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<form target=named method=post action=/posted><input name=k value=v></form>');
+      document.forms[0].submit();
+    JS
+    session.within_window(session.windows.last) do
+      expect(session).to have_text('POST k=v')
+      session.go_back
+      expect(session).to have_css('#second')
+      session.go_forward
+      expect(session).to have_text('POST k=v')
+    end
+  end
+
+  # (…a navigation to a javascript: URL its ongoing one until its task runs: one planned before it aborted, one after it
+  # aborting it — HTML "navigate to a javascript: URL", navigation_plan.rs `planJavascript`)
+  it 'runs a javascript: URL its opener navigates it to in place of the navigation planned before it, none planned after' do
+    session.execute_script("window.w = window.open(); w.location = '/second';")
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    session.execute_script("w.location = '/third'; w.location = 'javascript:document.title = \"ran\"'")
+    expect(session.evaluate_script('[w.document.title, w.location.pathname]')).to eq(['ran', '/second'])
+    session.execute_script("w.location = 'javascript:document.title = \"again\"'; w.location = '/third'")
+    session.within_window(session.windows.last) { expect(session).to have_css('#third') }
+    expect(session.evaluate_script('w.document.title')).to eq('third')
   end
 
   it 'is the opener of a pop-up it opens at a URL' do

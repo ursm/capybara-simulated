@@ -2999,10 +2999,10 @@ module Capybara
       # on every DOM mutation / URL change (see __settleGen wiring),
       # so this only short-circuits genuinely idle loops.
       def polling?
-        # Background-thread work (workers, EventSource, MessageBus
-        # long-poll) keeps the settle loop alive even when settle_gen
-        # is otherwise idle.
-        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+        # Background-thread work (workers, EventSource, MessageBus long-poll, an image a document's load waits for — a
+        # pop-up's, whose opener's `w.onload` a wait is for) keeps the settle loop alive even when settle_gen is otherwise
+        # idle.
+        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
         # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
@@ -5010,7 +5010,7 @@ module Capybara
         # run in the creating context's partition, not the blob's. Deliver an error so
         # Worker/SharedWorker fires `onerror`, and spawn no thread. The handle is still
         # >0 so the JS registers the worker and the queued __error reaches it.
-        if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self)
+        if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self, realm_id.to_i)
           return worker_fail(handle, 'Worker creation from a cross-partition blob URL is blocked')
         end
         inbox  = Thread::Queue.new
@@ -5088,6 +5088,9 @@ module Capybara
         record[:script_body] = body if service
         # (…and its type, which the destination of the imports the Update probes is of)
         record[:module] = script_type.to_s == 'module' if service
+        # (…its storage partition its owner document's — a nested worker's its parent's — as it was made: blob_rules.rs
+        # `partition_site`)
+        record[:partition] = parent_worker ? @workers.dig(parent_worker, :partition) : blob_partition_site(realm_id.to_i)
         # (…a dedicated worker's site for cookies its owner document's, kept as it was made — HTML's worker settings —
         # which its fetches, on its own thread, are judged by; a nested worker's its parent's)
         unless service
@@ -7490,6 +7493,8 @@ module Capybara
       def window_realm_gen = @runtime.window_gen
       def window_realms_changed = @runtime.window_realms_changed
       private def window_realm_made(key) = @runtime.window_realm_meta.find {|_, meta| meta[:window_key] == key }&.first
+      # …the number of its top-level traversable (session_history.rs `traversableId`).
+      def window_realm_traversable(realm) = @runtime.realm_direct_call(realm, '__csimTraversableId').to_i
       # Its URL and its title: its document's.
       def window_realm_url(realm)   = @runtime.realm_call(realm, '__csimLocationHref').to_s
       def window_realm_title(realm) = @runtime.realm_call(realm, '__csimDocumentTitle').to_s
@@ -7861,6 +7866,12 @@ module Capybara
       # discarded, which the driver does between calls (Driver#reap_closed_windows), none of this window's on the stack.
       private def close_steps
         prompt_page_to_unload
+        close!
+      end
+      # …and the user's close of it (Capybara's `Window#close`, Driver#close_window): its page not asked — the driver an
+      # accepting user — its document unloaded and its traversable closed at once (HTML "close a top-level traversable"),
+      # what a window its script opened reads of its opener after (navigables.rs `opener_now`).
+      def close!
         fire_document_teardown
         @session_history.close!
         @discard_due = true
@@ -8633,21 +8644,15 @@ module Capybara
       # URLs in.
       attr_reader :blob_window
 
-      # A blob URL a context of this window made (its entry the context entered in the registry): its STORAGE
-      # PARTITION (this window's top-level site) recorded beside it (blob_registry.rs `set_site`), so another window
-      # resolves or revokes it only from the same partition (blob URL partitioning) — the window that made it found by
-      # its registry, its bytes read back from wherever they live (its isolate).
-      def blob_register(url)
-        Native.blob_registry_set_site(@blob_window, url.to_s, blob_partition_site)
-        nil
-      end
+      # The storage partition of the blob URLs the document of realm `realm` makes and resolves (blob_rules.rs
+      # `partition_site`): its top-level traversable's site — a frame's its page's or its window's, a window `window.open`
+      # made in this isolate its own — '' for an opaque one; a worker's its owner document's (its record's).
+      def blob_partition_site(realm = 0)
+        if (record = Thread.current[:csim_worker_record])
+          return record[:partition].to_s
+        end
 
-      # The SITE (scheme + registrable domain, the engine's: `registrable_site`) of this window's top-level document —
-      # what storage partitioning keys a blob URL on: its creator's top-level site, so a same-origin iframe embedded in a
-      # cross-site top-level context is a DIFFERENT partition and can't reach the blob. A blob: document derives from its
-      # inner origin; data:/about: (no host) '' (an opaque origin, never same-partition with a real one).
-      def blob_partition_site
-        registrable_site(@current_url) || ''
+        @runtime.realm_direct_call(realm.to_i, '__csimBlobPartitionSite').to_s
       end
 
       # The blob a `blob:` URL names now — wherever the window that made it is (its partition's) — as `{bytes:, type:}`, or
@@ -8664,14 +8669,14 @@ module Capybara
       rescue StandardError
         nil
       end
-      # A blob URL another window of this session made, as a context of this window resolves it (`resolveBlobBytes`): its
-      # blob, `{'bytes' => …, 'type' => …}`, where the maker's storage partition is this window's — the same top-level
-      # site (File API "check for same-partition blob URL usage"; the origin the bindings checked) — nil otherwise: the
-      # maker window's registry's bytes (`blob_shared?` had them entered), else its isolate's — which a worker's thread
-      # cannot reach.
-      def partition_blob(url)
-        maker, site = Native.blob_registry_partition(@blob_window, url.to_s)
-        return nil unless maker && maker != @blob_window && site == blob_partition_site
+      # A blob URL another window of this session made, as a context of this window of the storage partition `site`
+      # resolves it (`resolveBlobBytes`): its blob, `{'bytes' => …, 'type' => …}`, where the maker's storage partition is
+      # that one — the same top-level site (File API "check for same-partition blob URL usage"; the origin the bindings
+      # checked) — nil otherwise: the maker window's registry's bytes (`blob_shared?` had them entered), else its
+      # isolate's — which a worker's thread cannot reach.
+      def partition_blob(url, site)
+        maker, made_in = Native.blob_registry_partition(@blob_window, url.to_s)
+        return nil unless maker && maker != @blob_window && made_in == site.to_s
 
         if (entry = Native.blob_registry_get(maker, url.to_s))
           return {'bytes' => entry[0], 'type' => entry[1]}
@@ -8699,7 +8704,7 @@ module Capybara
         return nil unless theirs.nil? || theirs == origin.(worker_url)
 
         maker, site = Native.blob_registry_partition(@blob_window, url)
-        return nil unless maker && (maker == @blob_window || site == blob_partition_site)
+        return nil unless maker && site == blob_partition_site
 
         Native.blob_registry_get(maker, url)
       end
@@ -8748,9 +8753,10 @@ module Capybara
       # same-partition one invalidates the blob in the MAKER's isolate too so every
       # window stops resolving it (the blob may have been created in another window).
       # (Context-teardown revokes go through revoke_owned_blobs, not here.)
-      def blob_unregister(url)
-        maker, site = Native.blob_registry_partition(@blob_window, url.to_s)
-        return nil if site && site != blob_partition_site
+      # (…`site` the storage partition of the context revoking it: blob_rules.rs `partition_site`)
+      def blob_unregister(url, site)
+        maker, made_in = Native.blob_registry_partition(@blob_window, url.to_s)
+        return nil if made_in && made_in != site.to_s
         @driver.drop_blob_in_window(maker, url.to_s, self) if maker && maker != @blob_window && @driver.respond_to?(:drop_blob_in_window)
         drop_local_blob(url)
         nil
@@ -8874,7 +8880,7 @@ module Capybara
         # `worker_pending?` true forever).
         busy_held = false
         # Tag this thread so blob URLs created by the worker's script are owned by
-        # this handle and revoked on terminate (see blob_register / revoke_worker_blobs).
+        # this handle and revoked on terminate (see blob.js `createObjectURL` / revoke_worker_blobs).
         Thread.current[:csim_worker_handle] = handle
         # …and with its record, whose site for cookies its fetches are judged by (rack_fetch's `FetchPlan`): a navigation
         # removes the registry's entry without waiting for the thread, and a fetch still in flight is the worker's all the
@@ -9037,6 +9043,8 @@ module Capybara
         if record
           record[:agent_owner] = Native.agent_owner_new
           rt.eval_void("globalThis.__dom.realmIdentify('agentOwner', #{record[:agent_owner]});")
+          # (…and its storage partition, its owner document's: what the blob URLs it makes and resolves are of)
+          rt.eval_void("globalThis.__dom.realmIdentify('partition', #{JSON.generate(record[:partition].to_s)});") if record[:partition]
         end
         # A dedicated / shared worker is a service-worker CLIENT of its origin, and the host
         # registry already records it as 'client-worker-<handle>' (sw_note_worker_client). Seed
@@ -10385,13 +10393,25 @@ module Capybara
       # Each one's entry of the window's session history its document's (history.js `__csimCommitWindowEntry`): a
       # location's after the current one, or in its place; a reload's the current one; a traversal's the one it goes to.
       # (None asked for where no window was opened.)
+      # …and those the documents they made planned as they loaded — a pop-up's script navigating its opener, another
+      # window it opened — taken with them, up to `WINDOW_NAV_ROUNDS` rounds: a document that navigates itself as it
+      # loads, again and again, goes on at the next drain.
+      WINDOW_NAV_ROUNDS = 8
       def consume_pending_window_nav
         return if @runtime.window_realm_meta.empty?
 
-        @runtime.call('__csimTakeWindowNavigations').each do |realm_id, kind, *plan|
-          navigate_window_realm(realm_id, kind, plan)
-        rescue StandardError => e
-          log_console('warn', "window realm self-navigation failed: #{e.message}")
+        # (…a traversal a script queued that makes a window's document again applied first, as the page's are: its task's
+        # the host's now — history.js `__csimApplyWindowTraversals`)
+        @runtime.call('__csimApplyWindowTraversals')
+        WINDOW_NAV_ROUNDS.times do
+          navs = @runtime.call('__csimTakeWindowNavigations')
+          break if navs.empty?
+
+          navs.each do |realm_id, kind, *plan|
+            navigate_window_realm(realm_id, kind, plan)
+          rescue StandardError => e
+            log_console('warn', "window realm self-navigation failed: #{e.message}")
+          end
         end
       end
       # …one of them — or the driver's own, the user's (`by_user`: Capybara's `visit` / `refresh` in the window, which no
@@ -10407,15 +10427,17 @@ module Capybara
         when 'location'
           url, replace, initiator, source, policy, activated, blob = plan
           referred = source if initiator_document
-          entry    = [replace ? 'replace' : 'push']
+          how      = replace ? 'replace' : 'push'
         when 'reload'
-          activated, blob = plan
-          url   = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
-          entry = ['reload']
+          activated, blob, *resource = plan
+          url = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+          how = 'reload'
         when 'traverse'
-          step, url, referred = plan
-          entry = ['step', step]
+          step, url, referred, *resource = plan
+          how = 'step'
         end
+        # (…a reload's or a traversal's of a document a POST made, that POST again: its entry's resource)
+        post ||= [resource[0].to_s.b, resource[1].to_s] unless resource.nil? || resource.empty?
         initiator ||= realm_id unless by_user || initiator_document
         made = {}
         body, ctype = nil
@@ -10441,6 +10463,8 @@ module Capybara
 
           headers = resp['headers'] || {}
           response = [resp['status'], headers]
+          # (…its entry's resource the POST that made it — none where a redirect made it of another request)
+          post = nil if resp['url'] && resp['url'] != url
           body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
           made = {
             csp:             response_csp(headers),
@@ -10466,12 +10490,16 @@ module Capybara
           log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
           return
         end
+        # (…its entry of the window's session history: how it is made, the step a traversal goes to, a POST's resource)
+        entry = [how, step, (post if http_url?(url))]
         # (…the window's initial about:blank's realm the one a document of its origin is loaded into, its Window kept)
         new_id =
-          if kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp])
+          if kind == 'location' && @runtime.realm_call(realm_id, '__csimKeepsWindowFor', url.to_s, made[:csp], *made[:doc_origin])
             @runtime.reuse_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
           else
             made[:viewport] = @runtime.realm_call(realm_id, '__csimViewportSize')
+            # (…its name the one the window's next document keeps: window.js `__csimWindowNameFor`)
+            made[:window_name] = @runtime.realm_call(realm_id, '__csimWindowNameFor', url.to_s, *made[:doc_origin])
             @runtime.reload_window_realm(realm_id, url, body.to_s, ctype.to_s, entry: entry, **made)
           end
         return unless new_id

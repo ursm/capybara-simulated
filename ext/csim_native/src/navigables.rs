@@ -54,6 +54,10 @@ pub(crate) struct Navigables {
     // key: the page's until a window of its takes it, back with the page when that one closes.
     focused_child: HashMap<i32, u32>,
     system_focus: i32,
+    // The realm of the script the isolate runs now, which its callbacks are called in: HTML's entry realm — the realm of
+    // the most recently entered realm execution context ("prepare to run script"): a script the host evaluates in a
+    // realm's document, an event listener another realm's dispatch calls (events.js `invokeEntries`) — none between them.
+    entry: Option<i32>,
     // The target names of the top-level windows `window.open` made in this isolate — the page's is its session history's
     // (`history`: its number in session_history.rs `HISTORIES`, the host's to say, 0 none), held in its active document
     // state as HTML has it.
@@ -68,8 +72,9 @@ pub(crate) struct Navigables {
     // — and its realm now.
     window_keys: HashMap<i32, i32>,
     window_realms: HashMap<i32, i32>,
-    // …the realm whose document made each: its "one permitted sandboxed navigator", which may navigate it though its
-    // sandboxing lets it navigate no other top-level traversable — and its `opener`.
+    // …the browsing context whose document made each: its "one permitted sandboxed navigator", which may navigate it
+    // though its sandboxing lets it navigate no other top-level traversable — and its `opener` — a window's by its key,
+    // which outlives the documents it navigates to, a frame's or the page's by its realm (`opener_now`).
     openers: HashMap<i32, i32>,
     // …which a script may close, as no other top-level traversable (HTML "script-closable": one a script created), and
     // those it has: their proxies reporting them closed at once, stepped until the task the close queued discards them
@@ -483,6 +488,7 @@ impl RealmArena {
             nav.opened.insert(key);
             nav.window_histories.entry(key).or_insert_with(|| crate::session_history::SessionHistory::copying(opener_storage));
             if let Some(opener) = opener {
+                let opener = nav.window_keys.get(&opener).copied().unwrap_or(opener);
                 nav.openers.insert(key, opener);
             }
             if !nav.closed.contains(&key) {
@@ -538,8 +544,20 @@ impl RealmArena {
     }
     // The realm whose document opened window `key` in this isolate, None for none or for one its page disowned.
     pub(crate) fn window_opener(&self, key: i32) -> Option<i32> {
+        if self.navigables.disowned.contains(&key) { None } else { self.opener_now(key) }
+    }
+    // …the realm of the document the browsing context that opened it shows now — a window's, whichever document it
+    // navigated to since — None for one whose browsing context is gone: a window closed, a frame removed (HTML: the opener
+    // browsing context, discarded, is no WindowProxy's — WPT opener-closed.html).
+    fn opener_now(&self, key: i32) -> Option<i32> {
         let nav = &self.navigables;
-        if nav.disowned.contains(&key) { None } else { nav.openers.get(&key).copied() }
+        let opener = *nav.openers.get(&key)?;
+        match nav.window_realms.get(&opener) {
+            Some(&realm) => (!nav.lost.contains(&realm)).then_some(realm),
+            // (…the page's, its traversable closed: the isolate hosts the windows it opened still — Driver `@hosts`)
+            None if opener == 0 => (nav.history == 0 || !crate::session_history::closed(nav.history)).then_some(0),
+            None => (!self.is_dropped(opener) && !nav.lost.contains(&opener)).then_some(opener),
+        }
     }
     // (…the page's — key 0's — its traversable's (session_history.rs), which outlives its documents: HTML's opener
     // browsing context is the browsing context's, null once disowned whatever document it shows next)
@@ -763,21 +781,23 @@ impl RealmArena {
             }
         }
         // (…one a document sandboxed against navigation may not navigate is none it finds — a new window then, Chrome — but
-        // the window it made itself, whose permitted sandboxed navigator it is; and none it is not familiar with: a
-        // cross-origin popup's link naming its opener opens a new window, Firefox — Chrome navigates the opener, a Blink
-        // departure from the rules — judged against the window, where HTML judges the navigable the name finds: a
-        // same-origin frame of a window it is not familiar with is found by none here, a gap)
+        // the window it made itself, whose permitted sandboxed navigator it is; and none it is not familiar with, judged
+        // against the navigable the name finds: a cross-origin popup's link naming its opener opens a new window, Firefox
+        // — Chrome navigates the opener, a Blink departure from the rules — and a page's naming a frame of another origin
+        // in a pop-up it opened does too, the pop-up's own document of another origin as well: WPT
+        // targeting-cross-origin-nested-browsing-contexts.html)
         let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
         // (…none closing: its `close()` takes it out of every lookup by name at once, its discard a task later)
         let windows = std::iter::once(0)
             .chain(self.navigables.windows.iter().copied())
             .filter(|&w| w != top && !self.is_dropped(w) && !self.navigables.closed.contains(&self.window_key(w)));
-        let reachable = |w: i32| (!sandboxed || self.navigables.openers.get(&self.window_key(w)) == Some(&current)) && self.familiar_with(current, w, 0);
+        let reachable = |w: i32| !sandboxed || self.opener_now(self.window_key(w)) == Some(current);
         for window in windows.filter(|&w| reachable(w)) {
             match self.find_in(window, None, name) {
-                None => continue,
-                Some(Chosen::TopLevel(_)) => return Chosen::Window(window),
-                Some(found) => return found,
+                Some(Chosen::TopLevel(_)) if self.familiar_with(current, window, 0) => return Chosen::Window(window),
+                Some(found @ Chosen::Frame(Some(frame), _)) if self.familiar_with(current, frame, 0) => return found,
+                Some(found @ Chosen::Frame(None, (parent, _))) if self.familiar_with_frame_of(current, parent) => return found,
+                _ => continue,
             }
         }
         Chosen::None
@@ -802,6 +822,11 @@ impl RealmArena {
             return true;
         }
         depth < 8 && self.window_opener(self.window_key(b)).is_some_and(|opener| self.familiar_with(a, opener, depth + 1))
+    }
+    // …and with a frame of realm `parent`'s document that has none of its own yet: an ancestor of it — `parent`, or one
+    // of its ancestors — of `a`'s origin.
+    fn familiar_with_frame_of(&self, a: i32, parent: i32) -> bool {
+        self.same_origin(a, parent) || self.ancestor_realms(parent).iter().any(|&r| self.same_origin(a, r))
     }
     // Whether realms `a`'s and `b`'s documents are of one origin — by their keys, as far as they are known
     // (`RealmLocation::known_origin_key`, none made: a realm that shares an opaque origin was given its key as it did, so
@@ -830,7 +855,7 @@ impl RealmArena {
         if top_level && self.ancestor_realms(source).contains(&target) {
             return self.top_navigation_allowed(source);
         }
-        !self.sandboxed(source, crate::sandbox::NAVIGATION) || (top_level && self.navigables.openers.get(&self.window_key(target)) == Some(&source))
+        !self.sandboxed(source, crate::sandbox::NAVIGATION) || (top_level && self.opener_now(self.window_key(target)) == Some(source))
     }
     // HTML "allowed to download": whether a navigation realm `source`'s document makes (none: the driver's) to a response
     // that is a download may save it — refused where its sandboxing, or the target's, has the sandboxed downloads flag:
@@ -1147,6 +1172,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "discardWindow", discard_window, context_id);
     crate::dom::register(scope, ns, "windowClosed", window_closed, context_id);
     crate::dom::register(scope, ns, "windowOpener", window_opener, context_id);
+    crate::dom::register(scope, ns, "enterRealm", enter_realm, context_id);
+    crate::dom::register(scope, ns, "exitRealm", exit_realm, context_id);
+    crate::dom::register(scope, ns, "entryRealm", entry_realm, context_id);
     crate::dom::register(scope, ns, "disownOpener", disown_opener, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
@@ -1482,6 +1510,26 @@ fn window_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     rv.set_int32(if arena.opener_disowned(realm) { -2 } else { arena.window_opener(realm).unwrap_or(-1) });
+}
+// __dom.enterRealm(realm) -> the entry realm before — realm `realm`'s script about to run, the entry realm while it does
+// (`Navigables::entry`) — and __dom.exitRealm(before): it ran, the one before the entry realm again (-1 none).
+// __dom.entryRealm() -> the entry realm, -1 for none: the document whose URL a Location's `href` setter, `assign()` and
+// `replace()` parse theirs against (location.js `entryURL`).
+fn enter_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope);
+    let cid = realm_id(scope, &args);
+    let nav = &mut crate::dom::realm(scope, cid).navigables;
+    let before = std::mem::replace(&mut nav.entry, realm);
+    rv.set_int32(before.unwrap_or(-1));
+}
+fn exit_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let before = args.get(0).int32_value(scope).filter(|&r| r >= 0);
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).navigables.entry = before;
+}
+fn entry_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_int32(crate::dom::realm(scope, cid).navigables.entry.unwrap_or(-1));
 }
 // __dom.disownOpener(key) — the window's page set its `opener` to null (`disown_opener`).
 fn disown_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

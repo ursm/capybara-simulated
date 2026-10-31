@@ -39,9 +39,12 @@ const TEXT_FIELDS: [&str; 4] = ["origin", "referer", "referrer_policy", "referre
 // top-level one's `window.name`: HTML keeps it there, so a traversal brings it back) — its document's referrer, a
 // frame's, and its classic history API state and its document's persisted form state, serialized
 // (StructuredSerializeForStorage).
+// A POST's body and content type.
+pub(crate) type Post = (Arc<[u8]>, Option<String>);
+
 #[derive(Clone, Default)]
 struct Data {
-    post: Option<(Arc<[u8]>, Option<String>)>,
+    post: Option<Post>,
     // (…by `TEXT_FIELDS`)
     texts: [Option<String>; 4],
     cross_site: Option<bool>,
@@ -926,6 +929,11 @@ impl SessionHistory {
     pub(crate) fn queued_documents(&self) -> bool {
         self.lock().queued_documents()
     }
+    // The POST its current entry's document was made of, which a reload of it sends again — none for a GET's.
+    pub(crate) fn current_post(&self) -> Option<Post> {
+        let t = self.lock();
+        t.state.current_entry(TOP, t.build).and_then(|e| e.data.post.clone())
+    }
     // #last_token -> the token of the traversal queued last, 0 for none ever: those up to it were asked for by now.
     fn last_token(&self) -> u64 {
         self.lock().tokens
@@ -1026,6 +1034,11 @@ impl SessionHistory {
     // #opener = traversable: the window that opened it (HTML "create a new auxiliary browsing context").
     fn set_opener(&self, opener: &SessionHistory) {
         self.lock().opener = Some(opener.id);
+    }
+    // #opener_id = id: …a window `window.open` made in another's isolate, by its number (`traversableId`), which no
+    // Ruby object holds: one closed since — its traversable gone — opens none (`familiar`).
+    fn set_opener_id(&self, opener: u64) {
+        self.lock().opener = Some(opener);
     }
     // #disowned? -> whether its page disowned its opener.
     fn is_disowned(&self) -> bool {
@@ -1215,6 +1228,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("name=", method!(SessionHistory::set_name, 1))?;
     class.define_method("show", method!(SessionHistory::show, 0))?;
     class.define_method("opener=", method!(SessionHistory::set_opener, 1))?;
+    class.define_method("opener_id=", method!(SessionHistory::set_opener_id, 1))?;
     class.define_method("disowned?", method!(SessionHistory::is_disowned, 0))?;
     class.define_method("close!", method!(SessionHistory::close, 0))?;
     class.define_method("ask_close", method!(SessionHistory::ask_close, 1))?;
@@ -1763,6 +1777,10 @@ pub(crate) fn disown(id: u64) {
 pub(crate) fn disowned(id: u64) -> bool {
     known(id).is_some_and(|k| k.1)
 }
+// …and whether it closed: its page's browsing context discarded, which no opener of another window is then.
+pub(crate) fn closed(id: u64) -> bool {
+    histories().1.get(&id).and_then(Weak::upgrade).is_some_and(|t| lock(&t).closed)
+}
 
 // A message posted to a traversable — none to one closing or closed: a task queued after the close's, which destroys
 // the document it would run in first.
@@ -1792,6 +1810,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "historyLength", history_length_op, context_id);
     crate::dom::register(scope, ns, "historyTraverse", history_traverse_op, context_id);
     crate::dom::register(scope, ns, "applyWindowTraversal", apply_window_traversal_op, context_id);
+    crate::dom::register(scope, ns, "windowsTraversing", windows_traversing_op, context_id);
+    crate::dom::register(scope, ns, "traversableId", traversable_id_op, context_id);
     crate::dom::register(scope, ns, "commitWindowEntry", commit_window_entry_op, context_id);
     crate::dom::register(scope, ns, "windowHistoryUpdate", window_history_update_op, context_id);
     crate::dom::register(scope, ns, "traversableTraverse", traversable_traverse_op, context_id);
@@ -1983,6 +2003,26 @@ fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
+// __dom.traversableId() -> the number of the top-level traversable the calling realm's document is of — its page's, or
+// a window's `window.open` made in this isolate — 0 for none: a window another isolate's opens by it (browser.rb
+// `window_traversable_id`, SessionHistory#opener_id=).
+fn traversable_id_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let id = if of_page(arena, cid) { arena.navigables.history } else { arena.window_history(cid).map_or(0, |(h, _)| h.id) };
+    rv.set_double(id as f64);
+}
+// __dom.windowsTraversing() -> the realms of the windows `window.open` made in this isolate a traversal queued of which
+// makes a document again, its task still to apply it: what the host applies as the task that asked ends, as it does the
+// page's (history.js `__csimApplyWindowTraversals`).
+fn windows_traversing_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    let windows: Vec<i32> = arena.stepped_windows().into_iter().filter(|&w| arena.window_history(w).is_some_and(|(h, _)| h.queued_documents())).collect();
+    let items: Vec<v8::Local<v8::Value>> = windows.into_iter().map(|w| v8::Integer::new(scope, w).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
 // __dom.applyWindowTraversal(token) -> the traversal of `token`, and those queued before it (`Traversable::take_due`),
 // applied to the session history of the calling realm's window — one `window.open` made in this isolate — in order:
 // [window, url, state, hashchange, …] — the window's realm, whose document is moved (a frame's `history` traverses its
@@ -1990,7 +2030,7 @@ fn history_traverse_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
 // fragment changed (HTML "update document for history step application": its location the URL, then `popstate` with
 // the state, then a `hashchange`, which the bindings do); one that makes its document again planned in that document's
 // navigation plan (navigation_plan.rs `Traversal`), which the host takes as the task ends, those asked of it after it let
-// go. Null for a realm of no such window: the page's traversals are the host's to apply.
+// go. Null for a realm of no such window: the page's traversals are the host's to apply. (…token 0: every one queued)
 fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let token = args.get(0).number_value(scope).map_or(0, |n| n as u64);
     let cid = crate::dom::realm_id(scope, &args);
@@ -1999,7 +2039,8 @@ fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
     let mut planned = None;
     {
         let mut t = lock(&traversable);
-        for q in t.take_queued(token) {
+        let due = if token == 0 { t.take_all_queued() } else { t.take_queued(token) };
+        for q in due {
             let Some((step, changes)) = t.traversal(q.delta) else { continue };
             let from = t.state.current_entry(TOP, t.build).map(|e| e.url.clone()).unwrap_or_default();
             let Some((entry, same_document)) = changes.iter().find(|c| c.0 == TOP).and_then(|c| t.state.entry(c.1).map(|e| (e.clone(), c.2))) else {
@@ -2013,7 +2054,7 @@ fn apply_window_traversal_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Functio
                 continue;
             }
             let referrer = entry.data.text("referer").map(str::to_owned);
-            planned = Some(crate::navigation_plan::Traversal { step, url: entry.url, referrer });
+            planned = Some(crate::navigation_plan::Traversal { step, url: entry.url, referrer, post: entry.data.post.clone() });
             break;
         }
     }
@@ -2035,25 +2076,33 @@ fn fragment(url: &str) -> Option<&str> {
     url.split_once('#').map(|(_, f)| f)
 }
 
-// __dom.commitWindowEntry(url, how, step, referrer) -> the classic history API state the calling realm's
+// __dom.commitWindowEntry(url, how, step, referrer, body, contentType) -> the classic history API state the calling realm's
 // document — a window's of this isolate, made by a navigation of it — starts with: its window's session history told of
 // it. `how` "push" a navigation's entry after the current one, "replace" one in place of it (a `location.replace`, or the
 // first navigation of a window at its initial about:blank, which has none: HTML "navigate"), each with the Referer the
-// request sent and no state; "reload" the current entry's document made again; "step" the traversal to
-// `step` applied (`Traversal`), the entry there's state its document's. Undefined for a realm of no such window.
+// request sent, a POST's `body` (a Uint8Array) and `contentType`, and no state; "reload" the current entry's document
+// made again; "step" the traversal to `step` applied (`Traversal`), the entry there's state its document's. Undefined
+// for a realm of no such window.
 fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let how = args.get(1).to_rust_string_lossy(scope);
     let step = args.get(2).integer_value(scope).unwrap_or(0);
     let text = |scope: &mut v8::PinScope<'_, '_>, v: v8::Local<'_, v8::Value>| (!v.is_null_or_undefined()).then(|| v.to_rust_string_lossy(scope));
     let referrer = text(scope, args.get(3));
+    let post = (!args.get(4).is_null_or_undefined()).then(|| {
+        let body = crate::blob_data::bytes_arg(scope, args.get(4));
+        (Arc::from(body), text(scope, args.get(5)))
+    });
     let cid = crate::dom::realm_id(scope, &args);
     let Some((traversable, _)) = window_traversable(crate::dom::realm(scope, cid), cid) else { return };
     let state = {
         let mut t = lock(&traversable);
+        // (…the traversals the document it replaces queued let go with it — one its `unload` asked for among them (WPT
+        // traverse-during-unload.html) — as the page's are: `clear_queued`)
+        t.queued.retain(|q| q.asked);
         match how.as_str() {
             "push" | "replace" => {
-                let data = Data { texts: [None, referrer, None, None], ..Data::default() };
+                let data = Data { post, texts: [None, referrer, None, None], ..Data::default() };
                 let replace = how == "replace" && !t.state.entries.is_empty();
                 t.commit(TOP, 0, &url, false, replace, data);
                 None

@@ -10,8 +10,15 @@ pub(crate) struct RealmIdentity {
     worker_handle: u32,
     agent_owner: u64,
     module_worker: bool,
+    // (…a worker's storage partition — its owner document's top-level site, the host's to say: blob_rules.rs
+    // `partition_site` — which no realm of its isolate shows)
+    partition: Option<String>,
 }
 impl RealmIdentity {
+    // (…a worker's storage partition, none for a window's realm)
+    pub(crate) fn partition(&self) -> Option<&str> {
+        self.partition.as_deref()
+    }
     // (…its agent's owner token, 0 for none: agents.rs `agentJoin`)
     pub(crate) fn agent_owner(&self) -> u64 {
         self.agent_owner
@@ -39,8 +46,8 @@ fn of<T>(scope: &mut v8::PinScope<'_, '_>, cid: i32, f: impl FnOnce(&RealmIdenti
     crate::dom::realm(scope, cid).realm_state(cid).map(|s| f(&s.identity))
 }
 
-// __dom.realmIdentify(field, value): the host's telling of the calling realm's `field` — 'clientId' (a string),
-// 'windowKey', 'workerHandle', 'agentOwner' (numbers), 'moduleWorker' (true).
+// __dom.realmIdentify(field, value): the host's telling of the calling realm's `field` — 'clientId', 'partition'
+// (strings), 'windowKey', 'workerHandle', 'agentOwner' (numbers), 'moduleWorker' (true).
 fn identify_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let field = args.get(0).to_rust_string_lossy(scope);
     let value = args.get(1);
@@ -54,6 +61,7 @@ fn identify_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
         "workerHandle" => identity.worker_handle = number as u32,
         "agentOwner" => identity.agent_owner = number as u64,
         "moduleWorker" => identity.module_worker = flag,
+        "partition" => identity.partition = Some(text),
         _ => {}
     }
 }

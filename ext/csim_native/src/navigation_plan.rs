@@ -63,16 +63,21 @@ struct Own {
     reload: Option<Reload>,
     submission: Option<FrameSubmission>,
     traversal: Option<Traversal>,
+    // …a navigation to a `javascript:` URL, by its id: the ongoing navigation while its task waits to run, which one
+    // planned after it ends (`javascriptOngoing`).
+    javascript: Option<u64>,
     planned: u64,
 }
 
 // A traversal of a window's session history that makes its document again (session_history.rs `applyWindowTraversal`):
-// the step it goes to, and the URL of the entry the window is at there, with the Referer its request sent — the request
-// a traversal makes it with again (HTML "apply the history step": the entry's document state).
+// the step it goes to, and the URL of the entry the window is at there, with the Referer its request sent and a POST's
+// body and content type — the request a traversal makes it with again (HTML "apply the history step": the entry's
+// document state's resource).
 pub(crate) struct Traversal {
     pub(crate) step: i64,
     pub(crate) url: String,
     pub(crate) referrer: Option<String>,
+    pub(crate) post: Option<crate::session_history::Post>,
 }
 
 // A reload: whether the document had transient activation as it began, and — one of a document at a `blob:` URL — the
@@ -258,6 +263,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "takeDownload", take_download, context_id);
     register(scope, ns, "planLocation", plan_location, context_id);
     register(scope, ns, "planReload", plan_reload, context_id);
+    register(scope, ns, "planJavascript", plan_javascript, context_id);
+    register(scope, ns, "javascriptOngoing", javascript_ongoing, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
@@ -424,6 +431,32 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
     plan.own.planned = next_planned();
 }
+// __dom.planJavascript() -> the id of a navigation of the calling realm's top-level document to a `javascript:` URL, its
+// ongoing navigation now: what it planned before let go (HTML "navigate": the ongoing navigation set to its id, which
+// aborts the one before — a location navigation another window's script planned of it), its script a task to come
+// (url-parse.js `runJavascriptURL`) — -1, none, while a traversal is planned.
+fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let plan = plan(scope, &args);
+    if plan.traversal_planned() {
+        return rv.set_double(-1.0);
+    }
+    plan.supersede();
+    let id = next_planned();
+    plan.own.javascript = Some(id);
+    rv.set_double(id as f64);
+}
+// __dom.javascriptOngoing(id) -> whether the navigation `id` (`planJavascript`) is the ongoing one still, its task
+// running now — no navigation planned since ("if targetNavigable's ongoing navigation is no longer navigationId, then
+// return") — and so no more.
+fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let id = args.get(0).number_value(scope).map_or(0, |n| n as u64);
+    let plan = plan(scope, &args);
+    let ongoing = plan.own.javascript == Some(id);
+    if ongoing {
+        plan.own.javascript = None;
+    }
+    rv.set_bool(ongoing);
+}
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
 // `blob:` URL, else undefined (`Reload`). None while a traversal is planned.
@@ -446,6 +479,11 @@ fn take_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let Some(l) = plan(scope, &args).own.location.take() else { return };
     let items = location_items(scope, l);
     rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// …a POST's body (a Uint8Array) and content type, or nothing for a GET's.
+fn post_items<'s>(scope: &mut v8::PinScope<'s, '_>, post: Option<crate::session_history::Post>) -> Vec<v8::Local<'s, v8::Value>> {
+    let Some((body, content_type)) = post else { return Vec::new() };
+    vec![crate::dom::u8_array(scope, body.to_vec()), text_or_null(scope, content_type)]
 }
 fn location_items<'s>(scope: &mut v8::PinScope<'s, '_>, l: Location) -> Vec<v8::Local<'s, v8::Value>> {
     let (realm, source, policy) = match l.initiator {
@@ -475,7 +513,10 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
     let windows = crate::dom::dom(scope).arena.stepped_windows();
     let mut taken = Vec::new();
     for w in windows {
-        let mut own = std::mem::take(&mut realm(scope, w).navigation_plan.own);
+        let plan = &mut realm(scope, w).navigation_plan;
+        let mut own = std::mem::take(&mut plan.own);
+        // (…a `javascript:` URL's its task's still, which no host takes)
+        plan.own.javascript = own.javascript.take();
         // (…a location's or a reload's let go where a traversal its window queued makes its document again: its task,
         // which plans that traversal, goes ahead of them — HTML "apply the history step" sets the ongoing navigation to
         // "traversal", as the page's does: browser.rb `apply_planned_traversals_before_navigations`)
@@ -493,19 +534,31 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
         let realm = v8::Integer::new(scope, w).into();
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload, own.traversal) {
             (Some(l), ..) => [vec![realm, v8::String::new(scope, "location").unwrap().into()], location_items(scope, l)].concat(),
-            (None, Some(r), _) => vec![
-                realm,
-                v8::String::new(scope, "reload").unwrap().into(),
-                v8::Boolean::new(scope, r.activated).into(),
-                r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
-            ],
-            (None, None, Some(t)) => vec![
-                realm,
-                v8::String::new(scope, "traverse").unwrap().into(),
-                v8::Number::new(scope, t.step as f64).into(),
-                v8::String::new(scope, &t.url).unwrap().into(),
-                text_or_null(scope, t.referrer),
-            ],
+            // (…a reload's of a document a POST made, that POST again: its entry's resource)
+            (None, Some(r), _) => {
+                let post = crate::dom::dom(scope).arena.window_history(w).and_then(|(h, _)| h.current_post());
+                [
+                    vec![
+                        realm,
+                        v8::String::new(scope, "reload").unwrap().into(),
+                        v8::Boolean::new(scope, r.activated).into(),
+                        r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
+                    ],
+                    post_items(scope, post),
+                ]
+                .concat()
+            }
+            (None, None, Some(t)) => [
+                vec![
+                    realm,
+                    v8::String::new(scope, "traverse").unwrap().into(),
+                    v8::Number::new(scope, t.step as f64).into(),
+                    v8::String::new(scope, &t.url).unwrap().into(),
+                    text_or_null(scope, t.referrer),
+                ],
+                post_items(scope, t.post),
+            ]
+            .concat(),
             (None, None, None) => continue,
         };
         items.push(v8::Array::new_with_elements(scope, &item).into());

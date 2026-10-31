@@ -67,6 +67,9 @@ module Capybara
       def set_viewport(w, h)
         host.set_window_realm_viewport(realm!, w, h)
       end
+      # The number of its top-level traversable — its session history's, which a window it opens in another isolate is
+      # opened by (Driver#open_aux_window).
+      def traversable_id = host.window_realm_traversable(realm!)
       # The response its document was made of, as the page's (Browser#status_code, #response_headers).
       def status_code      = host.window_realm_response(realm!)[0].to_i
       def response_headers = Browser.capitalized_headers(host.window_realm_response(realm!)[1])

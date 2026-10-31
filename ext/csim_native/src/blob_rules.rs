@@ -56,6 +56,35 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "blobType", blob_type_op, context_id);
     crate::dom::register(scope, ns, "blobSliceRange", slice_range_op, context_id);
     crate::dom::register(scope, ns, "blobUrlUsable", usable_op, context_id);
+    crate::dom::register(scope, ns, "blobPartitionSite", partition_site_op, context_id);
+}
+
+// The storage partition of realm `cid`'s blob URLs (File API's "check for same-partition blob URL usage", Storage's
+// storage key's top-level site): the site of its top-level traversable's active document — a frame's its page's or its
+// window's, a window `window.open` made in this isolate its own, of another site than its opener's where it is — '' for
+// an opaque one; a worker's its owner document's, which the host told it (`realmIdentify('partition', …)`).
+pub(crate) fn partition_site(arena: &mut crate::dom::RealmArena, cid: i32) -> String {
+    if let Some(site) = arena.realm_state(cid).and_then(|s| s.identity.partition().map(str::to_owned)) {
+        return site;
+    }
+    let top = arena.top_level_realm(cid);
+    let origin = arena.enter(top).location.origin().to_owned();
+    arena.enter(cid);
+    crate::realm_location::site(&origin).unwrap_or_default()
+}
+// …and whether a blob URL of the partition `site` (its maker's, as the registry recorded it: none for one it keeps no
+// partition of, a copy's) is usable from realm `cid`'s.
+pub(crate) fn same_partition(arena: &mut crate::dom::RealmArena, cid: i32, site: Option<&str>) -> bool {
+    site.is_none_or(|site| site == partition_site(arena, cid))
+}
+// __dom.blobPartitionSite() -> `partition_site` of the calling realm: what the host judges a blob URL another window made
+// by (browser.rb `partition_blob`).
+fn partition_site_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = crate::dom::realm_id(scope, &args);
+    let site = partition_site(crate::dom::realm(scope, cid), cid);
+    if let Some(s) = v8::String::new(scope, &site) {
+        rv.set(s.into());
+    }
 }
 
 // __dom.blobText(text, native) -> `blob_text`, as a byte string (each byte a code unit).
@@ -88,11 +117,15 @@ fn slice_range_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     rv.set(crate::dom::f64_array(scope, &[from, span]).into());
 }
 // __dom.blobUrlUsable(url) -> whether the calling realm may revoke or resolve `url` (`usable`), by its document's origin.
+// (…and of the calling realm's storage partition, where window `window`'s registry knows its maker's: `same_partition`)
 fn usable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let cid = crate::dom::realm_id(scope, &args);
-    let here = crate::dom::realm(scope, cid).location.origin().to_owned();
-    rv.set_bool(usable(&url, &here));
+    let window = args.get(1).integer_value(scope).and_then(|w| u64::try_from(w).ok());
+    let arena = crate::dom::realm(scope, cid);
+    let here = arena.location.origin().to_owned();
+    let site = window.and_then(|w| crate::blob_registry::site_of(w, &crate::blob_urls::entry_key(&url)));
+    rv.set_bool(usable(&url, &here) && same_partition(arena, cid, site.as_deref()));
 }
 
 #[cfg(test)]

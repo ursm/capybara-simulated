@@ -19,7 +19,7 @@ struct Entry {
     ty: String,
     // (…none for a copy: a blob: document's, booted here)
     owner: Option<String>,
-    // (…none for a copy too, which keeps the partition of the URL it copies — or until the host says it: `set_site`)
+    // (…none for a copy too, which keeps the partition of the URL it copies)
     site: Option<String>,
 }
 
@@ -40,6 +40,10 @@ fn lock() -> MutexGuard<'static, Windows> {
 // none) and its type — none for no entry (revoked, here or in another context, or never made).
 pub(crate) fn lookup(window: u64, key: &str) -> Option<(Option<Arc<[u8]>>, String)> {
     lock().get(&window).and_then(|e| e.get(key)).map(|e| (e.bytes.clone(), e.ty.clone()))
+}
+// …and its storage partition: its maker's top-level site, none for no entry or one it keeps none of (a copy).
+pub(crate) fn site_of(window: u64, key: &str) -> Option<String> {
+    lock().get(&window).and_then(|e| e.get(key)).and_then(|e| e.site.clone())
 }
 
 // A new window's registry, the process's, never one a window before had — of the session `session`.
@@ -99,13 +103,6 @@ pub(crate) fn get_for_ruby(ruby: &magnus::Ruby, window: u64, url: magnus::RStrin
     Some((ruby.str_from_slice(&bytes), ty))
 }
 
-// …the storage partition of the URL `url` a context of window `window` made: `site`, its top-level site as it was made.
-pub(crate) fn set_site(window: u64, url: magnus::RString, site: magnus::RString) {
-    let (url, site) = (url_text(url), url_text(site));
-    if let Some(entry) = lock().get_mut(&window).and_then(|e| e.get_mut(&url)) {
-        entry.site = Some(site);
-    }
-}
 // …the window of window `asker`'s session whose context made the URL `url` resolves to (`entry_key`: its fragment aside)
 // and its storage partition — or nil for none (revoked, never made, a copy alone, or another session's).
 pub(crate) fn partition(asker: u64, url: magnus::RString) -> Option<(u64, String)> {
@@ -130,15 +127,17 @@ fn window_arg(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgum
 }
 
 // __dom.blobRegistrySet(window, url, bytes, type, owner): the blob URL `url` a context of window `window` made — its
-// blob's bytes (null: none, the entry only its marker), its type, the context (`w:<handle>` / `r:<id>`) — entered,
-// taking it over from any entry it had.
+// blob's bytes (null: none, the entry only its marker), its type, the context (`w:<handle>` / `r:<id>`) and its storage
+// partition, the calling realm's (blob_rules.rs `partition_site`) — entered, taking it over from any entry it had.
 fn set_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(window) = window_arg(scope, &args) else { return };
     let url = args.get(1).to_rust_string_lossy(scope);
     let bytes = (!args.get(2).is_null_or_undefined()).then(|| crate::blob_data::bytes_arg(scope, args.get(2)).into());
     let ty = args.get(3).to_rust_string_lossy(scope);
     let owner = Some(args.get(4).to_rust_string_lossy(scope));
-    lock().entry(window).or_default().insert(url, Entry { bytes, ty, owner, site: None });
+    let cid = crate::dom::realm_id(scope, &args);
+    let site = Some(crate::blob_rules::partition_site(crate::dom::realm(scope, cid), cid));
+    lock().entry(window).or_default().insert(url, Entry { bytes, ty, owner, site });
 }
 
 // __dom.blobRegistryMarkers(window) -> the URLs of window `window`'s registry whose entries hold no bytes: made before

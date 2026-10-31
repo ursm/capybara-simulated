@@ -541,8 +541,8 @@ module Capybara
         dispose_frame_realm_tree(old_id, keep_proxies: true)
         create_window_realm(
           url, body, content_type,
-          opener_id: meta[:opener_id], window_name: meta[:window_name], window_key: meta[:window_key], retarget_from: old_id, entry: entry,
-          **{about_base: meta[:about_base]}.merge(made)
+          opener_id: meta[:opener_id], window_key: meta[:window_key], retarget_from: old_id, entry: entry,
+          **{about_base: meta[:about_base], window_name: meta[:window_name]}.merge(made)
         )
       end
       # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
@@ -1294,12 +1294,13 @@ module Capybara
         realm.call('__csimSetDocumentOrigin', doc_origin&.to_s)
         realm.call('__csimSetLocationOrigin', location_origin&.to_s)
         # (…its window's session history told of it, before its scripts read its `history`)
-        realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer)
+        realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer, *entry[2])
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
         realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
-        realm.call('__csimFireWindowLoad') rescue nil
+        # (…its load a task to come: window.js `__csimQueueWindowLoad`)
+        ctx.call('__csimQueueWindowLoad', realm.id) rescue nil
       end
 
       # Navigate window realm `id` from its initial about:blank to a document of that one's origin: loaded into the same

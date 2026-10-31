@@ -56,8 +56,12 @@ fn blob_resolve(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     let Some(window) = args.get(0).integer_value(scope).and_then(|w| u64::try_from(w).ok()) else { return rv.set_null() };
     let key = entry_key(&args.get(1).to_rust_string_lossy(scope));
     let cid = realm_id(scope, &args);
-    if args.get(2).is_true() && !crate::blob_rules::usable(&key, crate::dom::realm(scope, cid).location.origin()) {
-        return rv.set_null();
+    if args.get(2).is_true() {
+        let arena = crate::dom::realm(scope, cid);
+        let site = crate::blob_registry::site_of(window, &key);
+        if !crate::blob_rules::usable(&key, arena.location.origin()) || !crate::blob_rules::same_partition(arena, cid, site.as_deref()) {
+            return rv.set_null();
+        }
     }
     let entry = crate::blob_registry::lookup(window, &key);
     if let Some((_, blob)) = dom(scope).arena.blob_urls.0.get(&key) {
