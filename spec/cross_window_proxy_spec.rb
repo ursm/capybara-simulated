@@ -10,8 +10,9 @@ RSpec.describe 'a WindowProxy of a pop-up' do
   # (…a page's script by its path: /opens opens a pop-up when its `f` is called, whose boot — /moves — navigates it)
   let(:scripts) {
     {
-      '/opens' => "window.f = () => { window.open('/moves'); return 'returned'; };",
-      '/moves' => "opener.location.pathname = '/dir/moved';"
+      '/opens'  => "window.f = () => { window.open('/moves'); return 'returned'; };",
+      '/moves'  => "opener.location.pathname = '/dir/moved';",
+      '/framed' => "document.body.appendChild(document.createElement('iframe'));"
     }
   }
   let(:hits) { Hash.new(0) }
@@ -90,6 +91,12 @@ RSpec.describe 'a WindowProxy of a pop-up' do
     it 'carries undefined as itself, both ways' do
       expect(read("(w.v = undefined, [typeof w.v, 'v' in w])")).to eq(['undefined', true])
       expect(read("(w.eval('window.argc = (...a) => a.length + \":\" + a.map(String)'), w.argc(undefined, undefined))")).to eq('2:undefined,undefined')
+    end
+
+    # (…`frames` the WindowProxy itself, its child frames by index one object either way: HTML, Chrome and Firefox)
+    it 'is its own frames, which index its child frames as it does' do
+      open_window('/framed')
+      expect(read('[w.frames === w, w.length, w.frames[0] === w[0], w[0].parent === w, w[1]]')).to eq([true, 1, true, true, nil])
     end
 
     # (…Chrome and Firefox measured)
