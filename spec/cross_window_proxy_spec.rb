@@ -155,4 +155,41 @@ RSpec.describe 'a WindowProxy of a pop-up' do
       expect(read('[w.document.title, w.location.pathname, w.history.length]')).to eq(['back', '/back', 2])
     end
   end
+
+  # …and one opened at a URL of another site, a Browser of its own (Driver#hosts_partition?), which this window's script
+  # reaches through a WindowProxy of that isolate (platform-globals.js `csimWindowProxy`): back at this origin, whole as
+  # one of its origin is — its Location, its document, the properties put on its Window, `undefined` both ways.
+  context 'of another isolate, back at this origin' do
+    before do
+      browsers = session.driver.window_browsers.size
+      open_window('http://other.test/x')
+      expect(session.driver.window_browsers.size).to eq(browsers + 1)
+      session.execute_script("w.location = 'http://a.test/pop?x=1#frag'")
+      expect(read('w.document.title')).to eq('pop')
+    end
+
+    it "has its Location's every part" do
+      parts = '[w.location.href, w.location.origin, w.location.pathname, w.location.search, w.location.hash]'
+      expect(read(parts)).to eq(['http://a.test/pop?x=1#frag', 'http://a.test', '/pop', '?x=1', '#frag'])
+      expect(read('Object.keys(w.location).length')).to eq(14)
+    end
+
+    it 'reaches its document and its history' do
+      expect(read('[w.document.title, w.history.length]')).to eq(['pop', 2])
+    end
+
+    it "defines and deletes the window's own properties" do
+      expect(read("(Object.defineProperty(w, 'answer', {value: 42, configurable: true}), w.answer)")).to eq(42)
+      expect(read('[delete w.answer, typeof w.answer]')).to eq([true, 'undefined'])
+    end
+
+    it 'carries undefined as itself, both ways' do
+      expect(read("(w.v = undefined, [typeof w.v, 'v' in w])")).to eq(['undefined', true])
+      expect(read("(w.eval('window.argc = (...a) => a.length + \":\" + a.map(String)'), w.argc(undefined, undefined))")).to eq('2:undefined,undefined')
+    end
+
+    it 'has this window its opener' do
+      expect(read('w.opener === window')).to be(true)
+    end
+  end
 end
