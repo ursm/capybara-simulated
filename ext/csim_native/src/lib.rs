@@ -105,6 +105,7 @@ mod fetch_chain;
 mod navigation_fetch;
 mod worker_script_fetch;
 mod worker_host;
+mod clock_holds;
 mod fetch_hop;
 mod fetch_plan;
 mod sw_router;
@@ -295,6 +296,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     // The page's joint session history, its frames' with it (session_history.rs).
     session_history::define(native, ruby)?;
     worker_host::define(native, ruby)?;
+    clock_holds::define(native, ruby)?;
     broadcast_channels::define(native, ruby)?;
     storage_areas::define(native, ruby)?;
     http_cache::define(native, ruby)?;

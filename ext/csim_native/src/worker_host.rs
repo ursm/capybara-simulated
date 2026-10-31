@@ -13,7 +13,6 @@
 //   handler": the first to answer);
 // - the replies a thread waits for in place, off the event loop — a controlled worker's main script's fetch, a
 //   navigation's (`await_reply`), which the worker's thread hands over as it answers;
-// - how long the event loop holds its clock for a reply in flight, a budget per kind spent once across its steps;
 // - the client ids this window's realms adopted — each a navigation's reserved client's (Service Workers: the reserved
 //   client becomes the document's), its realm by it and it by its realm.
 //
@@ -32,11 +31,6 @@ const POSTED: usize = 3;
 const BOOTING: usize = 4;
 const BUSY: usize = 5;
 const OWED_KINDS: usize = 6;
-// The waits a step of the event loop holds its clock for, by kind (`wait_left`).
-const WAIT_FETCH: usize = 0;
-const WAIT_MESSAGE: usize = 1;
-const WAIT_SOCKET_CLOSE: usize = 2;
-const WAIT_KINDS: usize = 3;
 // The first id of the replies a thread waits for in place that are not a navigation's: far above any realm's own fetch
 // ids, so one can never be taken for a page's fetch on the same worker. A navigation's are negative.
 const DIRECT_BASE: i64 = 1_000_000_000;
@@ -46,6 +40,9 @@ const FALLTHROUGH: &str = r#"{"fallthrough":true}"#;
 #[magnus::wrap(class = "Capybara::Simulated::Native::WorkerHost", free_immediately)]
 pub(crate) struct WorkerHost {
     owed: [AtomicUsize; OWED_KINDS],
+    // How many times what is owed was let go of all at once (`clear`, `reset`): a release counted before then lets go of
+    // nothing — what it was owed for went with it (`release_from`).
+    epoch: AtomicU64,
     state: Mutex<State>,
     answered: Condvar,
 }
@@ -60,7 +57,6 @@ struct State {
     replies: HashMap<i64, Option<String>>,
     direct_seq: i64,
     navigation_seq: i64,
-    waits: [Option<Instant>; WAIT_KINDS],
     // realm → the client id it adopted, and back
     clients: HashMap<i64, String>,
     realms: HashMap<String, i64>,
@@ -77,24 +73,34 @@ static RESERVED_CLIENTS: AtomicU64 = AtomicU64::new(0);
 
 impl WorkerHost {
     fn new() -> Self {
-        WorkerHost { owed: Default::default(), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new() }
+        WorkerHost { owed: Default::default(), epoch: AtomicU64::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new() }
     }
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     // ── What is owed ──
-    // #owe(kind, n) — `n` more of `kind` owed.
-    fn owe(&self, kind: usize, n: usize) {
+    // #owe(kind, n) -> `n` more of `kind` owed — and the epoch it was owed in, which `release_from` takes.
+    fn owe(&self, kind: usize, n: usize) -> u64 {
         if let Some(count) = self.owed.get(kind) {
             count.fetch_add(n, Ordering::AcqRel);
         }
+        self.epoch.load(Ordering::Acquire)
     }
     // #release(kind, n) — `n` of `kind` answered: never below none, a reply that answers nothing counted (an `__error`
     // postback) letting go of nothing.
     fn release(&self, kind: usize, n: usize) {
         if let Some(count) = self.owed.get(kind) {
-            let _ = count.try_update(Ordering::AcqRel, Ordering::Acquire, |c| Some(c.saturating_sub(n)));
+            // (…`fetch_update`, which every toolchain the gem builds on has: its newer name `try_update` is recent)
+            #[allow(deprecated)]
+            let _ = count.fetch_update(Ordering::AcqRel, Ordering::Acquire, |c| Some(c.saturating_sub(n)));
+        }
+    }
+    // #release_from(kind, n, epoch) — …owed in `epoch`: none where everything owed was let go of since, which would take
+    // the release off what is owed after (a fetch in flight across a session's reset).
+    fn release_from(&self, kind: usize, n: usize, epoch: u64) {
+        if self.epoch.load(Ordering::Acquire) == epoch {
+            self.release(kind, n);
         }
     }
     fn owed_of(&self, kind: usize) -> usize {
@@ -104,24 +110,21 @@ impl WorkerHost {
     fn is_owed(&self, kinds: u32) -> bool {
         (0..OWED_KINDS).any(|k| kinds & (1 << k) != 0 && self.owed[k].load(Ordering::Acquire) > 0)
     }
-    // #clear — no reply nor answer owed, no stream open, no hold for one: the host's last worker gone, what was owed by
+    // #clear — no reply nor answer owed, no stream open: the host's last worker gone, what was owed by
     // it gone with it. (Not the workers still booting or busy, which their own threads let go of as they end.)
     fn clear(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
         for kind in [BROADCAST, MESSAGE, FETCH, POSTED] {
             self.owed[kind].store(0, Ordering::Release);
         }
-        let mut state = self.lock();
-        state.streams.clear();
-        state.waits[WAIT_FETCH] = None;
-        state.waits[WAIT_MESSAGE] = None;
+        self.lock().streams.clear();
     }
-    // #reset — and no hold, no race leg, no reply awaited, no client adopted either: the session's reset. (Still not the
+    // #reset — and no race leg, no reply awaited, no client adopted either: the session's reset. (Still not the
     // workers booting or busy: a thread the reset gave up joining lets go of its own as it ends, which a count zeroed
     // here would take off the next session's worker.)
     fn reset(&self) {
         self.clear();
         let mut state = self.lock();
-        state.waits = Default::default();
         state.raced.clear();
         state.replies.clear();
         state.clients.clear();
@@ -248,36 +251,6 @@ impl WorkerHost {
         self.lock().replies.remove(&fetch_id);
     }
 
-    // ── Clock holds ──
-    // #wait_left(kind, budget) -> the seconds a hold of `kind` has left — its budget of `budget` seconds begun with the
-    // first step that holds for it, and spent across the steps after (≤ 0 once spent).
-    fn wait_left(&self, kind: usize, budget: f64) -> f64 {
-        let mut state = self.lock();
-        let Some(wait) = state.waits.get_mut(kind) else { return 0.0 };
-        let deadline = *wait.get_or_insert_with(|| Instant::now() + Duration::from_secs_f64(budget.max(0.0)));
-        let now = Instant::now();
-        if deadline >= now { deadline.duration_since(now).as_secs_f64() } else { -now.duration_since(deadline).as_secs_f64() }
-    }
-    // #waits_settled(sockets_closed) — each hold whose reply is owed no more let go of, so the next waits afresh: a
-    // fetch's where no fetch is owed, a message's where no bcack nor swack is, a socket close's where none is closing
-    // (`sockets_closed`, the host's to know) — what an event-loop step does once its holds are behind it, in one call.
-    fn waits_settled(&self, sockets_closed: bool) {
-        let fetches = self.owed[FETCH].load(Ordering::Acquire);
-        let messages = self.owed[BROADCAST].load(Ordering::Acquire) + self.owed[MESSAGE].load(Ordering::Acquire);
-        let mut state = self.lock();
-        for (kind, settled) in [(WAIT_FETCH, fetches == 0), (WAIT_MESSAGE, messages == 0), (WAIT_SOCKET_CLOSE, sockets_closed)] {
-            if settled {
-                state.waits[kind] = None;
-            }
-        }
-    }
-    // #wait_reset(kind) — a reply of `kind` came in, or none is owed: the next one waits afresh.
-    fn wait_reset(&self, kind: usize) {
-        if let Some(wait) = self.lock().waits.get_mut(kind) {
-            *wait = None;
-        }
-    }
-
     // ── Adopted client ids ──
     // #adopt_client(realm, client_id) — realm `realm`'s document adopted the reserved client `client_id`: its id that one,
     // the one it had before naming nothing.
@@ -321,9 +294,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
         ("POSTED", POSTED),
         ("BOOTING", BOOTING),
         ("BUSY", BUSY),
-        ("WAIT_FETCH", WAIT_FETCH),
-        ("WAIT_MESSAGE", WAIT_MESSAGE),
-        ("WAIT_SOCKET_CLOSE", WAIT_SOCKET_CLOSE),
     ] {
         class.const_set(name, value)?;
     }
@@ -332,6 +302,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_singleton_method("direct?", function!(WorkerHost::is_direct, 1))?;
     class.define_method("owe", method!(WorkerHost::owe, 2))?;
     class.define_method("release", method!(WorkerHost::release, 2))?;
+    class.define_method("release_from", method!(WorkerHost::release_from, 3))?;
     class.define_method("owed", method!(WorkerHost::owed_of, 1))?;
     class.define_method("owed?", method!(WorkerHost::is_owed, 1))?;
     class.define_method("clear", method!(WorkerHost::clear, 0))?;
@@ -349,9 +320,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("await_reply", method!(WorkerHost::await_reply, 2))?;
     class.define_method("awaiting?", method!(WorkerHost::is_awaiting, 1))?;
     class.define_method("forget_reply", method!(WorkerHost::forget_reply, 1))?;
-    class.define_method("wait_left", method!(WorkerHost::wait_left, 2))?;
-    class.define_method("wait_reset", method!(WorkerHost::wait_reset, 1))?;
-    class.define_method("waits_settled", method!(WorkerHost::waits_settled, 1))?;
     class.define_method("adopt_client", method!(WorkerHost::adopt_client, 2))?;
     class.define_method("client_of", method!(WorkerHost::client_of, 1))?;
     class.define_method("realm_of", method!(WorkerHost::realm_of, 1))?;
@@ -427,13 +395,15 @@ mod tests {
     }
 
     #[test]
-    fn a_hold_spends_its_budget_once() {
+    fn a_release_from_before_a_clear_lets_go_of_nothing() {
         let host = WorkerHost::new();
-        assert!(host.wait_left(WAIT_FETCH, 0.0) <= 0.0);
-        assert!(host.wait_left(WAIT_FETCH, 10.0) <= 0.0);
-        host.wait_reset(WAIT_FETCH);
-        assert!(host.wait_left(WAIT_FETCH, 10.0) > 9.0);
-        assert!(host.wait_left(WAIT_MESSAGE, 10.0) > 9.0);
+        let before = host.owe(FETCH, 1);
+        host.clear();
+        let after = host.owe(FETCH, 1);
+        host.release_from(FETCH, 1, before);
+        assert_eq!(host.owed_of(FETCH), 1);
+        host.release_from(FETCH, 1, after);
+        assert_eq!(host.owed_of(FETCH), 0);
     }
 
     #[test]
