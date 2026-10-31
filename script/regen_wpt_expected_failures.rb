@@ -388,12 +388,15 @@ H
 in_ordered  = in_map.keys.sort.each_with_object({})  {|rel, h| h[rel] = in_map[rel] }
 out_ordered = out_map.keys.sort.each_with_object({}) {|rel, h| h[rel] = out_map[rel] }
 
-# (…each IN_SCOPE_NOTES note a comment above its file's entry, wrapped)
-in_yaml = in_ordered.to_yaml
-IN_SCOPE_NOTES.each do |rel, note|
-  comment = note.scan(/\S.{0,114}(?=\s|\z)/).map {|line| "# #{line}\n" }.join
-  in_yaml = in_yaml.sub(/^"?#{Regexp.escape(rel)}"?:\n/) { comment + $& }
-end
+# (…each file's entry emitted on its own — the form Psych gives its key whatever it is: plain, quoted, or `? key` past 128
+# characters — and each IN_SCOPE_NOTES note, wrapped, a comment above its file's; one whose file passes now named, for its
+# note to go)
+in_yaml = "---\n" + in_ordered.map {|rel, entry|
+  note = IN_SCOPE_NOTES[rel]
+  comment = note ? note.scan(/\S.{0,114}(?=\s|\z)/).map {|line| "# #{line}\n" }.join : ''
+  comment + {rel => entry}.to_yaml.delete_prefix("---\n")
+}.join
+(IN_SCOPE_NOTES.keys - in_map.keys).each {|rel| warn "IN_SCOPE_NOTES: #{rel} has no in-scope failure now — drop its note" }
 File.write(WptRunner::EXPECTED_PATH, in_hdr + in_yaml)
 File.write(WptRunner::OUT_OF_SCOPE_PATH, out_hdr + out_ordered.to_yaml)
 

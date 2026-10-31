@@ -234,10 +234,16 @@ impl Own {
 
 impl NavigationPlan {
     fn supersede(&mut self) {
+        self.let_go();
+        self.superseded += 1;
+    }
+    // …what was planned let go, by a reload (`planReload`): which is no navigation that ends a `javascript:` URL's —
+    // HTML "reload a navigable" sets no ongoing navigation, its "apply the reload history step" queued on the traversal
+    // queue instead.
+    fn let_go(&mut self) {
         self.navigation = None;
         self.submission = None;
         self.own = Own::default();
-        self.superseded += 1;
     }
     // A traversal of the document's window that makes its document again planned (`Traversal`): the navigation planned
     // before it let go — HTML "apply the history step" sets the ongoing navigation to "traversal".
@@ -438,19 +444,21 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
 // supersessions it is to be judged by (`javascriptOngoing`); -1, none, while a traversal is planned. It is the navigable's
 // ongoing navigation from now on (HTML "navigate", step 20 before step 21's `javascript:` branch: "Set the ongoing
 // navigation for navigable to navigationId."), which ends the one before it, whichever document began it: a location
-// navigation, a reload, a hyperlink's of this navigable, another `javascript:` URL's ("navigate to a javascript: URL"
-// step 2: "If targetNavigable's ongoing navigation is no longer navigationId, then return."). Not a form's submission,
-// whose navigation HTML "plan to navigate" begins in a task after this one, ending this one instead; nor a hyperlink's
-// that opens a new window, whose navigation is that navigable's. (Chrome and Firefox go on with a location navigation
-// set before it — whatwg/html#2590 — the spec's text the ruling here.)
+// navigation, a hyperlink's of this navigable, another `javascript:` URL's ("navigate to a javascript: URL" step 2: "If
+// targetNavigable's ongoing navigation is no longer navigationId, then return."). Not a form's submission, whose
+// navigation HTML "plan to navigate" begins in a task after this one, ending this one instead; nor a hyperlink's that
+// opens a new window, whose navigation is that navigable's; nor a reload, which HTML "reload a navigable" queues on the
+// traversal queue as "apply the reload history step" and is no ongoing navigation until that step applies (step 8.4,
+// "traversal") — which here is the host's, as the task ends, before this one's task runs. (Chrome and Firefox go on with
+// a location navigation set before it — whatwg/html#2590 — the spec's text the ruling here.)
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let plan = plan(scope, &args);
     if plan.traversal_planned() {
         return rv.set_double(-1.0);
     }
-    let submission = plan.own.submission.take();
+    let (submission, reload) = (plan.own.submission.take(), plan.own.reload.take());
     plan.navigation = plan.navigation.take().filter(|n| n.opens_window);
-    plan.own = Own { submission, ..Own::default() };
+    plan.own = Own { submission, reload, ..Own::default() };
     plan.superseded += 1;
     rv.set_double(plan.superseded as f64);
 }
@@ -469,7 +477,9 @@ fn javascript_ongoing(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
 }
 // __dom.planReload(activated, blob): the calling realm's document's reload planned, superseding what it planned before —
 // `activated` whether its window had transient activation as it began, `blob` its document's blob where that is at a
-// `blob:` URL, else undefined (`Reload`). None while a traversal is planned.
+// `blob:` URL, else undefined (`Reload`). None while a traversal is planned. (…which ends a location navigation or a
+// hyperlink's before it as its history step is applied — "apply the history step" step 8.4: "Set navigable's ongoing
+// navigation to "traversal"" — but no `javascript:` URL's, which a reload never makes the ongoing navigation of: `let_go`)
 fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let activated = args.get(0).is_true();
     let blob = (!args.get(1).is_null_or_undefined()).then(|| v8::Global::new(scope, args.get(1)));
@@ -477,7 +487,7 @@ fn plan_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     if plan.traversal_planned() {
         return;
     }
-    plan.supersede();
+    plan.let_go();
     plan.own.reload = Some(Reload { activated, blob });
     plan.own.planned = next_planned();
 }
