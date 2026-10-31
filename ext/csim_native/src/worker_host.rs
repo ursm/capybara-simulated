@@ -41,8 +41,9 @@ const FALLTHROUGH: &str = r#"{"fallthrough":true}"#;
 pub(crate) struct WorkerHost {
     owed: [AtomicUsize; OWED_KINDS],
     // How many times what is owed was let go of all at once (`clear`, `reset`): a release counted before then lets go of
-    // nothing — what it was owed for went with it (`release_from`).
-    epoch: AtomicU64,
+    // nothing — what it was owed for went with it (`release_from`). Its lock is held across a count and the epoch it is
+    // read in, so an owe and a clear are each one step to the other.
+    epoch: Mutex<u64>,
     state: Mutex<State>,
     answered: Condvar,
 }
@@ -73,7 +74,7 @@ static RESERVED_CLIENTS: AtomicU64 = AtomicU64::new(0);
 
 impl WorkerHost {
     fn new() -> Self {
-        WorkerHost { owed: Default::default(), epoch: AtomicU64::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new() }
+        WorkerHost { owed: Default::default(), epoch: Mutex::new(0), state: Mutex::new(State { direct_seq: DIRECT_BASE, ..State::default() }), answered: Condvar::new() }
     }
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
@@ -82,10 +83,14 @@ impl WorkerHost {
     // ── What is owed ──
     // #owe(kind, n) -> `n` more of `kind` owed — and the epoch it was owed in, which `release_from` takes.
     fn owe(&self, kind: usize, n: usize) -> u64 {
+        let epoch = self.epoch();
         if let Some(count) = self.owed.get(kind) {
             count.fetch_add(n, Ordering::AcqRel);
         }
-        self.epoch.load(Ordering::Acquire)
+        *epoch
+    }
+    fn epoch(&self) -> MutexGuard<'_, u64> {
+        self.epoch.lock().unwrap_or_else(PoisonError::into_inner)
     }
     // #release(kind, n) — `n` of `kind` answered: never below none, a reply that answers nothing counted (an `__error`
     // postback) letting go of nothing.
@@ -99,7 +104,8 @@ impl WorkerHost {
     // #release_from(kind, n, epoch) — …owed in `epoch`: none where everything owed was let go of since, which would take
     // the release off what is owed after (a fetch in flight across a session's reset).
     fn release_from(&self, kind: usize, n: usize, epoch: u64) {
-        if self.epoch.load(Ordering::Acquire) == epoch {
+        let now = self.epoch();
+        if *now == epoch {
             self.release(kind, n);
         }
     }
@@ -113,10 +119,12 @@ impl WorkerHost {
     // #clear — no reply nor answer owed, no stream open: the host's last worker gone, what was owed by
     // it gone with it. (Not the workers still booting or busy, which their own threads let go of as they end.)
     fn clear(&self) {
-        self.epoch.fetch_add(1, Ordering::AcqRel);
+        let mut epoch = self.epoch();
+        *epoch += 1;
         for kind in [BROADCAST, MESSAGE, FETCH, POSTED] {
             self.owed[kind].store(0, Ordering::Release);
         }
+        drop(epoch);
         self.lock().streams.clear();
     }
     // #reset — and no race leg, no reply awaited, no client adopted either: the session's reset. (Still not the

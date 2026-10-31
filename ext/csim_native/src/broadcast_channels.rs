@@ -252,8 +252,10 @@ impl BroadcastInbox {
     }
     // #clear — none of either: the isolate's realms, its queue among them, made anew.
     fn clear(&self) {
-        self.lock().clear();
+        let mut posts = self.lock();
+        posts.clear();
         self.count.store(0, std::sync::atomic::Ordering::Release);
+        drop(posts);
         self.set_queued(false);
     }
 }

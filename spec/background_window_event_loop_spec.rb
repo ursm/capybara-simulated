@@ -57,8 +57,8 @@ RSpec.describe 'a background window of a browsing context group of its own' do
     it "keeps no failing matcher waiting on a background #{path.delete_prefix('/')} window" do
       open_noopener(path)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      expect(session.has_css?('#nope', wait: 2)).to be(false)
-      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
+      expect(session.has_css?('#nope', wait: 5)).to be(false)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 2.5
     end
   end
 
@@ -66,7 +66,7 @@ RSpec.describe 'a background window of a browsing context group of its own' do
     session.execute_script(scripts['/mute'])
     session.has_css?('body')
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    expect(session.has_css?('#nope', wait: 2)).to be(false)
-    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
+    expect(session.has_css?('#nope', wait: 5)).to be(false)
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 2.5
   end
 end

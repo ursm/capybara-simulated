@@ -65,6 +65,14 @@ RSpec.describe "a message's source" do
     expect(session.evaluate_script('kept_seen')).to eq([true, false, 'http://a.test'])
   end
 
+  # (…the window's own `postMessage` one object as long as its Window is: kept as a pop-up's initial about:blank goes on
+  # to a document of its origin)
+  it "keeps a kept Window's own postMessage" do
+    session.execute_script("window.w = open(''); window.before = w.eval('postMessage'); w.location = '/popup'")
+    poll_until { session.evaluate_script('w.document.readyState === "complete" && w.location.pathname === "/popup"') }
+    expect(session.evaluate_script("[w.eval('postMessage') === before, typeof w.got]")).to eq([true, 'object'])
+  end
+
   it 'is no constructor' do
     session.execute_script("window.w = open('/popup')")
     expect(session.evaluate_script('[w, window].map((x) => { try { new x.postMessage("x", "*"); return "made"; } catch (e) { return e.name; } })')).to eq(%w[TypeError TypeError])

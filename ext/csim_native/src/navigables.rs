@@ -1657,12 +1657,13 @@ fn entered_global(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // realm, whose call is `steps.call(this, incumbent, ...args)` — `incumbent` the global of the incumbent realm, HTML's
 // incumbent settings object's: the realm of the script that called it, V8's incumbent context (that of the topmost
 // JavaScript function on the stack). A native function pushes no JavaScript frame of its own, so V8 finds its caller —
-// where `steps`, a function of the realm that made the operation, would find themselves. Where no JavaScript function
-// is on the stack — a job that is the operation itself, `queueMicrotask(w.postMessage.bind(w, …))` — V8 answers the
-// job's own context (`GetEnteredOrMicrotaskContext`): that of the function queued, a bound one's the realm that bound
-// it, where HTML's HostMakeJobCallback keeps the incumbent of the call that queued it. The two differ only for a function
-// bound in one realm and queued from another, which V8, recording no incumbent with a job, cannot tell apart. (What
-// `postMessage`'s source is: HTML "window post message steps" 8.)
+// where `steps`, a function of the realm that made the operation, would find themselves. A callback the bindings run —
+// `queueMicrotask`'s, a timer's, a listener's — has their own frame under it, the realm that queued it. A promise
+// reaction job that is the operation itself (`p.then(w.postMessage.bind(w, …))`) has none: V8 answers the job's context
+// (`GetEnteredOrMicrotaskContext`), the handler's realm — a bound one's, the realm that bound it — where HTML's
+// HostMakeJobCallback keeps the incumbent of the `then` that queued it. They differ only for a handler bound in one
+// realm and given to `then` in another: V8 records no incumbent with a promise reaction job (a justified gap, CLAUDE.md).
+// (What `postMessage`'s source is: HTML "window post message steps" 8.)
 fn incumbent_operation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(steps) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
     let name = args.get(1).to_rust_string_lossy(scope);
