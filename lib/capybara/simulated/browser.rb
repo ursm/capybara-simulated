@@ -6668,11 +6668,12 @@ module Capybara
 
       # Route a navigation through the controlling SW across the WHOLE window set (the
       # registration may live in another window's Browser — or a parked one). Falls back
-      # to this browser's own registry when driverless (unit specs build bare Browsers).
-      def any_window_sw_navigation_fetch(url, **kw)
-        return @driver.sw_navigation_fetch(url, **kw) if @driver.respond_to?(:sw_navigation_fetch)
+      # to this browser's own registry when driverless (unit specs build bare Browsers). (…`own` false: none of this
+      # browser's — a document of another storage partition than its page's, whose registrations it keeps none of)
+      def any_window_sw_navigation_fetch(url, own: true, **kw)
+        return @driver.sw_navigation_fetch(url, except: (self unless own), **kw) if @driver.respond_to?(:sw_navigation_fetch)
 
-        service_worker_navigation_fetch(url, **kw)
+        service_worker_navigation_fetch(url, **kw) if own
       end
 
       # One navigation fetch for a FRAME load — the bridge's __csimFrameWindow build
@@ -6688,9 +6689,11 @@ module Capybara
       # navigation (respondWith network error / redirect loop).
       # (…`initiator_document` the initiating document as another isolate's Browser describes it — Browser#navigation_initiator:
       # its URL, opacity and cross-site ancestor — where no realm of this isolate is it, its Referer `referrer_source`)
+      # (…`registry_site` a top-level navigation's of a window of this isolate: the site the isolate's service worker
+      # registry is kept for, whose workers handle none of its hops to another site — another window's may)
       def frame_navigation_fetch(url, referrer_source, is_reload: false, secure_ancestors: true, method: 'GET', body: nil, content_type: nil, defer_ok: false, dest: 'iframe', container_realm: nil,
                                  referrer_policy: nil, initiator_realm: nil, link_policy: nil, sandbox: nil, download_realm: container_realm, user_activated: false,
-                                 initiator_document: nil)
+                                 initiator_document: nil, registry_site: nil)
         # Handle Fetch: a navigation into a scope whose worker is still 'activating' (its
         # activate waitUntil unsettled) WAITS for activation (fetch-waits-for-activate).
         # The main thread can't block for it — the settling message is sent by this very
@@ -6758,7 +6761,7 @@ module Capybara
           # isSecureContext is hard-true) as secure by fiat. The JS caller computes
           # the ancestor chain (it IS the chain — the building realm is the parent).
           if (secure_ancestors || !target.start_with?('https://')) &&
-             (sw = any_window_sw_navigation_fetch(target, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
+             (sw = any_window_sw_navigation_fetch(target, own: registry_site.nil? || Native.site(target).to_s == registry_site, method: meth, body: req_body, content_type: req_ct, is_reload: is_reload, dest: dest,
                                                           referrer_source: ref_source, origin_url: origin_url, referrer_policy: ref_policy, site_seed: site_seed,
                                                           origin_null: origin_null, resulting_client_id: rid, cookie_cross_site: cookie_cross,
                                                           navigation_cross_site: fetch.cross_site?, cookie_context: cookies))
@@ -10531,7 +10534,17 @@ module Capybara
                  else {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
                  end
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, **by)
+          # (…no service worker of the isolate's registry handling it where it is of another top-level site, whose
+          # registrations the isolate keeps none of: `registry_site`)
+          resp = frame_navigation_fetch(
+            url,
+            referred || source,
+            dest:           'document',
+            download_realm: initiator,
+            user_activated: activated,
+            registry_site:  blob_partition_site(0),
+            **by
+          )
           return if resp.nil? || resp['no_document']
 
           headers = resp['headers'] || {}

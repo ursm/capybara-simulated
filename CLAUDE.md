@@ -208,11 +208,25 @@ test that every later command addresses, for a page that merely called
 document that has since navigated away does nothing and returns undefined,
 where a browser would still run it: each document is a realm rebuilt from the
 snapshot, so the function went with the old one (handle ids are
-process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — a
-pop-up of another top-level site's only, which stays an isolate of its own
-until the isolate keeps its registries (its service workers') by top-level
-site (`Driver#hosts_partition?`); a same-site pop-up is a realm of its
-opener's isolate, where the function runs as a browser runs it; and a window
+process-unique, so nothing else answers to it; `__csimRemoteRefApply`) — of
+a pop-up whose `open()` (or link, or form) named a URL of another top-level
+site than its opener's page, judged then, on that URL (`Driver#hosts_partition?`):
+an isolate of its own for good, until the isolate keeps its registries (its
+service workers') by top-level site, so one that comes back to its opener's
+origin is reached whole, through the RPC, and has the gap; a pop-up opened at
+a URL of the page's site, or at about:blank, is a realm of its opener's
+isolate, where the function runs as a browser runs it (a `noopener` window is
+another isolate always, rightly: a browsing context group of its own, which no
+function reaches); and a realm pop-up a redirect or a navigation takes to
+another top-level site stays a realm — HTML keeps its browsing context group —
+but its documents there are of a storage partition whose service worker
+registrations the isolate keeps none of: `register()` rejects with a
+SecurityError, `getRegistrations()` is empty and no worker of the isolate's
+handles its navigations (blob_rules.rs `registryPartition`), until the registry is kept by
+top-level site; and such a cross-site pop-up's WindowProxy, of another
+isolate, cross-origin has no child frame by index — `w[0]` a SecurityError,
+where HTML, Chrome and Firefox give that frame's WindowProxy — the RPC
+reaching that window's page alone (`csimWindowProxy`), gone with it; and a window
 `window.open` made in its opener's isolate keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
 Document object too, renewed (its listeners, handlers, observer registrations,

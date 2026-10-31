@@ -1112,10 +1112,11 @@ module Capybara
       # closed (searched newest-parked first: a re-registered scope's newest worker is
       # the active registration). Returns the owner's respondWith wire hash, or nil
       # (uncontrolled → load from the network).
-      def sw_navigation_fetch(url, **kw)
+      # (…`except` a Browser whose registry is not to handle it: Browser#any_window_sw_navigation_fetch)
+      def sw_navigation_fetch(url, except: nil, **kw)
         sweep_dead_parked
         owner = (window_browsers + @sw_parked.reverse).find {|b|
-          b.sw_controls_navigation?(url)
+          !b.equal?(except) && b.sw_controls_navigation?(url)
         }
         return nil unless owner
 
