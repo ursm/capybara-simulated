@@ -93,7 +93,7 @@ fn storage_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArgu
     if arena.is_dropped(realm) {
         return None;
     }
-    crate::realm_location::storage_key(arena, realm).filter(|(_, origin)| !origin.starts_with("opaque:"))
+    crate::realm_location::storage_key(arena, realm).filter(|(_, origin)| !crate::realm_location::is_opaque_origin_key(origin))
 }
 // The area an op names: its shed (arg 0) and realm arg 1's storage key — None for none, or no shed.
 fn area_key(scope: &mut v8::PinScope<'_, '_>, args: &v8::FunctionCallbackArguments<'_>) -> Option<(u64, String, String)> {
