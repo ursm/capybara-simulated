@@ -3017,7 +3017,14 @@ module Capybara
           # (…the document's of the window it addresses: the page's, or a window's `in_window` — a matcher in one waits on
           # none of the other's redraws)
           gen = @runtime.settle_gen(@top_realm_id)
-          if @last_polled_gen.nil? || gen != @last_polled_gen
+          # (…the grace a CHANGE of it earns: the first sample is none — a background window's worker still booting as
+          # the wait began made every failing matcher of the active window wait out its whole wait)
+          if @last_polled_gen.nil?
+            @last_polled_gen = gen
+            @idle_settle_polls = 0
+            return true
+          end
+          if gen != @last_polled_gen
             @last_polled_gen = gen
             @idle_settle_polls = 0
             @polling_grace = POLLING_GRACE_POLLS
