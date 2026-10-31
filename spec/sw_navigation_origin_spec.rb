@@ -43,4 +43,32 @@ RSpec.describe 'a service worker passthrough navigation', :every_host_local do
       '/scope/post' => ['same-origin', 'https://www.example.com'], '/noscope/post' => ['same-origin', 'https://www.example.com']
     )
   end
+
+  # …and a form's submission into a named frame, which the worker of its URL's scope may intercept, under the form's own
+  # referrer policy (`rel=noreferrer`: HTML's "noreferrer" link type, its request's referrer policy "no-referrer"), as
+  # the same submission no worker may intercept is.
+  it "sends a frame's form submission under the form's own referrer policy", :https do
+    seen   = {}
+    worker = "self.addEventListener('fetch', (e) => { if (e.request.mode === 'navigate') e.respondWith(fetch(e.request)); });"
+    s = simulated_session(lambda {|env|
+      seen[env['PATH_INFO']] = env['HTTP_REFERER']
+      next [200, {'content-type' => 'text/javascript'}, [worker]] if env['PATH_INFO'] == '/sw.js'
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><iframe name=f></iframe><form method=post target=f rel=noreferrer></form><form method=post target=f></form>']]
+    })
+    s.visit '/'
+    s.execute_script(<<~JS)
+      navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async (reg) => {
+        const w = reg.installing || reg.waiting || reg.active;
+        await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+        window.ready = true;
+      });
+    JS
+    poll_until { s.evaluate_script('window.ready') }
+    %w[none kept].each_with_index do |path, i|
+      s.execute_script("document.forms[#{i}].action = '/scope/#{path}'; document.forms[#{i}].submit()")
+      poll_until { s.evaluate_script('1') && seen.key?("/scope/#{path}") }
+    end
+    expect(seen.slice('/scope/none', '/scope/kept')).to eq('/scope/none' => nil, '/scope/kept' => 'https://www.example.com/')
+  end
 end
