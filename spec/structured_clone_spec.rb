@@ -416,11 +416,8 @@ RSpec.describe 'Structured clone of platform objects' do
     s.execute_script("window.open('/popup?opener'); window.open('/popup?noopener', '', 'noopener')")
     poll_until { s.evaluate_script('got.length') == 2 }
     s.execute_script("new BroadcastChannel('wasm').postMessage(new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0])))")
-    # (…each pop-up's event loop run as its window is: a background window's turns are the driver's to take)
-    poll_until do
-      s.windows.each {|w| s.within_window(w) { s.evaluate_script('1') } }
-      s.evaluate_script('got.length') == 4
-    end
+    # (…each pop-up's event loop run as the page's is waited on, no command sent to it)
+    poll_until { s.evaluate_script('got.length') == 4 }
 
     expect(s.evaluate_script('got').sort).to eq(['noopener messageerror', 'noopener ready', 'opener message true', 'opener ready'])
   end

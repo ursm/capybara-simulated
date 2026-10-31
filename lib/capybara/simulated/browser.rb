@@ -1081,7 +1081,7 @@ module Capybara
         # the delivered message never reaches the DOM during find-polling
         # (only `evaluate_script`, which ticks unconditionally, would see
         # it). Non-empty results keep the fast path — no extra tick.
-        return result unless empty_find_result?(result) && (@timers_active || async_io_pending? || background_timers_pending?)
+        return result unless empty_find_result?(result) && (@timers_active || async_io_pending? || background_steps_pending?)
 
         tick_real_time
         return result unless @find_cache_dirty
@@ -1114,7 +1114,7 @@ module Capybara
       # between-actions app cases (Avo actions_spec:464); no action-path flake has surfaced there.
       def timer_wait_elapsed?
         @pre_tick_armed &&
-          (@timers_active || background_timers_pending?) &&
+          (@timers_active || background_steps_pending?) &&
           (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_tick_ts) >= FIND_PRE_TICK_MIN_S
       end
 
@@ -1165,9 +1165,14 @@ module Capybara
       # Worker / SSE / hijacked-fetch message (with no active timer) still
       # drain that channel, without paying an unconditional drain on
       # timer-driven runloop pages.
+      # (…this window's own channels, then what the session's other windows and its service workers' host owe it)
       def async_io_pending?
-        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending? || agent_notices_pending? ||
-          sw_host_work_pending?
+        own_async_pending? || window_tasks_takeable? || agent_notices_pending? || sw_host_work_pending?
+      end
+      # …those of this window's own: its workers', its event streams', its hijacked fetches', its cross-window inboxes', its
+      # WebSockets', its images' — what its own step delivers, whichever window is the active one (`steps_pending?`).
+      def own_async_pending?
+        worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
       end
 
       # The engine registries' notices (agents.rs — IndexedDB's, Web Locks') for this window's realms, taken — each realm
@@ -1225,18 +1230,21 @@ module Capybara
       # …its others, none in a session of one window (the common one, which pays a Driver predicate).
       private def background_windows = @driver.respond_to?(:several_windows?) && @driver.several_windows? ? session_windows.drop(1) : []
 
-      # Whether another window of the session has timers to run, which each poll of this one steps
-      # (`step_background_windows`): what that window does as they fire is what a wait may be for (an OAuth or payment
+      # Whether another window of the session has work of its own to run, which each poll of this one steps
+      # (`step_background_windows`): what that window does as it runs is what a wait may be for (an OAuth or payment
       # pop-up reporting back to its opener) — waited on under the idle gate this window's own timers are (`polling?`),
       # keyed on THIS window's settle generation alone: no matcher of its sees another window's document, and what
       # crosses to it from one (a message, a storage event) changes this one's as it is delivered — a pop-up's clock
-      # redrawing its own DOM keeps no failing matcher here waiting out its wait. (…or a `load` its document still owes,
-      # held for its images in flight: a pop-up's, whose opener's listeners wait on it — `flush_pending_window_load`)
-      def background_timers_pending? = background_windows.any?(&:steps_pending?)
-      # (…or a navigation a service worker asked of a client of its, or one deferred on its activation, due:
-      # `consume_pending_sw_client_nav`, `consume_sw_deferred_navigations`)
+      # redrawing its own DOM keeps no failing matcher here waiting out its wait.
+      def background_steps_pending? = background_windows.any?(&:steps_pending?)
+      # …this window's: its timers; a `load` its document still owes, held for its images in flight (a pop-up's, whose
+      # opener's listeners wait on it — `flush_pending_window_load`); a navigation a service worker asked of a client of
+      # its, or one deferred on its activation, due (`consume_pending_sw_client_nav`, `consume_sw_deferred_navigations`);
+      # and what its own channels hold — a BroadcastChannel post or a `storage` event another window sent, a worker's
+      # answer, a socket's frame (`own_async_pending?`): every window's event loop runs, a background one's with no
+      # command sent to it, as a browser's does.
       def steps_pending?
-        @timers_active == true || @window_load_due == true || !@sw_navigations_due.empty? ||
+        @timers_active == true || @window_load_due == true || !@sw_navigations_due.empty? || own_async_pending? ||
           (sw_registered? && Native.sw_client_navs_queued(@sw_partition, @window_number))
       end
 
@@ -3033,13 +3041,13 @@ module Capybara
         # Background-thread work (workers, EventSource, MessageBus long-poll) keeps the settle loop alive even when settle_gen
         # is otherwise idle — and, where a window `window.open` made in this isolate is open, an image a document's load
         # waits for: a pop-up's, whose `w.onload` a wait of its opener's is for (the page's own load its visit waits out).
-        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || window_tasks_takeable? || websocket_pending?
         return true if image_loads_pending? && !@runtime.window_realm_meta.empty?
         # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
         # worker's forever `setInterval` (a heartbeat) cannot make every negative matcher wait out its whole timeout.
-        if @timers_active || worker_timers_pending? || background_timers_pending?
+        if @timers_active || worker_timers_pending? || background_steps_pending?
           # (…the document's of the window it addresses: the page's, or a window's `in_window` — a matcher in one waits on
           # none of the other's redraws)
           gen = @runtime.settle_gen(@top_realm_id)
@@ -3071,7 +3079,7 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || async_io_pending? || background_timers_pending?
+        return unless @timers_active || async_io_pending? || background_steps_pending?
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -7875,16 +7883,13 @@ module Capybara
       # window's VM is parked/disposed (redirect-keepalive "[new window][unload]").
       def fire_document_teardown        = (@runtime.call('__csimFireWindowUnloadDeep') rescue nil)
 
-      # Covers BroadcastChannel and `storage` — the cross-window event channels share these drain/pending hooks — and what
-      # was asked of another window of the session (`window_asked?`) that can be taken now, which this window's step takes
-      # for it (`window_tasks_takeable?`).
+      # Covers BroadcastChannel and `storage` — the cross-window event channels share these drain/pending hooks.
       # (…the isolate's BroadcastChannel queue where a post may have filled it since it was last drained: `@bc_queued`)
       def window_message_pending?
-        !@broadcast_inbox.empty? || !@storage_inbox.empty? || @bc_queued || window_tasks_takeable?
+        !@broadcast_inbox.empty? || !@storage_inbox.empty? || @bc_queued
       end
-      # …of the session's other windows, any while that one is not busy (`take_window_tasks_in_background`) — this
-      # window's own, its close and the navigation it was opened for, its navigation drain's
-      # (`drain_pending_navigation_once`: `pending_nav_intent?`).
+      # Whether something was asked of another window of the session (`window_asked?`) that can be taken now, which this
+      # window's step takes for it — any while that one is not busy (`take_window_tasks_in_background`).
       private def window_tasks_takeable?
         Native.window_tasks_pending && session_windows.drop(1).any? {|b| b.window_asked? && !b.window_busy? }
       end
