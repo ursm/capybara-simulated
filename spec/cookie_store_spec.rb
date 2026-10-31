@@ -334,6 +334,47 @@ RSpec.describe 'the cookie store' do
     ])
   end
 
+  # …and a form's submission into a frame the worker of its URL's scope may intercept is judged as the one it may not
+  # is: a frame of a's under b's page posting into its own named frame sends no SameSite cookie — its frame is under b's
+  # page, and its initiator has a cross-site ancestor (Fetch's step 4) — whether the worker sees it first or not.
+  it "judges a frame's form submission a service worker may intercept as one it may not" do
+    seen   = {}
+    worker = "self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));"
+    app    = lambda {|env|
+      req = Rack::Request.new(env)
+      case req.path
+      when '/set'    then [200, {'content-type' => 'text/html', 'set-cookie' => ['s=1; SameSite=Strict; Path=/', 'l=1; SameSite=Lax; Path=/']}, ['set']]
+      when '/sw.js'  then [200, {'content-type' => 'text/javascript'}, [worker]]
+      when '/top'    then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe src="https://a.test/poster"></iframe>']]
+      when '/poster' then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><iframe name="f"></iframe><form method="post" target="f"></form>']]
+      else
+        seen[req.path] = [env['HTTP_COOKIE'].to_s, env['HTTP_REFERER']]
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>echo']]
+      end
+    }
+    s = every_host_local { simulated_session(app) }
+    s.visit 'https://a.test/set'
+    s.visit 'https://b.test/top'
+    s.within_frame(0) do
+      s.execute_script("document.forms[0].action = 'https://a.test/scope/echo-before'; document.forms[0].submit()")
+      poll_until { s.evaluate_script('1') && seen.key?('/scope/echo-before') }
+      s.execute_script(<<~JS)
+        navigator.serviceWorker.register('/sw.js', {scope: '/scope/'}).then(async (reg) => {
+          const w = reg.installing || reg.waiting || reg.active;
+          await new Promise((res) => { if (w.state === 'activated') return res(); w.addEventListener('statechange', () => { if (w.state === 'activated') res(); }); });
+          window.ready = true;
+        });
+      JS
+      poll_until { s.evaluate_script('window.ready') }
+      s.execute_script("document.forms[0].action = 'https://a.test/scope/echo-after'; document.forms[0].submit()")
+      poll_until { s.evaluate_script('1') && seen.key?('/scope/echo-after') }
+    end
+    expect(seen).to eq(
+      '/scope/echo-before' => ['', 'https://a.test/poster'],
+      '/scope/echo-after'  => ['', 'https://a.test/poster']
+    )
+  end
+
   # A hyperlink's download is HTML's "download the hyperlink" request: "a new request whose URL is urlString, client is
   # entry settings object, initiator is 'download', destination is the empty string" — no navigation request, its mode
   # the default "no-cors" and its credentials mode the default "same-origin". So it is the document's whose link it is,
