@@ -1037,7 +1037,12 @@ impl SessionHistory {
     fn stash_traversal(&self, delta: i64) {
         self.lock().stashed.push(delta);
     }
-    // #take_stashed -> those, in order; #stashed? -> whether there are any.
+    // #next_stashed -> the first of those, taken — one queue however its taking is re-entered (a traversal applied runs
+    // what the page planned, which may apply the next); #stashed? -> whether there are any.
+    fn next_stashed(&self) -> Option<i64> {
+        let mut t = self.lock();
+        (!t.stashed.is_empty()).then(|| t.stashed.remove(0))
+    }
     fn take_stashed(&self) -> Vec<i64> {
         std::mem::take(&mut self.lock().stashed)
     }
@@ -1331,7 +1336,7 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
     class.define_method("take_all_queued", method!(SessionHistory::take_all_queued, 0))?;
     class.define_method("stash_traversal", method!(SessionHistory::stash_traversal, 1))?;
-    class.define_method("take_stashed", method!(SessionHistory::take_stashed, 0))?;
+    class.define_method("next_stashed", method!(SessionHistory::next_stashed, 0))?;
     class.define_method("stashed?", method!(SessionHistory::has_stashed, 0))?;
     class.define_method("flush_begin", method!(SessionHistory::flush_begin, 0))?;
     class.define_method("flush_end", method!(SessionHistory::flush_end, 1))?;
@@ -1375,7 +1380,7 @@ mod tests {
         h.flush_end(saved);
         h.stash_traversal(1);
         assert_eq!(h.flush_restore(true), Some(1));
-        assert_eq!(h.take_stashed(), vec![-2, -1, 1]);
+        assert_eq!([h.next_stashed(), h.next_stashed(), h.next_stashed(), h.next_stashed()], [Some(-2), Some(-1), Some(1), None]);
         assert_eq!(h.flush_restore(true), None);
         let saved = h.flush_begin();
         h.stash_traversal(-3);

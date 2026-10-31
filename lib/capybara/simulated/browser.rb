@@ -2481,14 +2481,17 @@ module Capybara
         consume_pending_history_traverse
       end
 
+      # (…the traversals stashed, one at a time off the traversable's one queue — a traversal applied runs what the page
+      # planned, which may come back here for the next: `restore_flushed_nav_intents` — each failing alone)
       def consume_pending_history_traverse
-        deltas = @session_history.take_stashed
-        return if deltas.empty?
-
-        invalidate_find_cache
-        deltas.each {|delta| perform_history_traverse(delta) }
-      rescue StandardError => e
-        log_console('warn', "history traversal failed: #{e.message}")
+        while (delta = @session_history.next_stashed)
+          invalidate_find_cache
+          begin
+            perform_history_traverse(delta)
+          rescue StandardError => e
+            log_console('warn', "history traversal failed: #{e.message}")
+          end
+        end
       end
 
       # The step a traversal by `delta` goes to, and the navigables' changes it makes (session_history.rs `traversal`).
