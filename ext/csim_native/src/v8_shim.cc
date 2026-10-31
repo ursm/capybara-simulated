@@ -87,3 +87,10 @@ class RootsHandler final : public v8::EmbedderRootsHandler {
 extern "C" void csim_install_roots_handler(v8::Isolate* isolate, uint16_t tag) {
   isolate->SetEmbedderRootsHandler(new RootsHandler(isolate, tag));
 }
+
+// The incumbent realm's context — HTML's, V8's: that of the topmost JavaScript function on the stack (a native function's
+// caller's, through any bound function between), else the entered one (navigables.rs `withIncumbent`). A handle of the
+// current scope, an indirect one as `csim_bound_target`'s.
+extern "C" const v8::Context* csim_incumbent_context(v8::Isolate* isolate) {
+  return *isolate->GetIncumbentContext();
+}

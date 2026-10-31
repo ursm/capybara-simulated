@@ -750,16 +750,18 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       end
     end
 
-    it "hears its opener's messages with the opener as their source, and its own back" do
+    # (…and a listener of the opener's on it posting back as the opener: its realm the incumbent, the source of a message
+    # its script posts — HTML "window post message steps" 8)
+    it "hears its opener's messages with the opener as their source, and the opener's listener answers as the opener" do
       session.execute_script(<<~JS)
         window.got = [];
-        window.addEventListener('message', (e) => got.push([e.data, e.source === w]));
+        window.addEventListener('message', (e) => got.push([e.data, e.source === w, e.source === window]));
         window.w = window.open('/second');
         w.addEventListener('message', (e) => { e.source.postMessage('pong', '*'); w.document.title = 'got:' + e.data + ':' + e.source.document.title; });
       JS
       session.has_css?('#none', wait: 0.2)
       session.execute_script("w.postMessage('ping', '*')")
-      expect(session.evaluate_script('[w.document.title, got]')).to eq(['got:ping:main', [['pong', true]]])
+      expect(session.evaluate_script('[w.document.title, got]')).to eq(['got:ping:main', [['pong', false, true]]])
     end
 
     # (…a network error an error document at its URL, of a new opaque origin — as the page's is (Browser#response_outcome)

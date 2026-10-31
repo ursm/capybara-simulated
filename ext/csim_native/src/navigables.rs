@@ -1240,6 +1240,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "exitRealm", exit_realm, context_id);
     crate::dom::register(scope, ns, "entryRealm", entry_realm, context_id);
     crate::dom::register(scope, ns, "enteredGlobal", entered_global, context_id);
+    crate::dom::register(scope, ns, "withIncumbent", with_incumbent, context_id);
     crate::dom::register(scope, ns, "disownOpener", disown_opener, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
@@ -1624,6 +1625,28 @@ fn entered_global(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
     let context = scope.get_entered_or_microtask_context();
     let global = context.global(scope);
     rv.set(global.into());
+}
+// src/v8_shim.cc: V8's incumbent context.
+unsafe extern "C" {
+    fn csim_incumbent_context(isolate: v8::UnsafeRawIsolatePtr) -> *const v8::Context;
+}
+// __dom.withIncumbent(steps, ...args) -> `steps(incumbent, ...args)`, `incumbent` the global of the incumbent realm — HTML's
+// incumbent settings object's, the realm of the script that called: V8's incumbent context, its topmost JavaScript
+// function's. Called as a member a binding made of it bound to its steps (`withIncumbent.bind(null, steps)`), which
+// pushes no JavaScript frame of its own, so the caller of the member is the one V8 finds — where the steps, a function
+// of the realm that made the member, would find themselves. (What `postMessage`'s source is: HTML "window post message
+// steps" 8.)
+fn with_incumbent(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(steps) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    // SAFETY: the shim answers a handle of this callback's scope (a `Local`'s representation), never a null one: a
+    // callback runs with a context entered.
+    let incumbent: v8::Local<v8::Context> = unsafe { std::mem::transmute(csim_incumbent_context(scope.as_raw_isolate_ptr())) };
+    let mut argv: Vec<v8::Local<v8::Value>> = vec![incumbent.global(scope).into()];
+    argv.extend((1..args.length()).map(|i| args.get(i)));
+    let receiver = v8::undefined(scope).into();
+    if let Some(result) = steps.call(scope, receiver, &argv) {
+        rv.set(result);
+    }
 }
 // __dom.disownOpener(key) — the window's page set its `opener` to null (`disown_opener`).
 fn disown_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
