@@ -1659,10 +1659,11 @@ fn entered_global(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackA
 // JavaScript function on the stack). A native function pushes no JavaScript frame of its own, so V8 finds its caller —
 // where `steps`, a function of the realm that made the operation, would find themselves. A callback the bindings run —
 // `queueMicrotask`'s, a timer's, a listener's — has their own frame under it, the realm that queued it. A promise
-// reaction job that is the operation itself (`p.then(w.postMessage.bind(w, …))`) has none: V8 answers the job's context
-// (`GetEnteredOrMicrotaskContext`), the handler's realm — a bound one's, the realm that bound it — where HTML's
-// HostMakeJobCallback keeps the incumbent of the `then` that queued it. They differ only for a handler bound in one
-// realm and given to `then` in another: V8 records no incumbent with a promise reaction job (a justified gap, CLAUDE.md).
+// reaction job that is the operation itself (`p.then(w.postMessage.bind(w, …))`) has none of its own: V8 finds the
+// topmost JavaScript frame under the checkpoint that runs the job — the bindings code driving the event loop, the realm
+// whose task or script ran the checkpoint; the job's own context (`GetEnteredOrMicrotaskContext`) only where no
+// JavaScript is on the stack — where HTML's HostMakeJobCallback keeps the incumbent of the `then` that queued it. V8
+// records no incumbent with a promise reaction job (a justified gap, CLAUDE.md).
 // (What `postMessage`'s source is: HTML "window post message steps" 8.)
 fn incumbent_operation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(steps) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
