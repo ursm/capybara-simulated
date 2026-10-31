@@ -156,4 +156,20 @@ RSpec.describe 'BroadcastChannel delivery' do
     JS
     expect(poll_until { session.evaluate_script('window.got.length') == 1 && session.evaluate_script('window.got') }).to eq(%w[x])
   end
+
+  # (…a channel heard as its delivery's task runs — one given its listener after the post among them — and none that no
+  # listener hears then, whose task is let go: broadcast-channel.js `__csimBcTakeQueued`)
+  it 'delivers to a listener added after the post, where another realm makes the deliveries queued' do
+    session.execute_script(<<~JS)
+      window.got = [];
+      document.body.append(document.createElement('iframe'));
+      const unheard = Array.from({length: 50}, () => new BroadcastChannel('late'));
+      const poster = new BroadcastChannel('late');
+      const late = new BroadcastChannel('late');
+      poster.postMessage('first');
+      late.onmessage = (e) => got.push(e.data);
+      late.addEventListener('message', (e) => got.push('listener:' + e.data));
+    JS
+    expect(poll_until { session.evaluate_script('window.got') unless session.evaluate_script('window.got').empty? }).to eq(%w[first listener:first])
+  end
 end
