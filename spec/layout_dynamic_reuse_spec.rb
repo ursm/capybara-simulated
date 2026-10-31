@@ -813,7 +813,7 @@ RSpec.describe 'layout reuse across dynamic style state' do
       end
       # (…40px a 100ms read apart, from the rendering update a frame's interval after the read that started it — its
       # start time that frame's, a browser's alike — to 300)
-      expect(reads).to eq([100, 136.8, 176.8, 216.8, 256.8, 296.8, 300])
+      expect(reads).to eq([100, 136.66667, 176.66667, 216.66667, 256.66666, 296.66666, 300])
       expect(s.evaluate_script('__csimNativeLayoutStats().rust') - passes).to be >= reads.size
     end
 

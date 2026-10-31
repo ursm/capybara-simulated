@@ -65,4 +65,17 @@ RSpec.describe 'animation frame callbacks' do
     JS
     expect(seen).to eq([true, false, true])
   end
+
+  # …at most one a frame's interval, whatever a frame queues: a loop of animation frame callbacks each queuing a 1 ms
+  # timer ran its frames 1 ms apart and starved a later timer of the page's.
+  it 'runs a later timer under an animation frame loop that queues a timer every frame' do
+    session.visit '/'
+    session.execute_script(<<~JS)
+      window.frames_run = 0;
+      (function frame() { frames_run++; setTimeout(() => {}, 1); requestAnimationFrame(frame); })();
+      setTimeout(() => document.body.append(Object.assign(document.createElement('p'), { id: 'done' })), 3000);
+    JS
+    expect(session).to have_css('#done', visible: :all, wait: 5)
+    expect(session.evaluate_script('frames_run')).to be < 300
+  end
 end

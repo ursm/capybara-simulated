@@ -126,11 +126,11 @@ RSpec.describe 'IntersectionObserver' do
   # notification included) only raises a pending flag, the render phase of the
   # next event-loop step queues the entries, and a task of the step after
   # notifies them. An app whose callback
-  # re-observes its target (Discourse's composer-image-node) therefore advances
-  # one round per step — in the eager-microtask model it looped unboundedly
+  # re-observes its target (Discourse's composer-image-node) therefore advances at most
+  # one round a step — in the eager-microtask model it looped unboundedly
   # inside a single step, spinning thousands of layout passes (the ProseMirror
   # composer hang).
-  it 'paces a callback that re-observes at one round per step' do
+  it 'paces a callback that re-observes at most one round a step' do
     s = session
     s.execute_script(<<~JS)
       window.__rounds = 0;
@@ -146,15 +146,17 @@ RSpec.describe 'IntersectionObserver' do
       reobserve();
     JS
     pump(s, 8)
-    # (…one step inside one script, so no frame the driver runs between scripts adds to it)
+    # (…three steps inside one script, so no frame the driver runs between scripts adds to them: at most a round a step,
+    # one a rendering update at most a frame's interval apart, across steps — a step need not hold one)
     rounds = s.evaluate_script(<<~JS)
       (() => {
         const before = window.__rounds;
-        __runLoopStep(50, 50, false);
+        for (let i = 0; i < 3; i++) __runLoopStep(50, 50, false);
         return [before > 0, window.__rounds - before];
       })()
     JS
-    expect(rounds).to eq([true, 1])
+    expect(rounds[0]).to be(true)
+    expect(rounds[1]).to be_between(1, 3)
   end
 
   it 'exposes the spec-shaped surface' do
