@@ -485,6 +485,9 @@ module Capybara
         windows = window_realm_meta.keys.select {|id| frame_realms.key?(id) }
         windows.flat_map {|id| [id, *realm_descendants(id)] }
       end
+      # …and the page's own document's: its realm and its frames' (`realm_descendants` of 0) — what HTML "destroy a
+      # document" destroys of a closed window whose isolate hosts the windows it made (Browser#destroy_page).
+      def page_realm_tree = [0, *realm_descendants(0)]
       private def realm_descendants(id)
         Array(realm_direct_call(0, '__csimRealmsMadeIn', id.to_i)).flat_map {|child| [child, *realm_descendants(child)] }
       end

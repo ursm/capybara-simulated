@@ -532,20 +532,12 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
         let realm = v8::Integer::new(scope, w).into();
         let item: Vec<v8::Local<v8::Value>> = match (own.location, own.reload, own.traversal) {
             (Some(l), ..) => [vec![realm, v8::String::new(scope, "location").unwrap().into()], location_items(scope, l)].concat(),
-            // (…a reload's of a document a POST made, that POST again: its entry's resource)
-            (None, Some(r), _) => {
-                let post = crate::dom::dom(scope).arena.window_history(w).and_then(|(h, _)| h.current_post());
-                [
-                    vec![
-                        realm,
-                        v8::String::new(scope, "reload").unwrap().into(),
-                        v8::Boolean::new(scope, r.activated).into(),
-                        r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
-                    ],
-                    post_items(scope, post),
-                ]
-                .concat()
-            }
+            (None, Some(r), _) => vec![
+                realm,
+                v8::String::new(scope, "reload").unwrap().into(),
+                v8::Boolean::new(scope, r.activated).into(),
+                r.blob.map_or_else(|| v8::undefined(scope).into(), |b| v8::Local::new(scope, b)),
+            ],
             (None, None, Some(t)) => [
                 vec![
                     realm,

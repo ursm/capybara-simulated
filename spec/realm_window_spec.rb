@@ -31,6 +31,8 @@ RSpec.describe 'a window made in its opener\'s isolate' do
         '<!doctype html><html><head><meta charset="utf-8"><title>second</title></head><body><p id="second">SECOND</p></body></html>'
       when '/boom'
         raise 'boom'
+      when '/r307'
+        return [307, {'location' => '/posted'}, []]
       when '/missing'
         return [404, {'content-type' => 'text/html'}, ['<!doctype html><meta charset="utf-8"><title>missing</title>']]
       when '/form'
@@ -41,7 +43,7 @@ RSpec.describe 'a window made in its opener\'s isolate' do
           </body></html>
         HTML
       when '/posted'
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>posted</title></head><body><p id=\"posted\">#{env['REQUEST_METHOD']} #{env['rack.input'].read}</p></body></html>"
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>posted</title></head><body><p id=\"posted\">#{env['REQUEST_METHOD']} #{env['rack.input']&.read}</p></body></html>"
       else
         '<!doctype html><html><head><meta charset="utf-8"><title>third</title></head><body><p id="third">THIRD</p></body></html>'
       end
@@ -373,6 +375,56 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     JS
     session.find(:css, '#js').click
     expect(session).to have_css('#second')
+  end
+
+  # (…its host page's document destroyed with its window — HTML "destroy a document": its timers run no more — the
+  # pop-up's own going on)
+  it "outlives the window that opened it, whose document's tasks run no more" do
+    host  = session.open_new_window
+    popup = session.within_window(host) do
+      session.visit('/')
+      session.window_opened_by do
+        session.execute_script("window.w = window.open(); window.n = 0; setInterval(() => { w.document.title = 'tick' + ++n; }, 50);")
+      end
+    end
+    host.close
+    session.within_window(popup) do
+      session.execute_script("window.k = 0; setInterval(() => k++, 50);")
+      before = session.title
+      session.evaluate_async_script('setTimeout(arguments[0], 500)')
+      expect([session.title, session.evaluate_script('k') > 2]).to eq([before, true])
+    end
+  end
+
+  # (…the entry realm the context the host entered, where no listener of several realms named one: a page of one realm
+  # opening the window in the listener that navigates it — HTML's entry settings object)
+  it "is navigated by the listener that opened it to a URL resolved against its opener's document" do
+    session.visit('/dir/page')
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<button id="go">go</button>');
+      document.getElementById('go').addEventListener('click', () => {
+        window.w = window.open();
+        w.document.write('<base href="/elsewhere/">');
+        w.location.href = 'next';
+      });
+    JS
+    popup = session.window_opened_by { session.click_button('go') }
+    session.within_window(popup) { expect(session).to have_current_path('/dir/next') }
+  end
+
+  # (…a 307 keeps the POST — Fetch "HTTP-redirect fetch" — which a reload of its entry posts again)
+  it 'posts again for a reload of an entry a 307 redirect kept a POST' do
+    session.execute_script("window.w = window.open('', 'named'); w.location = '/second';")
+    session.within_window(session.windows.last) { expect(session).to have_css('#second') }
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<form target=named method=post action=/r307><input name=k value=v></form>');
+      document.forms[0].submit();
+    JS
+    session.within_window(session.windows.last) do
+      expect(session).to have_text('POST k=v')
+      session.refresh
+      expect(session).to have_text('POST k=v')
+    end
   end
 
   it 'is the opener of a pop-up it opens at a URL' do

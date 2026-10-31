@@ -487,9 +487,10 @@ impl RealmArena {
             nav.window_realms.insert(key, realm);
             nav.opened.insert(key);
             nav.window_histories.entry(key).or_insert_with(|| crate::session_history::SessionHistory::copying(opener_storage));
+            // (…as it was first made: a navigation of the window keeps it, whatever of the realm it names is gone since)
             if let Some(opener) = opener {
                 let opener = nav.window_keys.get(&opener).copied().unwrap_or(opener);
-                nav.openers.insert(key, opener);
+                nav.openers.entry(key).or_insert(opener);
             }
             if !nav.closed.contains(&key) {
                 nav.windows.push(realm);
@@ -1175,6 +1176,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "enterRealm", enter_realm, context_id);
     crate::dom::register(scope, ns, "exitRealm", exit_realm, context_id);
     crate::dom::register(scope, ns, "entryRealm", entry_realm, context_id);
+    crate::dom::register(scope, ns, "enteredGlobal", entered_global, context_id);
     crate::dom::register(scope, ns, "disownOpener", disown_opener, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
@@ -1530,6 +1532,14 @@ fn exit_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 fn entry_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     rv.set_int32(crate::dom::realm(scope, cid).navigables.entry.unwrap_or(-1));
+}
+// __dom.enteredGlobal() -> the global of V8's entered — or, as a microtask runs, its — context: the entry realm where
+// none is entered by name (`entryRealm`), the host having entered the context of the script it runs and of the task it
+// dispatches, a promise job its handler's (HTML: a job's script's settings object is its entry).
+fn entered_global(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let context = scope.get_entered_or_microtask_context();
+    let global = context.global(scope);
+    rv.set(global.into());
 }
 // __dom.disownOpener(key) — the window's page set its `opener` to null (`disown_opener`).
 fn disown_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {

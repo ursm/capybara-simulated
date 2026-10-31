@@ -995,7 +995,10 @@ module Capybara
         @aux_windows.delete(w)
         b = w[:window]
         return b.discard! if b.is_a?(RealmWindow)
-        return @hosts << b if hosts_windows?(b)
+        if hosts_windows?(b)
+          b.destroy_page
+          return @hosts << b
+        end
 
         retire_browser(b)
       end

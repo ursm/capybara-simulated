@@ -2999,10 +2999,11 @@ module Capybara
       # on every DOM mutation / URL change (see __settleGen wiring),
       # so this only short-circuits genuinely idle loops.
       def polling?
-        # Background-thread work (workers, EventSource, MessageBus long-poll, an image a document's load waits for — a
-        # pop-up's, whose opener's `w.onload` a wait is for) keeps the settle loop alive even when settle_gen is otherwise
-        # idle.
-        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending? || image_loads_pending?
+        # Background-thread work (workers, EventSource, MessageBus long-poll) keeps the settle loop alive even when settle_gen
+        # is otherwise idle — and, where a window `window.open` made in this isolate is open, an image a document's load
+        # waits for: a pop-up's, whose `w.onload` a wait of its opener's is for (the page's own load its visit waits out).
+        return true if worker_pending? || event_source_pending? || hijack_fetch_pending? || window_message_pending? || websocket_pending?
+        return true if image_loads_pending? && !@runtime.window_realm_meta.empty?
         # …and a worker whose own timers are still to fire counts as the page's own do: it runs on its own thread and
         # clock, and what it posts when they fire is what a wait is for — `setTimeout(() => postMessage('w2'), 300)`
         # arrived after the wait had given up, because nothing on THIS page was pending. Under the same idle gate, so a
@@ -6785,6 +6786,9 @@ module Capybara
           # The final reserved client id — the JS frame builder hands it to the new realm
           # (create_frame_realm tells the realm its client id + records the adoption).
           out['resulting_client_id'] = rid if out
+          # (…and the method its last request was made with: a POST's a GET where a redirect made it one, a 307 / 308's a POST
+          # still — the resource its entry keeps)
+          out['method'] = fetch.request_method if out
           # (…the Referer its request carried, a service worker's as the network's would have: the referrer of the document
           # it makes)
           sent = fetch.referrer
@@ -7875,6 +7879,14 @@ module Capybara
         fire_document_teardown
         @session_history.close!
         @discard_due = true
+      end
+      # …and, its window closed while windows `window.open` made in its isolate are open still — whose host it is kept
+      # as (Driver `@hosts`) — its page's document destroyed (HTML "destroy a document"): its realm and its frames'
+      # discarded, no task of theirs run again — its timers, its listeners, its observers, its channels (window.js
+      # `__csimDiscardRealms`) — the windows it made stepped by its event loop still.
+      def destroy_page
+        @runtime.call('__csimDiscardRealms', @runtime.page_realm_tree)
+        @timers_active = false
       end
       # Whether its close ran, the window to be discarded.
       def discard_due? = @discard_due == true
@@ -10429,9 +10441,10 @@ module Capybara
           referred = source if initiator_document
           how      = replace ? 'replace' : 'push'
         when 'reload'
-          activated, blob, *resource = plan
-          url = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
-          how = 'reload'
+          activated, blob = plan
+          url      = @runtime.realm_call(realm_id, '__csimLocationHref').to_s
+          resource = @runtime.realm_call(realm_id, '__csimWindowEntryPost')
+          how      = 'reload'
         when 'traverse'
           step, url, referred, *resource = plan
           how = 'step'
@@ -10463,8 +10476,9 @@ module Capybara
 
           headers = resp['headers'] || {}
           response = [resp['status'], headers]
-          # (…its entry's resource the POST that made it — none where a redirect made it of another request)
-          post = nil if resp['url'] && resp['url'] != url
+          # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
+          # or 308 keeps it, Fetch "HTTP-redirect fetch")
+          post = nil if resp['method'] == 'GET'
           body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
           made = {
             csp:             response_csp(headers),
@@ -11982,12 +11996,13 @@ module Capybara
       # HTML "finalize a cross-document navigation": the target name of the document state a top-level navigation made
       # (`window.name` of its document: session_history.rs) cleared where that document's origin (`origin`, none an opaque
       # one) is another than the one it leaves — unless the window is an auxiliary browsing context whose opener is still
-      # there (not disowned: `window.opener = null`). (…a `noopener` window's first navigation away from its initial
-      # about:blank leaving it as it is — that document's origin its creator's, which such a window does not keep here —
-      # as Chrome and Firefox leave it)
+      # there: not disowned (`window.opener = null`), not closed — session_history.rs `has_opener?`, the rule a window of
+      # an isolate's is held to too (window.js `__csimWindowNameFor`). (…a `noopener` window's first navigation away from
+      # its initial about:blank leaving it as it is — that document's origin its creator's, which such a window does not
+      # keep here — as Chrome and Firefox leave it)
       private def clear_navigable_name(leaving_origin, origin)
         return if leaving_origin == :initial || (leaving_origin && leaving_origin == origin)
-        return if opener_handle && !@session_history.disowned?
+        return if @session_history.has_opener?
 
         @session_history.clear_name
       end
