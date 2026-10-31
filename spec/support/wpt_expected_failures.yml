@@ -6860,6 +6860,19 @@ shadow-dom/shadow-style-invalidation-vw-units.html:
 - "== shadow-dom/shadow-style-invalidation-vw-units-ref.html"
 shadow-dom/untriaged/html-elements-in-shadow-trees/inert-html-elements/test-001.html:
 - A_08_01_01_T01
+# IN SCOPE, against the test: it asserts that both of two `javascript:` URL navigations begun in one task run
+# ("Property is ... once the navigation happened" after a second `anchor.click()` to
+# `javascript:globalThis.verify()`). Current HTML "navigate" sets the ongoing navigation before its `javascript:`
+# branch (step 20: "Set the ongoing navigation for navigable to navigationId."; step 21: "If url's scheme is
+# "javascript", then: ... Queue a global task ... to navigate to a javascript: URL"), and "navigate to a javascript:
+# URL" step 2 returns: "If targetNavigable's ongoing navigation is no longer navigationId, then return." So the
+# second ends the first, which runs nothing. The text is not withdrawn (whatwg/html#2590 is open); the user ruled for
+# the text over Chrome and Firefox. Re-check when the test or the text changes.
+url/javascript-urls.window.js:
+- 'javascript: URL containing a JavaScript string split over path and query'
+- 'javascript: URL containing a JavaScript string split over path and query and has
+  a U+000A in scheme'
+- 'javascript: URL without an opaque path'
 wasm/serialization/module/serialization-via-notifications-api.any.js:
 - 'WebAssembly.Module cloning via the Notifications API''s data member: basic case'
 - 'WebAssembly.Module cloning via the Notifications API''s data member: is interleaved

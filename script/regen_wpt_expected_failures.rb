@@ -76,6 +76,22 @@ WICG_OUT = {
 # rule 1 ("Unratified specs default OUT"). Map: rel => reason.
 PROPOSAL_OUT = {}.freeze
 
+# In-scope files whose failures are the driver following the spec's CURRENT text where the test asserts otherwise, and
+# the text is not withdrawn — so no earned out-of-scope (CLAUDE.md rule 1, case 3, needs a withdrawn text), but no
+# backlog to chase either until one of the two changes. Each note is written above its file's entry in the in-scope
+# allowlist, quoting both, so the next regen keeps it. Map: rel => note.
+IN_SCOPE_NOTES = {
+  'url/javascript-urls.window.js' =>
+    'IN SCOPE, against the test: it asserts that both of two `javascript:` URL navigations begun in one task run ' \
+    '("Property is ... once the navigation happened" after a second `anchor.click()` to `javascript:globalThis.verify()`). ' \
+    'Current HTML "navigate" sets the ongoing navigation before its `javascript:` branch (step 20: "Set the ongoing ' \
+    'navigation for navigable to navigationId."; step 21: "If url\'s scheme is "javascript", then: ... Queue a global ' \
+    'task ... to navigate to a javascript: URL"), and "navigate to a javascript: URL" step 2 returns: "If ' \
+    'targetNavigable\'s ongoing navigation is no longer navigationId, then return." So the second ends the first, which ' \
+    'runs nothing. The text is not withdrawn (whatwg/html#2590 is open); the user ruled for the text over Chrome and ' \
+    'Firefox. Re-check when the test or the text changes.'
+}.freeze
+
 files = WptRunner.test_files
 warn "Running #{files.size} WPT files…"
 
@@ -372,7 +388,13 @@ H
 in_ordered  = in_map.keys.sort.each_with_object({})  {|rel, h| h[rel] = in_map[rel] }
 out_ordered = out_map.keys.sort.each_with_object({}) {|rel, h| h[rel] = out_map[rel] }
 
-File.write(WptRunner::EXPECTED_PATH, in_hdr + in_ordered.to_yaml)
+# (…each IN_SCOPE_NOTES note a comment above its file's entry, wrapped)
+in_yaml = in_ordered.to_yaml
+IN_SCOPE_NOTES.each do |rel, note|
+  comment = note.scan(/\S.{0,114}(?=\s|\z)/).map {|line| "# #{line}\n" }.join
+  in_yaml = in_yaml.sub(/^"?#{Regexp.escape(rel)}"?:\n/) { comment + $& }
+end
+File.write(WptRunner::EXPECTED_PATH, in_hdr + in_yaml)
 File.write(WptRunner::OUT_OF_SCOPE_PATH, out_hdr + out_ordered.to_yaml)
 
 warn "wrote #{WptRunner::EXPECTED_PATH}"

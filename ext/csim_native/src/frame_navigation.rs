@@ -249,6 +249,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "cancelFrameLocation", cancel_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
     crate::dom::register(scope, ns, "dropFrameNavigation", drop_frame_navigation, context_id);
@@ -722,6 +723,17 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     let cid = realm_id(scope, &args);
     if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
         nav.planned = 0;
+        nav.host = None;
+    }
+}
+
+// __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
+// `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it
+// plans to navigate to (`planned`), whose navigation HTML "plan to navigate" begins in a task after, ending that one.
+fn cancel_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    if let Some(nav) = crate::dom::realm(scope, cid).frame_navigations.0.get_mut(&container) {
         nav.host = None;
     }
 }

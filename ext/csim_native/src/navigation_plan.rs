@@ -266,6 +266,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "planReload", plan_reload, context_id);
     register(scope, ns, "planJavascript", plan_javascript, context_id);
     register(scope, ns, "javascriptOngoing", javascript_ongoing, context_id);
+    register(scope, ns, "navigationBegun", navigation_begun, context_id);
     register(scope, ns, "takeLocation", take_location, context_id);
     register(scope, ns, "takeReload", take_reload, context_id);
     register(scope, ns, "takeWindowNavigations", take_window_navigations, context_id);
@@ -432,24 +433,32 @@ fn plan_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     plan.own.location = Some(Location { url, replace, initiator, activated, blob });
     plan.own.planned = next_planned();
 }
-// __dom.planJavascript() -> a navigation of the calling realm's top-level document to a `javascript:` URL begun, its task
-// to come (url-parse.js `runJavascriptURL`), and the count of supersessions it is to be judged by (`javascriptOngoing`);
-// -1, none, while a traversal is planned. It is the navigable's ongoing navigation from now on (HTML "navigate", step 20
-// before step 21's `javascript:` branch: "Set the ongoing navigation for navigable to navigationId."), which ends the
-// navigation planned before it, whichever document planned it: a location navigation, a reload, a hyperlink's — but not
-// a form's submission, whose navigation HTML "plan to navigate" begins in a task after this one, and which ends this one
-// instead. (Chrome and Firefox navigate on to a location set before it — whatwg/html#2590 — where the spec wins.)
-// Another `javascript:` URL's ends none: the URL standard's WPT (url/javascript-urls.window.js) runs both of two a task
-// begins.
+// __dom.planJavascript() -> a navigation of the calling realm's navigable — its page's, a window's of this isolate, a
+// frame's — to a `javascript:` URL begun, its task to come (url-parse.js `runJavascriptURL`), and the count of
+// supersessions it is to be judged by (`javascriptOngoing`); -1, none, while a traversal is planned. It is the navigable's
+// ongoing navigation from now on (HTML "navigate", step 20 before step 21's `javascript:` branch: "Set the ongoing
+// navigation for navigable to navigationId."), which ends the one before it, whichever document began it: a location
+// navigation, a reload, a hyperlink's of this navigable, another `javascript:` URL's ("navigate to a javascript: URL"
+// step 2: "If targetNavigable's ongoing navigation is no longer navigationId, then return."). Not a form's submission,
+// whose navigation HTML "plan to navigate" begins in a task after this one, ending this one instead; nor a hyperlink's
+// that opens a new window, whose navigation is that navigable's. (Chrome and Firefox go on with a location navigation
+// set before it — whatwg/html#2590 — the spec's text the ruling here.)
 fn plan_javascript(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let plan = plan(scope, &args);
     if plan.traversal_planned() {
         return rv.set_double(-1.0);
     }
     let submission = plan.own.submission.take();
-    plan.navigation = None;
+    plan.navigation = plan.navigation.take().filter(|n| n.opens_window);
     plan.own = Own { submission, ..Own::default() };
+    plan.superseded += 1;
     rv.set_double(plan.superseded as f64);
+}
+// __dom.navigationBegun() — a navigation of the calling realm's navigable planned elsewhere than in its plan (a frame's,
+// whose container's plan holds it: frame_navigation.rs), which ends a `javascript:` URL's begun before it as the ones its
+// plan holds do (`supersede`).
+fn navigation_begun(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    plan(scope, &args).superseded += 1;
 }
 // __dom.javascriptOngoing(at) -> whether a `javascript:` URL's navigation begun at supersession count `at` goes on as
 // its task runs: no navigation planned since superseded it ("if targetNavigable's ongoing navigation is no longer

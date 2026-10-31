@@ -466,6 +466,62 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(session.windows.last) { expect(session).to have_current_path('/elsewhere/next') }
   end
 
+  # (…its documents after its host's, whose tasks are gone: loaded, traversed — its own event loop going on)
+  it 'loads and traverses its documents after the window that opened it closed' do
+    host  = session.open_new_window
+    popup = session.within_window(host) do
+      session.visit('/')
+      session.window_opened_by { session.execute_script("window.open().document.write('<a id=\"go\" href=\"/second\">go</a>')") }
+    end
+    host.close
+    session.within_window(popup) do
+      session.click_link('go')
+      expect(session).to have_css('#second')
+      expect(session.evaluate_script('document.readyState')).to eq('complete')
+      session.execute_script("location.href = '/third'")
+      expect(session).to have_css('#third')
+      session.go_back
+      expect(session).to have_css('#second')
+    end
+  end
+
+  # (…a hyperlink's to a new window its click listener followed: that navigable's navigation, which a `javascript:` URL
+  # of this one ends none of)
+  it "opens the window a javascript: link's click listener opened by a target=_blank link" do
+    session.execute_script(<<~JS)
+      document.body.insertAdjacentHTML('beforeend', '<a id="blank" href="/second" target="_blank">b</a>' +
+        '<a id="js" href="javascript:void(0)" onclick="document.getElementById(\\'blank\\').click()">js</a>');
+    JS
+    popup = session.window_opened_by { session.find(:css, '#js').click }
+    session.within_window(popup) { expect(session).to have_css('#second') }
+  end
+
+  # (…a frame's `javascript:` URL by the same rule as a top-level document's: ending the location navigation planned
+  # before it, ended by one planned after it)
+  it "runs a frame's javascript: URL in place of the navigation planned before it, none planned after" do
+    session.execute_script("document.body.insertAdjacentHTML('beforeend', '<iframe id=\"jf\" src=\"/second\"></iframe>')")
+    session.within_frame('jf') { expect(session).to have_css('#second') }
+    session.execute_script("window.ran = 0; window.jf = document.getElementById('jf'); jf.contentWindow.eval(\"location.href = '/third'; location.href = 'javascript:void(parent.ran = 1)'\")")
+    expect(session.evaluate_script('[ran, jf.contentWindow.location.pathname]')).to eq([1, '/second'])
+    session.execute_script("ran = 0; jf.contentWindow.eval(\"location.href = 'javascript:void(parent.ran = 1)'; location.href = '/third'\")")
+    session.within_frame('jf') { expect(session).to have_css('#third') }
+    expect(session.evaluate_script('ran')).to eq(0)
+  end
+
+  # (…a promise job's entry its handler's realm, not the realm of the listener that queued it — HTML)
+  it "resolves a URL a frame's function navigates it to, run as a promise job of a listener of the page, against the frame's document" do
+    session.visit('/dir/page')
+    session.execute_script("document.body.insertAdjacentHTML('beforeend', '<iframe id=\"pf\" src=\"/f/doc\"></iframe><button id=\"btn\">b</button>')")
+    session.within_frame('pf') { expect(session).to have_css('#third') }
+    session.execute_script(<<~JS)
+      const fn = document.getElementById('pf').contentWindow.eval("(function () { location.href = 'y'; })");
+      document.getElementById('btn').addEventListener('click', () => { Promise.resolve().then(fn); });
+    JS
+    session.click_button('btn')
+    session.within_frame('pf') { expect(session).to have_css('#third') }
+    expect(session.evaluate_script("document.getElementById('pf').contentWindow.location.pathname")).to eq('/f/y')
+  end
+
   it 'is the opener of a pop-up it opens at a URL' do
     popup = open_popup
     session.within_window(popup) { session.execute_script("window.open('/second', 'deep')") }

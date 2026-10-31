@@ -40002,6 +40002,15 @@ html/browsers/browsing-the-web/navigating-across-documents/010.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
+? html/browsers/browsing-the-web/navigating-across-documents/javascript-url-abort/javascript-url-abort-return-value-undefined.tentative.html
+: - name: Not aborting fetch for javascript:undefined navigation
+    reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+      specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+      path/suffix. CLAUDE.md rule 1.
+  - name: "[harness] TIMEOUT"
+    reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
+      specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
+      path/suffix. CLAUDE.md rule 1.
 html/browsers/the-window-object/open-close/open_fires_resize.tentative.html:
 - name: Opening a popup fires a resize event
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

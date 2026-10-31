@@ -1530,11 +1530,12 @@ fn window_opener(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set_int32(if arena.opener_disowned(realm) { -2 } else { arena.window_opener(realm).unwrap_or(-1) });
 }
 // __dom.enterRealm(realm) -> the entry realm before — realm `realm`'s script about to run, the entry realm while it does
-// (`Navigables::entry`) — and __dom.exitRealm(before): it ran, the one before the entry realm again (-1 none).
+// (`Navigables::entry`; -1 none: no realm entered by name, the entered context's — `enteredGlobal`) — and
+// __dom.exitRealm(before): it ran, the one before the entry realm again (-1 none).
 // __dom.entryRealm() -> the entry realm, -1 for none: the document whose URL a Location's `href` setter, `assign()` and
 // `replace()` parse theirs against (location.js `entryURL`).
 fn enter_realm(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let realm = args.get(0).int32_value(scope);
+    let realm = args.get(0).int32_value(scope).filter(|&r| r >= 0);
     let cid = realm_id(scope, &args);
     let nav = &mut crate::dom::realm(scope, cid).navigables;
     let before = std::mem::replace(&mut nav.entry, realm);
