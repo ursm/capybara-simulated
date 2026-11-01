@@ -373,6 +373,39 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
     expect(s.evaluate_script('window.held.closed')).to be(true)
   end
 
+  # …but not one under way below it: a frame navigation a timer runs unloads its tree in a loop step, entering V8 with no
+  # call of the host's around it, and a host call its handlers reach failing within it ends none of that walk.
+  it "ends no walk a failing call did not begin, the frames' unload going on" do
+    beacons = []
+    log = ->(n) { "<script>addEventListener('unload', () => navigator.sendBeacon('/log/#{n}'))</script>" }
+    pages = {
+      '/top' => '<iframe src="/a"></iframe>',
+      '/a'   => %(<iframe src="/c1"></iframe><iframe src="/c2"></iframe>#{log.('a')}),
+      '/c1'  => "#{log.('c1')}<script>addEventListener('unload', () => localStorage.setItem('fail-inside', '1'))</script>",
+      '/c2'  => log.('c2')
+    }
+    app = lambda do |env|
+      beacons << env['PATH_INFO'].delete_prefix('/log/') if env['REQUEST_METHOD'] == 'POST'
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{pages[env['PATH_INFO']] || env['PATH_INFO']}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/top'
+    poll_until { s.evaluate_script("!!(frames[0] && frames[0].frames.length === 2 && frames[0].frames[1].document.readyState === 'complete')") }
+    browser = s.driver.instance_variable_get(:@browser)
+    runtime = browser.instance_variable_get(:@runtime)
+    # (…a host call the storage write reaches making a call of its own that fails)
+    browser.singleton_class.prepend(Module.new {
+      define_method(:storage_changed) do |*args|
+        runtime.call('__csimNoSuchFunction') rescue nil if args.inspect.include?('fail-inside')
+        super(*args)
+      end
+    })
+    s.execute_script("setTimeout(() => { document.querySelector('iframe').srcdoc = '<p>next</p>' }, 50)")
+    poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument.body.textContent") == 'next' && beacons.size == 3 }
+
+    expect(beacons.sort).to eq(%w[a c1 c2])
+  end
+
   it 'ends a walk a failed call left open' do
     app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{env['PATH_INFO']}"]] }
     s = simulated_session(app)

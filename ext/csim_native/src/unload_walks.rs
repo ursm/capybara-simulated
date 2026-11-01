@@ -12,7 +12,9 @@
 //   and, its unloading begun (its children taken), destroyed with the rest: its removal left it to the walk, its counter
 //   raised. Which of its child navigables goes first HTML leaves open ("in what order?"): tree order, the prompt's.
 // A walk lives no longer than the host's call into the isolate it began in: one a termination left open (no `finally`
-// of the bindings' ran) is ended as the call returns (`end_open_walks`), its counters lowered.
+// of the bindings' ran) is ended as the call returns (`end_walks_since`), its counters lowered — those begun since the
+// call did (`MADE`, which the host reads as it makes the call: `last_walk`), not one a script the host did not enter
+// through that call began, still under way below it.
 
 use std::collections::HashMap;
 
@@ -20,8 +22,13 @@ use crate::dom::{realm_id, RealmArena};
 
 #[derive(Default)]
 pub(crate) struct Walks {
-    made: u32,
     open: HashMap<u32, Walk>,
+}
+
+// The number of the last walk begun — one count across the process, which the host reads without entering an isolate.
+static MADE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub(crate) fn last_walk() -> u32 {
+    MADE.load(std::sync::atomic::Ordering::Acquire)
 }
 
 struct Walk {
@@ -51,10 +58,9 @@ impl RealmArena {
             Kind::Prompt { .. } => self.inclusive_descendant_realms(root).into_iter().rev().map(|r| (r, false, 0)).collect(),
             Kind::Unload => vec![(root, false, 0)],
         };
-        let walks = &mut self.navigables.walks;
-        walks.made = walks.made.wrapping_add(1);
-        walks.open.insert(walks.made, Walk { root, kind, pending, reached: Vec::new(), raised: Vec::new(), removed: Vec::new() });
-        walks.made
+        let id = MADE.fetch_add(1, std::sync::atomic::Ordering::AcqRel).wrapping_add(1);
+        self.navigables.walks.open.insert(id, Walk { root, kind, pending, reached: Vec::new(), raised: Vec::new(), removed: Vec::new() });
+        id
     }
     // The realm of the next document walk `id` reaches, its unload counter raised — none where it is done.
     pub(crate) fn walk_next(&mut self, id: u32) -> Option<i32> {
@@ -105,13 +111,15 @@ impl RealmArena {
     }
     // The realms whose documents go with walk `id`'s, in the order they are destroyed: those of the tree under its root
     // as it is now, each after its descendants', then those it unloaded that a handler took out of it since, the last
-    // reached first, and those it began to unload whose navigables a handler destroyed — its root's among them only where
+    // reached first, and those it began to unload whose navigables a handler destroyed, with the documents still under
+    // them (a frame of one, taken but not reached, whose own navigable stands) — its root's among them only where
     // `with_root`.
     pub(crate) fn walk_dispose_order(&self, id: u32, with_root: bool) -> Vec<i32> {
         let Some(walk) = self.navigables.walks.open.get(&id) else { return Vec::new() };
         let mut order = self.inclusive_descendant_realms_children_first(walk.root);
-        let removed = if matches!(walk.kind, Kind::Unload) { &walk.removed[..] } else { &[] };
-        for &realm in walk.reached.iter().rev().chain(removed) {
+        let removed: &[i32] = if matches!(walk.kind, Kind::Unload) { &walk.removed } else { &[] };
+        let removed_trees = removed.iter().flat_map(|&r| self.inclusive_descendant_realms_children_first(r));
+        for realm in walk.reached.iter().rev().copied().chain(removed_trees) {
             if !order.contains(&realm) {
                 order.push(realm);
             }
@@ -142,15 +150,21 @@ impl RealmArena {
         }
         walk.removed
     }
-    // Every walk still open ended — none should be: a call into the isolate that returned left them (a termination).
-    // Returns how many.
-    pub(crate) fn end_open_walks(&mut self) -> usize {
-        let ids: Vec<u32> = self.navigables.walks.open.keys().copied().collect();
+    // Every walk begun after walk number `mark` still open ended — none should be: the call into the isolate the host
+    // made as `mark` was the last, which has returned, left them (a termination). Returns how many.
+    pub(crate) fn end_walks_since(&mut self, mark: u32) -> usize {
+        let ids: Vec<u32> = self.navigables.walks.open.keys().copied().filter(|&id| id.wrapping_sub(mark) as i32 > 0).collect();
         for &id in &ids {
             self.end_walk(id);
         }
         ids.len()
     }
+}
+
+pub(crate) fn define(native: magnus::RModule) -> Result<(), magnus::Error> {
+    use magnus::Module;
+    native.define_module_function("last_walk", magnus::function!(last_walk, 0))?;
+    Ok(())
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
@@ -159,7 +173,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "walkNext", walk_next, context_id);
     crate::dom::register(scope, ns, "walkDisposeOrder", walk_dispose_order, context_id);
     crate::dom::register(scope, ns, "walkEnd", walk_end, context_id);
-    crate::dom::register(scope, ns, "endOpenWalks", end_open_walks, context_id);
+    crate::dom::register(scope, ns, "endWalksSince", end_walks_since, context_id);
 }
 
 // __dom.promptWalk(realm, traversal) -> the walk asking realm `realm`'s document and its descendants' whether they may
@@ -199,10 +213,12 @@ fn walk_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let items: Vec<v8::Local<'_, v8::Value>> = removed.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.endOpenWalks() -> how many walks were left open, each ended (`end_open_walks`).
-fn end_open_walks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.endWalksSince(mark) -> how many walks begun after walk number `mark` were left open, each ended
+// (`end_walks_since`).
+fn end_walks_since(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mark = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let ended = crate::dom::realm(scope, cid).end_open_walks();
+    let ended = crate::dom::realm(scope, cid).end_walks_since(mark);
     rv.set_uint32(u32::try_from(ended).unwrap_or(u32::MAX));
 }
 
@@ -323,15 +339,40 @@ mod tests {
     }
 
     #[test]
-    fn walks_a_call_left_open_are_ended() {
+    fn an_unload_destroys_the_frames_under_a_document_whose_navigable_went_with_an_ancestor() {
+        // (…the page holds `a` (2) holding `c` (3) holding `d` (4))
+        let (mut arena, [a, ..]) = page();
+        let c_doc = arena.realm_document(3).expect("c's document");
+        arena.enter(3);
+        let d = element(&mut arena, c_doc, "iframe");
+        document(&mut arena, 4);
+        arena.enter(0);
+        arena.set_frame_realm(d, Some(4));
+        let id = arena.begin_walk(0, Kind::Unload);
+        assert_eq!(arena.walk_next(id), Some(4));
+        // (…`d`'s handler removing `a`, its grandparent: `c`, taken, has a navigable still — of a destroyed document)
+        arena.discard_navigable(a);
+        assert!(!arena.navigable_destroyed(3) && arena.navigable_destroyed(2));
+        assert_eq!(walk(&mut arena, id), vec![1, 0]);
+        assert_eq!(arena.walk_dispose_order(id, true), vec![1, 0, 4, 3, 2]);
+        arena.end_walk(id);
+    }
+
+    #[test]
+    fn walks_a_call_left_open_are_ended_but_none_begun_before_it() {
         let (mut arena, _) = page();
-        let unload = arena.begin_walk(0, Kind::Unload);
+        let running = arena.begin_walk(0, Kind::Unload);
+        assert_eq!(arena.walk_next(running), Some(3));
+        let mark = last_walk();
+        let unload = arena.begin_walk(2, Kind::Unload);
         assert_eq!(arena.walk_next(unload), Some(3));
-        let prompt = arena.begin_walk(2, Kind::Prompt { asking: None, traversal: false });
-        assert_eq!(arena.walk_next(prompt), Some(2));
-        assert_eq!(arena.end_open_walks(), 2);
+        let prompt = arena.begin_walk(1, Kind::Prompt { asking: None, traversal: false });
+        assert_eq!(arena.walk_next(prompt), Some(1));
+        assert_eq!(arena.end_walks_since(mark), 2);
+        assert!(arena.unloading(0) && arena.unloading(2) && arena.unloading(3) && !arena.unloading(1));
+        assert_eq!(arena.walk_next(running), Some(2));
+        arena.end_walk(running);
         assert!((0..4).all(|r| !arena.unloading(r)));
-        assert_eq!(arena.end_open_walks(), 0);
     }
 
     #[test]

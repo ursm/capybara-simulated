@@ -339,9 +339,12 @@ module Capybara
       # own able to replace the request's result or exception: a terminated runaway, a host fn raising, logged)
       # (…and, the outermost one raising, the walks over a document's tree it left open ended — a termination runs no
       # `finally` of the bindings', whose unload counters would otherwise stay raised, every navigation of those documents
-      # ignored from then on: unload_walks.rs `end_open_walks`)
+      # ignored from then on: those it began, numbered after the last as it was made — not one a script below it began,
+      # which entered V8 some other way (a loop step, a document's load) and is under way still: unload_walks.rs
+      # `end_walks_since`)
       private def outermost
         @call_depth = (depth = @call_depth.to_i) + 1
+        walk_mark = Native.last_walk if depth.zero?
         result = yield
         @call_depth = depth
         dispose_retired_realms(drain: true) if depth.zero? && @retired_realms
@@ -350,13 +353,13 @@ module Capybara
         if @call_depth != depth
           @call_depth = depth
           if depth.zero?
-            end_open_walks
+            end_walks_since(walk_mark) if walk_mark
             dispose_retired_realms(drain: false) if @retired_realms
           end
         end
       end
-      private def end_open_walks
-        ended = @ctx&.call('__csimEndOpenWalks').to_i
+      private def end_walks_since(mark)
+        ended = @ctx&.call('__csimEndWalksSince', mark).to_i
         @browser.log_console('warn', "#{ended} unload walk(s) left open by a failed call ended") if ended.positive?
       rescue StandardError
         nil

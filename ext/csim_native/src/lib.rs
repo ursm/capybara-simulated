@@ -300,6 +300,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     worker_host::define(native, ruby)?;
     clock_holds::define(native, ruby)?;
     broadcast_channels::define(native, ruby)?;
+    unload_walks::define(native)?;
     realm_location::define(native)?;
     storage_areas::define(native, ruby)?;
     http_cache::define(native, ruby)?;
