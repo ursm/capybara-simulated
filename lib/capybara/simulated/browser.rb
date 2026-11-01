@@ -2160,24 +2160,18 @@ module Capybara
       end
 
       # A download's resource saved to `downloads_directory` — `download` the one a hyperlink planned (navigation_plan.rs
-      # `takeDownload`: its URL, file name, the realm whose document planned it and the link's referrer policy): a `blob:`
-      # URL's bytes from the page, anything else fetched.
+      # `takeDownload`: its URL, file name, the realm whose document planned it and the link's referrer policy), by that
+      # document, which its sandbox may refuse (`save_downloaded_response`): a `blob:` URL's bytes from the page, anything
+      # else fetched — each named as any download is (downloads.rs `filename`: the hint a file's name alone, never a path).
       def save_download(download)
-        url, filename = download['url'].to_s, download['filename'].to_s
-        if url.start_with?('blob:')
-          content = @runtime.call('__csimReadBlobBytes', url)
-          return if content.nil?
-          name = filename.empty? ? 'download' : filename
-          dir = downloads_directory
-          FileUtils.mkdir_p(dir)
-          File.binwrite(File.join(dir, name), content)
-        else
-          download_link(
-            resolve_against_current(url, use_base: true),
-            filename,
-            realm:       download['realm'].to_i,
-            link_policy: download['policy'].to_s
-          )
+        url, filename, realm = download['url'].to_s, download['filename'].to_s, download['realm'].to_i
+        from_document(realm) do
+          if url.start_with?('blob:')
+            blob = host_blob(@runtime.call('__csimReadBlobForWindow', url))
+            save_downloaded_response(url, {'content-type' => blob[:type]}, [blob[:bytes].to_s], hint: filename) if blob
+          else
+            download_link(resolve_against_current(url, use_base: true), filename, realm: realm, link_policy: download['policy'].to_s)
+          end
         end
       end
 

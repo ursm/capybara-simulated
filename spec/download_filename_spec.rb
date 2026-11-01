@@ -103,6 +103,32 @@ RSpec.describe 'a download' do
     expect(Dir.children(@dir).sort).to eq(%w[report-a.csv report-b.csv])
   end
 
+  # (…a `blob:` link's as any other's: its `download` value a file's name alone — never a path out of the directory — and
+  # none at all from a frame sandboxed without `allow-downloads`)
+  it "names a blob: link's download as any other's, and refuses a sandboxed frame's" do
+    s = simulated_session(lambda {|env|
+      body = case env['PATH_INFO']
+             when '/' then '<iframe sandbox="allow-scripts" src="/framed"></iframe>'
+             else ''
+             end
+      [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=utf-8><body>#{body}"]]
+    })
+    link = <<~JS
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob(['x'], {type: 'text/plain'}));
+      a.download = '../escaped.txt';
+      document.body.append(a);
+      a.click();
+    JS
+    s.visit '/'
+    s.within_frame(0) { s.execute_script(link) }
+    s.evaluate_script('1')
+    expect(Dir.children(@dir)).to eq([])
+    s.execute_script(link)
+    s.evaluate_script('1')
+    expect([Dir.children(@dir), File.exist?(File.join(@dir, '..', 'escaped.txt'))]).to eq([['escaped.txt'], false])
+  end
+
   # (…a navigation's response of a MIME type no document is made of a download with no Content-Disposition too, the page
   # staying at its document: HTML "loading a document" — Chrome and Firefox save `application/octet-stream` and
   # `application/zip`; mime.rs `makes_document`)
