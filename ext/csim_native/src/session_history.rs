@@ -118,6 +118,11 @@ impl Data {
     fn text(&self, key: &str) -> Option<&str> {
         self.texts[TEXT_FIELDS.iter().position(|&k| k == key)?].as_deref()
     }
+    fn set_text(&mut self, key: &str, value: String) {
+        if let Some(at) = TEXT_FIELDS.iter().position(|&k| k == key) {
+            self.texts[at] = Some(value);
+        }
+    }
 
     // …and as a hash of the ones it has.
     fn to_hash(&self, ruby: &magnus::Ruby, url: &str) -> Result<RHash, magnus::Error> {
@@ -237,6 +242,14 @@ struct Traversable {
     // sandboxed document that opened it, where they propagate to the windows it opens), which every document of it is
     // sandboxed by (`popup_sandbox_of`).
     popup_sandbox: u32,
+    // The URL of the document its top-level navigable is at: the host's to say as a navigation commits a document, its
+    // document's own to change by its URL and history update steps (`pushState`, `replaceState`, a fragment
+    // navigation: `history_update`) — none before the first. And, while the host notes them (`noting`: as its event loop
+    // runs a turn or a document loads), the URLs those steps moved it from, which the host takes (`#note_url_changes`):
+    // the intermediates a polling `current_url` walks (browser.rb `record_url_transition`).
+    url: Option<String>,
+    noting: bool,
+    passed: Vec<String>,
 }
 
 impl Drop for Traversable {
@@ -817,6 +830,29 @@ impl Traversable {
         self.state.collect_docs();
         self.state.drop_stale_holds(build);
     }
+
+    // HTML "URL and history update steps" of navigable `nav`'s active document (its parent `parent`): an entry of the
+    // document's after the current one (`push`: `pushState`, a fragment navigation), or its active entry's URL and
+    // classic history API state made `url` and `state` (`replaceState`, a fragment navigation to the URL it is at) —
+    // none for a navigable of no entry yet (a top-level one at its initial about:blank, whose document has none).
+    fn update(&mut self, nav: u32, parent: u32, url: &str, state: Option<Arc<[u8]>>, push: bool) {
+        let Some(id) = self.state.current_entry(nav, self.build).map(|e| e.id) else { return };
+        if push {
+            self.commit(nav, parent, url, true, false, Data { state, ..Data::default() });
+        } else if let Some(entry) = self.state.entry_mut(id) {
+            entry.url = url.to_owned();
+            Arc::make_mut(&mut entry.data).state = state;
+            self.version += 1;
+        }
+    }
+    // Its top-level navigable's document's URL made `url` by those steps — the one it was at noted, while the host notes
+    // them, where it changed.
+    fn move_url(&mut self, url: &str) {
+        let from = self.url.replace(url.to_owned());
+        if let Some(from) = from.filter(|from| self.noting && !from.is_empty() && from != url) {
+            self.passed.push(from);
+        }
+    }
 }
 
 // A window's session history: the host's handle on it, and the realms' (`__dom.historyLength`), by its number — the
@@ -886,8 +922,9 @@ impl SessionHistory {
         self.id
     }
 
-    // #seed(navigable, parent, url) -> the id of the navigable's active entry, its session history made with `url`'s
-    // entry where it has none; nil where its parent has none.
+    // The id of the navigable's active entry, its session history made with `url`'s entry where it has none; none where
+    // its parent has none (`Traversable::ensure`; the bindings' `frame_entry`), which the tests seed with.
+    #[cfg(test)]
     fn seed(&self, nav: u32, parent: u32, url: String) -> Option<u64> {
         self.lock().ensure(nav, parent, &url)
     }
@@ -991,6 +1028,21 @@ impl SessionHistory {
     // #length -> `history.length`: the number of steps used, at least 1.
     fn length(&self) -> usize {
         self.lock().state.length()
+    }
+    // #document_url / #document_url=(url): the URL of the document its top-level navigable is at (`Traversable::url`),
+    // nil before the first — a navigation's to set as it commits one.
+    fn document_url(&self) -> Option<String> {
+        self.lock().url.clone()
+    }
+    fn set_document_url(&self, url: Option<String>) {
+        self.lock().url = url;
+    }
+    // #note_url_changes(on) -> the URLs its document's own URL and history update steps moved it from since the host
+    // last took them, while it noted them — noting them from now on where `on`.
+    fn note_url_changes(&self, on: bool) -> Vec<String> {
+        let mut t = self.lock();
+        t.noting = on;
+        std::mem::take(&mut t.passed)
     }
     // #traversal(delta) -> [step, [[navigable, entry, same_document], …]] of a traversal by `delta` as the host applies
     // it (`Traversable::traversal`), or nil for none.
@@ -1142,11 +1194,13 @@ impl SessionHistory {
     fn navigation_ongoing(&self, nav: u32, id: u64) -> bool {
         self.lock().navigation_ongoing(nav, id)
     }
-    // #clear: no entries at all, nor traversals queued.
+    // #clear: no entries at all, nor traversals queued, nor a document's URL.
     // (…a reset's: a fresh window's, what it knew of its opener and its documents gone with them)
     fn clear(&self) {
         let mut t = self.lock();
         t.state = State::new();
+        t.url = None;
+        t.passed.clear();
         t.saved = Default::default();
         t.frames_saved.clear();
         t.ongoing.clear();
@@ -1305,7 +1359,6 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_singleton_method("new", function!(SessionHistory::new, 0))?;
     class.define_singleton_method("of", function!(SessionHistory::of, 1))?;
     class.define_method("id", method!(SessionHistory::id, 0))?;
-    class.define_method("seed", method!(SessionHistory::seed, 3))?;
     class.define_method("push", method!(SessionHistory::push_for_ruby, 5))?;
     class.define_method("replace", method!(SessionHistory::replace_for_ruby, 5))?;
     class.define_method("active", method!(SessionHistory::active, 1))?;
@@ -1332,6 +1385,9 @@ pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(),
     class.define_method("asked?", method!(SessionHistory::is_asked, 0))?;
     class.define_method("clear_name", method!(SessionHistory::clear_name, 0))?;
     class.define_method("length", method!(SessionHistory::length, 0))?;
+    class.define_method("document_url", method!(SessionHistory::document_url, 0))?;
+    class.define_method("document_url=", method!(SessionHistory::set_document_url, 1))?;
+    class.define_method("note_url_changes", method!(SessionHistory::note_url_changes, 1))?;
     class.define_method("traversal", method!(SessionHistory::traversal, 1))?;
     class.define_method("take_queued", method!(SessionHistory::take_queued, 1))?;
     class.define_method("take_all_queued", method!(SessionHistory::take_all_queued, 0))?;
@@ -1807,7 +1863,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "destroyNavigableHistory", destroy_navigable_history_op, context_id);
     crate::dom::register(scope, ns, "windowEntryPost", window_entry_post_op, context_id);
     crate::dom::register(scope, ns, "commitWindowEntry", commit_window_entry_op, context_id);
-    crate::dom::register(scope, ns, "windowHistoryUpdate", window_history_update_op, context_id);
+    crate::dom::register(scope, ns, "historyUpdate", history_update_op, context_id);
+    crate::dom::register(scope, ns, "frameNavigable", frame_navigable_op, context_id);
+    crate::dom::register(scope, ns, "frameEntry", frame_entry_op, context_id);
     crate::dom::register(scope, ns, "historyOfPage", history_of_page_op, context_id);
 }
 
@@ -2122,29 +2180,98 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     rv.set(state_value(scope, state.as_ref()));
 }
 
-// __dom.windowHistoryUpdate(url, state, push) -> whether the calling realm's `history.pushState` (`push`) or
-// `replaceState` is its window's — one `window.open` made in this isolate — whose session history it then updates (HTML
-// "URL and history update steps"): an entry of the document's after the current one, or the current one's URL and state
-// made the new ones — none at its initial about:blank, which no entry is of yet (nor one the bindings ask while its
-// document is being unloaded: navigables.rs `session_history_takes`). False for the page's, and a frame's of either, which the host records (browser.rb
-// `frame_history_state`).
-fn window_history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// The navigable of frame realm `realm` in its traversable's session history: its number, its parent's (`TOP` for the
+// top-level one), the realm of its container's document, and the traversable with its number — none for a realm that is
+// no frame (the page's, a window's), one whose container left its document, or one of no traversable (browser.rb
+// `frame_navigable`).
+pub(crate) struct FrameNavigable {
+    nav: u32,
+    parent_nav: u32,
+    parent: i32,
+    traversable: Arc<Mutex<Traversable>>,
+    traversable_id: u64,
+}
+pub(crate) fn frame_navigable(arena: &crate::dom::RealmArena, realm: i32) -> Option<FrameNavigable> {
+    let (parent, _, nav, _) = arena.realm_tree(realm);
+    if realm == 0 || nav == TOP || arena.frame_container(parent, realm).is_none() {
+        return None;
+    }
+    let (traversable, _) = traversable_of(arena, realm)?;
+    let (_, depth, parent_nav, _) = if parent == 0 { (0, 0, TOP, false) } else { arena.realm_tree(parent) };
+    if parent_nav == TOP && depth != 0 {
+        return None;
+    }
+    Some(FrameNavigable { nav, parent_nav, parent, traversable, traversable_id: traversable_id_of(arena, realm) })
+}
+// …and its active entry — `create`, made where it has none (its parent's first, HTML "create a new child navigable"), of
+// the URL of the document the frame is at, keeping that document's referrer (HTML's document state: what a reload or a
+// traversal to the entry makes its document with) — with its navigable; none for no entry.
+fn frame_entry(arena: &crate::dom::RealmArena, realm: i32, create: bool) -> Option<(FrameNavigable, u64)> {
+    let frame = frame_navigable(arena, realm)?;
+    if !create {
+        let t = lock(&frame.traversable);
+        let id = t.state.current_entry(frame.nav, t.build)?.id;
+        drop(t);
+        return Some((frame, id));
+    }
+    if frame.parent_nav != TOP {
+        frame_entry(arena, frame.parent, true);
+    }
+    let url = arena.realm_state(realm).map_or_else(String::new, |s| s.location.href().to_owned());
+    let id = lock(&frame.traversable).ensure(frame.nav, frame.parent_nav, &url)?;
+    let referrer = arena.realm_document(realm).and_then(|doc| arena.document_states.referrer(doc)).unwrap_or_default().to_owned();
+    if let Some(entry) = lock(&frame.traversable).state.entry_mut(id).filter(|e| e.data.text("referrer").is_none()) {
+        Arc::make_mut(&mut entry.data).set_text("referrer", referrer);
+    }
+    Some((frame, id))
+}
+
+// __dom.frameNavigable(realm) -> [navigable, parent navigable, parent realm, traversable] of frame realm `realm`
+// (`frame_navigable`), the host's — null for none.
+fn frame_navigable_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some(frame) = frame_navigable(crate::dom::realm(scope, cid), realm) else { return rv.set_null() };
+    let items = [
+        v8::Integer::new_from_unsigned(scope, frame.nav).into(),
+        v8::Integer::new_from_unsigned(scope, frame.parent_nav).into(),
+        v8::Integer::new(scope, frame.parent).into(),
+        v8::Number::new(scope, frame.traversable_id as f64).into(),
+    ];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.frameEntry(realm, create) -> [traversable, entry] of frame realm `realm`'s active entry (`frame_entry`), the
+// host's — null for none.
+fn frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let realm = args.get(0).int32_value(scope).unwrap_or(0);
+    let create = args.get(1).is_true();
+    let cid = crate::dom::realm_id(scope, &args);
+    let Some((frame, id)) = frame_entry(crate::dom::realm(scope, cid), realm, create) else { return rv.set_null() };
+    let items = [v8::Number::new(scope, frame.traversable_id as f64).into(), v8::Number::new(scope, id as f64).into()];
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+
+// __dom.historyUpdate(url, state, push) — HTML "URL and history update steps" of the calling realm's document, its
+// `history.pushState` (`push`) or `replaceState`, or a fragment navigation (`Traversable::update`), recorded in the
+// session history of its traversable (`traversable_of`): the page's, a window's `window.open` made in this isolate,
+// a frame's of either — and, a top-level document's, its URL its traversable's (`move_url`). None while its document is
+// being unloaded (navigables.rs `session_history_takes`), nor for a realm of no traversable (a frame removed, a window
+// navigated away from): its URL and state its own all the same.
+fn history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
     let state = state_arg(args.get(1));
     let push = args.get(2).is_true();
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
-    let Some((traversable, _)) = window_traversable(arena, cid).filter(|&(_, window)| window == cid) else { return rv.set_bool(false) };
-    let mut t = lock(&traversable);
-    let build = t.build;
-    if t.state.current_entry(TOP, build).is_some() {
-        if push {
-            t.commit(TOP, 0, &url, true, false, Data { state, ..Data::default() });
-        } else if let Some(id) = t.state.current_entry(TOP, build).map(|e| e.id) {
-            let entry = t.state.entry_mut(id).expect("the current entry");
-            entry.url = url;
-            Arc::make_mut(&mut entry.data).state = state;
-        }
+    if !arena.session_history_takes(cid) {
+        return;
     }
-    rv.set_bool(true);
+    let Some((traversable, window)) = traversable_of(arena, cid) else { return };
+    if window.map_or(cid == 0, |window| window == cid) {
+        let mut t = lock(&traversable);
+        t.move_url(&url);
+        t.update(TOP, TOP, &url, state, push);
+    } else if let Some((frame, _)) = frame_entry(arena, cid, true) {
+        lock(&frame.traversable).update(frame.nav, frame.parent_nav, &url, state, push);
+    }
 }

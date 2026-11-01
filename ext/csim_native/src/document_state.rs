@@ -76,6 +76,7 @@ const TEXT_URL: usize = 0;
 const TEXT_ENCODING: usize = 1;
 const TEXT_DOMAIN: usize = 3;
 const TEXT_ABOUT_BASE: usize = 4;
+const TEXT_REFERRER: usize = 5;
 
 #[derive(Default)]
 pub(crate) struct DocumentStates(HashMap<NodeId, DocumentState>, HashMap<NodeId, DocumentTexts>);
@@ -97,6 +98,10 @@ impl DocumentStates {
     // `doc`'s character encoding, UTF-8 until one is set.
     fn encoding(&self, doc: NodeId) -> &str {
         self.1.get(&doc).and_then(|t| t.texts[TEXT_ENCODING].as_deref()).filter(|e| !e.is_empty()).unwrap_or("UTF-8")
+    }
+    // `doc`'s referrer (`document.referrer`), none until its load gave it one.
+    pub(crate) fn referrer(&self, doc: NodeId) -> Option<&str> {
+        self.1.get(&doc).and_then(|t| t.texts[TEXT_REFERRER].as_deref())
     }
     // The domain a `document.domain` write set on `doc`, none until one did.
     pub(crate) fn domain(&self, doc: NodeId) -> Option<&str> {

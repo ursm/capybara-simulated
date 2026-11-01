@@ -56,10 +56,6 @@ module Capybara
         # pagehide / unload handlers left it.
         '__csim_frameUnloaded'       => ->(b, *a) { b.frame_document_unloaded(a[0].to_i); nil },
         '__setTimersActive'          => ->(b, *a) { b.timers_active = !!a[0]; nil },
-        # a[2] is the realm that navigated: a nested browsing context keeps its OWN session
-        # history, so a frame's pushState must not be mirrored onto the top document's.
-        '__setCurrentUrl'            => ->(b, *a) { b.history_state(a[0], a[1], a[2]); nil },
-        '__pushHistoryEntry'         => ->(b, *a) { b.history_push(a[0], a[1], a[2]); nil },
         '__csimApplyTraversal'       => ->(b, *a) { b.apply_planned_traversal(a[0].to_i); nil },
         '__csimReadFilePick'         => ->(b, *a) { b.read_file_pick(a[0], a[1], a[2], a[3]) },
         '__getDocumentCookie'        => ->(b, *a) { b.document_cookie(a[0], a[1], a[2]) },

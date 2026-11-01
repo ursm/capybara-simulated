@@ -210,7 +210,6 @@ module Capybara
         # The wall-sync escape hatch, cached at construction (CLAUDE.md rule 3 — the env is fixed
         # for the session).
         @clock_wall                   = !ENV['CSIM_CLOCK_WALL'].nil?
-        @current_url                  = nil
         # Real browsers yield control between asynchronous URL
         # transitions (XHR-driven model loads, then `replaceWith` to a
         # child route), so Capybara polls catch the intermediate URL —
@@ -218,9 +217,9 @@ module Capybara
         # at `/wizard` while `Wizard.load()` runs. Our env drains
         # microtasks synchronously and only the final URL is reachable
         # by the time Ruby regains control. Queue URLs we transitioned
-        # through; `current_url` shifts one out per call so a polling
-        # `assert_current_path` walks the same set the real browser
-        # would have observed.
+        # through (`note_url_changes`); `current_url` shifts one out per
+        # call so a polling `assert_current_path` walks the same set the
+        # real browser would have observed.
         @recent_urls                  = []
         @recent_urls_last_push_at     = nil
         # The URL the page was at when the current user-action drain began.
@@ -604,7 +603,7 @@ module Capybara
       )
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
-        # inherit its @current_url default.
+        # inherit its `page_url` default.
         # (…one to a fragment of the page's document navigated in it, no request made — HTML "navigate", the realm's to say:
         # location.js `tryFragmentNavigate`)
         url = resolve_visit_url(url)
@@ -651,7 +650,7 @@ module Capybara
         end
       end
 
-      def resolve_visit_url(url, current = @current_url)
+      def resolve_visit_url(url, current = page_url)
         s = url.to_s
         # `about:blank` (and other authority-less schemes) have no `//`, so the
         # `scheme://` test below would treat them as relative paths and prepend
@@ -744,12 +743,12 @@ module Capybara
       # pumps `tick_real_time`, so calling it re-entrantly from inside a host-fn
       # callback (the driver building an aux window mid-`window.open`) corrupts
       # the caller's parse/event-loop state. Use this for identity reads.
-      def raw_current_url = @current_url.to_s
+      def raw_current_url = page_url.to_s
 
       def current_url
         tick_real_time
         # `tick_real_time` may have queued URL transitions via
-        # `record_url_transition`. A polling matcher
+        # `note_url_changes`. A polling matcher
         # (`have_current_path`) calls here once per ~50 ms iteration
         # and shifts one entry per call so it walks the same
         # intermediate-URL chain a real browser would have observed
@@ -768,14 +767,14 @@ module Capybara
           @recent_urls.clear if age_ms > RECENT_URLS_STALE_AGE_MS
         end
         return @recent_urls.shift if @recent_urls.any?
-        @current_url || ''
+        page_url || ''
       end
 
-      # Called whenever `@current_url` is about to be set to a new
-      # value during a page-load drain or a settle tick driven by a
-      # user action; queues the prior URL for surface-via-
-      # `current_url` so a polling matcher walks the intermediate
-      # chain. Out-of-band JS-driven pushStates
+      # The URLs the page's document's own history updates (pushState / replaceState / a fragment navigation) moved it
+      # from during a page-load drain or a settle tick driven by a user action — which its traversable notes while one
+      # runs, and only then (session_history.rs `Traversable::passed`) — each queued for surface-via-`current_url` so a
+      # polling matcher walks the intermediate chain; from now on noted where one runs (called as `@ticking` /
+      # `@navigating` change). Out-of-band JS-driven pushStates
       # (`execute_script("history.pushState(...)")`) bypass the queue —
       # they have no chain of microtask-driven transitions to walk,
       # and the caller expects to read the new URL one-shot. Bounded
@@ -784,22 +783,28 @@ module Capybara
       # cadence window. Without the queue the finish_installation
       # wizard chain's intermediate `/wizard` would be invisible:
       # the JS-side `replaceWith` to `/wizard/steps/setup` lands
-      # during a tick, so by the time Capybara polls `@current_url`
+      # during a tick, so by the time Capybara polls the page's URL
       # is already the final URL.
-      def record_url_transition(new_url)
-        return unless @ticking || @navigating
-        old = @current_url
-        return if old.nil? || old.to_s.empty?
-        return if old.to_s == new_url.to_s
+      private def note_url_changes
+        passed = @session_history.note_url_changes(@ticking || @navigating)
         # The URL the action started from is the starting point, not an
         # intermediate it walked through — don't surface it to a polling
         # (or one-shot) `current_url` as a step. Genuine mid-action
         # intermediates (a load to /wizard, *then* a replaceState to
         # /wizard/steps/setup) differ from the baseline and still queue.
-        return if @action_url_baseline && old.to_s == @action_url_baseline.to_s
-        @recent_urls << old.to_s
+        passed.delete(@action_url_baseline.to_s) if @action_url_baseline
+        return if passed.empty?
+
+        @recent_urls.concat(passed)
         @recent_urls.shift while @recent_urls.size > 8
         @recent_urls_last_push_at = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
+      end
+
+      # The URL of the document the page is at — its traversable's (session_history.rs `Traversable::url`), which a
+      # navigation sets as it commits a document and that document's own history updates move — nil before the first.
+      private def page_url = @session_history.document_url
+      private def page_url=(url)
+        @session_history.document_url = url
       end
 
       attr_reader :current_realm_id
@@ -947,9 +952,9 @@ module Capybara
       # loads — its scripts, sheets and images, each URL resolved already — ask as it is built, before the frame is
       # pointed at it)
       def current_browsing_context_url
-        return @current_url unless @current_realm_id && @runtime.frame_realm_alive?(@current_realm_id)
+        return page_url unless @current_realm_id && @runtime.frame_realm_alive?(@current_realm_id)
         href = dom_call('__csimLocationHref').to_s
-        href.empty? ? @current_url : href
+        href.empty? ? page_url : href
       end
 
       # Public entry for the Driver to resolve a `window.open` / cross-window
@@ -1441,20 +1446,20 @@ module Capybara
           # URL, e.g. `/start`) before the XHR resolves, landing on
           # the wrong page. Loop matches the navigate branch — bail
           # as soon as a drain round fires nothing.
-          submit_baseline_url = @current_url
+          submit_baseline_url = page_url
           8.times do
             @runtime.drain_microtasks
             break if @runtime.drain_timers(50).to_i.zero?
           end
           # If the drain queued or consumed a `location.assign`, that
           # navigation supersedes the form's default submit. Honour
-          # pending; if `@current_url` already changed mid-drain (the
+          # pending; if `page_url` already changed mid-drain (the
           # navigate landed during a timer fire), skip the form submit
           # entirely — its form handle is in a stale VM by now.
           consume_pending_frame_nav
           if own_planned.anybits?(OWN_LOCATION)
             consume_pending_location
-          elsif @current_url != submit_baseline_url
+          elsif page_url != submit_baseline_url
             # Already navigated; nothing more to do.
           else
             submit_form_spec(action['spec'])
@@ -1945,7 +1950,7 @@ module Capybara
       # every action entry (click / double_click / right_click / hover / set /
       # send_keys / select / unselect). A Turbo Drive Visit the action triggers
       # is async — its pushState may fire synchronously mid-action or in a LATER
-      # find-poll tick (the test's `wait_for_loaded`) — so `record_url_transition`
+      # find-poll tick (the test's `wait_for_loaded`) — so `note_url_changes`
       # uses this baseline to recognise the pre-action URL as the action's
       # starting point, not a walkable intermediate, and skip queuing it. Set at
       # action entry (NOT the tail drain, which runs after the pushState); must
@@ -1955,7 +1960,8 @@ module Capybara
       # reset by `navigate` so a stale baseline can't leak across a document
       # boundary.
       def mark_action_baseline
-        @action_url_baseline = @current_url
+        note_url_changes
+        @action_url_baseline = page_url
         # A NEW user action makes the previous action's intermediate-URL chain
         # stale outright — whatever a poller didn't walk by now belongs to a
         # story that is over. This, not the wall-clock age (which only backstops
@@ -2281,7 +2287,7 @@ module Capybara
       # session history entry of it; the navigation the window was opened for, if any, a task of its own after
       # (Driver#open_aux_window), which replaces it — one to about:blank none, the document at its URL instead.
       def open_initial_document(url = 'about:blank')
-        @current_url = url
+        self.page_url = url
         record_response(200, {'content-type' => 'text/html'})
         boot_response_into_ctx('', initial: true)
       end
@@ -2565,11 +2571,11 @@ module Capybara
       private def traverse_same_document(history, nav, id, top: 0)
         entry = history.entry(id)
         if nav.zero? && top.zero?
-          old_url = @current_url
-          @current_url = entry[:url]
-          @runtime.call('__csimUpdateLocation', @current_url)
+          old_url = page_url
+          self.page_url = entry[:url]
+          @runtime.call('__csimUpdateLocation', entry[:url])
           @runtime.call('__csimDispatchPopState', entry[:state])
-          @runtime.call('__csimQueueHashChange', old_url, @current_url) if fragment_of(old_url) != fragment_of(@current_url)
+          @runtime.call('__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
           return
         end
         realm = nav.zero? ? top : navigable_realm(nav)
@@ -2739,7 +2745,7 @@ module Capybara
         return yield if @recording_action
         @recording_action = true
         desc = description.is_a?(Proc) ? description.call : description
-        @trace.begin_step(kind, description: desc, url_before: @current_url)
+        @trace.begin_step(kind, description: desc, url_before: page_url)
         error = nil
         begin
           yield
@@ -2767,7 +2773,7 @@ module Capybara
           # interesting one is the attempt that finally worked. What a failure looks like is
           # captured once, after the example, where no wait window is running (`TracePersistence`).
           shot     = @trace_mode == :full && error.nil? ? trace_screenshot : nil
-          @trace.finish_step(url_after: @current_url, dom_after: dom, shot_after: shot, error: error)
+          @trace.finish_step(url_after: page_url, dom_after: dom, shot_after: shot, error: error)
           @recording_action = false
         end
       end
@@ -2929,8 +2935,10 @@ module Capybara
 
       def current_path
         tick_real_time
-        return '' if @current_url.nil? || @current_url.empty?
-        parse_url(@current_url)&.fetch(:pathname) || ''
+        url = page_url.to_s
+        return '' if url.empty?
+
+        parse_url(url)&.fetch(:pathname) || ''
       end
 
       # Capybara polls find / has_? via `synchronize` while
@@ -3014,6 +3022,7 @@ module Capybara
         # action or a find made for its own reasons.
         @read_owes_tick = false
         @ticking = true
+        note_url_changes
         begin
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Kept wall-anchored ONLY for `timer_wait_elapsed?` / FIND_PRE_TICK_MIN_S
@@ -3075,6 +3084,7 @@ module Capybara
           drain_async_channels
         ensure
           @ticking = false
+          note_url_changes
         end
         # What the handlers that fired during the drain left to do (e.g. `setTimeout(() => location.pathname = X)`).
         # Outside the @ticking guard so the navigate's rebuild_ctx is well-clear of the V8 call we just made.
@@ -3520,9 +3530,9 @@ module Capybara
         content_type,
         from_history: false,
         is_reload: false,
-        referer: @current_url,
+        referer: page_url,
         referrer_policy: nil,
-        initiator: @current_url,
+        initiator: page_url,
         replace: false,
         origin_null: false,
         initiator_cross_site_ancestor: false,
@@ -3637,7 +3647,6 @@ module Capybara
           @viewport_width  = nil
           @viewport_height = nil
         end
-        @current_url     = nil
         @current_referer = ''
         @document_handle = 0
         # A test may leave a frame switched-to without switching back
@@ -3998,7 +4007,7 @@ module Capybara
         # resolve against `<base href>` (HTML base-tag semantics) and the script loads.
         # Ordinary http(s) pages keep the document-URL base so the hot path skips the
         # `document_base_url` dom_call (CLAUDE.md rule 3).
-        needs_base = @current_url.to_s.start_with?('blob:', 'data:', 'about:')
+        needs_base = page_url.to_s.start_with?('blob:', 'data:', 'about:')
         key = resolve_against_current(url.to_s, use_base: needs_base)
         return nil unless key.is_a?(String)
         # (…by its destination — a preload of one `as` is no other's response, HTML's map of preloaded resources — and a
@@ -4358,7 +4367,7 @@ module Capybara
       def ws_open(url, protocols = nil, worker = nil, client: nil)
         queue    = worker || @websocket_queue
         client   = client&.to_h
-        source   = worker ? worker.url : (client ? client['clientUrl'].to_s : @current_url)
+        source   = worker ? worker.url : (client ? client['clientUrl'].to_s : page_url)
         id       = @websocket_lock.synchronize { @websocket_seq += 1 }
         # ws:// → http://, wss:// → https:// for the Rack env; resolve relative
         # against the current document (Action Cable's consumer builds an
@@ -4377,7 +4386,7 @@ module Capybara
                 elsif client
                   site_for_cookies(client['clientRealm'].to_i) || 'null'
                 else
-                  @current_url
+                  page_url
                 end
         cookie_context = Native.cookie_context(judge, target, false)
         # (…referred by a window's realm as its request's referrer and policy say — a srcdoc frame by its container's
@@ -6490,7 +6499,7 @@ module Capybara
       end
 
       private def client_realm_url(realm_id)
-        (realm_id.to_i.zero? ? @current_url : frame_realm_url(realm_id)).to_s
+        (realm_id.to_i.zero? ? page_url : frame_realm_url(realm_id)).to_s
       end
 
       # An https document may not be navigated to an http one (mixed content); the reverse, and
@@ -7673,7 +7682,7 @@ module Capybara
         end
         @current_referer = referrer.to_s
         record_history({url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact)
-        @current_url = url.to_s
+        self.page_url = url.to_s
         record_response(*response)
         boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null')
       end
@@ -8640,7 +8649,7 @@ module Capybara
       def boot_blob_document(url, bytes, content_type, flushed: false)
         # Before the URL below lands (see `flush_outgoing_page_init`).
         flush_outgoing_page_init if @timers_active && !flushed
-        @current_url = url.to_s
+        self.page_url = url.to_s
         ct = content_type.to_s.empty? ? 'text/html' : content_type.to_s
         # Blob string parts are UTF-8-encoded; when the Blob type carries no
         # charset, decode the document as UTF-8 (not the windows-1252 HTML locale
@@ -9650,7 +9659,7 @@ module Capybara
       # `<eval>` (no scheme, from V8) or `inline://<hash>` (from `__csim_runScript`) — and, its document's base URL out of
       # reach, resolves against the PAGE URL.
       private def effective_module_base(base)
-        module_base_url(base) || @current_url || @default_host
+        module_base_url(base) || page_url || @default_host
       end
       # …the importer's URL where it has a real one.
       private def module_base_url(base)
@@ -9665,7 +9674,7 @@ module Capybara
         # same base on every visit (a fresh VM re-instantiates the whole module
         # graph); Ruby's URI parser was a measured ~11% of per-visit wall. The
         # Browser persists across a suite's visits, so this instance-level memo
-        # (same scope/threading assumptions as @importmap / @current_url) turns
+        # (same scope/threading assumptions as @importmap) turns
         # all but the first visit's resolves into hash hits.
         cache = (@resolve_against_cache ||= {})
         cache[[eff, url]] ||= parse_url(url.to_s, eff)&.fetch(:href) || url
@@ -9770,7 +9779,7 @@ module Capybara
             navigation:            navigation == true,
             dest:                  dest,
             user_activated:        user_activated == true,
-            top_url:               @current_url,
+            top_url:               page_url,
             worker:                worker&.key?(:site_for_cookies) ? [worker[:site_for_cookies]] : nil,
             ua_headers:            ua_headers
           },
@@ -10103,7 +10112,7 @@ module Capybara
         # `.h2` test document's fetches run over h2). We don't model the h2 transport, so key
         # off the document URL — the same signal WPT uses to serve the resource over h2
         # (fetch/xhr status.h2 "statusText over H2 … should be the empty string").
-        reason = '' if @current_url.to_s.include?('.h2.')
+        reason = '' if page_url.to_s.include?('.h2.')
         out = timing.merge(
           'status'     => status,
           'statusText' => reason,
@@ -10650,20 +10659,12 @@ module Capybara
       # `history.back()` traverses that history, as its top-level document's does (`history_go`, `traverse_navigables`).
       #
       # Navigable of frame realm `realm_id`, its parent's (0 the top-level one), the parent realm, and the session history
-      # its entries are in — nil for a realm that is no frame.
+      # its entries are in — nil for a realm that is no frame (session_history.rs `frame_navigable`).
       def frame_navigable(realm_id)
         return nil if realm_id.to_i.zero?
 
-        parent, _, nav, _, traversable = @runtime.frame_realm_tree(realm_id)
-        return nil if nav.zero? || !(history = traversable_history(traversable))
-        return nil if frame_container_handle(realm_id, parent).zero?
-
-        parent_nav = 0
-        unless parent.zero?
-          _, depth, parent_nav = @runtime.frame_realm_tree(parent)
-          return nil if parent_nav.zero? && !depth.zero?
-        end
-        [nav, parent_nav, parent, history]
+        nav, parent_nav, parent, traversable = @runtime.realm_direct_call(0, '__csimFrameNavigable', realm_id.to_i)
+        (history = nav && traversable_history(traversable)) && [nav, parent_nav, parent, history]
       end
       # The session history numbered `id`: the page's own, or a window's of this isolate (session_history.rs
       # `SessionHistory.of`) — nil for none.
@@ -10688,21 +10689,13 @@ module Capybara
         @runtime.navigable_realms(nav).select {|realm| @runtime.frame_realm_alive?(realm) }.max
       end
       # The active entry of frame realm `realm_id`'s navigable, with the session history it is of — `create`, made where
-      # it has none (its parent's first), its URL the document's the frame is at; nil for none.
+      # it has none (its parent's first), its URL the document's the frame is at, keeping that document's referrer; nil
+      # for none (session_history.rs `frame_entry`).
       def frame_entry(realm_id, create: false)
-        return nil unless (nav, parent_nav, parent, history = frame_navigable(realm_id))
-        return (id = history.active(nav)) && [history, id] unless create
+        return nil if realm_id.to_i.zero?
 
-        frame_entry(parent, create: true) unless parent_nav.zero?
-        return nil unless (id = history.seed(nav, parent_nav, frame_realm_url(realm_id).to_s))
-
-        # (…an entry made of the document it is at keeping that document's referrer: `frame_document_made`)
-        frame_document_made_referrer(history, id, realm_id) unless history.text(id, :referrer)
-        [history, id]
-      end
-      private def frame_document_made_referrer(history, id, realm_id)
-        referrer = @runtime.frame_realm_alive?(realm_id) ? @runtime.realm_call(realm_id, '__csimDocumentReferrer').to_s : ''
-        history.update(id, {referrer: referrer})
+        traversable, id = @runtime.realm_direct_call(0, '__csimFrameEntry', realm_id.to_i, create)
+        (history = id && traversable_history(traversable)) && [history, id]
       end
       # Record a frame navigation away from `realm_id` to `new_url`: snapshot the OUTGOING document (URL + form state)
       # into the current entry, then add the new one — every frame navigation's, a form's, a link's, a location's
@@ -10824,11 +10817,11 @@ module Capybara
       # …as the engine answers it: [url, policy, opaque, realm, source] — the page's URL alone before the page has a realm
       # to ask. Asked on the page's context directly, as a frame's parser-time requests ask it from inside a V8 callback.
       private def request_client(realm, element_policy = nil, opaque = nil)
-        @runtime.realm_direct_call(0, '__csimRequestClient', realm.to_i, element_policy.to_s, opaque) || [@current_url, '', false, 0, @current_url, false]
+        @runtime.realm_direct_call(0, '__csimRequestClient', realm.to_i, element_policy.to_s, opaque) || [page_url, '', false, 0, page_url, false]
       end
       # The origin a request of client `client` is made as — its own where it is opaque, else its URL's, the page's for a
       # client of no http(s) URL — as `rack_fetch` judges its request.
-      def client_origin_of(client) = client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : @current_url)
+      def client_origin_of(client) = client[:origin] || url_origin(http_url?(client[:url]) ? client[:url] : page_url)
       # …and `client` pinned for a fetch made off the main thread (an image's): the origins of its document and its
       # ancestors' up to the top-level one, which the fetch's plan judges its cookies by at every hop (fetch_plan.rs
       # `ancestors`) — asked here, as no realm is asked from a host thread; an opaque client's own origin is judged by
@@ -11396,71 +11389,6 @@ module Capybara
         replay_history_entry(@session_history.active(0), is_reload: true, user_activated: user_activated, through_ui: through_ui)
         restore_flushed_nav_intents
       end
-      # `history.pushState(state, '', '/path')` ships the URL through
-      # `__setCurrentUrl` and lands here. Tab controllers / SPA frameworks
-      # pass a relative path; resolve it against the existing absolute
-      # `@current_url` so subsequent `resolve_against_current(href)`
-      # calls (e.g. click_link to a relative href) don't hit
-      # `URI::BadURIError: both URI are relative`.
-      # `history.replaceState(state, _, url)` updates the current entry
-      # in place rather than appending. Both the state and (when given)
-      # the URL are mirrored on Ruby's slot so a subsequent back to
-      # this entry restores the same state.
-      # (…none while the page's document is on its way out, which its bindings ask the engine before they ask this:
-      # navigables.rs `session_history_takes`)
-      def history_state(url, state = nil, realm_id = 0)
-        return frame_history_state(realm_id.to_i, url, state, push: false) unless realm_id.to_i.zero?
-
-        if url
-          resolved = resolve_against_current(url.to_s)
-          record_url_transition(resolved)
-          @current_url = resolved
-        end
-        return unless (id = @session_history.active(0))
-
-        @session_history.set_url(id, @current_url)
-        @session_history.update(id, {state: state})
-      end
-      # `history.pushState(state, _, url)` from SPA navigation (Turbo
-      # Visit, InstantClick, …) appends a new browser-history entry.
-      # Mirror that on the Ruby side so `Capybara#go_back` traverses
-      # within the pushState chain (fires `popstate`) and only crosses
-      # to a real reload when the back hits a `:visit` boundary.
-      # (…but a window still at its initial about:blank — of no entry yet — whose every one replaces it, HTML's "URL and
-      # history update steps": "if document's is initial about:blank is true, then set historyHandling to 'replace'" —
-      # so the navigation away from it replaces it too)
-      def history_push(url, state = nil, realm_id = 0)
-        return frame_history_state(realm_id.to_i, url, state, push: true) unless realm_id.to_i.zero?
-        return history_state(url, state) unless @session_history.active(0)
-
-        resolved = resolve_against_current(url.to_s)
-        record_url_transition(resolved)
-        @current_url = resolved
-        # (…of the document's state, what it was reached by with it — session_history.rs `sharing_document_state` — so a
-        # traversal that makes the document again refers as it was, and a user's reload is judged as it was reached)
-        record_history({url: resolved, state: state, kind: :push_state})
-      end
-
-      # A SAME-DOCUMENT URL change (pushState / replaceState / a fragment navigation) made by a NESTED browsing context:
-      # an entry of that frame's session history (a step of the page's joint one) — mirroring it onto the page's would
-      # make `current_url` report a URL no window is at, which is what an iframe'd SPA does on every navigation — or,
-      # `push` not, its current entry's URL and state made the new ones, so a later `location.reload()` refetches the
-      # pushState'd URL, not the stale `src`.
-      # (A same-isolate window realm's own — a pop-up's — are its traversable's, which the engine records: session_history.rs
-      # `windowHistoryUpdate`; a frame's of it are of that one's joint history, as a frame's of the page are of the page's.)
-      private def frame_history_state(realm_id, url, state, push:)
-        return nil if realm_id.zero? || !(history, id = frame_entry(realm_id, create: true))
-
-        nav, parent, = frame_navigable(realm_id)
-        if push
-          history.push(nav, parent, url.to_s, true, {state: state})
-        else
-          history.set_url(id, url.to_s) if url
-          history.update(id, {state: state})
-        end
-        nil
-      end
-
       # Whether realm `realm` (0 the page) is a document of this page's navigables: the page's, or a frame's of it — the
       # engine's to say, as `history.length` asks it (session_history.rs `historyOfPage`).
       private def history_of_page?(realm) = realm.to_i.zero? || @runtime.call('__csimHistoryOfPage', realm.to_i) == true
@@ -11492,7 +11420,7 @@ module Capybara
         return unless meta
 
         opener = meta[:opener_id].to_i
-        opener.positive? ? frame_realm_url(opener) : @current_url
+        opener.positive? ? frame_realm_url(opener) : page_url
       end
 
       # (…its text: HTML's UTF-8 decode of the bytes) — in `context`, the one the page's engine gave its document's cookie
@@ -11760,11 +11688,11 @@ module Capybara
       # (…`origin_null` and `initiator_cross_site_ancestor` the initiating document's: `initiating_document`)
       def navigate(
         url,
-        referer: @current_url,
+        referer: page_url,
         referrer_policy: nil,
         from_history: false,
         is_reload: false,
-        initiator: @current_url,
+        initiator: page_url,
         origin_null: false,
         initiator_cross_site_ancestor: false,
         replace: false,
@@ -11903,6 +11831,7 @@ module Capybara
         # user-action baseline is likewise scoped to the prior document —
         # drop it so it can't match (and wrongly suppress) a transition on
         # the new page.
+        note_url_changes
         @recent_urls.clear if @recent_urls
         @recent_urls_last_push_at = nil
         @action_url_baseline = nil
@@ -11912,6 +11841,7 @@ module Capybara
         # — record intermediates so a polling matcher can walk them.
         prior_navigating = @navigating
         @navigating = true unless from_history
+        note_url_changes
         begin
           # The document's referrer is the request's, the last hop's (a redirect determines it anew).
           @current_referer = fetch.referrer.to_s
@@ -11943,12 +11873,12 @@ module Capybara
             # its creator's: `open_initial_document`) — and an opaque initiator's (a sandboxed document's: `origin_null`,
             # `initiating_document`) one of no tuple origin, a new opaque one here where HTML has that one)
             if initiator && !origin_null
-              own  = initiator == @current_url
+              own  = initiator == page_url
               base = own ? @runtime.realm_direct_call(0, '__csimBaseURL').to_s : initiator.to_s
               inherit_creator(origin: url_origin(initiator).to_s, base: base)
             end
             commits.(initiator && url_origin(initiator))
-            @current_url = url.to_s
+            self.page_url = url.to_s
             record_response(200, {'content-type' => 'text/html'})
             return boot_response_into_ctx('')
           # A `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
@@ -11977,7 +11907,7 @@ module Capybara
             return boot_inline_document(url, 200, {'content-type' => mime}, commits) if verdict == 'inline'
 
             commits.(nil)
-            @current_url = url.to_s
+            self.page_url = url.to_s
             record_response(200, {'content-type' => mime})
             return boot_response_into_ctx(bytes, opaque_origin: true)
           # (…a POST to any URL but an HTTP(S) one a network error, its error document at the URL: Fetch "scheme fetch" —
@@ -12026,7 +11956,7 @@ module Capybara
             return boot_inline_document(target, hop.status, hop.headers, commits)
           end
 
-          @current_url = target
+          self.page_url = target
           record_response(hop.status, hop.headers)
           commits.(url_origin(target))
           # Full-reload navigation rebuilds the JS Context from the warm
@@ -12037,6 +11967,7 @@ module Capybara
           boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?, content_type: hop.document_type)
         ensure
           @navigating = prior_navigating
+          note_url_changes
           # No document committed (a download, a raise mid-fetch) → the page that
           # flushed is still live and still means what its timers asked for.
           restore_flushed_nav_intents
@@ -12097,7 +12028,7 @@ module Capybara
       # it came. (`commits` the navigation's, which clears the navigable's name by the origin it leaves.)
       private def boot_inline_document(url, status, headers, commits)
         commits.(nil)
-        @current_url = url.to_s
+        self.page_url = url.to_s
         record_response(status, headers)
         boot_response_into_ctx('', opaque_origin: true, inline: true)
       end
@@ -12117,13 +12048,13 @@ module Capybara
         restore_flushed_nav_intents
         return if window_has_document?
 
-        @current_url     = 'about:blank'
+        self.page_url = 'about:blank'
         @current_referer = ''   # (…its referrer its creator's, none of the navigation that made no document)
         open_initial_document if @document_handle.zero?
         nil
       end
       private def window_has_document?
-        !(@current_url.to_s.empty? || @current_url == 'about:blank')
+        !['', 'about:blank'].include?(page_url.to_s)
       end
 
       # The opener policy of the top-level document realm `realm`'s is in: the page's, or a window's `window.open` made in
@@ -12157,7 +12088,7 @@ module Capybara
       # (…`opaque` its origin a new opaque one: an error document's)
       private def commit_coop(coop, opaque, due)
         if due.nil? && !(coop == 'unsafe-none' && @page_coop.to_s.match?(/\A(unsafe-none)?\z/))
-          origin = opaque ? 'null' : (about_blank_url?(@current_url) ? @creator&.fetch(:origin) : url_origin(@current_url)).to_s
+          origin = opaque ? 'null' : (about_blank_url?(page_url) ? @creator&.fetch(:origin) : url_origin(page_url)).to_s
           initial = @runtime.realm_call(0, '__csimInitialAboutBlank') == true
           due = Native.coop_switch(initial, document_origin(0).to_s, @page_coop || 'unsafe-none', origin, coop)
         end
@@ -12225,7 +12156,7 @@ module Capybara
         # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own
         # COEP (it is never isolated here). (…an about:blank document's its creator's — the document that navigated to it,
         # or a pop-up's opener: it takes its creator's policy container, the policies with it)
-        about_blank = about_blank_url?(@current_url)
+        about_blank = about_blank_url?(page_url)
         @runtime.cross_origin_isolated = opener_policy == 'same-origin-plus-COEP' unless about_blank
         # (…and its opener policy, what a navigation of the page after is judged by — the page's browsing context group left
         # for a new one where it needs: `commit_coop`)
@@ -12258,7 +12189,7 @@ module Capybara
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
           'timeTravelOffsetMs' => ((Time.now.to_f - Process.clock_gettime(Process::CLOCK_REALTIME)) * 1000).to_i,
-          'url'                => @current_url.to_s,
+          'url'                => page_url.to_s,
           'html'               => document_payload(html)
         }
         opts['contentType'] = ctype if ctype
@@ -12281,8 +12212,8 @@ module Capybara
         opts['refresh'] = refresh if refresh
         # (…the worker controlling it: its navigation's — not one still activating, which the navigation's wait for it
         # gave up on, the navigation having gone to the network: `await_sw_activation`)
-        if http_url?(@current_url)
-          controller = sw_client_controller_for(@current_url.to_s, Native.site(@current_url.to_s).to_s)
+        if http_url?(page_url)
+          controller = sw_client_controller_for(page_url, Native.site(page_url).to_s)
           controller = nil if controller && controller[1] && !Native.sw_worker_activated(@sw_partition, controller[0])
           opts['controller'] = controller if controller
         end
@@ -12291,7 +12222,7 @@ module Capybara
         # `leaving_document_origin`)
         creator = @creator
         @creator = nil unless initial
-        if creator && about_blank_url?(@current_url)
+        if creator && about_blank_url?(page_url)
           opts['creatorOrigin'] = creator[:origin]
           opts['aboutBase']     = creator[:base]
           opts['referrer']      = creator[:url] unless creator[:url].empty?
@@ -12405,9 +12336,9 @@ module Capybara
       #    `/arrived` loads at `/arrived`, and going back from it lands on
       #    `/pushed` — the outgoing document's entries are real, they just don't
       #    move the incoming document's URL. Running here reproduces that: the
-      #    mirrors (`history_state` / `history_push` / `history_go`, which all take
-      #    effect IMMEDIATELY on `@current_url` and the session history) act on the outgoing
-      #    entry, and this navigation's `record_history` / `@current_url = url`
+      #    history updates (pushState, replaceState, `history_go`, which all take
+      #    effect IMMEDIATELY on the page URL and the session history) act on the outgoing
+      #    entry, and this navigation's `record_history` / `self.page_url = url`
       #    then commit on top. Flushing AFTER the commit — where this used to
       #    live — let a late SPA redirect rewrite the incoming URL instead:
       #    Mastodon signs in to `/`, whose router schedules a `<Redirect to=
@@ -12721,7 +12652,7 @@ module Capybara
       # (…its origin a new opaque one, whatever its URL's: HTML "determine the origin" for a navigation params' error —
       # Chrome and Firefox measured: a window of the failed URL's origin finds it by no name)
       def commit_error_document(url)
-        @current_url = url
+        self.page_url = url
         record_response(0, {'content-type' => 'text/html'})
         boot_response_into_ctx('', opaque_origin: true)
       end
@@ -12849,7 +12780,7 @@ module Capybara
 
       # Path-only or fragment-only URLs are always against the current
       # origin. For absolute URLs, compare host:port to the cached
-      # parsed @current_url (or default_host on first navigate).
+      # parsed `page_url` (or default_host on first navigate).
       def url_is_local?(url)
         return true if @all_hosts_local
         s = url.to_s
@@ -12861,13 +12792,14 @@ module Capybara
         uri[:hostname] == ref[:hostname] && effective_port(uri) == effective_port(ref)
       end
 
-      # The current URL's parts, kept while it stays the same string.
+      # The current URL's parts, kept while it stays the same.
       def current_url_parts
-        return nil if @current_url.nil?
-        return @current_url_parts if @current_url_parts_for.equal?(@current_url)
+        return nil unless (url = page_url)
+        return @current_url_parts if @current_url_parts_for == url
+
         # (…the parts kept before the URL they are of: another thread — an event stream's reader — asks too, and must
         # never find the URL's mark beside another's parts)
-        url, parts             = @current_url, parse_url(@current_url)
+        parts                  = parse_url(url)
         @current_url_parts     = parts
         @current_url_parts_for = url
         parts

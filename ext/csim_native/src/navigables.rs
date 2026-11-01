@@ -1392,7 +1392,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "incumbentOperation", incumbent_operation, context_id);
     crate::dom::register(scope, ns, "disownOpener", disown_opener, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
-    crate::dom::register(scope, ns, "sessionHistoryTakes", session_history_takes, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
     crate::dom::register(scope, ns, "targetUnloading", target_unloading, context_id);
@@ -1856,13 +1855,6 @@ fn own_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(crate::dom::node_value(scope, container));
 }
 
-// __dom.sessionHistoryTakes() -> whether the session history takes the entry the calling realm's document makes now by
-// its URL and history update steps (`pushState`, `replaceState`, a fragment navigation) — the document's URL and
-// classic history API state its own either way (`session_history_takes`).
-fn session_history_takes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let cid = realm_id(scope, &args);
-    rv.set_bool(crate::dom::realm(scope, cid).session_history_takes(cid));
-}
 // __dom.unloading(realm) -> whether the realm's document is being unloaded or asked whether it may be now — its unload
 // counter above 0, a navigation of its navigable ignored.
 fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
