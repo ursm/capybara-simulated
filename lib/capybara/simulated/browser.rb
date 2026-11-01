@@ -10704,6 +10704,10 @@ module Capybara
         data = post ? {body: post[:body].to_s, content_type: post[:content_type], origin: post[:origin]}.compact : {}
         initial ? history.replace(nav, parent_nav, new_url.to_s, false, data) : history.push(nav, parent_nav, new_url.to_s, false, data)
       end
+      # …an entry pushed (`record`), or the current one replaced (`replace_frame_entry`).
+      private def record_frame_navigation(realm_id, url, record)
+        record ? record_frame_nav(realm_id, url) : replace_frame_entry(realm_id, url)
+      end
       # …and a navigation of it its session history records no entry for — a location's: the current entry made its, so
       # neither a reload nor a traversal goes back to the document it left.
       def replace_frame_entry(realm_id, url)
@@ -11025,9 +11029,6 @@ module Capybara
           return navigate_frame(resolve_against_current(get_url), entry: entry, referrer: referrer, is_reload: is_reload, is_history: is_history, record: record,
                                                                   initiator: initiator || @current_realm_id.to_i, origin_null: origin_null, user_activated: user_activated)
         end
-        if !is_reload && !is_history
-          record ? record_frame_nav(realm_id, get_url) : replace_frame_entry(realm_id, get_url)
-        end
         # A frame reached via contentWindow (not on the entered stack). An ABSOLUTE http(s) target is
         # fetched Ruby-side (like navigate_realm_self_post) so the navigation carries correct request
         # headers — a Referer under the initiating document's Referrer-Policy, no Origin (GET), the
@@ -11037,6 +11038,7 @@ module Capybara
         # (where the owning iframe lives), not unconditionally to main.
         parent = @runtime.frame_realm_parent(realm_id)
         unless get_url.is_a?(String) && http_url?(get_url)
+          record_frame_navigation(realm_id, get_url, record) unless is_reload || is_history
           return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
         end
         # The realm may have been disposed earlier in THIS drain batch — an ancestor frame that also
@@ -11046,6 +11048,10 @@ module Capybara
         return unless @runtime.frame_realm_alive?(realm_id)
         return unless prompt_to_unload_frame(realm_id, parent)
 
+        # (…its entry recorded once its document was asked whether it may be unloaded: what its beforeunload handlers
+        # pushed — the frame's entries, its parent's — comes before it, HTML "navigate" asking it before the fetch whose
+        # response finalizes the navigation's entry; Chrome and Firefox agree)
+        record_frame_navigation(realm_id, get_url, record) unless is_reload || is_history
         navigate_realm_self(realm_id, get_url, nil, nil, is_reload: is_reload, is_history: is_history, origin_null: origin_null, referrer: referrer,
                                                          initiator: initiator, origin_url: origin_url, user_activated: user_activated)
       end
@@ -11075,9 +11081,11 @@ module Capybara
                                                               origin_null: origin_null, user_activated: user_activated)
         end
         # A reload / history traversal RE-POSTS an existing entry — it doesn't push a new one; only
-        # a fresh submission records history.
-        record_frame_nav(realm_id, url) if !is_reload && !is_history
+        # a fresh submission records history, once its document was asked whether it may be unloaded
+        # (`navigate_realm_self_get`).
         return unless prompt_to_unload_frame(realm_id)
+
+        record_frame_nav(realm_id, url) if !is_reload && !is_history
 
         navigate_realm_self(realm_id, url.to_s, body, content_type, is_reload: is_reload, is_history: is_history, origin_null: origin_null, referrer: referrer,
                                                                     initiator: initiator, origin_url: origin_url, user_activated: user_activated)
