@@ -4436,7 +4436,7 @@ module Capybara
         # (…referred by a window's realm as its request's referrer and policy say — a srcdoc frame by its container's
         # document, an opaque document not at all: document-origin.js `clientReferrerSource` — a worker by its script)
         referer = client ? Native.request_referrer(client['referrerPolicy'].to_s, client['referrer'].to_s, target) : source
-        apply_default_request_env(env, referer: referer, cookie_context: cookie_context)
+        apply_default_request_env(env, target, referer: referer, cookie_context: cookie_context)
         env['HTTP_UPGRADE']               = 'websocket'
         env['HTTP_CONNECTION']            = 'Upgrade'
         env['HTTP_SEC_WEBSOCKET_KEY']     = key
@@ -6840,7 +6840,9 @@ module Capybara
             return {'no_document' => true}
           end
         end
-        out = response_hash(hop.status, hop.headers, hop.document || read_rack_body(hop.rack_body), target, fetch.redirected?) or return
+        # (…a response the host cannot hand on — a NUL in a header — a network error at its URL, as one of no response is,
+        # the opener policy switch its hops needed carried all the same: navigation_fetch.rs `coop_switch?`)
+        out = response_hash(hop.status, hop.headers, hop.document || read_rack_body(hop.rack_body), target, fetch.redirected?) or return failed.()
         # The final reserved client id — the JS frame builder hands it to the new realm
         # (create_frame_realm tells the realm its client id + records the adoption).
         out['resulting_client_id'] = hop.client_id
@@ -6918,7 +6920,9 @@ module Capybara
              ))
             return NavigationHop.new('fail') if sw['networkError']
 
-            status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
+            # (…its header list where the wire carries one — a redirect's, whose Location fields the combined headers would
+            # make one: response-wire.js `header_list`)
+            status, headers, document = (sw['status'] || 200).to_i, sw['header_list'] || sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
           else
             response = dispatch_navigation_hop(target, meth, network_headers, body: hop_body, content_type: content_type) or return NavigationHop.new('fail')
             status, headers, rack_body = response
@@ -7114,7 +7118,8 @@ module Capybara
         # split); a redirect status with NO Location → the body commits as the document at
         # the request URL (Chrome's behavior — navigation-redirect "No location redirect").
         if resp['type'] == 'opaqueredirect'
-          resp = if resp['redirect_loc'].to_s.empty?
+          resp = resp.except('header_list')
+          resp = if resp['redirect_loc'].nil? || resp['redirect_loc'] == ''
             resp.merge(
               'status'   => resp['redirect_status'].to_i,
               'headers'  => {'content-type' => resp['redirect_ct'].to_s},
@@ -7123,7 +7128,7 @@ module Capybara
           else
             resp.merge(
               'status'  => resp['redirect_status'].to_i,
-              'headers' => {'location' => resp['redirect_loc'].to_s}
+              'headers' => {'location' => resp['redirect_loc']}
             )
           end
         end
@@ -9806,7 +9811,7 @@ module Capybara
           # The stored response for the hop's URL, the plan's to judge (the HTTP cache keeps it; http_cache.rs its policy).
           cache_entry   = @@asset_cache.lookup(target)
           cache_headers = cache_entry&.headers
-          stored        = cache_entry && [cache_entry.status, cache_entry.fresh?, location_fields(cache_headers)]
+          stored        = cache_entry && [cache_entry.status, cache_entry.fresh?, Native.location_fields(cache_headers)]
           step, *args = plan.begin_hop(stored, Process.clock_gettime(Process::CLOCK_MONOTONIC))
           case step
           when 'error'
@@ -9842,7 +9847,7 @@ module Capybara
           # (…its cookies as the engine's cookie context for the hop has them: none where the credentials mode keeps them
           # back — `omit` always, `same-origin` to another origin: cors-redirect-credentials / cors-cookies — and SameSite
           # ones by the site the chain latched so far)
-          apply_default_request_env(env, referer: hop_referer, force: false, cookie_context: cookie_context)
+          apply_default_request_env(env, target, referer: hop_referer, force: false, cookie_context: cookie_context)
           # (…and an authentication entry sent ahead of a challenge, the caller's own Authorization winning)
           env['HTTP_AUTHORIZATION'] = authorization if authorization && !env.key?('HTTP_AUTHORIZATION')
           # The CORS-preflight a cross-origin CORS-unsafe hop sends first, unless the cache covers it (cors.rs).
@@ -10175,9 +10180,12 @@ module Capybara
         o_r = response_hash(0, {}, '', target, false, type: 'opaqueredirect', body_null: true)
         o_r['redirect_status'] = status.to_i
         # (…and its Location fields as they came, which a worker's script fetch judges as Fetch does: the engine's)
-        o_r['redirect_locations'] = location_fields(resp_headers)
-        if (loc = redirect_location(status, resp_headers))
-          o_r['redirect_loc'] = resolve_against(loc, target)
+        o_r['redirect_locations'] = Native.location_fields(resp_headers)
+        # (…the target a navigation consuming it follows, by the rule its own redirects are followed by (response_headers.rs
+        # `redirect_locations`): its one Location resolved, its several as they came — a network error as it is followed —
+        # or, none to follow, its own body to commit)
+        if (locations = Native.redirect_locations(status.to_i, resp_headers))
+          o_r['redirect_loc'] = locations.one? ? resolve_against(locations.first, target) : locations
         else
           o_r['redirect_ct']       = header_text(header_field(resp_headers, 'content-type'))
           o_r['opaque_render'] = body_str.to_s.b unless body_str.to_s.empty?
@@ -11461,13 +11469,6 @@ module Capybara
         h && !h.empty? ? h : nil
       end
 
-      # The URL a request built into `env` is for — the TARGET server's (SERVER_NAME / HTTP_HOST), not the current
-      # document's, so a cross-origin fetch sends the target's cookies rather than leaking the document's (cors-cookies);
-      # read off the request itself, never a forwarding header a page may set (X-Forwarded-Host, Forwarded).
-      def env_request_url(env)
-        "#{env['rack.url_scheme']}://#{env['HTTP_HOST'] || env['SERVER_NAME']}#{env['SCRIPT_NAME']}#{env['PATH_INFO']}"
-      end
-
       # (…the time a cookie expires by: the app's clock, which a test may travel)
       def cookie_now = Time.now.to_f * 1000
 
@@ -12529,11 +12530,13 @@ module Capybara
       # The headers every request the host sends carries — its user agent, its client's address, a test's sticky headers,
       # an `Accept`, its `Referer` — and its cookies, as `cookie_context` lets the jar give them (the engine's for the
       # request: fetch_hop.rs, navigation_fetch.rs; nil, none).
-      def apply_default_request_env(env, referer:, cookie_context:, force: true)
+      # (…its cookies the jar's for the request's URL, `url` — whatever `Host` a test's sticky header sends — as a
+      # navigation's are: navigation_fetch.rs `request_headers`)
+      def apply_default_request_env(env, url, referer:, cookie_context:, force: true)
         apply_user_agent_env(env, force: force)
         referrer = Native.referrer_url(referer)
         env['HTTP_REFERER'] = referrer if referrer
-        attach_cookies(env, env_request_url(env), cookie_context)
+        attach_cookies(env, url, cookie_context)
       end
       # …those of them the user agent sets of itself, whatever the request: its user agent, its client's address, a test's
       # sticky headers and an `Accept` (`force: false` keeping any the caller set already).
@@ -12929,46 +12932,10 @@ module Capybara
         Native.combined_field(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
       end
 
-      # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
-      # choice), 304 (not modified), 305/306 (deprecated) are NOT redirects: the 3xx
-      # response is returned to the caller as-is (xhr send-redirect basics).
-      REDIRECT_STATUSES = [301, 302, 303, 307, 308].freeze
-
-      # A navigation's redirect target: the response's Location where it is a redirect status.
-      def redirect_location(status, headers)
-        return nil unless REDIRECT_STATUSES.include?(status.to_i)
-        loc = location_field(headers)
-        # A blank (or absent) Location has no FOLLOWABLE target: an empty value parses back
-        # to the current URL, so following it would just self-redirect. Return nil so a
-        # caller renders the 3xx as-is rather than looping — the several navigation handlers
-        # rely on this. (A fetch follows it as Fetch does — `follow_redirect` — to its own URL, until the redirect limit
-        # makes it a network error.)
-        loc unless loc.to_s.empty?
-      end
-
-      # A response's distinct Location fields — Rack 3 permits an Array of them — none for no header (an empty Array too).
-      # More than one is failure, the one value Location takes ("extract header list values"; Chrome's
-      # ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION).
-      def location_fields(headers)
-        loc = header_field(headers, 'location')
-        return [] if loc.nil?
-        return loc.uniq if loc.is_a?(Array)
-
-        # (…Rack 2's several fields of a name one String, joined by newlines — an empty one a field all the same)
-        loc.empty? ? [loc] : loc.split("\n").uniq
-      end
-      # …and a service worker's response's, field by field as its header list has them, which the wire carries beside
-      # the combined headers that would make two Locations one (response-wire.js `header_list`).
-      def wire_location_fields(wire)
-        list = wire['header_list'] or return location_fields(wire['headers'] || {})
-
-        list.filter_map {|name, value| value if name.to_s.casecmp?('location') }.uniq
-      end
-      # …as a navigation reads it: its one field, '' for more than one — no followable target — and nil for none.
-      def location_field(headers)
-        locations = location_fields(headers)
-        locations.size > 1 ? '' : locations.first
-      end
+      # A service worker's response's distinct Location fields, field by field as its header list has them, which the wire
+      # carries beside the combined headers that would make two Locations one (response-wire.js `header_list`): the
+      # engine's (response_headers.rs `location_fields`), as every response's are read.
+      def wire_location_fields(wire) = Native.location_fields(wire['header_list'] || wire['headers'])
 
       # …parsed as the page parses a URL (url_ops.rs): Ruby's URI refused what the URL Standard keeps, and the URL came
       # back unresolved (`location.href = '/a|b'` left `current_url` the bare path).
@@ -13006,7 +12973,7 @@ module Capybara
         # the SAME value the actual request sends (computed by the caller), not the raw
         # document URL (cors-preflight-referrer).
         # (…and no cookies: a CORS-preflight is always uncredentialed, even where the request that follows is)
-        apply_default_request_env(env, referer: referer, force: false, cookie_context: nil)
+        apply_default_request_env(env, target, referer: referer, force: false, cookie_context: nil)
         # A CORS-preflight is a fetch, so it carries fetch's default `Accept: */*` (NOT
         # the navigation Accept apply_default_request_env sets) — some handlers reject a
         # preflight whose Accept isn't */* (preflight.py).
@@ -13041,7 +13008,7 @@ module Capybara
           cors_value(headers, 'access-control-allow-credentials'),
           referrer_policy_header(headers),
           server_delay_ms_of(headers),
-          location_fields(headers)
+          Native.location_fields(headers)
         ]
       end
       # A response `plan`'s chain of hops ended in, as its host reads it: marked tainted where the chain left its client's

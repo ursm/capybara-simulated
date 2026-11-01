@@ -338,6 +338,8 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("link_noopener", magnus::function!(token_list::noopener_for_ruby, 2))?;
     native.define_module_function("site", magnus::function!(realm_location::site_for_ruby, 1))?;
     native.define_module_function("document_params", magnus::function!(response_headers::document_params, 1))?;
+    native.define_module_function("location_fields", magnus::function!(response_headers::location_fields_for_ruby, 1))?;
+    native.define_module_function("redirect_locations", magnus::function!(response_headers::redirect_locations_for_ruby, 2))?;
     native.define_module_function("coop_switch", magnus::function!(coop::switch_for_ruby, 5))?;
     // What a request says of where it came from — its Referer, Origin and Sec-Fetch-Site, over its redirects too
     // (referrer.rs).

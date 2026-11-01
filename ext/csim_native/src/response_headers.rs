@@ -83,20 +83,32 @@ fn set_cookie_lines(value: Value) -> Result<Vec<Vec<u8>>, Error> {
 }
 
 impl ResponseFields {
-    // (…`headers` a Hash, or anything else whose `each` gives [name, value] pairs: a Rack 2 app's Array of them)
+    // (…`headers` a Hash, or anything else whose `to_a` gives [name, value] pairs: a Rack 2 app's Array of them, a
+    // service worker's response's header list)
     pub(crate) fn read(headers: Option<Value>) -> Result<Self, Error> {
         let mut out = ResponseFields::default();
         let Some(headers) = headers else { return Ok(out) };
         let headers = match RHash::from_value(headers) {
             Some(hash) => hash,
             None => {
-                let hash = RHash::new();
+                let ruby = Ruby::get_with(headers);
+                let hash = ruby.hash_new();
                 for pair in headers.funcall::<_, _, RArray>("to_a", ())? {
                     let pair = RArray::try_convert(pair)?;
                     let (k, v): (Value, Value) = (pair.entry(0)?, pair.entry(1)?);
-                    // (…the first of a name kept, as a lookup of it finds the first)
-                    if hash.get(k).is_none() {
-                        hash.aset(k, v)?;
+                    // (…a header list's: a name given more than once an Array of its values, as Rack 3 gives them — a
+                    // service worker's Response with two Location fields keeps two)
+                    match hash.get(k) {
+                        None => hash.aset(k, v)?,
+                        Some(seen) => match RArray::from_value(seen) {
+                            Some(list) => list.push(v)?,
+                            None => {
+                            let list = ruby.ary_new();
+                            list.push(seen)?;
+                            list.push(v)?;
+                            hash.aset(k, list)?;
+                        }
+                        },
                     }
                 }
                 hash
@@ -193,4 +205,25 @@ pub(crate) fn document_params(ruby: &Ruby, headers: Option<Value>) -> Result<RAr
     out.push(fields.refresh.clone())?;
     out.push(fields.opener_policy().name())?;
     Ok(out)
+}
+
+// Native.location_fields(headers) -> a response's distinct Location fields as they came (`ResponseFields::locations`) —
+// none for no header; more than one a network error as a redirect is followed (fetch_chain.rs `follow`).
+pub(crate) fn location_fields_for_ruby(ruby: &Ruby, headers: Option<Value>) -> Result<RArray, Error> {
+    let out = ruby.ary_new();
+    for field in ResponseFields::read(headers)?.locations {
+        out.push(ruby.str_from_slice(&field))?;
+    }
+    Ok(out)
+}
+// Native.redirect_locations(status, headers) -> the Location fields a navigation follows a response of status `status`
+// to (`ResponseFields::redirect_locations`), nil where it follows none.
+pub(crate) fn redirect_locations_for_ruby(ruby: &Ruby, status: u32, headers: Option<Value>) -> Result<Option<RArray>, Error> {
+    let fields = ResponseFields::read(headers)?;
+    let Some(locations) = fields.redirect_locations(status) else { return Ok(None) };
+    let out = ruby.ary_new();
+    for field in locations {
+        out.push(ruby.str_from_slice(field))?;
+    }
+    Ok(Some(out))
 }
