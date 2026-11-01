@@ -7742,7 +7742,12 @@ module Capybara
         # (skip-waiting "both active and waiting" hang).
         sw_evals.each {|e| sw_job_evaluated(e[:handle].to_i, e[:ok], e[:msg]) }
         # What changes a client's control — a claim, a lifecycle phase — held for the window's next step, in the order the
-        # workers made them (`hold_controller_changes`).
+        # workers made them (`hold_controller_changes`) — but for a message to a client posted after one, below. (…where
+        # each event stood in the outbox, which the partitions above lost)
+        held_before = controller_changes_held?
+        order       = {}.compare_by_identity
+        events.each_with_index {|e, i| order[e] = i }
+        first_claim = claims.map {|e| order[e] }.min
         hold_controller_changes(claims, sw_phases)
         # A reaped SERVICE worker (posted by reap_worker, possibly from a worker thread):
         # main-thread cleanup of the activation-parking state it can no longer satisfy, and of
@@ -7777,6 +7782,10 @@ module Capybara
         # (…one to a reserved client — a navigation's, its document not committed, which a deadlocked worker's `get` resolved
         # to early: workers.js `__csim_swBreakSelfWait` — held until it is a client: `sw_client_settled`)
         sw_msgs.each do |e|
+          # (…one posted after a claim held — an earlier drain's, or this one's before it in the outbox — is causally after
+          # it: `clients.claim()` sets each client's active worker before its promise resolves, so a message sent after
+          # `await self.clients.claim()` finds its client controlled; the claim taken effect first)
+          apply_controller_changes if controller_changes_held? && (held_before || (first_claim && order[e] > first_claim))
           @runtime.run_due_by(e[:at]) if e[:at]
           if Native.sw_client_reserved(@sw_partition, e[:client].to_s)
             (@reserved_client_messages ||= Hash.new {|h, k| h[k] = [] })[e[:client].to_s] << e
@@ -7846,8 +7855,11 @@ module Capybara
       # scheduler had it. Held, the command's script runs first, at the time it was issued, and the claim takes effect
       # with the window's next step: what a page reads of its control (its realm's `navigator.serviceWorker.controller`)
       # and what routes its fetches (the registry's record of its client's controller, which `broadcast_claim` writes
-      # with it) move together, at a time of the window's. The spec allows either order — the claim's controller change
-      # is a task queued from the worker's parallel steps — and this is the one no machine's load can change.
+      # with it) move together, at a time of the window's. The spec allows either order against what the window does
+      # meanwhile — the claim's controller change is a task queued from the worker's parallel steps — and this is the one
+      # no machine's load can change. It does not against what the WORKER does after it: `clients.claim()` resolves only
+      # once every client's active worker is set, so a message the worker posts to a client after it is causally later,
+      # and the claim takes effect before that message is delivered (deliver_worker_messages).
       # The phases ride with the claims, in order, so a claim is in place before the 'activated' after it is observable
       # (the activation.https flake); a phase with no claim held before it is applied at once, as nothing of the window's
       # orders it.
