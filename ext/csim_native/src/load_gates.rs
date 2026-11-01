@@ -21,6 +21,13 @@ pub(crate) struct LoadGates {
     next: u32,
 }
 
+impl LoadGates {
+    // Whether a gate's work is still to run.
+    pub(crate) fn pending(&self) -> bool {
+        !self.gates.is_empty()
+    }
+}
+
 // The flush is bounded: flushing one can queue another (a frame's document brings its own sheets), and a document that
 // keeps queuing them would otherwise never load.
 const FLUSH_ROUNDS: usize = 8;

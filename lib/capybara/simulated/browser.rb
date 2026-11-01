@@ -12421,12 +12421,13 @@ module Capybara
       # `maxMs: 0` fires only what is ALREADY due, so a `setTimeout(fn, 50)` stays
       # pending and a test can still observe the state before it.
       # The document's DOMContentLoaded and `load` are among those tasks — "the end" queued them (bridge.entry.js
-      # `__csimTaskOfTheEnd`) — the load in queue order with the page's own: a `setTimeout(0)` its parse or its
-      # DOMContentLoaded handlers queued runs before it, one its load handlers queue after. (HTML leaves the order of
+      # `__csimTaskOfTheEnd`) — each ahead of a `setTimeout(0)` or a message its parse queued, the load where nothing
+      # delays it (else in turn, once it no longer is), one its load handlers queue after it. (HTML leaves the order of
       # two task sources to the UA, and the engines differ by the page's shape, measured 2026-11-01: on a page whose
-      # parse ends at once, Chrome 156 fires DOMContentLoaded and the load before a parse-time `setTimeout(0)`, Firefox
-      # 159 the timer before the load; on one whose parse waits for a slow external script, Chrome runs the timer before
-      # DOMContentLoaded. The order here is Firefox's.)
+      # parse ends at once, Chrome 156 fires DOMContentLoaded and the load before a parse-time `setTimeout(0)` and a
+      # message (`dcl, load, msg, t0`), Firefox 159 the timer before the load, the message after it; on one whose parse
+      # waits for a slow external script, Chrome runs the timer and the message before DOMContentLoaded — a parse here
+      # never waits, its scripts fetched as it runs. The order here is Chrome's.)
       def flush_page_init
         return unless @timers_active
 

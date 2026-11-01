@@ -251,6 +251,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "loadDelay", load_delay, context_id);
     crate::dom::register(scope, ns, "oweContainerLoad", owe_container_load, context_id);
     crate::dom::register(scope, ns, "loadDelaySettled", load_delay_settled, context_id);
+    crate::dom::register(scope, ns, "loadDelayedNow", load_delayed_now, context_id);
     crate::dom::register(scope, ns, "supersedeFrameNav", supersede_frame_nav, context_id);
     crate::dom::register(scope, ns, "frameNavUrl", frame_nav_url, context_id);
     crate::dom::register(scope, ns, "setFrameNavUrl", set_frame_nav_url, context_id);
@@ -923,6 +924,13 @@ fn load_delay_settled(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let cid = realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     rv.set_bool(arena.realm_state(cid).is_some_and(|s| s.load_delay != 0) && !arena.load_delayed_here(cid));
+}
+// __dom.loadDelayedNow() -> whether something delays the calling realm's document's load event now: what
+// `load_delayed_here` counts, or a load gate's work still to run (load_gates.rs).
+fn load_delayed_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    rv.set_bool(arena.load_delayed_here(cid) || arena.realm_state(cid).is_some_and(|s| s.load_gates.pending()));
 }
 impl RealmArena {
     // Whether something delays realm `cid`'s document's load event now: its images (image_requests.rs

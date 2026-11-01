@@ -17,10 +17,11 @@ RSpec.describe 'the load "the end" queues' do
     })
   end
 
-  # Firefox 159: a `setTimeout(0)` queued as the page parses runs before its load, a load handler's after it. (Chrome 156
-  # fires the load first on a page whose parse ends at once — `dcl, load, msg, t0` — and runs the timer first where the
-  # parse waits on a slow script: HTML leaves the order to the event loop. Measured 2026-11-01.)
-  it 'runs after the tasks the parse queued, and before those its handlers queue' do
+  # The load nothing delays takes its turn ahead of the tasks the parse queued (timers.rs `AHEAD`, once), a load
+  # handler's after it: Chrome 156 on a page whose parse ends at once (`dcl, load, msg, t0`; Firefox 159 runs the timer
+  # before the load, and Chrome too where the parse waits on a slow script — HTML leaves the order to the event loop).
+  # Measured 2026-11-01.
+  it 'runs ahead of the tasks the parse queued where nothing delays it, and before those its handlers queue' do
     s = session_for('/' => <<~HTML)
       <!DOCTYPE html><meta charset="utf-8"><script>
         window.log = [];
@@ -29,7 +30,7 @@ RSpec.describe 'the load "the end" queues' do
       </script>
     HTML
     s.visit '/'
-    expect(s.evaluate_script('log')).to eq(['parse timeout', 'load complete', 'load timeout'])
+    expect(s.evaluate_script('log')).to eq(['load complete', 'parse timeout', 'load timeout'])
   end
 
   # The images a page's style uses fetched before its load: HTML leaves open which CSS fetches delay the load event
@@ -142,8 +143,9 @@ RSpec.describe 'the load "the end" queues' do
 
   # HTML "the end" step 6: DOMContentLoaded is a task of its own, queued as the parse ends — after the microtasks the
   # `interactive` readystatechange queued, ahead of the timers the parse queued (HTML lets the event loop choose among task
-  # sources; Chrome 156 and Firefox 159 both fire it before those, measured 2026-11-01) — and the load after what its
-  # handlers queue (Firefox 159; Chrome 156 fires the load first), its animation frames after the load.
+  # sources; Chrome 156 and Firefox 159 both fire it before those, measured 2026-11-01) — and the load nothing delays
+  # right after it, ahead of those timers and of its handlers' (Chrome 156's order, probe dcltask.html), its animation
+  # frames after the load.
   it 'fires DOMContentLoaded as a task of its own, ahead of the tasks the parse queued' do
     s = session_for('/' => <<~HTML)
       <!DOCTYPE html><meta charset="utf-8"><script>
@@ -168,19 +170,20 @@ RSpec.describe 'the load "the end" queues' do
         'rsc interactive',
         'rsc microtask',
         'dcl interactive',
-        'parse timeout',
-        'dcl timeout',
         'rsc complete',
         'rsc microtask',
         'load',
+        'parse timeout',
+        'dcl timeout',
         'frame'
       ]
     )
   end
 
-  # A message the page posts itself as it parses is a task of the posted message task source, which the event loop takes
-  # behind the load that nothing delays (timers.rs `BEHIND`) — and before one its images delay. Chrome 156 and Firefox 159
-  # alike, measured 2026-11-01 (probes pm.html / dcltask.html); HTML leaves the choice among task sources to the UA.
+  # A message the page posts itself as it parses is delivered after the load that nothing delays — which takes its turn
+  # ahead of it (timers.rs `AHEAD`; the message keeps its own, in turn) — and before one its images delay. Chrome 156
+  # and Firefox 159 alike, measured 2026-11-01 (probes pm.html / dcltask.html); HTML leaves the choice among task sources
+  # to the UA.
   {'nothing delays it' => ['', %w[load message]], 'an image delays it' => ['<img src="/i.png">', %w[message load]]}.each do |shape, (img, order)|
     it "delivers a message the page posted itself as it parsed relative to its load where #{shape}" do
       png = File.binread(File.join(__dir__, 'wpt/images/anim-gr.png'))
@@ -238,6 +241,31 @@ RSpec.describe 'the load "the end" queues' do
     HTML
     s.visit '/'
     expect(s).to have_css('#out', text: 'ab,dcl')
+  end
+
+  # A Window's message takes its turn among a MessagePort's — both the posted message task source — however long a port
+  # ping-pong runs: a page's message posted as one begins arrives at its first round (Chrome 156, Firefox 159: `msg at
+  # pp 1`), and a reload planned then runs the tasks queued before it, capped, the pong it queues taking its turn after
+  # them (it never ends).
+  it "delivers a window's message among a port ping-pong's, and reloads under one" do
+    s = session_for('/' => <<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><body><script>
+        if (sessionStorage.n) {
+          document.write('<p id="out">' + sessionStorage.msg + '</p>');
+        } else addEventListener('load', () => {
+          sessionStorage.n = 1;
+          const ch = new MessageChannel();
+          let n = 0;
+          ch.port1.onmessage = () => { n++; ch.port2.postMessage(0); };
+          ch.port2.postMessage(0);
+          addEventListener('message', () => { sessionStorage.msg = 'msg at pp ' + n; });
+          postMessage('x', '*');
+          location.reload();
+        });
+      </script>
+    HTML
+    s.visit '/'
+    expect(s).to have_css('#out', text: 'msg at pp 1')
   end
 
   # …once, before its load, for a frame's document too — whose build fires its load as it ends, before any task of its
