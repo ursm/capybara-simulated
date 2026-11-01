@@ -6,7 +6,9 @@ require_relative 'support/session_teardown'
 # A frame realm the page is done with is disposed once no host request is under way (V8Runtime#retire_realm): a frame its
 # container's `load` listener removes — inside a microtask checkpoint, where V8 refuses to dispose a context — goes all
 # the same, its context collected (one context of the last may linger in V8 a while, never twenty), however the
-# microtask drain before the disposal ends.
+# microtask drain before the disposal ends. A context disposed is collected by a full GC sooner or later, one a refused
+# disposal leaked never is: the count is the least of a few full GCs, each after a turn of the page's event loop — what
+# one GC under load had not freed yet the next does, a leak none (the bound stays twenty frames below the leak's).
 RSpec.describe 'disposing a removed frame realm' do
   html = <<~HTML
     <!DOCTYPE html><meta charset="utf-8"><body><script>
@@ -27,10 +29,13 @@ RSpec.describe 'disposing a removed frame realm' do
     }
   }
 
-  def native_contexts(session)
+  def native_contexts(session, collections: 1)
     ctx = session.driver.browser.instance_variable_get(:@runtime).instance_variable_get(:@ctx)
-    ctx.low_memory_notification
-    ctx.heap_statistics[:number_of_native_contexts]
+    Array.new(collections) {
+      session.evaluate_script('1')
+      ctx.low_memory_notification
+      ctx.heap_statistics[:number_of_native_contexts]
+    }.min
   end
 
   def remove_frames(session)
@@ -43,7 +48,7 @@ RSpec.describe 'disposing a removed frame realm' do
     session.visit '/'
     before = native_contexts(session)
     remove_frames(session)
-    expect(native_contexts(session)).to be <= before + 1
+    expect(native_contexts(session, collections: 5)).to be <= before + 1
   end
 
   # …and where the drain raises (a terminated runaway, a host function raising), the request's own result stands and the
@@ -57,6 +62,6 @@ RSpec.describe 'disposing a removed frame realm' do
     session.execute_script('round(20)')
     expect(session.evaluate_script('1 + 1')).to eq(2)
     runtime.singleton_class.send(:remove_method, :drain_microtasks)
-    expect(native_contexts(session)).to be <= before + 1
+    expect(native_contexts(session, collections: 5)).to be <= before + 1
   end
 end
