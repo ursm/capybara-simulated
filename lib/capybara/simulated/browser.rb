@@ -2520,9 +2520,9 @@ module Capybara
           plan = history_plan(delta) if flushed
           # (…and the page asked whether it may be unloaded before the step is applied — HTML "apply the history step"
           # checks if unloading is canceled for the step it applies — what its handlers would do to the session history
-          # ignored, as an unloading page's is: the step stands; Chrome and Firefox both go to it, a pushState of a
-          # handler's dropping no forward step)
-          frozen_history { prompt_page_to_unload }
+          # taken by none, as an unloading page's is (navigables.rs `session_history_takes`): the step stands; Chrome and
+          # Firefox both go to it, a pushState of a handler's dropping no forward step)
+          prompt_page_to_unload(traversal: true)
         end
         step, changes = plan
         if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
@@ -2555,12 +2555,11 @@ module Capybara
         # forward again restores it, keeping how it was reached: a POST entry re-POSTs)
         frames = changes.filter_map {|nav, id, same_document| [nav, id, navigable_realm(nav)] unless same_document }
         # (…each asked first whether it may be unloaded, before the step applies — HTML "apply the history step" — what
-        # its handlers would do to the session history ignored, as the page's are (Chrome and Firefox: the step stands);
-        # one a handler removed traversed no more, and its navigation asks it no second time: `prompt_to_unload_frame`)
+        # its handlers would do to the session history taken by none, as the page's are (Chrome and Firefox: the step
+        # stands); one a handler removed traversed no more, and its navigation asks it no second time:
+        # `prompt_to_unload_frame`)
         urls = frames.to_h {|_, _, realm| [realm, realm && frame_realm_url(realm)] }
-        frozen_history do
-          frames.select! {|_, _, realm| realm.nil? || (prompt_to_unload_frame(realm) && @runtime.frame_realm_alive?(realm)) }
-        end
+        frames.select! {|_, _, realm| realm.nil? || (prompt_to_unload_frame(realm, traversal: true) && @runtime.frame_realm_alive?(realm)) }
         @prompted_frames = frames.filter_map {|_, _, realm| realm }.to_set
         frames.each {|_, _, realm| leave_frame_entry(realm, urls[realm]) if realm }
         # (…the history as it stood kept, for a step none of whose documents is made after all — every frame's entry's
@@ -7716,20 +7715,12 @@ module Capybara
         @session_history.ask_close
       end
 
-      # The session history out of a page's reach while `block` runs a handler of its whose document is on its way out
-      # (`history_state` / `history_push` ignore what it asks).
-      private def frozen_history
-        was, @history_frozen = @history_frozen, true
-        yield
-      ensure
-        @history_frozen = was
-      end
-      # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a traversal's, a reload's
-      # too — "check if unloading is canceled"), or its close runs (HTML "definitely close"): `beforeunload` at its
-      # document, then at its frames' documents, its unload counter raised while each runs (dom-nodes.js
-      # `promptDocumentToUnload`). The navigation or the close goes on whatever a handler says: HTML cancels it only where
-      # the user, prompted, declines — none here to ask, the driver one who confirms the prompt.
-      def prompt_page_to_unload         = (@runtime.call('__csimPromptToUnload') rescue nil)
+      # The page asked whether it may be unloaded as a navigation of it begins (HTML "navigate" — a reload's too — "check
+      # if unloading is canceled"), as a traversal applies its step (`traversal`), or as its close runs (HTML "definitely
+      # close"): `beforeunload` at its document, then at its frames' documents, its unload counter raised while each runs
+      # (dom-nodes.js `promptDocumentToUnload`). The navigation or the close goes on whatever a handler says: HTML cancels
+      # it only where the user, prompted, declines — none here to ask, the driver one who confirms the prompt.
+      def prompt_page_to_unload(traversal: false) = (@runtime.call('__csimPromptToUnload', traversal) rescue nil)
       # The document-teardown pair (pagehide+unload), this window AND its nested
       # frames, theirs first — fired as a navigation replaces the page's document
       # (`boot_response_into_ctx`), and by the Driver before an explicitly-closed aux
@@ -10424,9 +10415,8 @@ module Capybara
           return if deferred
         end
 
-        # (…its document asked first whether it may be unloaded, as the page's is — what its handlers would do to the
-        # session history ignored: `prompt_page_to_unload`, `frozen_history`)
-        frozen_history { @runtime.realm_call(realm_id, '__csimPromptToUnload') }
+        # (…its document asked first whether it may be unloaded, as the page's is: `prompt_page_to_unload`)
+        @runtime.realm_call(realm_id, '__csimPromptToUnload')
         # An http(s) one is fetched as its window's top-level navigation request (destination `document`) of the
         # document that navigated it — its redirects, a service worker and its Fetch Metadata as a frame's are
         # (`frame_navigation_fetch`) — a response that makes no document (a 204, a download) leaving it at the one it
@@ -10482,7 +10472,7 @@ module Capybara
         # (…the document it replaces unloaded first, its frames' with it — HTML "unload a document and its descendants", as
         # the page's is: `boot_response_into_ctx` — while its realms still live, an initial about:blank's too, its renewed
         # Document visible all the same)
-        frozen_history { @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep') }
+        @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep')
         # (…its entry taking its controls' state as its handlers left it, which a traversal back to it restores: as the
         # page's, `capture_left_page_form_state` — none of an initial about:blank, which no entry is of)
         history = window_history(realm_id)
@@ -11330,10 +11320,10 @@ module Capybara
       # unloading is canceled": its `beforeunload`, and its frames' — `__csimPromptToUnloadFrame`): false when a handler
       # removed the frame, the navigation then going no further.
       # (…none a second time of one a traversal asked as it applied its step: `perform_history_traverse`)
-      def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id))
+      def prompt_to_unload_frame(realm_id, parent = @runtime.frame_realm_parent(realm_id), traversal: false)
         return true if @prompted_frames&.delete?(realm_id)
 
-        frame_realm_host_call(parent, '__csimPromptToUnloadFrame', realm_id) != false
+        frame_realm_host_call(parent, '__csimPromptToUnloadFrame', realm_id, traversal) != false
       end
       # …and, its response in, its document unloaded (pagehide and unload, its frames' after it) while still the frame's
       # — false when a handler of them removed the frame, the response then having nowhere to go: what is left of the old
@@ -11410,10 +11400,9 @@ module Capybara
       # in place rather than appending. Both the state and (when given)
       # the URL are mirrored on Ruby's slot so a subsequent back to
       # this entry restores the same state.
-      # (…none while the page's document is on its way out — unloaded, the session history its next document's
-      # (`boot_response_into_ctx`), or asked as a traversal applies its step: `frozen_history`)
+      # (…none while the page's document is on its way out, which its bindings ask the engine before they ask this:
+      # navigables.rs `session_history_takes`)
       def history_state(url, state = nil, realm_id = 0)
-        return if @history_frozen
         return frame_history_state(realm_id.to_i, url, state, push: false) unless realm_id.to_i.zero?
 
         if url
@@ -11435,7 +11424,6 @@ module Capybara
       # history update steps": "if document's is initial about:blank is true, then set historyHandling to 'replace'" —
       # so the navigation away from it replaces it too)
       def history_push(url, state = nil, realm_id = 0)
-        return if @history_frozen
         return frame_history_state(realm_id.to_i, url, state, push: true) unless realm_id.to_i.zero?
         return history_state(url, state) unless @session_history.active(0)
 
@@ -12268,9 +12256,9 @@ module Capybara
         # …and the document it replaces unloaded first (HTML "unload a document and its descendants"): its pagehide and
         # unload, and its frames', while its realms still live — what their handlers send (a beacon, a keepalive fetch)
         # is the old document's, its fetch group's quota with it (`keepalive_retire` below). (…what they do to the session
-        # history ignored: its entry, and the URL, are the next document's by now — a gap, Chrome's pushState of one
-        # adding the old document a step)
-        frozen_history { fire_document_teardown }
+        # history taken by none: navigables.rs `session_history_takes`, HTML's explicit step over Chrome, which keeps a
+        # pagehide's pushState)
+        fire_document_teardown
         # (…its controls' state, as its handlers left it, kept by the entry it leaves)
         capture_left_page_form_state
         # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving

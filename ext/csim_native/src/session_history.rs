@@ -2125,9 +2125,8 @@ fn commit_window_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
 // __dom.windowHistoryUpdate(url, state, push) -> whether the calling realm's `history.pushState` (`push`) or
 // `replaceState` is its window's — one `window.open` made in this isolate — whose session history it then updates (HTML
 // "URL and history update steps"): an entry of the document's after the current one, or the current one's URL and state
-// made the new ones — none at its initial about:blank, which no entry is of yet, nor while its document is being
-// unloaded or asked whether it may be: what a handler of it would do to the session history ignored, as the page's is
-// (browser.rb `frozen_history`). False for the page's, and a frame's of either, which the host records (browser.rb
+// made the new ones — none at its initial about:blank, which no entry is of yet (nor one the bindings ask while its
+// document is being unloaded: navigables.rs `session_history_takes`). False for the page's, and a frame's of either, which the host records (browser.rb
 // `frame_history_state`).
 fn window_history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let url = args.get(0).to_rust_string_lossy(scope);
@@ -2136,9 +2135,6 @@ fn window_history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::Function
     let cid = crate::dom::realm_id(scope, &args);
     let arena = crate::dom::realm(scope, cid);
     let Some((traversable, _)) = window_traversable(arena, cid).filter(|&(_, window)| window == cid) else { return rv.set_bool(false) };
-    if arena.unloading(cid) {
-        return rv.set_bool(true);
-    }
     let mut t = lock(&traversable);
     let build = t.build;
     if t.state.current_entry(TOP, build).is_some() {

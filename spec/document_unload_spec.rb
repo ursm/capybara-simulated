@@ -151,6 +151,32 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
     expect(s.evaluate_script('location.hash')).to eq('')
   end
 
+  # …and the entry a beforeunload handler pushes as a navigation begins is the session history's: "navigate" asks the
+  # document on the traversal queue before the fetch, the entry finalized long before the navigation's (HTML "finalize
+  # a same-document navigation") — a pop-up's as the page's (Chrome 156: the step kept, back goes to it, measured
+  # 2026-11-01).
+  {'the page' => '', 'a pop-up' => 'w.'}.each do |which, on|
+    it "keeps the entry #{which}'s beforeunload handler pushes as a navigation begins" do
+      app = lambda do |env|
+        body = env['PATH_INFO'] == '/a' ? "<script>addEventListener('beforeunload', () => history.pushState(null, '', '/pushed'))</script>a" : env['PATH_INFO']
+        [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+      end
+      s = simulated_session(app)
+      s.visit '/a'
+      unless on.empty?
+        s.execute_script("window.w = open('/a')")
+        poll_until { s.evaluate_script('w.document.readyState') == 'complete' }
+      end
+      s.execute_script("#{on}location = '/b'")
+      poll_until { s.evaluate_script("#{on}location.pathname") == '/b' }
+
+      expect(s.evaluate_script("#{on}history.length")).to eq(3)
+      s.execute_script("#{on}history.back()")
+      poll_until { s.evaluate_script("#{on}location.pathname") != '/b' }
+      expect(s.evaluate_script("#{on}location.pathname")).to eq('/pushed')
+    end
+  end
+
   # …its unload counter raised as it unloads (HTML): a navigation, a document.write, a dialog of a handler ignored, and
   # what one does to the session history too — its entry, and the URL, the next document's by now — its document hidden
   # after its pagehide (Chrome: pagehide visible, visibilitychange hidden, unload hidden).

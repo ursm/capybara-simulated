@@ -106,8 +106,9 @@ pub(crate) struct Navigables {
     unloading: HashSet<i32>,
     // …and those whose documents are being asked whether they may be unloaded — their beforeunload firing, the unload
     // counter raised as well ("check if unloading is canceled"), a navigation ignored as above — but not unloaded yet:
-    // a frame of one re-navigated from it is asked itself, where a frame of one being unloaded was asked with it.
-    prompting: HashSet<i32>,
+    // a frame of one re-navigated from it is asked itself, where a frame of one being unloaded was asked with it. Each
+    // whether it is asked as a traversal applies its step (`session_history_takes`).
+    prompting: HashMap<i32, bool>,
     // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
@@ -1263,6 +1264,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
     crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
     crate::dom::register(scope, ns, "setPrompting", set_prompting, context_id);
+    crate::dom::register(scope, ns, "sessionHistoryTakes", session_history_takes, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
     crate::dom::register(scope, ns, "targetUnloading", target_unloading, context_id);
@@ -1728,18 +1730,26 @@ fn set_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         unloading.remove(&realm);
     }
 }
-// __dom.setPrompting(realm, on) — the realm's document begins (`on`) or ends being asked whether it may be unloaded
-// (`Navigables::prompting`).
+// __dom.setPrompting(realm, on, traversal) — the realm's document begins (`on`) or ends being asked whether it may be
+// unloaded (`Navigables::prompting`), `traversal` as a traversal applies its step.
 fn set_prompting(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(realm) = args.get(0).int32_value(scope) else { return };
     let on = args.get(1).is_true();
+    let traversal = args.get(2).is_true();
     let cid = realm_id(scope, &args);
     let prompting = &mut crate::dom::realm(scope, cid).navigables.prompting;
     if on {
-        prompting.insert(realm);
+        prompting.insert(realm, traversal);
     } else {
         prompting.remove(&realm);
     }
+}
+// __dom.sessionHistoryTakes() -> whether the session history takes the entry the calling realm's document makes now by
+// its URL and history update steps (`pushState`, `replaceState`, a fragment navigation) — the document's URL and
+// classic history API state its own either way (`session_history_takes`).
+fn session_history_takes(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).session_history_takes(cid));
 }
 // __dom.unloading(realm) -> whether the realm's document is being unloaded or asked whether it may be now — its unload
 // counter above 0, a navigation of its navigable ignored.
@@ -1751,7 +1761,19 @@ fn unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 impl RealmArena {
     // Whether realm `realm`'s document is being unloaded, or asked whether it may be: a navigation it makes then ignored.
     pub(crate) fn unloading(&self, realm: i32) -> bool {
-        self.navigables.unloading.contains(&realm) || self.navigables.prompting.contains(&realm)
+        self.navigables.unloading.contains(&realm) || self.navigables.prompting.contains_key(&realm)
+    }
+    // Whether the session history takes the entry realm `realm`'s document makes now (HTML "URL and history update
+    // steps", whose entry the traversable's session history traversal queue finalizes after the steps queued before it:
+    // "finalize a same-document navigation"). None while its document is being unloaded (HTML "apply the history step"
+    // unloads the displayed document and then activates the next one's entry, in one job of that queue, before the
+    // entry's own steps: "If targetNavigable's active session history entry is not targetEntry, then return") — nor
+    // while it is asked whether it may be unloaded as a traversal applies its step, which goes to that step the same way
+    // (Chrome and Firefox). One its beforeunload makes as a navigation begins is taken: "navigate" asks it on the queue
+    // before the fetch, the entry finalized long before the navigation's own (Chrome 156: the step kept, measured
+    // 2026-11-01). Chrome keeps a pagehide's too — the spec's explicit step over it.
+    pub(crate) fn session_history_takes(&self, realm: i32) -> bool {
+        !self.navigables.unloading.contains(&realm) && self.navigables.prompting.get(&realm) != Some(&true)
     }
 }
 // __dom.targetUnloading(target) -> whether the navigable target name `target` chooses from the calling realm — its own
