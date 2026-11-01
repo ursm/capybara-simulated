@@ -40,11 +40,14 @@ RSpec.describe "the session's service workers", :every_host_local, :https do
             const path = new URL(e.request.url).pathname;
             if (path.startsWith('/sw/')) e.respondWith(new Response('<title>FROM-SW</title>', {headers: {'content-type': 'text/html'}}));
             if (path === '/sub') e.respondWith(new Response('SUB-SW'));
+            if (path === '/slow') e.respondWith(new Promise((res) => setTimeout(() => res(new Response('SLOW-SW')), 300)));
+            if (path === '/slow-net') e.respondWith(fetch('/server-slow').then((r) => r.text()).then((t) => new Response(`SW+${t}`)));
           });
         JS
       when '/reg'
         html.(<<~HTML)
           <title>reg</title><a id=talk href=/talk target=_blank>talk</a><a id=nav href=/sw/x target=_blank>nav</a>
+          <a id=slow href=/wait?/slow target=_blank>slow</a><a id=slow-net href=/wait?/slow-net target=_blank>slow-net</a>
           <script>
             window.heard = [];
             navigator.serviceWorker.onmessage = (e) => heard.push(e.data);
@@ -74,6 +77,11 @@ RSpec.describe "the session's service workers", :every_host_local, :https do
             });
           </script>
         HTML
+      when '/wait'
+        html.("<script>fetch(location.search.slice(1)).then((r) => r.text()).then((t) => document.body.insertAdjacentHTML('beforeend', `<p id=done>${t}</p>`))</script>")
+      when '/server-slow'
+        sleep 0.6
+        [200, {'content-type' => 'text/plain'}, ['SERVER']]
       when '/count' then html.("<script>navigator.serviceWorker.getRegistrations().then((r) => document.title = 'n=' + r.length)</script>")
       else html.("<title>NET#{env['PATH_INFO']}</title>")
       end
@@ -91,6 +99,17 @@ RSpec.describe "the session's service workers", :every_host_local, :https do
     end
     session.find('#nav').click
     session.within_window(session.windows.last) { expect(session).to have_title('FROM-SW') }
+  end
+
+  # A noopener window's fetch is answered as the host's event loop runs — the worker's timer, the worker's own fetch's
+  # network time — whichever window's step delivers the answer: a wait in the pop-up finds what the answer's script made.
+  {'slow' => 'SLOW-SW', 'slow-net' => 'SW+SERVER'}.each do |link, text|
+    it "has a noopener window's wait see the worker's answer to its fetch (#{link})" do
+      session.visit 'https://a.test/reg'
+      expect(session).to have_title('ready')
+      session.find("##{link}").click
+      session.within_window(session.windows.last) { expect(session).to have_css('#done', text: text, wait: 5) }
+    end
   end
 
   it "navigates a noopener window's client as the worker asks, the window stepped as the worker's page waits" do

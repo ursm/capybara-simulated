@@ -6226,8 +6226,11 @@ module Capybara
         Native.port_forget_window(@session_partition, @window_number)
       end
 
-      # Call a host fn in realm `realm` of this window (0: its page), where it is still alive.
+      # Call a host fn in realm `realm` of this window (0: its page), where it is still alive — what the session's service
+      # workers tell a client, from whichever window's step delivers it: the script it runs may change the document, which
+      # a find of this window's then reads afresh (`invalidate_find_cache`), its own settle having run none of it.
       def realm_told(realm, fn, *args)
+        invalidate_find_cache
         return @runtime.call(fn, *args) if realm.zero?
 
         @runtime.realm_call(realm, fn, *args) if @runtime.frame_realm_alive?(realm)
@@ -6237,7 +6240,7 @@ module Capybara
       def sw_fetch_answered(realm, fn, fetch_id, payload, to_worker)
         return @workers.dig(-realm, :inbox)&.push(to_worker.merge(fetch_id: fetch_id)) if realm.negative? && to_worker
 
-        @runtime.realm_call(realm, fn, fetch_id, payload)
+        realm_told(realm, fn, fetch_id, payload)
       end
 
       # Call a host fn in every realm of every window's (`broadcast_to_realms`): what changes the registration state
