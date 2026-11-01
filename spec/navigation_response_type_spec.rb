@@ -48,11 +48,12 @@ RSpec.describe 'a navigation response by its type' do
     end
   end
 
-  %w[/nonebin /unknown /apache /img /x.csv].each do |path|
+  # (…named by its URL, an extensionless one given its supplied type's extension where that has one: downloads.rs)
+  {'/nonebin' => 'nonebin', '/unknown' => 'unknown', '/apache' => 'apache.txt', '/img' => 'img', '/x.csv' => 'x.csv'}.each do |path, name|
     it "downloads #{path}, the page staying at its document" do
       session.visit '/'
       session.visit path
-      expect([session.current_path, session.has_css?('#start'), Dir.children(@downloads)]).to eq(['/', true, [File.basename(path)]])
+      expect([session.current_path, session.has_css?('#start'), Dir.children(@downloads)]).to eq(['/', true, [name]])
     end
   end
 

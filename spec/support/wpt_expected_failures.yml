@@ -2527,22 +2527,8 @@ fetch/metadata/generated/audioworklet.https.sub.html:
 - sec-fetch-storage-access - Same site
 - sec-fetch-user
 fetch/metadata/generated/element-a.https.sub.html:
-- "[harness] TIMEOUT"
-- 'sec-fetch-dest - attributes: download'
-- sec-fetch-dest - no attributes
-- 'sec-fetch-mode - attributes: download'
-- sec-fetch-storage-access - Cross-site - no attributes
-- sec-fetch-storage-access - Same site - no attributes
-- sec-fetch-user - no attributes
 - sec-fetch-user - no attributes with user activation
 fetch/metadata/generated/element-area.https.sub.html:
-- "[harness] TIMEOUT"
-- 'sec-fetch-dest - attributes: download'
-- sec-fetch-dest - no attributes
-- 'sec-fetch-mode - attributes: download'
-- sec-fetch-storage-access - Cross-site - no attributes
-- sec-fetch-storage-access - Same site - no attributes
-- sec-fetch-user - no attributes
 - sec-fetch-user - no attributes with user activation
 fetch/metadata/generated/element-audio.https.sub.html:
 - sec-fetch-storage-access - Cross-site, no attributes

@@ -103,6 +103,34 @@ RSpec.describe 'a download' do
     expect(Dir.children(@dir).sort).to eq(%w[report-a.csv report-b.csv])
   end
 
+  # (…a frame's script's `<a download>` clicks — a timer's, the driver's `execute_script` in it — each a download, two in
+  # one task both, as Chrome 156 saves them; and one named by an extensionless URL given its type's extension, Chrome's
+  # `upper.txt`)
+  it "saves a frame script's downloads, and gives an extensionless URL's its type's extension" do
+    s = simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when '/inner'
+        [200, {'content-type' => 'text/html'}, [<<~HTML]]
+          <!DOCTYPE html><a id=a download="framed.txt">x</a><a id=h href="/upper" download>h</a>
+          <script>
+            const a = document.getElementById('a');
+            a.href = URL.createObjectURL(new Blob(['abcd'], {type: 'text/plain'}));
+            setTimeout(() => { a.click(); document.getElementById('h').click(); }, 50);
+          </script>
+        HTML
+      when '/upper' then [200, {'content-type' => 'text/plain'}, ['up']]
+      when '/more' then [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename=more.txt'}, ['m']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>t</title><iframe src="/inner"></iframe>']]
+      end
+    })
+    s.visit '/'
+    s.has_css?('#nothing', wait: 0.5)
+    expect(Dir.children(@dir).sort).to eq(%w[framed.txt upper.txt])
+    s.within_frame(0) { s.execute_script("const m = document.createElement('a'); m.href = '/more'; m.download = ''; document.body.append(m); m.click()") }
+    s.evaluate_script('1')
+    expect(Dir.children(@dir).sort).to eq(%w[framed.txt more.txt upper.txt])
+  end
+
   # (…a Content-Disposition of the `inline` type, or of none, no download for the filename it names: Chrome 156 and
   # Firefox 159 render `inline; filename=x.txt` and `filename=y.txt`, and download `foo; filename=z.txt` — RFC 6266
   # §4.2's unknown type, handled as `attachment`)

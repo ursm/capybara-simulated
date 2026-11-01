@@ -630,6 +630,10 @@ impl RealmArena {
     pub(crate) fn stepped_windows(&self) -> Vec<i32> {
         self.navigables.windows.clone()
     }
+    // …and the realms whose documents are the active documents of child navigables now (each frame's), in no order.
+    pub(crate) fn linked_frame_realms(&self) -> Vec<i32> {
+        self.navigables.containers.keys().copied().filter(|&r| self.live_container(r).is_some()).collect()
+    }
     // The key of realm `realm`'s window: its own, for a realm that is no window's or its first document's.
     fn window_key(&self, realm: i32) -> i32 {
         self.navigables.window_keys.get(&realm).copied().unwrap_or(realm)

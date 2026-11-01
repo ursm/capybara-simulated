@@ -2152,11 +2152,15 @@ module Capybara
       # 'click')`). The click's default action plans `{url, filename}` as a
       # download (navigation_plan.rs); we drain
       # here at every tick so the file lands in `downloads_directory`
-      # before Capybara's `wait_for_download` polls.
+      # before Capybara's `wait_for_download` polls. (…every one planned, by the page's document or a frame's or a window's
+      # of this isolate: navigation_plan.rs `takeDownload`)
       def consume_pending_download
-        pending = @runtime.call('__csimTakePendingDownload')
-        return unless pending.is_a?(Hash) && pending['url']
-        save_download(pending)
+        loop do
+          pending = @runtime.call('__csimTakePendingDownload')
+          break unless pending.is_a?(Hash) && pending['url']
+
+          save_download(pending)
+        end
       end
 
       # A download's resource saved to `downloads_directory` — `download` the one a hyperlink planned (navigation_plan.rs
@@ -2170,7 +2174,7 @@ module Capybara
             blob = host_blob(@runtime.call('__csimReadBlobForWindow', url))
             save_downloaded_response(url, {'content-type' => blob[:type]}, [blob[:bytes].to_s], hint: filename) if blob
           else
-            download_link(resolve_against_current(url, use_base: true), filename, realm: realm, link_policy: download['policy'].to_s)
+            download_link(url, filename, realm: realm, link_policy: download['policy'].to_s)
           end
         end
       end

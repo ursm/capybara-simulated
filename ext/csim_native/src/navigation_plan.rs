@@ -114,8 +114,10 @@ pub(crate) fn next_planned() -> u64 {
 pub(crate) struct NavigationPlan {
     navigation: Option<Navigation>,
     submission: Option<Submission>,
-    // (…a download's URL, file name, and the referrer policy its hyperlink's `rel` / `referrerpolicy` set, '' none)
-    download: Option<(String, String, String)>,
+    // (…the downloads its hyperlinks planned, in order — two clicked in one task both downloaded, as Chrome 156 measured
+    // 2026-11-01 downloads them — each its URL, file name, and the referrer policy the hyperlink's `rel` /
+    // `referrerpolicy` set, '' none)
+    download: std::collections::VecDeque<(String, String, String)>,
     // (…its own: a location navigation, a reload, a frame's submission to it)
     own: Own,
     // (…a window's: a traversal of its session history moving a frame of it, which none of those lets go — `FrameTraversal`)
@@ -375,7 +377,7 @@ fn plan_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let url = args.get(0).to_rust_string_lossy(scope);
     let filename = args.get(1).to_rust_string_lossy(scope);
     let policy = if args.get(2).is_null_or_undefined() { String::new() } else { args.get(2).to_rust_string_lossy(scope) };
-    plan(scope, &args).download = Some((url, filename, policy));
+    plan(scope, &args).download.push_back((url, filename, policy));
 }
 
 // __dom.supersedePlanned(pageOnly): a navigation of the top-level document planned elsewhere (a traversal making its
@@ -432,12 +434,23 @@ fn take_submission(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     rv.set(v8::Local::new(scope, request));
 }
 
-// __dom.takeDownload() -> [url, filename, realm, policy] of the download the calling realm's document planned — `realm`
-// its own, whose document the download's initiator is (each realm keeps its own plan) — which it plans no more, or null.
+// __dom.takeDownload() -> [url, filename, realm, policy] of a download a document of this isolate planned — the calling
+// realm's, else a frame's, else a window's: each realm keeps its own plan, and a frame's script (a timer's, one the driver
+// runs in it) plans one the host takes as any task ends — `realm` the one whose document planned it, the download's
+// initiator — which it plans no more, or null.
 fn take_download(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_null();
-    let cid = realm_id(scope, &args);
-    let Some((url, filename, policy)) = plan(scope, &args).download.take() else { return };
+    let own = realm_id(scope, &args);
+    let arena = &crate::dom::dom(scope).arena;
+    let others: Vec<i32> = arena.linked_frame_realms().into_iter().chain(arena.stepped_windows()).filter(|&r| r != own).collect();
+    let mut found = None;
+    for cid in std::iter::once(own).chain(others) {
+        if let Some(download) = realm(scope, cid).navigation_plan.download.pop_front() {
+            found = Some((cid, download));
+            break;
+        }
+    }
+    let Some((cid, (url, filename, policy))) = found else { return };
     let (Some(url), Some(filename), Some(policy)) = (v8::String::new(scope, &url), v8::String::new(scope, &filename), v8::String::new(scope, &policy)) else {
         return;
     };

@@ -113,26 +113,23 @@ fn plain_name(name: &str) -> Option<String> {
 }
 
 // The name a download of `url` is saved under: its `Content-Disposition`'s (`cd`, none for none), else the one its
-// `<a download>` suggests (`hint`), else the last segment of the URL's path. A URL of an opaque path has no segments: a
-// `blob:` one is named by its UUID, the last segment of the URL it wraps, a `data:` one `download` — each with the
-// extension its MIME type (`mime`, its response's Content-Type, None none) has, as Chrome names them (`download.zip`,
-// `<uuid>.pdf`; measured 2026-11-01).
+// `<a download>` suggests (`hint`), else one of its URL's: the last segment of its path. A URL of an opaque path has no
+// segments: a `blob:` one is named by its UUID, the last segment of the URL it wraps, a `data:` one `download`. One of
+// its URL's with no extension gets the one its MIME type (`mime`, its response's Content-Type, None none) has, as Chrome
+// names them (`download.zip`, `<uuid>.pdf`, `/upper` of `text/plain` `upper.txt`; measured 2026-11-01).
 pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str, mime: Option<&str>) -> String {
-    let opaque = || {
-        let inner = url.get(..5).filter(|s| s.eq_ignore_ascii_case("blob:")).and_then(|_| ada_url::Url::parse(&url[5..], None).ok());
-        let stem = inner.and_then(|u| plain_name(u.pathname())).unwrap_or_else(|| "download".to_owned());
-        match mime.and_then(crate::mime::extract).and_then(|m| extension(&m.essence)) {
-            Some(ext) => format!("{stem}.{ext}"),
-            None => stem,
-        }
-    };
-    cd.and_then(disposition_filename)
-        .or_else(|| plain_name(hint))
-        .or_else(|| match ada_url::Url::parse(url, None) {
+    let given = cd.and_then(disposition_filename).or_else(|| plain_name(hint));
+    given.unwrap_or_else(|| {
+        let segment = match ada_url::Url::parse(url, None) {
             Ok(u) if u.pathname().starts_with('/') => plain_name(u.pathname()),
-            _ => None,
-        })
-        .unwrap_or_else(opaque)
+            _ => url.get(..5).filter(|s| s.eq_ignore_ascii_case("blob:")).and_then(|_| ada_url::Url::parse(&url[5..], None).ok()).and_then(|u| plain_name(u.pathname())),
+        };
+        let stem = segment.unwrap_or_else(|| "download".to_owned());
+        match mime.and_then(crate::mime::extract).and_then(|m| extension(&m.essence)) {
+            Some(ext) if !stem.contains('.') => format!("{stem}.{ext}"),
+            _ => stem,
+        }
+    })
 }
 // The extension a file of MIME type `essence` is given.
 fn extension(essence: &str) -> Option<&'static str> {
@@ -201,5 +198,8 @@ mod tests {
         assert_eq!(filename(None, "data:application/zip,x", "", Some("application/zip")), "download.zip");
         assert_eq!(filename(None, "blob:http://a.test/5e1d-0a", "", Some("application/pdf")), "5e1d-0a.pdf");
         assert_eq!(filename(None, "blob:http://a.test/5e1d-0a", "", Some("application/octet-stream")), "5e1d-0a");
+        assert_eq!(filename(None, "http://a.test/upper", "", Some("text/plain; charset=utf-8")), "upper.txt");
+        assert_eq!(filename(None, "http://a.test/r.csv", "", Some("text/plain")), "r.csv");
+        assert_eq!(filename(None, "http://a.test/upper", "mine", Some("text/plain")), "mine");
     }
 }
