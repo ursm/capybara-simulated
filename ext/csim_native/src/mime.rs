@@ -176,21 +176,145 @@ pub(crate) fn document_kind(essence: &str) -> u32 {
         DOCUMENT_HTML
     }
 }
-// Whether a navigation response whose `Content-Type` is `content_type` (None: it has none) makes a document — else it is
-// handed off as a download (HTML "loading a document": "otherwise", no document type this user agent supports, no PDF
-// viewer among them) — an HTML, XML, JavaScript or JSON MIME type, `text/css`, `text/plain`, `text/vtt`,
-// `multipart/x-mixed-replace`, an image, audio or video type (a media document); and one of no MIME type at all, which
-// the sniffing HTML's steps begin with makes HTML of. Chrome and Firefox download `application/octet-stream` and
-// `application/zip` alike (measured 2026-11-01); Chrome also downloads `text/csv`, an unknown `image/x-foo` and
-// `application/atom+xml`, and renders an unknown `text/*` and a PDF — departures of its own, the XML one from HTML's
-// explicit rule.
-pub(crate) fn makes_document(content_type: Option<&str>) -> bool {
-    let Some(essence) = content_type.and_then(extract).map(|m| m.essence) else { return true };
-    let (kind, _) = essence.split_once('/').unwrap_or_default();
+// How a navigation's response loads (HTML "load a document"): by its computed MIME type (MIME Sniffing §7.1, `computed`)
+// — a document of an HTML, XML, JavaScript or JSON MIME type, `text/css`, `text/plain`, `text/vtt`,
+// `multipart/x-mixed-replace`, or a supported image, audio or video type (a media document: the image types the decoder
+// reads, image_decode.rs, and the media types `canPlayType` answers, media.rs) — or, of any other, handed off as a
+// download: PDF among them, there being no PDF viewer (`navigator.pdfViewerEnabled` false). Chrome and Firefox download
+// `application/octet-stream` and `application/zip` alike (measured 2026-11-01), and Chrome an unsupported `image/x-foo`
+// and `text/csv` as HTML says; it renders an unknown `text/*` and downloads `application/atom+xml`, departures of its own
+// from HTML's explicit rule.
+// …whether the document a type `essence` (a computed one) makes is one.
+pub(crate) fn makes_document(essence: &str) -> bool {
     essence == "text/html"
-        || document_kind(&essence) != DOCUMENT_HTML
+        || document_kind(essence) != DOCUMENT_HTML
         || essence == "multipart/x-mixed-replace"
-        || matches!(kind, "image" | "audio" | "video")
+        || SUPPORTED_IMAGES.contains(&essence)
+        || (matches!(essence.split_once('/').map(|(k, _)| k), Some("audio" | "video")) && !crate::media::can_play_type(essence).is_empty())
+}
+const SUPPORTED_IMAGES: [&str; 9] = [
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/x-icon",
+    "image/vnd.microsoft.icon",
+    "image/avif",
+    "image/svg+xml",
+];
+
+// Whether the computed MIME type of a response whose `Content-Type` is `content_type` (None: it has none) needs its
+// body: one of no MIME type — none supplied, an empty or an invalid one — or `unknown/unknown`, `application/unknown`,
+// `*/*` (MIME Sniffing §7.1 step 1), or one the check-for-apache-bug flag is set for: a `text/plain` an old Apache sent
+// for anything, its bytes exactly one of four (§5.1) — whose body tells text from binary (`computed`).
+pub(crate) fn needs_body(content_type: Option<&str>) -> bool {
+    // (…the common `text/html`, with its parameters or none, answered before a parse)
+    if content_type.is_some_and(|t| t.get(..9).is_some_and(|s| s.eq_ignore_ascii_case("text/html")) && matches!(t.as_bytes().get(9), None | Some(b';' | b' ' | b'\t'))) {
+        return false;
+    }
+    apache_bug(content_type) || supplied(content_type).is_none()
+}
+fn apache_bug(content_type: Option<&str>) -> bool {
+    matches!(content_type, Some("text/plain" | "text/plain; charset=ISO-8859-1" | "text/plain; charset=iso-8859-1" | "text/plain; charset=UTF-8"))
+}
+// …the supplied MIME type's essence, None where it is none to go by: none given, none that parses, an unknown one.
+fn supplied(content_type: Option<&str>) -> Option<String> {
+    content_type.and_then(extract).map(|m| m.essence).filter(|e| !matches!(e.as_str(), "unknown/unknown" | "application/unknown" | "*/*"))
+}
+// MIME Sniffing §7.1 "determine the computed MIME type" of a navigation's response, its essence — `head` its resource
+// header (its first 1445 bytes; the sniff-scriptable flag set, the no-sniff flag not modelled): a supplied type that is
+// none to go by sniffed by "the rules for identifying an unknown MIME type" (§7.1), one the Apache bug is suspected of by
+// "the rules for distinguishing if a resource is text or binary" (§7.2), any other as it is.
+pub(crate) fn computed(content_type: Option<&str>, head: &[u8]) -> String {
+    let head = &head[..head.len().min(1445)];
+    match supplied(content_type) {
+        Some(essence) if !apache_bug(content_type) => essence,
+        Some(essence) => text_or_binary(head).unwrap_or(essence),
+        None => unknown(head),
+    }
+}
+// …whether a navigation's response makes a document (`makes_document`) of its computed type — that type, None for a
+// download.
+pub(crate) fn document_type(content_type: Option<&str>, head: &[u8]) -> Option<String> {
+    let essence = if needs_body(content_type) { computed(content_type, head) } else { supplied(content_type).unwrap_or_else(|| "text/html".to_owned()) };
+    makes_document(&essence).then_some(essence)
+}
+// A binary data byte (§3).
+fn binary(b: u8) -> bool {
+    matches!(b, 0x00..=0x08 | 0x0B | 0x0E..=0x1A | 0x1C..=0x1F)
+}
+fn bom(head: &[u8]) -> bool {
+    head.starts_with(&[0xFE, 0xFF]) || head.starts_with(&[0xFF, 0xFE]) || head.starts_with(&[0xEF, 0xBB, 0xBF])
+}
+// §7.2: text where it has a BOM or no binary data byte — the supplied `text/plain` then (None) — else the image or media
+// type its signature is, else `application/octet-stream`.
+fn text_or_binary(head: &[u8]) -> Option<String> {
+    if bom(head) || !head.iter().any(|&b| binary(b)) {
+        return None;
+    }
+    Some(signature(head).unwrap_or("application/octet-stream").to_owned())
+}
+// §7.1 the rules for identifying an unknown MIME type, the sniff-scriptable flag set: an HTML or XML signature after
+// leading white space, PDF, PostScript, a BOM's text, an image, media or archive signature — else `text/plain` where it
+// has no binary data byte, `application/octet-stream` where it has.
+fn unknown(head: &[u8]) -> String {
+    let at = head.iter().position(|b| !matches!(b, 0x09 | 0x0A | 0x0C | 0x0D | 0x20)).unwrap_or(head.len());
+    let rest = &head[at..];
+    let tag_ends = |n: usize| matches!(rest.get(n), Some(b' ' | b'>'));
+    const HTML: [&[u8]; 17] = [
+        b"<!DOCTYPE HTML", b"<HTML", b"<HEAD", b"<SCRIPT", b"<IFRAME", b"<H1", b"<DIV", b"<FONT", b"<TABLE", b"<A", b"<STYLE",
+        b"<TITLE", b"<B", b"<BODY", b"<BR", b"<P", b"<!--",
+    ];
+    if HTML.iter().any(|p| rest.len() > p.len() && rest[..p.len()].eq_ignore_ascii_case(p) && tag_ends(p.len())) {
+        return "text/html".to_owned();
+    }
+    let found = if rest.starts_with(b"<?xml") {
+        Some("text/xml")
+    } else if head.starts_with(b"%PDF-") {
+        Some("application/pdf")
+    } else if head.starts_with(b"%!PS-Adobe-") {
+        Some("application/postscript")
+    } else if bom(head) {
+        Some("text/plain")
+    } else {
+        signature(head)
+    };
+    found.map_or_else(|| if head.iter().any(|&b| binary(b)) { "application/octet-stream" } else { "text/plain" }.to_owned(), str::to_owned)
+}
+// The image (§6.1), media (§6.2, WebM / MP3 / Ogg / WAVE / MP4 by their plain signatures) and archive (§6.3) type a
+// resource header's signature is.
+fn signature(head: &[u8]) -> Option<&'static str> {
+    let riff = |kind: &[u8]| head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == kind;
+    Some(match head {
+        [0, 0, 1, 0, ..] => "image/x-icon",
+        [0, 0, 2, 0, ..] => "image/x-icon",
+        [b'B', b'M', ..] => "image/bmp",
+        [b'G', b'I', b'F', b'8', b'7' | b'9', b'a', ..] => "image/gif",
+        _ if riff(b"WEBP") && head.get(12..14) == Some(b"VP") => "image/webp",
+        [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, ..] => "image/png",
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [0x1A, 0x45, 0xDF, 0xA3, ..] => "video/webm",
+        [b'.', b's', b'n', b'd', ..] => "audio/basic",
+        [b'F', b'O', b'R', b'M', _, _, _, _, b'A', b'I', b'F', b'F', ..] => "audio/aiff",
+        [b'I', b'D', b'3', ..] => "audio/mpeg",
+        [b'O', b'g', b'g', b'S', 0, ..] => "application/ogg",
+        [b'M', b'T', b'h', b'd', 0, 0, 0, 6, ..] => "audio/midi",
+        _ if riff(b"AVI ") => "video/avi",
+        _ if riff(b"WAVE") => "audio/wave",
+        [_, _, _, _, b'f', b't', b'y', b'p', ..] if head.len() >= 12 && head.get(8..11) == Some(b"mp4") => "video/mp4",
+        [0x1F, 0x8B, 0x08, ..] => "application/x-gzip",
+        [b'P', b'K', 0x03, 0x04, ..] => "application/zip",
+        [b'R', b'a', b'r', b' ', 0x1A, 0x07, 0x00, ..] => "application/x-rar-compressed",
+        _ => return None,
+    })
+}
+// Native.navigation_document_type(content type, head) -> `document_type`: the type a response of `Content-Type`
+// `content_type` (nil none) whose body begins with `head` makes a document of, nil for a download.
+pub(crate) fn document_type_for_ruby(content_type: Option<String>, head: magnus::RString) -> Option<String> {
+    // SAFETY: read at once, before anything could run Ruby code that moves or frees it.
+    let head = unsafe { head.as_slice() };
+    document_type(content_type.as_deref(), head)
 }
 // __dom.documentKind(essence) -> `document_kind`.
 fn document_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -273,14 +397,26 @@ mod tests {
 
     #[test]
     fn a_navigation_response_of_no_document_type_downloads() {
-        for t in ["text/html; charset=utf-8", "text/plain", "application/xhtml+xml", "image/png", "video/mp4", "application/json"] {
-            assert!(makes_document(Some(t)), "{t}");
+        let doc = |t: Option<&str>, head: &[u8]| document_type(t, head);
+        for t in ["text/html; charset=utf-8", "TEXT/HTML", "text/plain;charset=utf-8", "application/xhtml+xml", "image/png", "video/mp4", "application/json"] {
+            assert!(doc(Some(t), b"").is_some(), "{t}");
         }
-        assert!(makes_document(None));
-        assert!(makes_document(Some("garbage")));
-        for t in ["application/octet-stream", "application/zip", "text/csv", "application/pdf"] {
-            assert!(!makes_document(Some(t)), "{t}");
+        for t in ["application/octet-stream", "application/zip", "text/csv", "application/pdf", "image/x-foo", "audio/x-nothing"] {
+            assert_eq!(doc(Some(t), b""), None, "{t}");
         }
+        // (…none supplied, an invalid one, an unknown one: sniffed — HTML, text, binary)
+        assert_eq!(doc(None, b"  <!doctype html><p>").as_deref(), Some("text/html"));
+        assert_eq!(doc(Some("garbage"), b"<P>x").as_deref(), Some("text/html"));
+        assert_eq!(doc(Some(""), b"plain words").as_deref(), Some("text/plain"));
+        assert_eq!(doc(Some("unknown/unknown"), b"\x89PNG\r\n\x1a\n").as_deref(), Some("image/png"));
+        assert_eq!(doc(Some("*/*"), b"PK\x03\x04"), None);
+        assert_eq!(doc(Some("application/unknown"), b"%PDF-1.4"), None);
+        assert_eq!(doc(None, b"\x00\x01binary"), None);
+        // (…an Apache-bug `text/plain` binary — a download — or text; another spelling as it is)
+        assert_eq!(doc(Some("text/plain"), b"\x00\x01binary"), None);
+        assert_eq!(doc(Some("text/plain; charset=UTF-8"), b"text").as_deref(), Some("text/plain"));
+        assert_eq!(doc(Some("text/plain; charset=utf-8"), b"\x00\x01binary").as_deref(), Some("text/plain"));
+        assert!(!needs_body(Some("text/html; charset=utf-8")) && needs_body(None) && needs_body(Some("text/plain")));
     }
 
     fn round_trip(input: &str) -> Option<String> {

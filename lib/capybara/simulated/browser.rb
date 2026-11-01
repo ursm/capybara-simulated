@@ -605,8 +605,13 @@ module Capybara
         # Explicitly nil for a driver-initiated visit (address-bar semantics, site
         # 'none') — page-initiated internal callers reach `navigate` directly and
         # inherit its @current_url default.
+        # (…one to a fragment of the page's document navigated in it, no request made — HTML "navigate", the realm's to say:
+        # location.js `tryFragmentNavigate`)
+        url = resolve_visit_url(url)
+        return if window_has_document? && in_top_context { @runtime.call('__csimFragmentNavigate', url, replace) } == true
+
         navigate(
-          resolve_visit_url(url),
+          url,
           referer:                       referer,
           referrer_policy:               referrer_policy,
           initiator:                     initiator,
@@ -655,6 +660,8 @@ module Capybara
         # A `data:` URL the same: its own document, which the address bar navigates to (navigation_fetch.rs
         # `data_navigation`).
         return s if s.match?(/\A(?:about|data):/i)
+        # (…a fragment alone the current URL's, with that fragment)
+        return parse_url(s, current.to_s)&.fetch(:href) || s if s.start_with?('#') && !current.to_s.empty?
         unless s =~ %r{\A[a-z]+://}i
           # Strip path/query/fragment off the current URL to get the origin
           # root. An opaque or host-less current URL (e.g. `about:blank` in a
@@ -6878,6 +6885,16 @@ module Capybara
           # (…what the response makes of it — a top-level traversable's, each response's opener policy enforced as it comes,
           # a redirect's too: navigation_fetch.rs `response` — a network one's Set-Cookie stored as it comes)
           command, to_get, new_client = fetch.response(status, headers, (cookie_now unless document)) { coop_facts(coop_realm) }
+          # (…one whose body says whether it is a document, and its type: MIME Sniffing's computed MIME type of its first
+          # bytes, mime.rs `document_type` — the type the document is made as, where it is another than the one supplied)
+          if command == 'sniff'
+            document ||= read_rack_body(rack_body)
+            rack_body = nil
+            supplied  = (ct = header_field(headers, 'content-type')) && header_text(ct)
+            type      = Native.navigation_document_type(supplied, document.byteslice(0, 1445))
+            command   = type ? 'document' : 'download'
+            headers   = header_map(headers).reject {|k, _| k.to_s.casecmp?('content-type') }.merge('content-type' => type) if type && !supplied.to_s.downcase.start_with?(type)
+          end
           close_rack_body(rack_body) unless command == 'document' || command == 'download'
           return NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy) unless command == 'redirect'
 
@@ -10358,8 +10375,16 @@ module Capybara
         made = {}
         body, ctype = nil
         if (blob = host_blob(blob))
+          # (…one of a type that makes no document saved, the window left at the one it is at: mime.rs `document_type`)
+          given = blob[:type].to_s
+          type  = Native.navigation_document_type(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
+          unless type
+            from_document(initiator) { save_downloaded_response(url, {'content-type' => given}, [blob[:bytes].to_s]) }
+            return
+          end
+
           body  = document_payload(blob[:bytes])
-          ctype = blob[:type].to_s.empty? ? 'text/html' : blob[:type]
+          ctype = given.empty? ? type : given
         end
         # (…of a URL a navigation fails on before any request — another about: one than about:blank, a blob: one no store
         # resolved as it began, a POST to no HTTP(S) URL — an error document, as the page's and a frame's are; none at all
@@ -11918,8 +11943,13 @@ module Capybara
             blob ||= blob_snapshot(url)
             return error_document.(url) unless blob
 
+            # (…one of a type that makes no document saved, as a response of it is: mime.rs `document_type`)
+            given = blob[:type].to_s
+            type  = Native.navigation_document_type(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
+            return download_in_place(url, {'content-type' => given}, [blob[:bytes].to_s]) unless type
+
             commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
-            return boot_blob_document(url, blob[:bytes], blob[:type], flushed: true)
+            return boot_blob_document(url, blob[:bytes], given.empty? ? type : given, flushed: true)
           # A `data:` URL's response its own (Fetch "scheme fetch"): a download where it makes no document; else its
           # document, of a new opaque origin — a document's refused before it began (above) — and a malformed one a network
           # error (navigation_fetch.rs `data_navigation`).
@@ -11969,14 +11999,9 @@ module Capybara
           case hop.command
           when 'fail'
             return error_document.(target)
-          when 'hand_off'
+          when 'hand_off', 'no_content'
             return navigation_made_no_document(target)
-          when 'no_content'
-            return navigation_made_no_content(target)
-          # A response that downloads makes no document: a window that has one stays at it, its URL its document's
-          # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
-          # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
-          # which within_window assertions read.
+          # A response that downloads makes no document: a window stays at the one it has (`download_in_place`).
           when 'download'
             return download_in_place(target, hop.headers, hop.rack_body || [hop.document])
           end
@@ -12045,32 +12070,23 @@ module Capybara
       # A navigation's response that downloads makes no document: a window that has one stays at it — its URL and its
       # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a),
       # and what its flushed timers planned still stands, the page they ran in being the one that stays. One that has none
-      # yet — an aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened
-      # on, which within_window assertions read.
+      # yet stays at its initial about:blank (`navigation_made_no_document`).
       private def download_in_place(url, headers, body)
         save_downloaded_response(url, headers, body)
         navigation_made_no_document(url)
       end
-      # …as a navigation handed off to external software makes none (navigation_fetch.rs `redirect`).
-      # (…a window with none yet left with no entry of it either: still at its initial about:blank, which the navigation
-      # after it replaces)
-      private def navigation_made_no_document(url)
-        @current_url = url unless window_has_document?
+      # …as a navigation handed off to external software makes none (navigation_fetch.rs `redirect`), and a 204 / 205
+      # (`response`): a window with no document yet — one `window.open` made on such a URL, the session's first before its
+      # first visit — left at the initial about:blank it was made with (`open_initial_document`), which fires no load: its
+      # URL about:blank (Chrome: `about:blank`, from the window and its opener alike) — the URL of its document, which the
+      # driver's `current_url` reports, never the URL of a response that made none — its session history none of the
+      # navigation's. (…one the driver made no initial document for given one now)
+      private def navigation_made_no_document(_url)
         restore_navigation_history
         @session_history.forget(0)
         restore_flushed_nav_intents
-        nil
-      end
-      # …and as a 204 / 205 makes none (navigation_fetch.rs `response`): a window with no document yet — one `window.open` made
-      # on such a URL — left at the initial about:blank it was made with (`open_initial_document`), which fires no load:
-      # its URL about:blank (Chrome: `about:blank`, from the window and its opener alike), its session history none of the
-      # navigation's. (…one the driver made no initial document for, the session's first window before its first visit,
-      # given one now)
-      private def navigation_made_no_content(url)
-        return navigation_made_no_document(url) if window_has_document?
+        return if window_has_document?
 
-        restore_navigation_history
-        @session_history.forget(0)
         @current_url     = 'about:blank'
         @current_referer = ''   # (…its referrer its creator's, none of the navigation that made no document)
         open_initial_document if @document_handle.zero?
@@ -12468,7 +12484,8 @@ module Capybara
         return if body.is_a?(CutShortBody)   # the download fails: its body never came whole (Chrome)
         return unless allowed
 
-        filename = Native.download_filename(content_disposition_header(headers), url.to_s, hint)
+        ctype    = (ct = header_field(headers, 'content-type')) && header_text(ct)
+        filename = Native.download_filename(content_disposition_header(headers), url.to_s, hint, ctype)
         dir = downloads_directory
         FileUtils.mkdir_p(dir)
         File.binwrite(File.join(dir, filename), read_rack_body(body))

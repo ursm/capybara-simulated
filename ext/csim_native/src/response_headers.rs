@@ -189,9 +189,15 @@ impl ResponseFields {
     }
 
     // Whether the response downloads: its Content-Disposition says so (downloads.rs `is_download`), or its Content-Type is
-    // of no document (mime.rs `makes_document`).
+    // of no document (mime.rs `document_type`) — where that needs no body (`sniffs`).
     pub(crate) fn downloads(&self) -> bool {
-        self.content_disposition.as_deref().is_some_and(crate::downloads::is_download) || !crate::mime::makes_document(self.content_type.as_deref())
+        let ct = self.content_type.as_deref();
+        self.content_disposition.as_deref().is_some_and(crate::downloads::is_download) || (!crate::mime::needs_body(ct) && crate::mime::document_type(ct, b"").is_none())
+    }
+    // …whether it does — and the type of the document it makes — is for its body to say: MIME Sniffing's computed
+    // MIME type of one of no type to go by, or of an Apache-bug `text/plain` (mime.rs `needs_body`).
+    pub(crate) fn sniffs(&self) -> bool {
+        crate::mime::needs_body(self.content_type.as_deref())
     }
 
     // The document's opener policy (coop.rs `obtain`).

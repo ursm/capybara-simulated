@@ -103,12 +103,12 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
             r.url = url;
         }
         // (…a data: URL its own response, its MIME type `text/plain;charset=US-ASCII` where it names none — a malformed
-        // one a network error, the empty document; one of a type that makes no document (mime.rs `makes_document`) a
+        // one a network error, the empty document; one of a type that makes no document (mime.rs `document_type`) a
         // download, which the host saves as it does a fetched one's, the frame left at the one it is at — and a blob: URL
         // the blob's bytes, kept as the document loaded last, which a reload of it revoked by then loads again: HTML keeps
         // the blob alive for the document)
         FrameSource::Data(url) => match crate::data_url::process(&url) {
-            Some((mime, _)) if !crate::mime::makes_document(Some(&mime)) => {
+            Some((mime, bytes)) if crate::mime::document_type(Some(&mime), &bytes).is_none() => {
                 r.url = url;
                 match navigate(scope, host, cid, container, reload, &mut r)? {
                     FRAME_BUILD => {}

@@ -113,18 +113,50 @@ fn plain_name(name: &str) -> Option<String> {
 }
 
 // The name a download of `url` is saved under: its `Content-Disposition`'s (`cd`, none for none), else the one its
-// `<a download>` suggests (`hint`), else the last segment of the URL's path — 'download' where none gives one (a URL of
-// an opaque path, a `data:` one's, has no segments: Chrome names its download `download` too).
-pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str) -> String {
+// `<a download>` suggests (`hint`), else the last segment of the URL's path. A URL of an opaque path has no segments: a
+// `blob:` one is named by its UUID, the last segment of the URL it wraps, a `data:` one `download` — each with the
+// extension its MIME type (`mime`, its response's Content-Type, None none) has, as Chrome names them (`download.zip`,
+// `<uuid>.pdf`; measured 2026-11-01).
+pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str, mime: Option<&str>) -> String {
+    let opaque = || {
+        let inner = url.get(..5).filter(|s| s.eq_ignore_ascii_case("blob:")).and_then(|_| ada_url::Url::parse(&url[5..], None).ok());
+        let stem = inner.and_then(|u| plain_name(u.pathname())).unwrap_or_else(|| "download".to_owned());
+        match mime.and_then(crate::mime::extract).and_then(|m| extension(&m.essence)) {
+            Some(ext) => format!("{stem}.{ext}"),
+            None => stem,
+        }
+    };
     cd.and_then(disposition_filename)
         .or_else(|| plain_name(hint))
-        .or_else(|| ada_url::Url::parse(url, None).ok().filter(|u| u.pathname().starts_with('/')).and_then(|u| plain_name(u.pathname())))
-        .unwrap_or_else(|| "download".to_owned())
+        .or_else(|| match ada_url::Url::parse(url, None) {
+            Ok(u) if u.pathname().starts_with('/') => plain_name(u.pathname()),
+            _ => None,
+        })
+        .unwrap_or_else(opaque)
+}
+// The extension a file of MIME type `essence` is given.
+fn extension(essence: &str) -> Option<&'static str> {
+    Some(match essence {
+        "application/zip" => "zip",
+        "application/pdf" => "pdf",
+        "application/json" => "json",
+        "application/gzip" | "application/x-gzip" => "gz",
+        "text/csv" => "csv",
+        "text/plain" => "txt",
+        "text/html" => "html",
+        "text/xml" | "application/xml" => "xml",
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        _ => return None,
+    })
 }
 
-pub(crate) fn filename_for_ruby(cd: Option<String>, url: String, hint: Option<String>) -> String {
+pub(crate) fn filename_for_ruby(cd: Option<String>, url: String, hint: Option<String>, mime: Option<String>) -> String {
     // (…a header's text as the host hands it over — each byte a code point (`header_text`) — its bytes again)
-    filename(cd.map(|cd| crate::isomorphic::encode(&cd)).as_deref(), &url, hint.as_deref().unwrap_or(""))
+    filename(cd.map(|cd| crate::isomorphic::encode(&cd)).as_deref(), &url, hint.as_deref().unwrap_or(""), mime.as_deref())
 }
 
 #[cfg(test)]
@@ -160,10 +192,13 @@ mod tests {
 
     #[test]
     fn a_name_falls_back_to_the_hint_then_the_url() {
-        assert_eq!(filename(None, "http://a.test/r/report.csv?x", ""), "report.csv");
-        assert_eq!(filename(None, "http://a.test/r/report.csv", "mine.csv"), "mine.csv");
-        assert_eq!(filename(Some(b"attachment; filename=d.txt"), "http://a.test/x", "mine.csv"), "d.txt");
-        assert_eq!(filename(Some(b"attachment"), "http://a.test/", ""), "download");
-        assert_eq!(filename(None, "data:application/octet-stream,a/b", ""), "download");
+        assert_eq!(filename(None, "http://a.test/r/report.csv?x", "", None), "report.csv");
+        assert_eq!(filename(None, "http://a.test/r/report.csv", "mine.csv", None), "mine.csv");
+        assert_eq!(filename(Some(b"attachment; filename=d.txt"), "http://a.test/x", "mine.csv", None), "d.txt");
+        assert_eq!(filename(Some(b"attachment"), "http://a.test/", "", None), "download");
+        assert_eq!(filename(None, "data:application/octet-stream,a/b", "", None), "download");
+        assert_eq!(filename(None, "data:application/zip,x", "", Some("application/zip")), "download.zip");
+        assert_eq!(filename(None, "blob:http://a.test/5e1d-0a", "", Some("application/pdf")), "5e1d-0a.pdf");
+        assert_eq!(filename(None, "blob:http://a.test/5e1d-0a", "", Some("application/octet-stream")), "5e1d-0a");
     }
 }

@@ -50,6 +50,8 @@ RSpec.describe 'binary-tagged response headers' do
         else [200, shared, ['<!DOCTYPE html><body>']]
         end
       })
+      # (…`/page` a download, its Content-Disposition naming a file: the window stays at the document before it)
+      s.visit '/'
       s.visit '/page'
       got = s.evaluate_script(<<~JS)
         (() => { const x = new XMLHttpRequest(); x.open('GET', '/page', false); x.send(); return [x.status, x.getResponseHeader('x-shared')]; })()

@@ -11,6 +11,11 @@ pub(crate) fn process(input: &str) -> Option<(String, Vec<u8>)> {
     Some((url.mime_type().to_string(), body))
 }
 
+// …and the MIME type alone, its body not decoded.
+pub(crate) fn mime_type(input: &str) -> Option<String> {
+    Some(data_url::DataUrl::process(input).ok()?.mime_type().to_string())
+}
+
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "dataUrl", data_url_op, context_id);
     crate::dom::register(scope, ns, "dataUrlResponse", data_url_response_op, context_id);

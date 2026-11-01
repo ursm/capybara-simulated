@@ -191,7 +191,7 @@ pub(crate) fn start(url: &str, method: &str, refuses_data: bool) -> &'static str
     } else if method == "GET" && protocol == "blob:" {
         "blob"
     } else if protocol == "data:" {
-        if refuses_data && data_navigation(url).0 != "download" { "refused" } else { "data" }
+        if refuses_data && !data_downloads(url) { "refused" } else { "data" }
     } else if protocol == "about:" || (method != "GET" && !matches!(protocol, "http:" | "https:")) {
         "fail"
     } else {
@@ -213,8 +213,17 @@ pub(crate) fn data_navigation(url: &str) -> (&'static str, Option<(String, Vec<u
     let is_data = url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:"));
     match is_data.then(|| crate::data_url::process(url)).flatten() {
         None => ("fail", None),
-        Some(r) if !crate::mime::makes_document(Some(&r.0)) => ("download", Some(r)),
+        Some(r) if crate::mime::document_type(Some(&r.0), &r.1).is_none() => ("download", Some(r)),
         Some(r) => ("document", Some(r)),
+    }
+}
+// …whether it is a download, its MIME type read alone — its body decoded only where the type needs it (an unknown one's:
+// mime.rs `needs_body`).
+fn data_downloads(url: &str) -> bool {
+    match crate::data_url::mime_type(url) {
+        Some(mime) if crate::mime::needs_body(Some(&mime)) => data_navigation(url).0 == "download",
+        Some(mime) => crate::mime::document_type(Some(&mime), b"").is_none(),
+        None => false,
     }
 }
 // Native.data_navigation(url) -> [verdict, MIME type, body] (`data_navigation`; nil each but the verdict for one of no
@@ -395,7 +404,9 @@ impl NavigationFetch {
     // - ['no_content'] — a 204 / 205: the navigation aborted, the navigable at the document it is at, no `load` and no
     //   session history entry (HTML "populate a session history entry's document"; Chrome, measured 2026-10-24: the
     //   page's link and form, a frame's form, link, `location` and `src` alike);
-    // - ['download'] — a response that downloads (its Content-Disposition): handed off to be saved, no document made;
+    // - ['download'] — a response that downloads (its Content-Disposition, or a type that makes no document: mime.rs
+    //   `document_type`): handed off to be saved, no document made;
+    // - ['sniff'] — one whose body says which, and the type of its document (`Native.navigation_document_type`);
     // - ['document'] — the document it makes.
     // A top-level traversable's opener policy is enforced on each, a redirect's too (`enforce_coop`); the block gives the
     // facts of the document the navigation leaves, `[origin, initial about:blank, popup sandboxing flags]`, where they
@@ -416,6 +427,8 @@ impl NavigationFetch {
             "no_content"
         } else if fields.downloads() {
             "download"
+        } else if fields.sniffs() {
+            "sniff"
         } else {
             "document"
         };

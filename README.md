@@ -120,6 +120,24 @@ click_link 'About'
 puts page.text
 ```
 
+### Downloads
+
+A navigation whose response is not a document is a download, as in a browser — and unlike `rack_test`, which shows any
+response as `page.body`. That covers a `Content-Disposition: attachment` response, a `<a download>` link, and any
+response whose type no document is made of (HTML "load a document"): `text/csv`, `application/pdf` (there is no PDF
+viewer), `application/zip`, `application/octet-stream`, a response with no `Content-Type` whose body is binary, and the
+like. The page stays where it was, and `current_url` keeps reporting the document it shows (`about:blank` for a window
+that has none yet). The file is saved to the first of these that is set:
+
+1. `ENV['CSIM_DOWNLOADS_DIR']`
+2. `Capybara.save_path`
+3. `./tmp/downloads`
+
+```ruby
+click_link 'Export CSV'
+expect(File.read(File.join(Capybara.save_path, 'report.csv'))).to include('id,name')
+```
+
 ## Trace
 
 Each Capybara action (`visit`, `click`, `set`, …) is recorded as a step in a per-test trace: URL before / after, console output and network requests during the step, plus elapsed and per-step durations. On action failure (and only then, by default) the post-action DOM is captured too, and a failing example gets one **screenshot** of the state it ended in.
