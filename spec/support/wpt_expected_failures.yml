@@ -6508,13 +6508,6 @@ service-workers/service-worker/fetch-request-css-images.https.html:
 - Verify FetchEvent for css image-set (backgroundImage).
 - Verify FetchEvent for css image-set (shapeOutside).
 - "[harness] TIMEOUT"
-service-workers/service-worker/fetch-request-xhr-sync-error.https.window.js:
-- Verify synchronous XMLHttpRequest always throws a NetworkError for ReadableStream
-  errors
-service-workers/service-worker/fetch-request-xhr-sync-on-worker.https.html:
-- Verify SyncXHR on Worker is intercepted
-service-workers/service-worker/fetch-request-xhr-sync.https.html:
-- Verify SyncXHR is intercepted
 service-workers/service-worker/http-to-https-redirect-and-register.https.html:
 - register on a non-secure page after redirect from an non-secure url
 service-workers/service-worker/immutable-prototype-serviceworker.https.html:

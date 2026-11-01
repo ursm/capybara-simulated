@@ -5506,14 +5506,18 @@ module Capybara
       # `ensure`.
       # (…`realm` the client's as the host knows it: a worker's the negative of its handle)
       def sw_direct_fetch(sw_handle, req_json, realm)
+        resp = sw_direct_reply(sw_handle, req_json, realm)
+        resp && JSON.parse(resp)
+      rescue JSON::ParserError
+        nil
+      end
+      # …its reply as the wire carries it, JSON.
+      private def sw_direct_reply(sw_handle, req_json, realm)
         w = @workers[sw_handle.to_i] or return nil
         fid   = @worker_host.await_direct
         epoch = @worker_host.owe(WorkerHost::FETCH, 1)
         w[:inbox] << {kind: 'fetch', req: req_json, fetch_id: fid, realm_id: realm}
-        resp = await_worker_reply(fid, w)
-        resp && JSON.parse(resp)
-      rescue JSON::ParserError
-        nil
+        await_worker_reply(fid, w)
       ensure
         if fid
           @worker_host.forget_reply(fid)
@@ -5603,6 +5607,18 @@ module Capybara
         # the response is delivered back to it, not the main realm (realm 0 = main/top window).
         w[:inbox] << msg
         true
+      end
+
+      # A controlled client's SYNCHRONOUS request — a sync XHR, a page's or a worker's — → the controlling SW's `fetch`
+      # event, its answer awaited in place on the calling thread (`sw_direct_reply`): Handle Fetch is the request's whatever
+      # its caller waits on. Its wire JSON, or nil for the network — a worker gone, or one still activating, which the
+      # caller cannot wait for in place: the window's thread would be holding the activation its `activate` waitUntil may
+      # need (the script-subresource path's rule, sw_script_subresource_fetch).
+      def service_worker_sync_fetch(handle, req_json, realm_id)
+        return sw_host.service_worker_sync_fetch(handle, req_json, sw_realm_key(realm_id)) unless sw_host?
+        return nil unless @workers[handle.to_i] && sw_live?(handle) && Native.sw_worker_activated(@sw_partition, handle.to_i)
+
+        sw_direct_reply(handle, sw_fetch_request(req_json.to_s), realm_id.to_i)
       end
 
       # A controlled client cancelled a streaming respondWith body (`response.body.cancel()` or an
@@ -9629,12 +9645,14 @@ module Capybara
               # drain. If the dispatch itself dies (engine raise, Thread#kill) the JS side can
               # never post — fall the client back to the network so the counter drains (a
               # duplicate response is harmless: the client's pendingFetch entry is one-shot).
+              # (…its reply one a thread awaits in place — a navigation's, a direct one's — or the event loop's to deliver)
               dispatched = false
+              fid        = msg[:fetch_id].to_i
               begin
-                rt.call('__csim_swDispatchFetch', msg[:req], msg[:fetch_id], msg[:realm_id])
+                rt.call('__csim_swDispatchFetch', msg[:req], fid, msg[:realm_id], fid.negative? || WorkerHost.direct?(fid))
                 dispatched = true
               ensure
-                sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, WorkerHost::FALLTHROUGH, outbox, msg[:realm_id].to_i) unless dispatched
+                sw_deliver_fetch_response(handle, fid, WorkerHost::FALLTHROUGH, outbox, msg[:realm_id].to_i) unless dispatched
               end
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_fetch_response'
               # THIS worker is a controlled CLIENT whose fetch went through its SW

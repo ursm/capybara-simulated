@@ -135,6 +135,8 @@ module Capybara
         # A controlled client's fetch → the controlling SW's `fetch` event. Returns false if the SW
         # is gone (client falls back to the network).
         '__csim_serviceWorkerControllerFetch' => ->(b, *a) { b.service_worker_controller_fetch(a[0], a[1], a[2], a[3]) },
+        # …a synchronous request's (a sync XHR), its answer awaited in place: the wire JSON, or nil for the network.
+        '__csim_serviceWorkerSyncFetch'       => ->(b, *a) { b.service_worker_sync_fetch(a[0], a[1], a[2]) },
         # A controlled client cancelled a streaming respondWith body → cancel the SW's source stream
         # (routed to the worker that owns this [realm, fetch] stream). See sw_stream_cancel.
         '__csim_swStreamCancel'               => ->(b, *a) { b.sw_stream_cancel(a[0], a[1]); nil },

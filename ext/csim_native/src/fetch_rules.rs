@@ -112,8 +112,9 @@ pub(crate) fn sw_subresource_usable(destination: &str, mode: &str, response_type
 // "null"), `flags` its `FETCH_*` facts: a `data:` URL's processor; a `blob:` URL's entry; for an http(s) URL a
 // navigation's chain (outside a worker: a service worker's re-fetch of one is a plain fetch), else a network error where
 // its mode is `same-origin` and the URL of another origin (step 12, before any service worker), else the controlling
-// service worker (Handle Fetch, which a synchronous request cannot await), else a keepalive request's own thread, else
-// the network; for any other URL the network, which refuses it — Handle Fetch sees an HTTP(S) request alone.
+// service worker (Handle Fetch, a synchronous request's too: its caller waits for the answer), else a keepalive request's
+// own thread, else the network; for any other URL the network, which refuses it — Handle Fetch sees an HTTP(S) request
+// alone.
 pub(crate) const ROUTE_NETWORK: u32 = 0;
 pub(crate) const ROUTE_DATA: u32 = 1;
 pub(crate) const ROUTE_BLOB: u32 = 2;
@@ -122,7 +123,6 @@ pub(crate) const ROUTE_REFUSED: u32 = 4;
 pub(crate) const ROUTE_SERVICE_WORKER: u32 = 5;
 pub(crate) const ROUTE_KEEPALIVE: u32 = 6;
 pub(crate) const FETCH_CONTROLLED: u32 = 1;
-pub(crate) const FETCH_SYNC: u32 = 2;
 pub(crate) const FETCH_KEEPALIVE: u32 = 4;
 pub(crate) const FETCH_NAVIGATE: u32 = 8;
 pub(crate) const FETCH_IN_WORKER: u32 = 16;
@@ -134,7 +134,7 @@ pub(crate) fn fetch_route(url: &str, flags: u32, here: &str) -> u32 {
         "blob:" => ROUTE_BLOB,
         "http:" | "https:" if flags & (FETCH_NAVIGATE | FETCH_IN_WORKER) == FETCH_NAVIGATE => ROUTE_NAVIGATION,
         "http:" | "https:" if flags & FETCH_SAME_ORIGIN != 0 && u.origin() != here => ROUTE_REFUSED,
-        "http:" | "https:" if flags & (FETCH_CONTROLLED | FETCH_SYNC) == FETCH_CONTROLLED => ROUTE_SERVICE_WORKER,
+        "http:" | "https:" if flags & FETCH_CONTROLLED != 0 => ROUTE_SERVICE_WORKER,
         "http:" | "https:" if flags & FETCH_KEEPALIVE != 0 => ROUTE_KEEPALIVE,
         _ => ROUTE_NETWORK,
     }
@@ -732,7 +732,6 @@ mod tests {
         assert_eq!(fetch_route("blob:http://b.test/u", FETCH_CONTROLLED | FETCH_SAME_ORIGIN, here), ROUTE_BLOB);
         assert_eq!(fetch_route("http://a.test/x", 0, here), ROUTE_NETWORK);
         assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED, here), ROUTE_SERVICE_WORKER);
-        assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED | FETCH_SYNC, here), ROUTE_NETWORK);
         assert_eq!(fetch_route("http://a.test/x", FETCH_CONTROLLED | FETCH_KEEPALIVE, here), ROUTE_SERVICE_WORKER);
         assert_eq!(fetch_route("http://a.test/x", FETCH_KEEPALIVE, here), ROUTE_KEEPALIVE);
         assert_eq!(fetch_route("http://a.test/x", FETCH_NAVIGATE | FETCH_CONTROLLED, here), ROUTE_NAVIGATION);
