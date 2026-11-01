@@ -620,13 +620,16 @@ module Capybara
       # The navigation's reserved client id — the realm ADOPTS it as its service-worker Client identity
       # (`event.resultingClientId` resolves to THIS client after commit). Seeded BEFORE the document loads so the realm's
       # own client reports (sw-client.js clientId()) already carry it; the browser-side alias keeps message routing and
-      # record minting coherent (sw_adopt_client_id). A frame's and a window's alike.
-      def adopt_client_id(realm, client_id)
+      # record minting coherent (sw_adopt_client_id). A frame's and a window's alike, and the page's (`realm` the main
+      # context, `realm_id` 0: Browser#boot_response_into_ctx).
+      def adopt_client_id(realm, client_id, realm_id: realm.id)
         return if client_id.to_s.empty?
 
         realm.eval_void("globalThis.__dom.realmIdentify('clientId', #{JSON.generate(client_id.to_s)});")
-        @browser.sw_adopt_client_id(realm.id, client_id.to_s)
+        @browser.sw_adopt_client_id(realm_id, client_id.to_s)
       end
+      # …the page's document's: realm 0's, which each document of the page reuses.
+      def adopt_page_client_id(client_id) = adopt_client_id(ctx, client_id, realm_id: 0)
       # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
       # new one's window — one object however its active document changes (HTML) — before the new document's scripts run.
       def retarget_window_proxies(from, to)

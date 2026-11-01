@@ -1,5 +1,6 @@
 // Who a realm is to the host, as the host told it (`realmIdentify`): the service-worker client id its document adopted
-// (a navigation's reserved one, a dedicated or shared worker's), the window key of a window `window.open` made — the
+// (a navigation's reserved one — its environment's id, told again for each document a reused realm holds, the page's —
+// or a dedicated or shared worker's), the window key of a window `window.open` made — the
 // realm of its first document, which the documents it navigates to keep — and a worker's handle, its agent's owner token
 // and whether it is a module worker. Kept in the realm's state (`RealmState::identity`), for its context's lifetime.
 

@@ -6570,22 +6570,21 @@ module Capybara
       # client-message router can tell a worker client from a browsing context.
       def sw_worker_client_id(handle) = "client-#{@client_space}worker-#{handle.to_i}"
 
-      # A realm's service-worker Client id, in this window's space (`@client_space`: none for the
-      # session's first window). The MAIN realm (id 0) is 'client-window'; a realm that ADOPTED
-      # a navigation's reserved client id reports that id; every other realm is `client-<realm>`. The same spellings are produced JS-side by sw-client.js's clientId()
-      # (which prefers the adopted client id, realm_identity.rs) and the FetchEvent clientKey
-      # (js/src/workers.js), and read back by the client-message router below — so they must
-      # be minted in exactly one place.
+      # A realm's service-worker Client id — its document's environment id (HTML: each document a new environment, the
+      # id its navigation reserved, `event.resultingClientId`) — in this window's space (`@client_space`: none for the
+      # session's first window): the id it ADOPTED (`sw_adopt_client_id`), the page's realm 0 one per document though the
+      # realm is reused across them; `client-<realm>` for a realm that adopted none (a frame built outside a navigation's
+      # chain). The same spellings are produced JS-side by sw-client.js's clientId() (which prefers the adopted client id,
+      # realm_identity.rs) and the FetchEvent clientKey (js/src/workers.js), and read back by the client-message router
+      # below — so they must be minted in exactly one place.
       def sw_client_id(realm_id)
-        return "client-#{@client_space}window" if realm_id.to_i.zero?
-
         @worker_host.client_of(realm_id.to_i) || "client-#{@client_space}#{realm_id.to_i}"
       end
 
-      # The realm a client id names — the inverse of `sw_client_id`, nil for an unrecognized id.
+      # The realm a client id names — the inverse of `sw_client_id`, nil for an unrecognized id: one a document that is
+      # gone adopted names none, the page's realm's next document's another.
       def sw_client_realm(client_id)
         id = client_id.to_s
-        return 0 if id == "client-#{@client_space}window"
         adopted = @worker_host.realm_of(id) and return adopted
 
         (m = /\Aclient-#{Regexp.escape(@client_space)}(\d+)\z/.match(id)) ? m[1].to_i : nil
@@ -6595,16 +6594,18 @@ module Capybara
       # object" for a navigation, `FetchEvent.resultingClientId`): minted once per navigation
       # CHAIN, re-minted when a redirect hop crosses origins (a reserved client is origin-bound —
       # navigation-redirect tags 'a'→'x' across the hop), and ADOPTED by the committed document's
-      # realm (`sw_adopt_client_id`). Its number the process's, unique across sessions: an adopted
-      # id names one realm only.
+      # realm (`sw_adopt_client_id`) — a document no navigation fetched (an initial about:blank, a
+      # blob: or an error document) one of its own. Its number the process's, unique across
+      # sessions: an adopted id names one realm only.
       def mint_resulting_client_id = "client-#{@client_space}nav#{Native.reserved_client_seq}"
 
       # The committed document's realm ADOPTS the navigation's reserved client id (the
       # reserved client BECOMES the document's client). A rebuild of the same frame re-adopts
-      # under the new realm id; the superseded alias is dropped so a stale id resolves nothing.
+      # under the new realm id, the page's next document under realm 0 again; the superseded
+      # alias is dropped so a stale id resolves nothing.
       def sw_adopt_client_id(realm_id, client_id)
         cid = client_id.to_s
-        return if cid.empty? || realm_id.to_i.zero?
+        return if cid.empty?
 
         @worker_host.adopt_client(realm_id.to_i, cid)
         nil
@@ -6833,8 +6834,8 @@ module Capybara
       # network; each response judged by the engine (`response`) — a redirect
       # followed, the request's body gone where it makes a GET (301 / 302 of a POST, 303 of a non-GET/HEAD: Fetch
       # "HTTP-redirect fetch") — and its reserved client id (`event.resultingClientId`) one per chain, re-minted where a
-      # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits — none where
-      # `client_ids` is false. `ready` is called with each hop's URL before its request is made (its cookies read), `begun`
+      # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits.
+      # `ready` is called with each hop's URL before its request is made (its cookies read), `begun`
       # with it as the hop begins, `redirected` as a redirect is followed.
       # Returns the last hop's `NavigationHop`; a network error — of no response, or a service worker's — 'fail'.
       private def run_navigation_fetch(
@@ -6846,13 +6847,12 @@ module Capybara
         is_reload: false,
         is_history: false,
         coop_realm: nil,
-        client_ids: true,
         ready: nil,
         begun: nil,
         redirected: nil
       )
         req_body = body.to_s.b
-        rid      = (mint_resulting_client_id if client_ids)
+        rid      = mint_resulting_client_id
         loop do
           ready&.call(fetch.target)
           meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies, worker_site = fetch.begin_hop(cookie_now)
@@ -6913,7 +6913,7 @@ module Capybara
 
           redirected&.call
           req_body, content_type = ''.b, nil if to_get
-          rid = mint_resulting_client_id if rid && new_client
+          rid = mint_resulting_client_id if new_client
         end
       end
 
@@ -6968,7 +6968,7 @@ module Capybara
         dest: 'iframe',
         cookie_cross_site: false,
         navigation_cross_site: false,
-        resulting_client_id: nil,
+        resulting_client_id:,
         origin_url: referrer_source
       )
         match = sw_navigation_match(url, site) or return nil
@@ -7049,8 +7049,7 @@ module Capybara
           navigationCrossSite: navigation_cross_site,
           # The navigation's RESERVED client id (`event.resultingClientId`): one per navigation
           # chain, re-minted across a cross-origin redirect hop, adopted by the committed
-          # document (mint_resulting_client_id / sw_adopt_client_id). nil → the worker falls
-          # back to its realm-derived key (a caller that doesn't thread the chain id yet).
+          # document (mint_resulting_client_id / sw_adopt_client_id).
           resultingClientId:   resulting_client_id,
           # The Navigation Preload response (nil unless preload is enabled), surfaced to the handler
           # as `event.preloadResponse`.
@@ -7410,8 +7409,8 @@ module Capybara
         # A worker's port → the other end of its channel: a realm's, a worker's, or none yet (held for it —
         # a client decodes a transferred port in the sw_client_msg processed just below).
         port_msgs.each {|e| port_post(e[:end], e[:data]) }
-        # A service worker → client message: deliver to the POSTING client's realm. The client id
-        # encodes it — `client-<realm>` for a frame/window realm, 'client-window' for the main realm.
+        # A service worker → client message: deliver to the realm of the client it names, by the
+        # registry's owner of its id (a document gone is no client: the message dropped).
         # A `client.postMessage` to a controlled IFRAME must reach THAT frame's navigator.service-
         # Worker, not the top window (postmessage-to-client). `e[:handle]` is the SENDING worker, so
         # the client's message `source` is exact. A message to a DISCARDED frame realm is dropped
@@ -7684,7 +7683,7 @@ module Capybara
         record_history({url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact)
         self.page_url = url.to_s
         record_response(*response)
-        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null')
+        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null', client_id: made[:client_id])
       end
 
 
@@ -8982,7 +8981,7 @@ module Capybara
         # the SAME id as this isolate's client identity (clientId() prefers the adopted one), so
         # a worker's own `ServiceWorker.postMessage` names itself correctly as the source and an
         # SW's `client.postMessage` reply routes back to THIS isolate (the registry has it as this worker's:
-        # note_client) instead of falling back to 'client-window' → the main realm. (Subresource interception FROM a
+        # note_client) instead of falling back to a realm-numbered key. (Subresource interception FROM a
         # worker isolate would also want this id, but no controller is ever installed into a
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
         # A SERVICE worker is not a client.
@@ -11928,7 +11927,6 @@ module Capybara
             is_reload:    is_reload,
             is_history:   from_history && !is_reload,
             coop_realm:   0,
-            client_ids:   false,
             begun:        lambda {|_|
               @current_referer = fetch.referrer.to_s
               # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
@@ -11953,7 +11951,7 @@ module Capybara
           when 'download'
             return download_in_place(target, hop.headers, hop.rack_body || [hop.document])
           when 'inline'
-            return boot_inline_document(target, hop.status, hop.headers, commits)
+            return boot_inline_document(target, hop.status, hop.headers, commits, client_id: hop.client_id)
           end
 
           self.page_url = target
@@ -11964,7 +11962,7 @@ module Capybara
           # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
           # `$(document).on(...)` delegates) — snapshot warmup keeps the
           # rebuild itself cheap; app-bundle re-eval dominates.
-          boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?, content_type: hop.document_type)
+          boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?, content_type: hop.document_type, client_id: hop.client_id)
         ensure
           @navigating = prior_navigating
           note_url_changes
@@ -12026,11 +12024,11 @@ module Capybara
       # an empty `text/html` document at the response's URL, of a new opaque origin, and of no policy its response sets — no
       # Content-Security-Policy, Referrer-Policy, Refresh or opener policy (a new policy container); the response recorded as
       # it came. (`commits` the navigation's, which clears the navigable's name by the origin it leaves.)
-      private def boot_inline_document(url, status, headers, commits)
+      private def boot_inline_document(url, status, headers, commits, client_id: nil)
         commits.(nil)
         self.page_url = url.to_s
         record_response(status, headers)
-        boot_response_into_ctx('', opaque_origin: true, inline: true)
+        boot_response_into_ctx('', opaque_origin: true, inline: true, client_id: client_id)
       end
       private def download_in_place(url, headers, body)
         save_downloaded_response(url, headers, body)
@@ -12120,7 +12118,8 @@ module Capybara
       # is to be left — none for a document no response enforced made: `commit_coop`)
       # (…`content_type` the type its body said where it did — MIME Sniffing's computed one — over the response's)
       # (…`inline` an inline content document's: `boot_inline_document`)
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil, content_type: nil, inline: false)
+      # (…`client_id` the reserved client id of the navigation whose response it is: `run_navigation_fetch`)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil, content_type: nil, inline: false, client_id: nil)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -12164,6 +12163,10 @@ module Capybara
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         @runtime.rebuild_ctx
+        # (…a new environment, as every document is, though its realm is the last one's: the id its navigation reserved —
+        # `event.resultingClientId` — else one of its own, adopted before its scripts run; the last one's let go of above,
+        # `sw_unload_document_clients`)
+        @runtime.adopt_page_client_id(client_id || mint_resulting_client_id)
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
         yield if block_given?
         # The lifecycle steps queued on the outgoing page's event loop are the new page's to run.

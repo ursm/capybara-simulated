@@ -291,26 +291,28 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
   # see the top page — the PWA shape ("raise the existing window") reads matchAll cold.
   it 'lists a controlled top-level page that has never talked to the worker' do
     session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/')
-    top     = match_all(session, via: 'a').find {|c| c['id'] == 'client-window' }
+    top     = match_all(session, via: 'a').find {|c| c['frameType'] == 'top-level' }
 
     expect(top).not_to be_nil
     expect(top['url']).to end_with('/')
     expect(top['frameType']).to eq('top-level')
   end
 
-  # The TOP-LEVEL context's client id is 'client-window', not `client-<realm>` — the main realm
-  # is realm 0, and both the JS side (sw-client.js, the FetchEvent client key) and the browser's
-  # client-message router spell it that way. Focus reported for realm 0 has to mint the same id
-  # or the top page can never be the focused client.
+  # The TOP-LEVEL context's client id is its document's — the one its navigation reserved — not
+  # `client-<realm>`: the main realm is realm 0, reused by each document of the page, and both the
+  # JS side (sw-client.js, the FetchEvent client key) and the browser's client-message router read
+  # the id the realm adopted. Focus reported for realm 0 has to name the same client or the top
+  # page can never be the focused client.
   it 'focuses the top-level window, whose client id is not realm-numbered' do
     session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/')
     session.execute_script("document.getElementById('top').focus();")
     clients = match_all(session, via: :top)
-    top     = clients.find {|c| c['id'] == 'client-window' }
+    top     = clients.find {|c| c['frameType'] == 'top-level' }
 
     expect(top).not_to be_nil
+    expect(top['id']).not_to eq('client-0')
     expect(top['focused']).to be(true)
-    expect(clients.first['id']).to eq('client-window')
+    expect(clients.first['id']).to eq(top['id'])
   end
 
   # Blurring an `<iframe>` takes focus out of its nested context, so it falls back to the
@@ -324,7 +326,7 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
     clients = match_all(session, via: :top)
 
     expect(clients.find {|c| c['url'].end_with?('#a') }['focused']).to be(false)
-    expect(clients.find {|c| c['id'] == 'client-window' }['focused']).to be(true)
+    expect(clients.find {|c| c['frameType'] == 'top-level' }['focused']).to be(true)
   end
 
   # `clients.matchAll().then(cs => cs[0].focus())` is how a notificationclick handler raises the existing tab — on a
@@ -772,7 +774,7 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
   it 'does not focus the opener when an auxiliary window takes focus' do
     session = session_with_frames({'a' => '/scope/page.html#a'}, scope: '/')
     session.execute_script("document.getElementById('top').focus();")
-    expect(match_all(session, via: 'a').find {|c| c['id'] == 'client-window' }['focused']).to be(true)
+    expect(match_all(session, via: 'a').find {|c| c['frameType'] == 'top-level' }['focused']).to be(true)
 
     session.execute_script(<<~JS)
       globalThis.__popup = window.open();
@@ -781,7 +783,7 @@ RSpec.describe 'Service Worker client enumeration', :every_host_local do
     JS
     clients = match_all(session, via: 'a', options: {'includeUncontrolled' => true})
 
-    expect(clients.find {|c| c['id'] == 'client-window' }['focused']).to be(false)
+    expect(clients.find {|c| c['frameType'] == 'top-level' }['focused']).to be(false)
     expect(clients.select {|c| c['focused'] }.map {|c| c['frameType'] }).to eq(['auxiliary'])
   end
 
