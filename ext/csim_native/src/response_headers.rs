@@ -7,6 +7,8 @@ use magnus::{prelude::*, r_hash::ForEach, Error, RArray, RHash, RString, Ruby, V
 
 use crate::fetch_rules::ruby_bytes;
 use crate::http_cache::combine;
+// (…a header value as script reads it: each byte the code point it is)
+use crate::isomorphic::decode as isomorphic_decode;
 
 #[derive(Default)]
 pub(crate) struct ResponseFields {
@@ -26,10 +28,6 @@ pub(crate) struct ResponseFields {
     pub(crate) set_cookie: Vec<Vec<u8>>,
 }
 
-// A header value as script reads it: its fields combined (http_cache.rs `combine`), each byte the code point it is.
-fn latin1(bytes: &[u8]) -> String {
-    bytes.iter().map(|&b| char::from(b)).collect()
-}
 
 // A Rack 2 value's fields: its String split at newlines as Ruby's `String#split` splits it — the empty fields it ends in
 // dropped.
@@ -119,7 +117,7 @@ impl ResponseFields {
         headers.foreach(|k: Value, v: Value| {
             let name = ruby_bytes(k.funcall("to_s", ())?);
             let is = |n: &str| name.eq_ignore_ascii_case(n.as_bytes());
-            let text = |v: Value| -> Result<Option<String>, Error> { Ok(combine(v)?.map(|b| latin1(&b))) };
+            let text = |v: Value| -> Result<Option<String>, Error> { Ok(combine(v)?.map(|b| isomorphic_decode(&b))) };
             // (…the first header of a name, as the host's `header_field` reads one — but every Content-Security-Policy)
             if is("location") && !location {
                 location = true;
@@ -149,7 +147,7 @@ impl ResponseFields {
                         None => ruby_bytes(v.funcall("to_s", ())?),
                     };
                     // (…as the app gave it, a UTF-8 one's text: a URL in it is parsed as the document's)
-                    out.refresh = Some(String::from_utf8(bytes).unwrap_or_else(|e| latin1(e.as_bytes())));
+                    out.refresh = Some(String::from_utf8(bytes).unwrap_or_else(|e| isomorphic_decode(e.as_bytes())));
                 }
             } else if is("set-cookie") && !cookie {
                 cookie = true;

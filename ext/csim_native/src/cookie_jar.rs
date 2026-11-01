@@ -414,7 +414,7 @@ impl Jar {
 // The cookie-string a request to `url` in `context` at `now` takes, as bytes (empty for none) — of jar `jar`.
 pub(crate) fn retrieve(jar: u64, url: &str, context: u32, now: f64) -> Vec<u8> {
     let found = lock().jars.get_mut(&jar).map_or_else(String::new, |j| j.retrieve(url, context, now));
-    found.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
+    crate::isomorphic::encode(&found)
 }
 // …and a response's set-cookie-strings `lines` (each as bytes) for `url`, stored in `context` at `now`.
 pub(crate) fn store_lines(jar: u64, url: &str, lines: &[Vec<u8>], context: u32, now: f64) {
@@ -423,7 +423,7 @@ pub(crate) fn store_lines(jar: u64, url: &str, lines: &[Vec<u8>], context: u32, 
     }
     if let Some(j) = lock().jars.get_mut(&jar) {
         for line in lines {
-            j.store(url, &line.iter().map(|&b| char::from(b)).collect::<String>(), context, now);
+            j.store(url, &crate::isomorphic::decode(line), context, now);
         }
     }
 }
@@ -433,15 +433,14 @@ pub(crate) fn store_lines(jar: u64, url: &str, lines: &[Vec<u8>], context: u32, 
 // what the server sent is what goes back, a UTF-8 one's bytes included; a URL as its text)
 fn text(s: magnus::RString) -> String {
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
-    unsafe { s.as_slice() }.iter().map(|&b| char::from(b)).collect()
+    crate::isomorphic::decode(unsafe { s.as_slice() })
 }
 fn url_text(s: magnus::RString) -> String {
     // SAFETY: as above.
     String::from_utf8_lossy(unsafe { s.as_slice() }).into_owned()
 }
 fn bytes(ruby: &magnus::Ruby, text: &str) -> magnus::RString {
-    let bytes: Vec<u8> = text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect();
-    ruby.str_from_slice(&bytes)
+    ruby.str_from_slice(&crate::isomorphic::encode(text))
 }
 // A new session's cookie store.
 pub(crate) fn new_for_ruby() -> u64 {

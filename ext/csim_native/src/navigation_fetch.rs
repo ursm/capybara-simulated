@@ -305,7 +305,9 @@ impl NavigationFetch {
     // Sec-Fetch-User where its source snapshot had transient activation); its Referer (the chain's: its policy over the
     // source the previous hop left, as a URL is sent: referrer.rs `referrer_url`); its Origin, an unsafe method's alone
     // (Fetch "append a request `Origin` header": `null` once a redirect tainted it or its initiator is opaque, and where
-    // its referrer policy withholds it); and its cookies, the jar's for its URL in the hop's context.
+    // its referrer policy withholds it); and its cookies, the jar's for its URL in the hop's context — none where a service
+    // worker may answer the hop first: Fetch reads them as the network request is made, after the worker's leg (and its
+    // preload), which may set some, so the host attaches them then.
     fn request_headers(&self, st: &Nav, now: f64) -> Vec<(&'static str, Vec<u8>)> {
         let target = &st.chain.target;
         let site = wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), target));
@@ -325,7 +327,7 @@ impl NavigationFetch {
             let policy = st.chain.ref_policy.as_deref().unwrap_or("");
             out.push(("HTTP_ORIGIN", crate::referrer::origin_header(origin, policy, target, false).as_bytes().to_vec()));
         }
-        if self.jar != 0 {
+        if self.jar != 0 && self.sw_site(target).is_none() {
             let cookies = crate::cookie_jar::retrieve(self.jar, target, st.cookies, now);
             if !cookies.is_empty() {
                 out.push(("HTTP_COOKIE", cookies));

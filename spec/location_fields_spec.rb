@@ -20,6 +20,8 @@ RSpec.describe 'a response with two Location fields' do
         [302, {'content-type' => 'text/html', 'location' => location}, ['<!DOCTYPE html><body>stayed']]
       when '/pairs'
         [302, [%w[Content-Type text/html], %w[Location /b]], ['<!DOCTYPE html><body>stayed']]
+      when '/pairs2'
+        [302, [%w[Content-Type text/html], %w[Location /a], %w[Location /b]], ['<!DOCTYPE html><body>stayed']]
       when '/a', '/b' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body>went #{env['PATH_INFO']}"]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
       end
@@ -45,6 +47,14 @@ RSpec.describe 'a response with two Location fields' do
   it 'is read off headers given as pairs' do
     session.visit '/pairs'
     expect(session).to have_text('went /b')
+  end
+
+  # (…two pairs of the name each a field, as a header list has them — not the first followed)
+  it 'is two where headers given as pairs name it twice' do
+    session.visit '/'
+    session.visit '/pairs2'
+    expect(session).to have_no_text('went')
+    expect(session.current_url).to end_with('/pairs2')
   end
 
   it 'fails a navigation to it' do

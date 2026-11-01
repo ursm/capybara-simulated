@@ -105,6 +105,7 @@ mod session_history;
 mod fetch_chain;
 mod navigation_fetch;
 mod response_headers;
+mod isomorphic;
 mod worker_script_fetch;
 mod worker_host;
 mod clock_holds;
@@ -341,19 +342,15 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("location_fields", magnus::function!(response_headers::location_fields_for_ruby, 1))?;
     native.define_module_function("redirect_locations", magnus::function!(response_headers::redirect_locations_for_ruby, 2))?;
     native.define_module_function("coop_switch", magnus::function!(coop::switch_for_ruby, 5))?;
-    // What a request says of where it came from — its Referer, Origin and Sec-Fetch-Site, over its redirects too
-    // (referrer.rs).
+    // A request's Referer, under its referrer policy (referrer.rs).
     native.define_module_function("request_referrer", magnus::function!(referrer::request_referrer_for_ruby, 3))?;
     native.define_module_function("referrer_url", magnus::function!(referrer::referrer_url_for_ruby, 1))?;
     native.define_module_function("default_referrer_policy", magnus::function!(referrer::default_policy_for_ruby, 0))?;
-    native.define_module_function("origin_header", magnus::function!(referrer::origin_header_for_ruby, 4))?;
-    native.define_module_function("fetch_site", magnus::function!(referrer::fetch_site_for_ruby, 3))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
     native.define_module_function("about_blank_url", magnus::function!(url_ops::about_blank_url_for_ruby, 1))?;
     // Whether a response downloads, and the name it is saved under (downloads.rs).
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
-    native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
     native.define_module_function("service_worker_response_allowed", magnus::function!(fetch_rules::service_worker_response_allowed_for_ruby, 4))?;
     native.define_module_function("default_accept", magnus::function!(fetch_rules::default_accept_for_ruby, 1))?;
     native.define_module_function("sw_subresource_usable", magnus::function!(fetch_rules::sw_subresource_usable_for_ruby, 5))?;

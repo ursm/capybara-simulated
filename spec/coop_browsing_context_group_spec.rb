@@ -21,6 +21,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     simulated_session(lambda {|env|
       headers = {'content-type' => 'text/html'}.merge(policies.fetch(env['PATH_INFO'], {}))
       return [302, headers.merge('location' => 'http://a.test/plain'), []] if env['PATH_INFO'] == '/hop'
+      return [302, policies['/framed'].merge('location' => 'http://a.test/sbx'), []] if env['PATH_INFO'] == '/hopsbx'
       return [204, policies['/coi'], []] if env['PATH_INFO'] == '/nocontent'
 
       frame = '<iframe name="fr" src="http://b.test/plain"></iframe>' if env['PATH_INFO'] == '/framed'
@@ -158,6 +159,15 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     session.visit('http://a.test/sbx')
     expect(session).to have_no_css('#p')
     expect(session.evaluate_script('origin')).to eq('null')
+  end
+
+  # (…and a pop-up's, its switch needed by the redirect before: its error document committed in the new group at the last
+  # hop's URL, of a new opaque origin all the same)
+  it "commits a switched pop-up's error document of an opaque origin at its last hop" do
+    session.visit('http://a.test/plain')
+    window = session.window_opened_by { session.execute_script("window.w = open('http://a.test/hopsbx')") }
+    expect(session.evaluate_script('w.closed')).to be(true)
+    session.within_window(window) { expect(session.evaluate_script('[location.href, origin, opener === null]')).to eq(['http://a.test/sbx', 'null', true]) }
   end
 
   # (…the switch a navigation's responses need its own, which a navigation that commits nothing — a 204's — leaves to none

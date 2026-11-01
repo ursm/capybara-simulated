@@ -337,7 +337,7 @@ pub(crate) fn cors_safelisted_request_header(name: &[u8], value: &[u8]) -> bool 
                 return false;
             }
             // (…the value isomorphic-decoded, each byte the code point it is)
-            let decoded: String = value.iter().map(|&b| char::from(b)).collect();
+            let decoded = crate::isomorphic::decode(value);
             let Some(mime) = crate::mime::parse(&decoded) else { return false };
             matches!(mime.essence.as_str(), "application/x-www-form-urlencoded" | "multipart/form-data" | "text/plain")
         }
@@ -653,9 +653,6 @@ fn normalized_method_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 pub(crate) fn ruby_bytes(s: magnus::RString) -> Vec<u8> {
     // SAFETY: copied at once, before anything could run Ruby code that moves or frees it.
     unsafe { s.as_slice() }.to_vec()
-}
-pub(crate) fn redirect_to_get_for_ruby(status: u32, method: magnus::RString) -> bool {
-    redirect_to_get(status, &ruby_bytes(method))
 }
 pub(crate) fn service_worker_response_allowed_for_ruby(mode: String, redirect: String, response_type: String, redirected: bool) -> bool {
     service_worker_response_allowed(&mode, &redirect, &response_type, redirected)

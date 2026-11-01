@@ -104,9 +104,6 @@ pub(crate) fn origin_header<'a>(origin: &'a str, policy: &str, target: &str, cor
     };
     if withheld { "null" } else { origin }
 }
-pub(crate) fn origin_header_for_ruby(origin: Option<String>, policy: Option<String>, target: Option<String>, cors: bool) -> Option<String> {
-    Some(origin_header(&origin?, policy.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""), cors).to_owned())
-}
 
 // `Sec-Fetch-Site` of a request its initiator `initiator` makes to `target`: 'none' with no initiator of an http(s)
 // URL (a load the user made), 'same-origin', 'same-site' (realm_location.rs `site`), else 'cross-site'.
@@ -132,9 +129,6 @@ pub(crate) fn wider_site<'a>(seed: Option<&'a str>, site: &'a str) -> &'a str {
         Some(seed) if rank(seed) >= rank(site) => seed,
         _ => site,
     }
-}
-pub(crate) fn fetch_site_for_ruby(seed: Option<String>, initiator: Option<String>, target: Option<String>) -> String {
-    wider_site(seed.as_deref(), fetch_site(initiator.as_deref().unwrap_or(""), target.as_deref().unwrap_or(""))).to_owned()
 }
 
 // A request's redirect-taint (Fetch "redirect-taint"), walked once as its URL list grows hop by hop: "same-site" once a

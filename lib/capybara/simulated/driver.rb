@@ -660,7 +660,7 @@ module Capybara
         host.close_window_realm(entry[:window].key)
         entry[:window] = aux
         window_browsers.each {|b| b.fill_blob_markers unless b.equal?(aux) }
-        aux.adopt_navigation_response(url, response, body, referrer: made[:referrer], referrer_policy: made[:referrer_policy], traversable: traversable)
+        aux.adopt_navigation_response(url, response, body, made, traversable: traversable)
         nil
       end
 

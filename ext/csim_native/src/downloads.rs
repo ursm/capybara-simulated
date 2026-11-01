@@ -121,12 +121,9 @@ pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str) -> String {
         .unwrap_or_else(|| "download".to_owned())
 }
 
-// A header's text as the host hands it over — each byte a code point (`header_text`) — its bytes again.
-fn header_bytes(text: &str) -> Vec<u8> {
-    text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
-}
 pub(crate) fn filename_for_ruby(cd: Option<String>, url: String, hint: Option<String>) -> String {
-    filename(cd.map(|cd| header_bytes(&cd)).as_deref(), &url, hint.as_deref().unwrap_or(""))
+    // (…a header's text as the host hands it over — each byte a code point (`header_text`) — its bytes again)
+    filename(cd.map(|cd| crate::isomorphic::encode(&cd)).as_deref(), &url, hint.as_deref().unwrap_or(""))
 }
 
 #[cfg(test)]

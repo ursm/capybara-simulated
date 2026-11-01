@@ -6861,7 +6861,7 @@ module Capybara
       # followed, the request's body gone where it makes a GET (301 / 302 of a POST, 303 of a non-GET/HEAD: Fetch
       # "HTTP-redirect fetch") — and its reserved client id (`event.resultingClientId`) one per chain, re-minted where a
       # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits — none where
-      # `client_ids` is false. `ready` is called with each hop's URL before its request is made (its cookies read), `hop`
+      # `client_ids` is false. `ready` is called with each hop's URL before its request is made (its cookies read), `begun`
       # with it as the hop begins, `redirected` as a redirect is followed.
       # Returns the last hop's `NavigationHop`; a network error — of no response, or a service worker's — 'fail'.
       private def run_navigation_fetch(
@@ -6875,7 +6875,7 @@ module Capybara
         coop_realm: nil,
         client_ids: true,
         ready: nil,
-        hop: nil,
+        begun: nil,
         redirected: nil
       )
         req_body = body.to_s.b
@@ -6883,7 +6883,7 @@ module Capybara
         loop do
           ready&.call(fetch.target)
           meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies, worker_site = fetch.begin_hop(cookie_now)
-          hop&.call(target)
+          begun&.call(target)
           hop_body  = req_body.empty? ? nil : req_body
           rack_body = document = nil
           if worker_site &&
@@ -6913,7 +6913,14 @@ module Capybara
             # make one: response-wire.js `header_list`)
             status, headers, document = (sw['status'] || 200).to_i, sw['header_list'] || sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
           else
-            response = dispatch_navigation_hop(target, meth, network_headers, body: hop_body, content_type: content_type) or return NavigationHop.new('fail')
+            response = dispatch_navigation_hop(
+              target,
+              meth,
+              network_headers,
+              body:           hop_body,
+              content_type:   content_type,
+              cookie_context: (cookies if worker_site)
+            ) or return NavigationHop.new('fail')
             status, headers, rack_body = response
           end
           # (…what the response makes of it — a top-level traversable's, each response's opener policy enforced as it comes,
@@ -7680,9 +7687,12 @@ module Capybara
         history
       end
       # …and the document that response makes, made by this window — a Browser of its own, its first — at `url`: the
-      # response's status and headers, its body, the Referer its request sent and its policy.
+      # response's status and headers, its body, and what the navigation made of it (`made`, navigate_window_realm's: the
+      # Referer its request sent and its policy, and its origin, `null` an error document's — a new opaque one — its
+      # Content-Security-Policy and Refresh the response headers' own, as the page's commit reads them).
       # (…`traversable` the window's, kept across the switch: its session history and its session storage this one's)
-      def adopt_navigation_response(url, response, body, referrer:, referrer_policy:, traversable: nil)
+      def adopt_navigation_response(url, response, body, made, traversable: nil)
+        referrer, referrer_policy = made.values_at(:referrer, :referrer_policy)
         if traversable
           Native.storage_clear(@session_storage)
           @session_history = traversable
@@ -7692,7 +7702,7 @@ module Capybara
         record_history({url: url.to_s, referer: referrer, referrer_policy: referrer_policy}.compact)
         @current_url = url.to_s
         record_response(*response)
-        boot_response_into_ctx(body.to_s)
+        boot_response_into_ctx(body.to_s, opaque_origin: made[:doc_origin] == 'null')
       end
 
 
@@ -11965,7 +11975,7 @@ module Capybara
             is_history:   from_history && !is_reload,
             coop_realm:   0,
             client_ids:   false,
-            hop:          lambda {|_|
+            begun:        lambda {|_|
               @current_referer = fetch.referrer.to_s
               # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
               # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it
@@ -12601,7 +12611,9 @@ module Capybara
       # metadata, Referer, Origin and cookies, as Rack env pairs; `extra_headers` beside them: the navigation preload
       # marker) and those the user agent sets of itself. Its response [status, headers, body], its status an Integer, or
       # nil for a network error; the caller has the engine judge it (`response`), its Set-Cookie with it.
-      def dispatch_navigation_hop(url, method, headers, body: nil, content_type: nil, extra_headers: nil)
+      # (…`cookie_context` the hop's where a service worker could answer it first, whose headers carry no Cookie: the jar's
+      # read now, as the request is made — Fetch's "HTTP-network-or-cache fetch" — after the worker's leg)
+      def dispatch_navigation_hop(url, method, headers, body: nil, content_type: nil, extra_headers: nil, cookie_context: nil)
         # (…a body's length sent with it alone — a POST's, an empty one's `0` — a GET's none: Fetch "HTTP-network fetch")
         env = body ? rack_env_for(url, method: method, input: body) : rack_env_for(url, method: method)
         if content_type
@@ -12612,6 +12624,7 @@ module Capybara
         # (…its Cookie the jar's alone, none where the jar gives none — a test's sticky one too)
         env.delete('HTTP_COOKIE')
         headers.each {|k, v| env[k] = v }
+        attach_cookies(env, url, cookie_context) if cookie_context
         extra_headers&.each {|k, v| env[k] = v }
         response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil
         response[0] = response[0].to_i
@@ -12631,7 +12644,8 @@ module Capybara
           url,
           'GET',
           network_headers,
-          extra_headers: {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
+          extra_headers:  {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s},
+          cookie_context: cookie_context
         ) or return PRELOAD_NETWORK_ERROR
         status, headers, resp_body = response
         store_set_cookies(headers, url, cookie_context)
