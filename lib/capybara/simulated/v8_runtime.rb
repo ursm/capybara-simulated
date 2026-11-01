@@ -335,12 +335,19 @@ module Capybara
 
       # A request of the host's into V8, the frame realms disposed meanwhile let go of once it is the outermost one and has
       # returned (`retire_realm`).
+      # (…the drain none after a request that raised — no page microtask runs behind a call that failed — and none of its
+      # own able to replace the request's result or exception: a terminated runaway, a host fn raising, logged)
       private def outermost
         @call_depth = (depth = @call_depth.to_i) + 1
-        yield
-      ensure
+        result = yield
         @call_depth = depth
-        dispose_retired_realms if depth.zero? && @retired_realms
+        dispose_retired_realms(drain: true) if depth.zero? && @retired_realms
+        result
+      ensure
+        if @call_depth != depth
+          @call_depth = depth
+          dispose_retired_realms(drain: false) if depth.zero? && @retired_realms
+        end
       end
       # A frame realm the page is done with, its context disposed once no request is under way: V8 refuses to dispose one
       # inside a microtask checkpoint or while a request of it is on the stack — a container's `load` listener removing its
@@ -351,11 +358,17 @@ module Capybara
       private def retire_realm(realm)
         (@retired_realms ||= []) << realm
       end
-      private def dispose_retired_realms
+      # (…`drain`: the promise jobs queued in them run first — what a task of theirs settled as it was removed, an XHR's
+      # events — each realm disposed whatever the drain did)
+      private def dispose_retired_realms(drain:)
         realms, @retired_realms = @retired_realms, nil
-        # (…the promise jobs queued in them run first — what a task of theirs settled as it was removed, an XHR's events)
-        drain_microtasks
-        realms.each {|realm| realm.dispose rescue nil }
+        begin
+          drain_microtasks if drain
+        rescue StandardError => e
+          @browser.log_console('warn', "microtask drain before disposing realms failed: #{e.message}")
+        ensure
+          realms.each {|realm| realm.dispose rescue nil }
+        end
       end
 
       # Route a host-fn call into a specific frame realm's context — or the
