@@ -337,6 +337,9 @@ module Capybara
       # returned (`retire_realm`).
       # (…the drain none after a request that raised — no page microtask runs behind a call that failed — and none of its
       # own able to replace the request's result or exception: a terminated runaway, a host fn raising, logged)
+      # (…and, the outermost one raising, the walks over a document's tree it left open ended — a termination runs no
+      # `finally` of the bindings', whose unload counters would otherwise stay raised, every navigation of those documents
+      # ignored from then on: unload_walks.rs `end_open_walks`)
       private def outermost
         @call_depth = (depth = @call_depth.to_i) + 1
         result = yield
@@ -346,8 +349,17 @@ module Capybara
       ensure
         if @call_depth != depth
           @call_depth = depth
-          dispose_retired_realms(drain: false) if depth.zero? && @retired_realms
+          if depth.zero?
+            end_open_walks
+            dispose_retired_realms(drain: false) if @retired_realms
+          end
         end
+      end
+      private def end_open_walks
+        ended = @ctx&.call('__csimEndOpenWalks').to_i
+        @browser.log_console('warn', "#{ended} unload walk(s) left open by a failed call ended") if ended.positive?
+      rescue StandardError
+        nil
       end
       # A frame realm the page is done with, its context disposed once no request is under way: V8 refuses to dispose one
       # inside a microtask checkpoint or while a request of it is on the stack — a container's `load` listener removing its

@@ -317,4 +317,50 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
       ]
     )
   end
+
+  # A frame whose own `beforeunload` handler removes it as the page is asked is destroyed once its handlers are done
+  # (HTML "destroy a child navigable"; its realm could not go with its script on the stack): its browsing context is
+  # discarded by the time the page is unloaded, and none of its own teardown fires.
+  it "destroys a frame its own beforeunload handler removed once the prompt has asked it" do
+    app = lambda do |env|
+      body = case env['PATH_INFO']
+             when '/top' then <<~HTML
+               <iframe src="/frame"></iframe><script>
+                 addEventListener('load', () => { window.held = frames[0] });
+                 addEventListener('unload', () => localStorage.setItem('closed', String(window.held.closed)));
+               </script>
+             HTML
+             when '/frame' then <<~HTML
+               <script>
+                 addEventListener('beforeunload', () => parent.document.querySelector('iframe').remove());
+                 addEventListener('unload', () => localStorage.setItem('frame-unload', 'fired'));
+               </script>
+             HTML
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/top'
+    poll_until { s.evaluate_script('window.held !== undefined') }
+    s.execute_script("localStorage.clear()")
+    s.visit '/after'
+
+    expect(s.evaluate_script("[localStorage.getItem('closed'), localStorage.getItem('frame-unload')]")).to eq(['true', nil])
+  end
+
+  # A walk a call left open — its `finally` never run, as a termination skips it — is ended as the call returns: the
+  # document it was asking navigates again.
+  it 'ends a walk a failed call left open' do
+    app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{env['PATH_INFO']}"]] }
+    s = simulated_session(app)
+    s.visit '/a'
+    expect {
+      s.execute_script("const walk = __dom.promptWalk(0, false); __dom.walkNext(walk); throw new Error('left open')")
+    }.to raise_error(/left open/)
+    s.execute_script("location.href = '/b'")
+    poll_until { s.evaluate_script('location.pathname') == '/b' }
+
+    expect(s).to have_current_path('/b')
+  end
 end

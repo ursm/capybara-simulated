@@ -3,10 +3,14 @@
 // - "checking if unloading is canceled": `beforeunload` at the active documents of the navigables it is given — a
 //   navigable's inclusive descendant navigables, in tree order — as they were when it began ("documentsToFireBeforeunload"),
 //   one destroyed since by a handler (its frame removed) skipped, as the task its event would be fired in is; each
-//   document's unload counter raised while its handlers run, so a navigation one of them makes is ignored;
+//   document's unload counter raised while its handlers run, so a navigation one of them makes is ignored — and one
+//   whose frame its own handlers removed destroyed as they are done (HTML "destroy a child navigable": its removal could
+//   not dispose a realm whose script was on the stack, handles.js `discardBrowsingContext`), `end_walk`;
 // - "unload a document and its descendants": each document unloaded after the documents of its child navigables — those
 //   it has as its own unloading begins — its unload counter raised from then until the walk ends, after the documents
 //   are destroyed (the host disposes their realms, `dispose_order`); one a handler took out of the tree since skipped.
+// A walk lives no longer than the host's call into the isolate it began in: one a termination left open (no `finally`
+// of the bindings' ran) is ended as the call returns (`end_open_walks`), its counters lowered.
 
 use std::collections::HashMap;
 
@@ -27,6 +31,8 @@ struct Walk {
     // a document a walk under way is unloading, which a frame removed by its handler walks again).
     reached: Vec<i32>,
     raised: Vec<i32>,
+    // …and, a prompt's, the documents its handlers took out of the tree as they were asked: to destroy.
+    removed: Vec<i32>,
 }
 
 enum Kind {
@@ -43,7 +49,7 @@ impl RealmArena {
         };
         let walks = &mut self.navigables.walks;
         walks.made = walks.made.wrapping_add(1);
-        walks.open.insert(walks.made, Walk { root, kind, pending, reached: Vec::new(), raised: Vec::new() });
+        walks.open.insert(walks.made, Walk { root, kind, pending, reached: Vec::new(), raised: Vec::new(), removed: Vec::new() });
         walks.made
     }
     // The realm of the next document walk `id` reaches, its unload counter raised — none where it is done.
@@ -52,7 +58,7 @@ impl RealmArena {
         let next = match walk.kind {
             Kind::Prompt { ref mut asking, traversal } => {
                 if let Some(done) = asking.take() {
-                    self.navigables.prompting.remove(&done);
+                    self.done_asking(done, walk.root, &mut walk.removed);
                 }
                 let next = std::iter::from_fn(|| walk.pending.pop()).map(|(r, _)| r).find(|&r| self.realm_under(r, walk.root));
                 if let Some(realm) = next.filter(|&r| !self.unloading(r)) {
@@ -100,15 +106,35 @@ impl RealmArena {
         }
         order
     }
-    // Walk `id` done: the unload counters it raised lowered.
-    pub(crate) fn end_walk(&mut self, id: u32) {
-        let Some(walk) = self.navigables.walks.open.remove(&id) else { return };
+    // A prompt done asking realm `realm`'s document: its counter lowered, and the document noted to destroy where its
+    // handlers took its frame out of the tree — one still fully active, which a removal by another's handler was not
+    // left to.
+    fn done_asking(&mut self, realm: i32, root: i32, removed: &mut Vec<i32>) {
+        self.navigables.prompting.remove(&realm);
+        if realm != root && !self.realm_under(realm, root) && self.navigables.fully_active(realm) {
+            removed.push(realm);
+        }
+    }
+    // Walk `id` done: the unload counters it raised lowered. Returns the documents its handlers took out of the tree as
+    // they were asked, whose realms the caller destroys.
+    pub(crate) fn end_walk(&mut self, id: u32) -> Vec<i32> {
+        let Some(mut walk) = self.navigables.walks.open.remove(&id) else { return Vec::new() };
         if let Kind::Prompt { asking: Some(realm), .. } = walk.kind {
-            self.navigables.prompting.remove(&realm);
+            self.done_asking(realm, walk.root, &mut walk.removed);
         }
         for realm in walk.raised {
             self.navigables.unloading.remove(&realm);
         }
+        walk.removed
+    }
+    // Every walk still open ended — none should be: a call into the isolate that returned left them (a termination).
+    // Returns how many.
+    pub(crate) fn end_open_walks(&mut self) -> usize {
+        let ids: Vec<u32> = self.navigables.walks.open.keys().copied().collect();
+        for &id in &ids {
+            self.end_walk(id);
+        }
+        ids.len()
     }
 }
 
@@ -118,6 +144,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "walkNext", walk_next, context_id);
     crate::dom::register(scope, ns, "walkDisposeOrder", walk_dispose_order, context_id);
     crate::dom::register(scope, ns, "walkEnd", walk_end, context_id);
+    crate::dom::register(scope, ns, "endOpenWalks", end_open_walks, context_id);
 }
 
 // __dom.promptWalk(realm, traversal) -> the walk asking realm `realm`'s document and its descendants' whether they may
@@ -149,11 +176,19 @@ fn walk_dispose_order(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallba
     let items: Vec<v8::Local<'_, v8::Value>> = order.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.walkEnd(walk) — the walk done (`end_walk`).
-fn walk_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.walkEnd(walk) -> the realms to destroy (`end_walk`), the walk done.
+fn walk_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    crate::dom::realm(scope, cid).end_walk(id);
+    let removed = crate::dom::realm(scope, cid).end_walk(id);
+    let items: Vec<v8::Local<'_, v8::Value>> = removed.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
+}
+// __dom.endOpenWalks() -> how many walks were left open, each ended (`end_open_walks`).
+fn end_open_walks(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let ended = crate::dom::realm(scope, cid).end_open_walks();
+    rv.set_uint32(u32::try_from(ended).unwrap_or(u32::MAX));
 }
 
 #[cfg(test)]
@@ -242,6 +277,33 @@ mod tests {
         assert_eq!(arena.walk_dispose_order(id, false), vec![3, 2]);
         arena.end_walk(id);
         assert!((0..4).all(|r| !arena.unloading(r)));
+    }
+
+    #[test]
+    fn a_prompt_destroys_a_document_whose_own_handler_removed_its_frame_once_it_is_asked() {
+        let (mut arena, [_, b, c]) = page();
+        let id = arena.begin_walk(0, Kind::Prompt { asking: None, traversal: false });
+        assert_eq!([0, 2, 3].map(|_| arena.walk_next(id)), [Some(0), Some(2), Some(3)]);
+        // (…`c`'s handler removing `c` itself: asked still, its realm not yet to go)
+        arena.discard_navigable(c);
+        assert!(arena.unloading(3));
+        assert_eq!(arena.walk_next(id), Some(1));
+        assert!(!arena.unloading(3));
+        // (…`b`'s removing `b`, the last asked, as the walk ends)
+        arena.discard_navigable(b);
+        assert_eq!(arena.end_walk(id), vec![3, 1]);
+    }
+
+    #[test]
+    fn walks_a_call_left_open_are_ended() {
+        let (mut arena, _) = page();
+        let unload = arena.begin_walk(0, Kind::Unload);
+        assert_eq!(arena.walk_next(unload), Some(3));
+        let prompt = arena.begin_walk(2, Kind::Prompt { asking: None, traversal: false });
+        assert_eq!(arena.walk_next(prompt), Some(2));
+        assert_eq!(arena.end_open_walks(), 2);
+        assert!((0..4).all(|r| !arena.unloading(r)));
+        assert_eq!(arena.end_open_walks(), 0);
     }
 
     #[test]
