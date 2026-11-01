@@ -97,6 +97,9 @@ const LOAD_OWED: u32 = 1 << 8;
 // The navigation's document built on a task not run yet (frame-nav.js `FN_BUILD_QUEUED`): a read of the frame's window
 // meanwhile is answered with its initial about:blank document's.
 const BUILD_QUEUED: u32 = 1 << 10;
+// Its window read while the navigation to its URL was under way and not built as it connects (`frameWindowRead`): built
+// as it connects from then on (`builds_eagerly`).
+const WINDOW_READ: u32 = 1 << 11;
 
 // A navigation the host makes of a frame's navigable, planned by the frame's own document or a hyperlink that targets it
 // (HTML "plan to navigate": the navigable's one, a later one replacing it — a form's of its parent's document as well):
@@ -259,6 +262,8 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "landFrameNavigation", land_frame_navigation, context_id);
     crate::dom::register(scope, ns, "frameNavigationPlanned", frame_navigation_planned, context_id);
     crate::dom::register(scope, ns, "cancelFrameNavigation", cancel_frame_navigation, context_id);
+    crate::dom::register(scope, ns, "stopFrameLoading", stop_frame_loading, context_id);
+    crate::dom::register(scope, ns, "frameWindowRead", frame_window_read, context_id);
     crate::dom::register(scope, ns, "cancelFrameLocation", cancel_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameLocation", plan_frame_location, context_id);
     crate::dom::register(scope, ns, "planFrameReload", plan_frame_reload, context_id);
@@ -509,6 +514,8 @@ fn plan_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCal
     }
     navs.1.next = navs.1.next.wrapping_add(1).max(1);
     let token = navs.1.next;
+    crate::dom::realm(scope, cid).stop_attribute_navigation(container);
+    let navs = &mut crate::dom::realm(scope, cid).frame_navigations;
     // (…the host's planned navigation of it replaced too)
     let nav = navs.0.entry(container).or_default();
     nav.planned = token;
@@ -660,6 +667,7 @@ fn plan_frame_location(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     let referrer = crate::referrer::navigation_referrer(arena, initiator, &policy);
     let sandbox = arena.get(container).and_then(|n| n.plain_attr("sandbox")).map(str::to_owned);
     let aborted = abort_document(arena, target);
+    arena.stop_attribute_navigation(container);
     let nav = arena.frame_navigation(container);
     nav.aborted_document = aborted;
     // (…a form's of its parent's document cancelled: its response loads into nothing, its pending `load` this one's)
@@ -983,7 +991,51 @@ fn supersede_frame_nav(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallb
     arena.supersede_frame_nav(container);
     crate::session_history::begin_navigation_of(arena, cid, Some(container));
 }
+// __dom.frameWindowRead(container, allHostsLocal) -> whether a read of the frame `container`'s window comes while the
+// navigation to its URL is under way — its `load` still owed, no document built, none queued: one not built as it connects
+// (`builds_eagerly`: an app's cross-origin embed) — which it then is from now on, the navigation begun again as one that
+// is (its `load` owed anew, `frameLoadBegin`), the frame at its initial about:blank until its build runs: HTML navigates
+// it in parallel whatever its origin (Chrome: about:blank as the parent parses, the embed's document after).
+fn frame_window_read(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(false);
+    let Some(container) = crate::node_handle::nid_of(scope, args.get(0)) else { return };
+    let all_hosts_local = args.get(1).is_true();
+    let doc = node_document(scope, args.get(0));
+    let cid = realm_id(scope, &args);
+    let arena = crate::dom::realm(scope, cid);
+    if arena.frame_nav(container) & (LOAD_OWED | BUILD_QUEUED) != LOAD_OWED || arena.frame_realm(container).is_some() {
+        return;
+    }
+    if arena.navigates_to_blank(container, doc) || arena.builds_eagerly(container, doc, cid, all_hosts_local) {
+        return;
+    }
+    arena.supersede_frame_nav(container);
+    let nav = arena.frame_navigation(container);
+    nav.flags = (nav.flags & !LOAD_FIRED) | WINDOW_READ;
+    rv.set_bool(true);
+}
+// __dom.stopFrameLoading(containerNid) -> whether HTML "stop loading" the container's navigable — its document opened again
+// (dom-nodes.js `_open`) — cancelled the navigation its attributes began (`stop_attribute_navigation`).
+fn stop_frame_loading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).stop_attribute_navigation(container));
+}
 impl RealmArena {
+    // The navigation the container's attributes began, its build still to commit — queued (`BUILD_QUEUED`), or the frame
+    // at the initial about:blank made meanwhile (`COMMIT_PENDING`) — cancelled: by another navigation of its navigable,
+    // which replaces it as the ongoing one (HTML "navigate": a location's, a link's or a form's targeting it, a
+    // `window.open` naming it), or by its document opened again ("stop loading"). Its build, run, then keeps the document
+    // the frame is at, and the element `load` it owed is owed no more (`supersede_frame_nav`) — the navigation replacing
+    // it owes its own. Whether there was one.
+    pub(crate) fn stop_attribute_navigation(&mut self, container: NodeId) -> bool {
+        if self.frame_nav(container) & (COMMIT_PENDING | BUILD_QUEUED) == 0 {
+            return false;
+        }
+        self.frame_navigation(container).flags &= !(COMMIT_PENDING | BUILD_QUEUED);
+        self.supersede_frame_nav(container);
+        true
+    }
     pub(crate) fn supersede_frame_nav(&mut self, container: NodeId) {
         let nav = self.frame_navigation(container);
         nav.generation = nav.generation.wrapping_add(1);
@@ -1317,6 +1369,9 @@ impl RealmArena {
         }
         if s.is_empty() || scheme("about:") {
             return false;
+        }
+        if nav.is_some_and(|n| n.flags & WINDOW_READ != 0) {
+            return true;
         }
         // (…a node of the realm's own document keeps none of its own: that document is its tree's root, a frame built
         // only as it is connected)

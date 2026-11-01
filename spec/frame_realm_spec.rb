@@ -89,14 +89,15 @@ RSpec.describe 'iframe contentDocument same-origin policy' do
   let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
+  # (…once the frame's navigation is in: until then it is its initial about:blank, of this document's origin — HTML
+  # navigates it in parallel)
   def content_doc_reachable(frame_html)
-    session.evaluate_script(<<~JS)
-      (function () {
-        const f = document.createElement('iframe');
-        #{frame_html}
-        document.body.appendChild(f);
-        return !!f.contentDocument;
-      })()
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.createElement('iframe');
+      #{frame_html}
+      f.onload = () => done(!!f.contentDocument);
+      document.body.appendChild(f);
     JS
   end
 
@@ -144,32 +145,28 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
   let(:session) { simulated_session(app) }
   before { session.visit '/' }
 
-  # Read `prop` off a freshly-appended cross-origin frame's contentWindow.
-  def cross_window_get(prop)
-    session.evaluate_script(<<~JS)
-      (function () {
-        const f = document.createElement('iframe');
-        f.src = 'http://cross.example.org/child';
-        document.body.appendChild(f);
-        try { const v = f.contentWindow.#{prop}; return 'ok:' + (typeof v); }
-        catch (e) { return e.name; }
-      })()
+  # Evaluate `body` (a JS function body given `f`, a freshly appended cross-origin frame, and `w`, its contentWindow)
+  # once the frame's document is in — until then it is its initial about:blank, of this document's origin: HTML navigates
+  # it in parallel.
+  def with_cross_frame(body)
+    session.evaluate_async_script(<<~JS)
+      const done = arguments[0];
+      const f = document.createElement('iframe');
+      f.src = 'http://cross.example.org/child';
+      f.onload = () => { const w = f.contentWindow; done((() => { #{body} })()); };
+      document.body.appendChild(f);
     JS
+  end
+
+  # Read `prop` off a cross-origin frame's contentWindow.
+  def cross_window_get(prop)
+    with_cross_frame("try { const v = w.#{prop}; return 'ok:' + (typeof v); } catch (e) { return e.name; }")
   end
 
   # Evaluate `expr` (a JS expression given `w` = the cross-origin frame's contentWindow),
   # returning `ok:<typeof>` or the thrown error's name.
   def cross_window_eval(expr)
-    session.evaluate_script(<<~JS)
-      (function () {
-        const f = document.createElement('iframe');
-        f.src = 'http://cross.example.org/child';
-        document.body.appendChild(f);
-        const w = f.contentWindow;
-        try { return 'ok:' + (typeof (#{expr})); }
-        catch (e) { return e.name; }
-      })()
-    JS
+    with_cross_frame("try { return 'ok:' + (typeof (#{expr})); } catch (e) { return e.name; }")
   end
 
   it 'throws SecurityError reading document on a cross-origin frame' do
@@ -230,19 +227,14 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
   # (b2) A Window member called with a cross-origin window as `this` passes Web IDL's security check only for a
   # CrossOriginProperty: the getter of `document` read off this window and called on the frame's throws, as reading
   # it through the frame does; its driver state is no more reachable; `postMessage` / `closed` stay callable.
-  it "security-checks a Window member called on a cross-origin window" do
+  it 'security-checks a Window member called on a cross-origin window' do
     expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'document').get.call(w)")).to eq('SecurityError')
     expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'name').get.call(w)")).to eq('SecurityError')
     expect(cross_window_eval('w.__csimDocument')).to eq('SecurityError')
     expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'closed').get.call(w)")).to eq('ok:boolean')
     expect(cross_window_eval("Object.getOwnPropertyDescriptor(window, 'opener').set.call(w, 7)")).to eq('SecurityError')
     expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "closed").enumerable')).to eq('ok:boolean')
-    expect(session.evaluate_script(<<~JS)).to eq(false)
-      (function () {
-        const f = document.createElement('iframe'); f.src = 'http://cross.example.org/child';
-        document.body.appendChild(f); return Object.getOwnPropertyDescriptor(f.contentWindow, 'closed').enumerable;
-      })()
-    JS
+    expect(with_cross_frame("return Object.getOwnPropertyDescriptor(w, 'closed').enumerable;")).to eq(false)
   end
 
   # (c) `[[Has]]` / `[[GetOwnProperty]]` are SOP-gated too, so a probe can't enumerate
@@ -255,14 +247,7 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
     expect(cross_window_eval("'postMessage' in w")).to eq('ok:boolean')
     expect(cross_window_eval('Object.getOwnPropertyDescriptor(w, "document")')).to eq('SecurityError')
     # A sensitive (configurable) own property name is hidden from enumeration too.
-    hidden = session.evaluate_script(<<~JS)
-      (function () {
-        const f = document.createElement('iframe'); f.src = 'http://cross.example.org/child';
-        document.body.appendChild(f);
-        return Object.getOwnPropertyNames(f.contentWindow).includes('document');
-      })()
-    JS
-    expect(hidden).to eq(false)
+    expect(with_cross_frame("return Object.getOwnPropertyNames(w).includes('document');")).to eq(false)
   end
 
   it 'allows full access to a same-origin frame window' do
@@ -292,7 +277,7 @@ RSpec.describe 'cross-origin WindowProxy same-origin policy' do
       const f = document.createElement('iframe');
       f.src = 'http://cross.example.org/child';
       document.body.appendChild(f);
-      void f.contentWindow;   // cross-origin frames build lazily — force the load
+      void f.contentWindow;   // a cross-origin frame read while it navigates is built (frameWindowRead)
     JS
     poll_until { session.evaluate_script("window.__r !== 'none'") }
     r = session.evaluate_script('window.__r')

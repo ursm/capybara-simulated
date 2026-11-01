@@ -78,7 +78,7 @@ RSpec.describe "a frame's initial about:blank document" do
 
   # The driver waits for the page's load, which waits for its frames' documents: `within_frame` right after `visit`
   # finds the src document's content, never the initial about:blank.
-  it "is never what within_frame finds after visit" do
+  it 'is never what within_frame finds after visit' do
     app = lambda {|env|
       next html.('<body><p id="inner">framed</p>') if env['PATH_INFO'] == '/child'
 
@@ -89,5 +89,97 @@ RSpec.describe "a frame's initial about:blank document" do
     session.within_frame('f') do
       expect(session.find(:css, '#inner').text).to eq('framed')
     end
+  end
+
+  # A javascript: URL navigating the frame is evaluated in its initial about:blank (HTML "evaluate a javascript: URL"),
+  # which stays where the result is no string: what the parent wrote into it, and set on its window, kept — the editor's
+  # `javascript:void 0` frame. Chrome 156, measured 2026-11-01.
+  it 'keeps a javascript: URL frame at the document its parent wrote into' do
+    app = lambda {|_env|
+      html.(<<~HTML)
+        <body><script>var log = [];</script>
+        <iframe id="f" src="javascript:void(parent.log.push('js ran foo=' + window.foo))"></iframe>
+        <script>
+          var w = f.contentWindow, d = f.contentDocument; w.foo = 'x'; d.body.innerHTML = 'kept';
+          f.onload = () => log.push('cload body=' + f.contentDocument.body.textContent + ' foo=' + f.contentWindow.foo + ' sameDoc=' + (d === f.contentDocument));
+        </script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 2 }
+    expect(session.evaluate_script('log')).to eq(['js ran foo=x', 'cload body=kept foo=x sameDoc=true'])
+  end
+
+  # `document.open()` of the initial about:blank stops the navigation its `src` began (HTML "document open steps" → "stop
+  # loading"): one container load, the written document's, which takes the URL of the document whose script opened it.
+  # Chrome 156 (which fires that load inside `close()`, Firefox after it) and Firefox 159 alike.
+  it 'is opened in place of the navigation, which document.open() stops' do
+    app = lambda {|env|
+      next html.('<body>child') if env['PATH_INFO'] == '/child'
+
+      html.(<<~HTML)
+        <body><script>
+          var log = [], f = document.createElement('iframe'); f.src = '/child'; document.body.append(f);
+          f.addEventListener('load', () => log.push('cload ' + f.contentDocument.URL + ' ' + f.contentDocument.body.textContent));
+          var d = f.contentDocument; d.open(); d.write('<body>written'); d.close();
+          log.push('url ' + d.URL);
+        </script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 2 }
+    sleep 0.1
+    expect(session.evaluate_script('log')).to eq(['url http://www.example.com/', 'cload http://www.example.com/ written'])
+  end
+
+  # Another navigation of the frame's navigable replaces the one its `src` began (HTML "navigate": one ongoing navigation)
+  # — its location's set on the initial about:blank, a link targeting it by name, `window.open` naming it: only the
+  # second document loads, its container's load fired once. Chrome 156 (WPT-style probes a7, a7b, a7c of the review).
+  {
+    'its location set on the initial about:blank' => "f.contentWindow.location.href = '/second';",
+    'a link targeting it by name'                 => 'l.click();',
+    '`window.open` naming it'                     => "open('/second', 'n');"
+  }.each do |how, navigate|
+    it "gives way to a later navigation of the frame: #{how}" do
+      app = lambda {|env|
+        next html.("<body><script>parent.log.push('script ' + location.pathname)</script>") unless env['PATH_INFO'] == '/'
+
+        html.(<<~HTML)
+          <body><script>var log = [];</script><iframe id="f" name="n" src="/first"></iframe><a id="l" href="/second" target="n">x</a>
+          <script>
+            f.addEventListener('load', () => log.push('cload ' + f.contentWindow.location.pathname));
+            #{navigate}
+          </script>
+        HTML
+      }
+      session = simulated_session(app)
+      session.visit '/'
+      poll_until { session.evaluate_script('log.length') >= 2 }
+      sleep 0.1
+      expect(session.evaluate_script('log')).to eq(['script /second', 'cload /second'])
+    end
+  end
+
+  # A frame of another origin, an app's embed, which is not built as it connects: read while its navigation is under way,
+  # it is the initial about:blank, of the parent's origin, and the embed's document after. Chrome 156.
+  it "is an embed's of another origin until its document is in" do
+    app = lambda {|env|
+      next html.('<body>embed') if env['HTTP_HOST'] == 'other.example'
+
+      html.(<<~HTML)
+        <body><script>var log = [];</script><iframe id="f" src="http://other.example/embed"></iframe>
+        <script>
+          var w = f.contentWindow;
+          log.push(w.location.href + ' ' + !!f.contentDocument);
+          f.onload = () => log.push('cload ' + (f.contentWindow === w) + ' ' + f.contentDocument);
+        </script>
+      HTML
+    }
+    session = simulated_session(app)
+    session.visit '/'
+    poll_until { session.evaluate_script('log.length') >= 2 }
+    expect(session.evaluate_script('log')).to eq(['about:blank true', 'cload true null'])
   end
 end
