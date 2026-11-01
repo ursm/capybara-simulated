@@ -109,4 +109,30 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', :every_host_
       expect(poll_until { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[t50 t100 m200 frame t400])
     end
   end
+
+  # (…and a dedicated worker's main script a service worker answers off a 300 ms timer, which the worker's own thread
+  # waits on in place (Browser#await_worker_reply off the window's thread): the service worker's timers run at the
+  # window's times all the same, what it posts meanwhile reaches the page at its time, nothing of the page's touched from
+  # the worker's thread, and the worker, waiting, holds up no step of the window's)
+  it "hears a worker whose main script a service worker answers late at its times" do
+    sw = "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));" \
+         "self.addEventListener('fetch', e => { if (!e.request.url.endsWith('/w.js')) return;" \
+         "setTimeout(() => self.clients.matchAll().then(cs => cs.forEach(c => c.postMessage('m100'))), 100);" \
+         "e.respondWith(new Promise(r => setTimeout(() => r(new Response(\"postMessage('w')\", {headers: {'content-type': 'text/javascript'}})), 300))); });"
+    page = <<~HTML
+      <!doctype html><meta charset=utf-8><script>globalThis.log = []; navigator.serviceWorker.onmessage = (e) => log.push(e.data);</script>
+      <button onclick="[50, 200, 500].forEach((t) => setTimeout(() => log.push('t' + t), t)); new Worker('/w.js').onmessage = (e) => log.push(e.data)">b</button>
+    HTML
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [sw]] if env['PATH_INFO'] == '/sw.js'
+
+      [200, {'content-type' => 'text/html'}, [page]]
+    })
+    session.visit '/a'
+    session.execute_script("navigator.serviceWorker.register('/sw.js')")
+    poll_until { session.evaluate_script('navigator.serviceWorker.controller !== null') }
+    session.visit '/a'
+    session.click_button 'b'
+    expect(poll_until { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[t50 m100 t200 w t500])
+  end
 end

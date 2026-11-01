@@ -210,6 +210,9 @@ module Capybara
         @driver                       = driver
         @all_hosts_local_override     = all_hosts_local
         @browsing_context_group       = "g#{object_id}"
+        # (…the thread the window's isolate is driven on: a worker's thread waiting on another worker touches nothing of
+        # the window's — `await_worker_reply`)
+        @main_thread                  = Thread.current
         # The page's joint session history, its frames' with it, and what a replay of each entry sends and restores
         # (session_history.rs) — made before the runtime, whose realms are told it.
         @session_history              = Native::SessionHistory.new
@@ -420,6 +423,9 @@ module Capybara
         # is parked here (a push-back would reorder it behind concurrent worker pushes) and
         # consumed first by the next deliver_worker_messages.
         @worker_outbox_head = nil
+        # What the service workers changed of their clients' control — their claims, their lifecycle phases — taken from
+        # the outbox and held for the window's next event-loop step (`hold_controller_changes`).
+        @held_controller_changes = []
         # What the workers owe this window and what it streams, races, awaits and holds its clock for across their threads
         # — the engine's (worker_host.rs `WorkerHost`), counted with no lock: the plain messages posted to a worker that it
         # may answer (`POSTED`: `polling?` stays true while one is outstanding, so long-running compute isn't starved by the
@@ -2090,7 +2096,10 @@ module Capybara
           # `worker_pending?`: `POSTED` (plain postMessage — a listen-only worker never
           # replies) and `BOOTING` have no matching reply, and blocking on them would
           # tax every settle on such pages with the full budget.
-          if worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil?
+          # (…nor while a worker waits in place on another's answer — a dedicated worker's main script or sync XHR a service
+          # worker answers, which owes a fetch: that answer comes as the window's time moves, a service worker's timer
+          # running at it, which a window parked here would not move: `worker_awaits_worker?`)
+          if worker_reply_pending? && @worker_outbox.empty? && @worker_outbox_head.nil? && !worker_awaits_worker?
             worker_wait_deadline ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
             park_worker_reply(worker_wait_deadline) while worker_reply_pending? &&
               @worker_outbox.empty? && @worker_outbox_head.nil? &&
@@ -3058,6 +3067,9 @@ module Capybara
         @ticking = true
         note_url_changes
         begin
+          # (…what a service worker changed of its clients' control held for the window's step, which this advance is —
+          # one of no step at all, the page with no timer, too: `hold_controller_changes`)
+          apply_controller_changes
           now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           # Kept wall-anchored ONLY for `timer_wait_elapsed?` / FIND_PRE_TICK_MIN_S
           # (gates tick FREQUENCY for the smoke first-find-no-fire contract); the
@@ -3220,7 +3232,8 @@ module Capybara
         # `settle` — and deliver the reply at the current instant, WITHOUT advancing the clock, then
         # keep pumping. A fetch that never replies is bounded by its hold's budget (`ClockHolds::FETCH`; and, past
         # that, the caller's own max-steps backstop), so it can't wedge the drain.
-        if @worker_host.owed?(OWED_FETCH) && (held = hold_for_sw_fetch(turns))
+        # (…none while a worker waits in place on another's answer, which the window's time moving brings: `worker_awaits_worker?`)
+        if @worker_host.owed?(OWED_FETCH) && !worker_awaits_worker? && (held = hold_for_sw_fetch(turns))
           return held
         end
 
@@ -5511,17 +5524,25 @@ module Capybara
       # The reply to `fetch_id` a thread waits for in place (`WorkerHost#await_direct`, `#await_navigation`), awaited for
       # WORKER_ROUND_TRIP_BUDGET with the GVL released, a poll interval at a time — nil where none came, or the wait was
       # let go of meanwhile (a session's reset).
-      # (…the window's event loop stopped while it waits, the awaited worker's clock moves on real time meanwhile — its
-      # record's `:awaited`, which its thread reads — as no window step can move it; no other worker's: `worker_now`)
+      # (…where the window's thread waits here, its event loop stopped, no window step comes to move the awaited worker's
+      # clock: it moves on real time meanwhile — its record's `:awaited`, which its thread reads (`worker_now`) — and the
+      # window's clock follows it after (`window_follows_awaited_worker`). Where another worker's thread waits — a
+      # dedicated worker's main script a service worker answers — the window's event loop goes on, and the awaited worker
+      # with it, in the lockstep: nothing of the window's touched from that thread, whose isolate is not the page's; the
+      # waiting worker, blocked, its timers unable to run, no worker the window's steps wait on (`lockstep_worker?`, its
+      # `:blocked`), nor one the window's settle parks for: `worker_awaits_worker?`)
       private def await_worker_reply(fetch_id, worker = nil)
-        worker[:awaited] = worker[:awaited].to_i + 1 if worker
+        waiting = Thread.current[:csim_worker_record] unless Thread.current == @main_thread
+        waiting[:blocked] = waiting[:blocked].to_i + 1 if waiting
+        worker[:awaited] = worker[:awaited].to_i + 1 if worker && !waiting
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
           reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min) and return reply
         end
         nil
       ensure
-        if worker
+        waiting[:blocked] -= 1 if waiting
+        if worker && !waiting
           worker[:awaited] -= 1
           window_follows_awaited_worker(worker)
         end
@@ -5996,6 +6017,11 @@ module Capybara
       def step_sw_activation
         taking_window_tasks do
           next 0 if deliver_worker_messages.positive?
+          # (…a claim or a phase held for the window's step taken by one: `hold_controller_changes`)
+          if controller_changes_held?
+            @runtime.run_loop_step(0)
+            next 0
+          end
 
           worker = sw_next_timer_at&.-(@runtime.clock)
           if worker_drive_pending? || !sw_workers_parked? || worker&.<=(0)
@@ -6064,16 +6090,30 @@ module Capybara
           w[:inbox] << {kind: 'tick', to: now}
         end
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
-        due.each do |w|
-          left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          w[:lagging] = !(left.positive? && w[:thread]&.alive? && pop_with_timeout(w[:ticked], left))
-        end
+        due.each {|w| w[:lagging] = !tick_answered?(w, deadline) }
         deliver_worker_messages
         nil
       end
+      # …whether worker `w` answered its tick by `deadline` — or, blocked meanwhile on another worker's answer
+      # (`await_worker_reply`: a main script, a sync XHR a service worker answers, which the window's steps let it make), is
+      # waited for no more and counts as answered: it is not lagging, it waits on the window.
+      private def tick_answered?(w, deadline)
+        loop do
+          return false unless w[:thread]&.alive?
+          return true if w[:blocked].to_i.positive?
+
+          left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          return false unless left.positive?
+          return true if pop_with_timeout(w[:ticked], [left, WORKER_BLOCK_POLL].min)
+        end
+      end
+      WORKER_BLOCK_POLL = 0.01
+      # …whether a worker of this window's waits in place on another worker's answer (`await_worker_reply`: its `:blocked`)
+      # — one the window's steps bring, the answering worker's timers running at the window's time.
+      private def worker_awaits_worker? = !@workers.empty? && @workers.values.any? {|w| w[:blocked].to_i.positive? }
       # …a live worker in the lockstep: not one left lagging — but one whose answer came in since, back in it.
       private def lockstep_worker?(w)
-        return false unless w[:thread]&.alive? && w[:next_timer_at]
+        return false unless w[:thread]&.alive? && w[:next_timer_at] && w[:blocked].to_i.zero?
 
         w[:lagging] = false if w[:lagging] && !w[:ticked].empty?
         !w[:lagging]
@@ -7496,52 +7536,9 @@ module Capybara
         # can land in the same drain batch, and its lifecycle must have begun to take it
         # (skip-waiting "both active and waiting" hang).
         sw_evals.each {|e| sw_job_evaluated(e[:handle].to_i, e[:ok], e[:msg]) }
-        # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
-        # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
-        # Processed BEFORE the phase markers below: the worker emits its activate-handler claim
-        # ahead of its 'sw_phase', and the phase marker is what resumes the client-side
-        # 'activated' step — a claim handled after it would let `wait_for_state(..., 'activated')`
-        # resolve with the claimed frame's controller still unset (the activation.https flake).
-        # Process LONGEST scope first: when nested-scope workers claim in the same drain, the deeper
-        # registration must be installed before the shallower one runs, or a client the shallow claim
-        # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
-        # page would double-fire). A worker claims only once active (workers.js `claim()`), which the
-        # host's Activate step made it before telling it to fire activate (sw_registry.rs
-        # `continue_activating`), so its scope is the registry's here — a claim of one whose
-        # registration left the map since claims nothing. TRADEOFF: partition processing can't keep
-        # both claim<phase and message<claim, so a worker's same-turn `client.postMessage(x);
-        # clients.claim()` now delivers the claim's controllerchange BEFORE message x (these are
-        # separate task sources in a real browser; no ordering contract is broken, but it inverts the
-        # previous within-batch order).
-        # An ACTIVATING worker's claim applies immediately too (claim is valid from state
-        # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
-        # controlled — its fetches then park on the activation, not the claim).
-        claims.map {|e| [e, sw_scope_of(e[:handle].to_i)] }
-              .sort_by {|_e, scope| -(scope ? scope.length : -1) }
-              .each do |e, scope|
-          broadcast_claim(e[:handle], e[:has_fetch], scope) if scope
-        end
-        # A worker finished a lifecycle phase — its lifecycle parks its observable states on
-        # these: 'installed' on the install marker (whose `ok:false` — a rejected install
-        # waitUntil — fails the version to redundant instead), and 'activated' on the activated
-        # marker (its claims are handled just above, so they are in place before the state is
-        # observable). The activated
-        # marker also releases the functional events Handle Fetch parked while the worker was
-        # 'activating' (fetch-waits-for-activate): the record flag flips FIRST (new dispatches
-        # stop deferring), then the resumed step makes it the worker serving its scope, then the
-        # parked fetches/navigations replay against the now-complete state.
-        sw_phases.each do |e|
-          h     = e[:handle].to_i
-          phase = e[:phase].to_s
-          Native.sw_note_phase(@sw_partition, h, phase, !e.key?(:ok) || e[:ok])
-          sw_resume_step(h, phase == 'install' ? 'install' : 'activation')
-        end
-        sw_phases.each do |e|
-          next unless e[:phase].to_s == 'activated'
-
-          flush_sw_deferred_fetches(e[:handle].to_i)
-          retry_deferred_navigations
-        end
+        # What changes a client's control — a claim, a lifecycle phase — held for the window's next step, in the order the
+        # workers made them (`hold_controller_changes`).
+        hold_controller_changes(claims, sw_phases)
         # A reaped SERVICE worker (posted by reap_worker, possibly from a worker thread):
         # main-thread cleanup of the activation-parking state it can no longer satisfy, and of
         # the jobs waiting on it (sw_registry.rs `job_worker_gone_for_ruby`).
@@ -7634,6 +7631,92 @@ module Capybara
         events.size
       end
 
+      # Window-first: what a service worker changes of its clients' control — its `clients.claim()`, a lifecycle phase (the
+      # 'activated' one makes it the worker serving its scope) — is applied at a step boundary of the window's event loop
+      # (V8Runtime#run_loop_step: `apply_controller_changes`), never by a read or a command of the host's that merely
+      # drained the outbox. A worker runs on its own thread, so when its claim reaches the outbox is a matter of real time,
+      # not of the window's: were a command's drain to apply it, a script that command runs at the same virtual time — one
+      # appending a `<video>` whose fetch the claim would route — would find its client controlled or not as the thread
+      # scheduler had it. Held, the command's script runs first, at the time it was issued, and the claim takes effect
+      # with the window's next step: what a page reads of its control (its realm's `navigator.serviceWorker.controller`)
+      # and what routes its fetches (the registry's record of its client's controller, which `broadcast_claim` writes
+      # with it) move together, at a time of the window's. The spec allows either order — the claim's controller change
+      # is a task queued from the worker's parallel steps — and this is the one no machine's load can change.
+      # The phases ride with the claims, in order, so a claim is in place before the 'activated' after it is observable
+      # (the activation.https flake); a phase with no claim held before it is applied at once, as nothing of the window's
+      # orders it.
+      private def hold_controller_changes(claims, phases)
+        if claims.empty? && @held_controller_changes.empty?
+          apply_sw_phases(phases)
+        elsif !(claims.empty? && phases.empty?)
+          @held_controller_changes << [claims, phases]
+        end
+      end
+      # …applied, in the order they were held. (…a held one is work pending (`worker_drive_pending?`), which a settle
+      # steps for)
+      def apply_controller_changes
+        return if @held_controller_changes.empty?
+
+        held, @held_controller_changes = @held_controller_changes, []
+        held.each do |claims, phases|
+          apply_sw_claims(claims)
+          apply_sw_phases(phases)
+        end
+      end
+      private def controller_changes_held? = !@held_controller_changes.empty?
+
+      # clients.claim(): the claiming worker takes control of EVERY in-scope client — including
+      # ones that never register()'d (an iframe built before the SW existed). See broadcast_claim.
+      # Processed BEFORE the phase markers below: the worker emits its activate-handler claim
+      # ahead of its 'sw_phase', and the phase marker is what resumes the client-side
+      # 'activated' step — a claim handled after it would let `wait_for_state(..., 'activated')`
+      # resolve with the claimed frame's controller still unset (the activation.https flake).
+      # Process LONGEST scope first: when nested-scope workers claim in the same drain, the deeper
+      # registration must be installed before the shallower one runs, or a client the shallow claim
+      # transiently seizes would fire a spurious extra controllerchange (a reload-on-controllerchange
+      # page would double-fire). A worker claims only once active (workers.js `claim()`), which the
+      # host's Activate step made it before telling it to fire activate (sw_registry.rs
+      # `continue_activating`), so its scope is the registry's here — a claim of one whose
+      # registration left the map since claims nothing. TRADEOFF: partition processing can't keep
+      # both claim<phase and message<claim, so a worker's same-turn `client.postMessage(x);
+      # clients.claim()` now delivers the claim's controllerchange BEFORE message x (these are
+      # separate task sources in a real browser; no ordering contract is broken, but it inverts the
+      # previous within-batch order).
+      # An ACTIVATING worker's claim applies immediately too (claim is valid from state
+      # 'activating'; fetch-waits-for-activate claims mid-activate and expects the client
+      # controlled — its fetches then park on the activation, not the claim).
+      private def apply_sw_claims(claims)
+        claims.map {|e| [e, sw_scope_of(e[:handle].to_i)] }
+              .sort_by {|_e, scope| -(scope ? scope.length : -1) }
+              .each do |e, scope|
+          broadcast_claim(e[:handle], e[:has_fetch], scope) if scope
+        end
+      end
+
+      # A worker finished a lifecycle phase — its lifecycle parks its observable states on
+      # these: 'installed' on the install marker (whose `ok:false` — a rejected install
+      # waitUntil — fails the version to redundant instead), and 'activated' on the activated
+      # marker (the claims held with it applied first, so they are in place before the state is
+      # observable). The activated
+      # marker also releases the functional events Handle Fetch parked while the worker was
+      # 'activating' (fetch-waits-for-activate): the record flag flips FIRST (new dispatches
+      # stop deferring), then the resumed step makes it the worker serving its scope, then the
+      # parked fetches/navigations replay against the now-complete state.
+      private def apply_sw_phases(sw_phases)
+        sw_phases.each do |e|
+          h     = e[:handle].to_i
+          phase = e[:phase].to_s
+          Native.sw_note_phase(@sw_partition, h, phase, !e.key?(:ok) || e[:ok])
+          sw_resume_step(h, phase == 'install' ? 'install' : 'activation')
+        end
+        sw_phases.each do |e|
+          next unless e[:phase].to_s == 'activated'
+
+          flush_sw_deferred_fetches(e[:handle].to_i)
+          retry_deferred_navigations
+        end
+      end
+
       def worker_timers_pending? = @workers.each_value.any? {|r| r[:timers_due] && !r[:stopping] }
       # The ms until the soonest timer any live worker has parked (-1 = none) — a page waiting on a worker's `setTimeout`
       # waits on it as on its own (the WPT drain's parked-timer progress): the worker's clock follows the window's, so the
@@ -7642,7 +7725,7 @@ module Capybara
         @workers.each_value.filter_map {|r| r[:next_timer] if r[:timers_due] && !r[:stopping] && r[:next_timer] }.min || -1.0
       end
 
-      def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || @worker_host.owed?(OWED_ANY)
+      def worker_pending? = !@worker_outbox.empty? || !@worker_outbox_head.nil? || controller_changes_held? || @worker_host.owed?(OWED_ANY)
 
       # The subset of worker pendings whose outbox reply is CONTRACTUAL (bcack / swack /
       # fetch_response are posted under `ensure`, so they arrive even when the worker-side
@@ -7666,7 +7749,7 @@ module Capybara
       # `POSTED`: a listen-only worker holds that forever and would pin a drain
       # loop to its max-steps backstop.
       def worker_drive_pending?
-        !@worker_outbox.empty? || !@worker_outbox_head.nil? ||
+        !@worker_outbox.empty? || !@worker_outbox_head.nil? || controller_changes_held? ||
           worker_reply_pending? ||
           @worker_host.owed?(OWED_WORK) ||
           (!@workers.empty? && @workers.to_a.any? {|_h, w| !w[:inbox].empty? && w[:thread]&.alive? })
@@ -8710,6 +8793,7 @@ module Capybara
         @workers.clear
         @worker_outbox.clear
         @worker_outbox_head = nil
+        @held_controller_changes.clear
         # Nothing owed, streamed, raced, awaited or held for any more, and no client id adopted: the adopted ids go with
         # the client registry (the reserved ids a navigation mints are the process's, never reset — `mint_resulting_client_id`).
         @worker_host.reset

@@ -458,6 +458,7 @@ module Capybara
         # loops themselves (timers.js `drainChildRealms`), so this one call covers
         # child frames too — no separate Ruby-side fan-out (which would
         # double-advance their clocks and fire intervals twice).
+        @browser.apply_controller_changes
         @browser.running_event_loop { walks_guarded { max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i) } }
       end
 
@@ -470,15 +471,18 @@ module Capybara
       # window goes on: Browser#worker_due_within, #run_workers_due — one virtual time for the two event loops, the
       # window's — `max_ms` reached all the same, its iteration budget shared, and the steps' answers folded: what fired,
       # in all, whether any dirtied, the last's frame and settle gen; one that `yield_on_gen` ended on a change the last)
+      # (…what the service workers changed of their clients' control applied at each of its boundaries, before its tasks
+      # run: Browser#hold_controller_changes)
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
         left    = max_ms.to_i
         out     = nil
         waited  = 0.0
         loop do
+          @browser.apply_controller_changes
           cut = @browser.worker_due_within(left, waited)
           # `__runLoopStep` steps child iframe realms itself (timers.js
           # `drainChildRealms`), folding their fired/dirtied into the result.
-          r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } }
+          r = @browser.running_event_loop { stepping { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } } }
           r = { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
           @clock = r['now'].to_f if r['now']
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
@@ -499,9 +503,17 @@ module Capybara
       # run first, in the order of their times — none from inside a call of the host's into the window, which a step must
       # not nest in.
       def run_due_by(at)
-        return if @call_depth.to_i.positive? || !@clock || at >= @clock
+        return if @call_depth.to_i.positive? || @stepping || !@clock || at >= @clock
 
         run_loop_step((at - @clock).floor)
+      end
+
+      # (…a step under way, which a host fn a task of it calls must not nest another in: `run_due_by`)
+      private def stepping
+        was, @stepping = @stepping, true
+        yield
+      ensure
+        @stepping = was
       end
 
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
