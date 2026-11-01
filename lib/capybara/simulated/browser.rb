@@ -5594,6 +5594,9 @@ module Capybara
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
           reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min) and return reply
+          # (…none from a worker whose thread is gone — a request it never took answered as it was reaped, so this one it
+          # took and dropped)
+          break if worker && worker[:thread] && !worker[:thread].alive?
         end
         nil
       ensure
@@ -5610,7 +5613,9 @@ module Capybara
       # for the window too: its clock moved to the worker's, no task of its run; and what the worker posted meanwhile
       # delivered at once, each a task queued at that time — before the page's timers due after it, after those due
       # before it, which are overdue now and run first: in the order of their times (`worker_due_within`).
-      # (…`follower` a window inside running script: its clock alone moved)
+      # (…`follower` a window inside running script: its clock alone moved, what the worker posted delivered at its next
+      # step — after the timers overdue by then, which that step runs first: HTML orders no task sources against each
+      # other)
       private def window_follows_awaited_worker(worker, follower = nil)
         return unless worker[:awaited].zero? && worker[:now]
 
@@ -6225,7 +6230,7 @@ module Capybara
           return true if w[:blocked].to_i.positive?
 
           left = worker_deadline(w, start) - Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          return false unless left.positive?
+          return !w[:ticked].empty? unless left.positive?
           return true if pop_with_timeout(w[:ticked], [left, WORKER_BLOCK_POLL].min)
         end
       end
