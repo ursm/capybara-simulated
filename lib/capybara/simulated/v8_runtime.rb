@@ -455,8 +455,9 @@ module Capybara
       # `realm_tree`): [the realm whose document its container was in — 0 the page's, or none: a window's — its depth,
       # the navigable it was the active document of (0 for none), whether its document was that navigable's first, the
       # number of the top-level traversable whose session history its navigable's entries are in (0 for none), the realm
-      # of the top-level document it was made under — a window's `window.open` made in this isolate, or the page's, 0].
-      def frame_realm_tree(realm_id) = realm_direct_call(0, '__csimRealmTree', realm_id.to_i) || [0, 0, 0, false, 0, 0]
+      # of the top-level document it was made under — a window's `window.open` made in this isolate, or the page's, 0;
+      # -1 for a realm the tree does not know: dropped, or never a frame's].
+      def frame_realm_tree(realm_id) = realm_direct_call(0, '__csimRealmTree', realm_id.to_i) || [0, 0, 0, false, 0, -1]
       # …the realm that OWNS its container, which a form/navigation that reaches a frame via `contentWindow` (so it never
       # entered `within_frame` and has no `@frame_stack` entry) rebuilds + rebinds it through.
       def frame_realm_parent(realm_id)
@@ -1154,18 +1155,21 @@ module Capybara
       # this isolate is opened in (`window_group`), its page's group left by a navigation since (Browser#enforce_coop)
       # keeping it.
       def page_group = [@browser.browsing_context_group, @cross_origin_isolated == true]
-      # …and that of the top-level document realm `realm`'s is in: a window's its own, the page's otherwise.
+      # …and that of the top-level document realm `realm`'s is in: a window's its own, the page's otherwise — that of a
+      # realm the tree does not know among them, which no window's group is kept for.
       def window_group(realm)
         return page_group if window_realm_meta.empty?
 
         window_realm_meta.dig(top_level_realm(realm), :group) || page_group
       end
       # The realm of the top-level document realm `realm`'s is in: a window's `window.open` made in this isolate, or the
-      # page's, 0 (`frame_realm_tree`).
+      # page's, 0 — nil for a realm the tree does not know (`frame_realm_tree`): one dropped, whose document has no
+      # top-level one any more.
       def top_level_realm(realm)
-        return 0 if realm.to_i.zero? || window_realm_meta.empty?
+        return 0 if realm.to_i.zero?
 
-        frame_realm_tree(realm)[5]
+        top = frame_realm_tree(realm)[5]
+        top unless top.negative?
       end
 
       def create_frame_realm(

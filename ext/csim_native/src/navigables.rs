@@ -422,6 +422,12 @@ impl RealmArena {
     pub(crate) fn top_level_realm(&self, realm: i32) -> i32 {
         self.navigables.tops.get(&realm).copied().unwrap_or(realm)
     }
+    // …none for a realm the tree does not know: no frame's (or one dropped), nor the page's, nor a window's.
+    pub(crate) fn known_top_level_realm(&self, realm: i32) -> Option<i32> {
+        let nav = &self.navigables;
+        let known = realm == 0 || nav.tops.contains_key(&realm) || nav.windows.contains(&realm) || nav.window_keys.contains_key(&realm);
+        known.then(|| self.top_level_realm(realm))
+    }
     // `container`'s navigable destroyed — its container left its document. Whether that lost one between two documents
     // (`lost`), whose WindowProxies are then to be dropped.
     pub(crate) fn discard_navigable(&mut self, container: NodeId) -> bool {
@@ -1448,7 +1454,7 @@ fn realm_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let arena = crate::dom::realm(scope, cid);
     let (parent, depth, navigable, first) = arena.realm_tree(realm);
     let traversable = crate::session_history::traversable_id_of(arena, realm);
-    let top = arena.top_level_realm(realm);
+    let top = arena.known_top_level_realm(realm).unwrap_or(-1);
     let items = [
         v8::Integer::new(scope, parent).into(),
         v8::Integer::new_from_unsigned(scope, depth).into(),

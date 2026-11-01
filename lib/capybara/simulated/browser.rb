@@ -7645,7 +7645,8 @@ module Capybara
       def opener_policy_isolates?(realm)
         return false unless %w[same-origin same-origin-plus-COEP].include?(document_coop(realm))
 
-        document_origin(realm) != document_origin(@runtime.top_level_realm(realm))
+        top = @runtime.top_level_realm(realm)
+        !top.nil? && document_origin(realm) != document_origin(top)
       end
       # The top-level traversable of window realm `realm`, whose navigation response left its browsing context group for a
       # Browser of its own (Driver#move_window_to_new_group) — kept by the switch, which replaces the browsing context, not
@@ -12183,16 +12184,17 @@ module Capybara
         Native.coop_value(header.('cross-origin-opener-policy'), header.('cross-origin-embedder-policy'))
       end
       # …that of the top-level document realm `realm`'s is in: the page's, or a window's `window.open` made in this
-      # isolate — its initial about:blank's its creator's (`creator_coop`).
+      # isolate — its initial about:blank's its creator's (`creator_coop`) — none for a realm with no top-level document.
       def document_coop(realm)
         top = @runtime.top_level_realm(realm)
-        (top.zero? ? @page_coop : @runtime.window_realm_meta.dig(top, :coop)) || 'unsafe-none'
+        (top&.zero? ? @page_coop : @runtime.window_realm_meta.dig(top, :coop)) || 'unsafe-none'
       end
       # …the one a new window's initial about:blank takes of the document of realm `creator` that opened it: its top-level
       # document's, where its origin is that one's (HTML "create a new browsing context and document" step 19), else none.
       private def creator_coop(creator)
         origin = document_origin(creator)
-        origin != 'null' && origin == document_origin(@runtime.top_level_realm(creator)) ? document_coop(creator) : 'unsafe-none'
+        top    = @runtime.top_level_realm(creator)
+        top && origin != 'null' && origin == document_origin(top) ? document_coop(creator) : 'unsafe-none'
       end
       # HTML's opener policy enforcement result of a navigation of the top-level traversable whose document is realm
       # `realm`'s — the page's, a window's — as it begins: that document's origin and opener policy, whether it is its
