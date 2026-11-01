@@ -12113,6 +12113,11 @@ module Capybara
       # …the history kept as it stood before — none, for a window at its initial about:blank — for a navigation that makes
       # no document to leave it as it was.
       private def save_navigation_history = @session_history.save(0)
+      # …and restored, the entry the page's document was to leave (`leave_page_entry`) left by none: no document unloads.
+      private def restore_navigation_history
+        @page_leaving_entry = nil
+        @session_history.restore(0)
+      end
       # Whether a navigation's response is a 204 / 205 — HTML "navigate" ("populate a session history entry's document"):
       # the navigation aborted, the navigable at the document it is at, no `load` and no session history entry (Chrome,
       # measured 2026-10-24: the page's link and form, a frame's form, link, `location` and `src` alike).
@@ -12141,7 +12146,7 @@ module Capybara
       # after it replaces)
       private def navigation_made_no_document(url)
         @current_url = url unless window_has_document?
-        @session_history.restore(0)
+        restore_navigation_history
         @session_history.forget(0)
         restore_flushed_nav_intents
         nil
@@ -12154,7 +12159,7 @@ module Capybara
       private def navigation_made_no_content(url)
         return navigation_made_no_document(url) if window_has_document?
 
-        @session_history.restore(0)
+        restore_navigation_history
         @session_history.forget(0)
         @current_url     = 'about:blank'
         @current_referer = ''   # (…its referrer its creator's, none of the navigation that made no document)
