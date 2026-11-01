@@ -138,4 +138,69 @@ RSpec.describe 'the load "the end" queues' do
       expect(s.evaluate_script('log')).to eq(['page'])
     end
   end
+
+  # HTML "the end" step 6: DOMContentLoaded is a task of its own, queued as the parse ends — after the microtasks the
+  # `interactive` readystatechange queued, ahead of the timers the parse queued (HTML lets the event loop choose among task
+  # sources; Chrome 156 and Firefox 159 both fire it before those, measured 2026-11-01) — and the load after what its
+  # handlers queue (Firefox 159; Chrome 156 fires the load first), its animation frames after the load.
+  it 'fires DOMContentLoaded as a task of its own, ahead of the tasks the parse queued' do
+    s = session_for('/' => <<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><script>
+        window.log = [];
+        document.addEventListener('readystatechange', () => {
+          log.push('rsc ' + document.readyState);
+          Promise.resolve().then(() => log.push('rsc microtask'));
+        });
+        setTimeout(() => log.push('parse timeout'), 0);
+        requestAnimationFrame(() => log.push('frame'));
+        document.addEventListener('DOMContentLoaded', () => {
+          log.push('dcl ' + document.readyState);
+          setTimeout(() => log.push('dcl timeout'), 0);
+        });
+        addEventListener('load', () => log.push('load'));
+      </script>
+    HTML
+    s.visit '/'
+    s.document.synchronize(3) { raise Capybara::ExpectationNotMet unless s.evaluate_script('log.includes("frame")') }
+    expect(s.evaluate_script('log')).to eq(
+      [
+        'rsc interactive',
+        'rsc microtask',
+        'dcl interactive',
+        'parse timeout',
+        'dcl timeout',
+        'rsc complete',
+        'rsc microtask',
+        'load',
+        'frame'
+      ]
+    )
+  end
+
+  # …once, before its load, for a frame's document too — whose build fires its load as it ends, before any task of its
+  # own runs — and none for one a navigation aborted as it parsed.
+  it "fires a frame's DOMContentLoaded before its load, and none for a document aborted as it parsed" do
+    s = session_for(
+      '/'       => <<~HTML,
+        <!DOCTYPE html><meta charset="utf-8"><script>window.log = [];</script>
+        <iframe src="/frame"></iframe><iframe src="/aborts"></iframe>
+      HTML
+      '/frame'  => <<~HTML,
+        <script>
+          document.addEventListener('DOMContentLoaded', () => parent.log.push('frame dcl'));
+          addEventListener('load', () => parent.log.push('frame load'));
+        </script>
+      HTML
+      '/aborts' => <<~HTML,
+        <script>
+          document.addEventListener('DOMContentLoaded', () => parent.log.push('aborted dcl'));
+          location.href = '/done';
+        </script>
+      HTML
+      '/done'   => 'done'
+    )
+    s.visit '/'
+    s.has_css?('#never', wait: 0.3)
+    expect(s.evaluate_script('log')).to eq(['frame dcl', 'frame load'])
+  end
 end

@@ -71,6 +71,9 @@ fn take(gates: &mut LoadGates, id: u32) -> bool {
 fn flush_load_gates_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Ok(run) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
     let cid = realm_id(scope, &args);
+    flush(scope, cid, run);
+}
+pub(crate) fn flush(scope: &mut v8::PinScope<'_, '_>, cid: i32, run: v8::Local<'_, v8::Function>) {
     let document = realm(scope, cid).realm_document(cid);
     for _ in 0..FLUSH_ROUNDS {
         let candidates: Vec<(u32, Option<NodeId>)> = match gates_of(scope, cid) {

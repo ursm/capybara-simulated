@@ -1,21 +1,23 @@
-// A document's state that is no node's tree (DOM §4.5, HTML §3.1): its mode (no-quirks, limited-quirks, quirks), its
-// readiness (loading, interactive, complete), whether it has a browsing context, whether it is an XMLDocument (the
-// interface's brand — no content type's XML-ness, the node's `STATE_XML_DOCUMENT`), whether a scoped custom element
-// registry initialized it, its throw-on-dynamic-markup-insertion counter (HTML §8.4.1), and its currently executing
-// script (`currentScript`, HTML §3.1.5: the script element running, null in a shadow tree or a module) — and the texts
-// that describe it (DOM §4.5: its URL, its encoding, its content type; HTML: its `document.domain`, the base URL an
-// about: one inherits from its creator) and when it was last modified (`docText`) — kept by the document's node, let go
-// of with it. The bindings read and write each (`docState`, the Document's `_quirks`,
-// `_readyState`, … accessors: dom-nodes.js), and the parser sets the mode it finds.
+// A document's state that is no node's tree (DOM §4.5, HTML §3.1): its mode (no-quirks, limited-quirks, quirks), its load
+// lifecycle (its readiness — loading, interactive, complete — among it: document_lifecycle.rs), whether it has a
+// browsing context, whether it is an XMLDocument (the interface's brand — no content type's XML-ness, the node's
+// `STATE_XML_DOCUMENT`), whether a scoped custom element registry initialized it, its throw-on-dynamic-markup-insertion
+// counter (HTML §8.4.1), and its currently executing script (`currentScript`, HTML §3.1.5: the script element running,
+// null in a shadow tree or a module) — and the texts that describe it (DOM §4.5: its URL, its encoding, its content type;
+// HTML: its `document.domain`, the base URL an about: one inherits from its creator) and when it was last modified
+// (`docText`) — kept by the document's node, let go of with it. The bindings read and write each (`docState`, the
+// Document's `_quirks`, `_readyState`, … accessors: dom-nodes.js), and the parser sets the mode it finds.
 
 use std::collections::HashMap;
 
+use crate::document_lifecycle::Lifecycle;
 use crate::dom::{nid_arg, NodeId, RealmArena};
 
 #[derive(Clone, Copy)]
 struct DocumentState {
     mode: u32,
-    ready: u32,
+    // Its load lifecycle — its readiness among it (document_lifecycle.rs).
+    lifecycle: Lifecycle,
     flags: u32,
     insertions: u32,
     // Its ignore-destructive-writes counter (HTML §8.4.3): raised while an external classic script it fetched runs, a
@@ -25,10 +27,6 @@ struct DocumentState {
     // Whether it will declaratively refresh (HTML: a `<meta http-equiv=refresh>` or a `Refresh` header said so already,
     // which no later one undoes): the engine's alone, which no binding writes (declarative_refresh.rs).
     will_refresh: bool,
-    // Whether a navigation of its navigable aborted it while its parser was active (HTML "navigate" → "abort a document
-    // and its descendants" → "abort a parser"): "the end" runs for it no more — no load of its own, none at its
-    // container. The engine's alone; a parse it begins afresh (its readiness `loading` again) clears it.
-    aborted: bool,
 }
 
 impl Default for DocumentState {
@@ -37,13 +35,12 @@ impl Default for DocumentState {
     fn default() -> Self {
         DocumentState {
             mode: 0,
-            ready: READY_COMPLETE,
+            lifecycle: Lifecycle::default(),
             flags: 0,
             insertions: 0,
             destructive_ignored: 0,
             current_script: None,
             will_refresh: false,
-            aborted: false,
         }
     }
 }
@@ -54,10 +51,10 @@ const READY: u32 = 1;
 const FLAGS: u32 = 2;
 const INSERTIONS: u32 = 3;
 const DESTRUCTIVE_IGNORED: u32 = 4;
+// (…and the number of the document its load lifecycle is of: `Lifecycle::generation`)
+const GENERATION: u32 = 5;
 // …and the flag that says a document has no browsing context (`FLAGS`'s first).
 const NO_BROWSING_CONTEXT: u32 = 1;
-const READY_COMPLETE: u32 = 2;
-const READY_LOADING: u32 = 0;
 
 // …its texts, as the bindings number them (`DOC_TEXT_*`): none until set — a document's URL then its realm's, its
 // encoding UTF-8, its content type text/html, its referrer (HTML §3.1.2: the URL of the document that navigated to it,
@@ -107,14 +104,13 @@ impl DocumentStates {
     pub(crate) fn has_browsing_context(&self, doc: NodeId) -> bool {
         self.0.get(&doc).is_none_or(|s| s.flags & NO_BROWSING_CONTEXT == 0)
     }
-    // `doc` aborted by a navigation of its navigable, where its parser is active (`aborted`): whether it was.
-    pub(crate) fn abort_parsing(&mut self, doc: NodeId) -> bool {
-        let Some(state) = self.0.get_mut(&doc).filter(|s| s.ready == READY_LOADING) else { return false };
-        state.aborted = true;
-        true
+    // `doc`'s load lifecycle — that of one made by a script, which no parse loads, for one it keeps none of — and it to
+    // change (made where it was none).
+    pub(crate) fn lifecycle(&self, doc: NodeId) -> Lifecycle {
+        self.0.get(&doc).map(|s| s.lifecycle).unwrap_or_default()
     }
-    pub(crate) fn aborted(&self, doc: NodeId) -> bool {
-        self.0.get(&doc).is_some_and(|s| s.aborted)
+    pub(crate) fn lifecycle_mut(&mut self, doc: NodeId) -> &mut Lifecycle {
+        &mut self.0.entry(doc).or_default().lifecycle
     }
     // Whether `doc` will declaratively refresh, and that it will.
     pub(crate) fn will_refresh(&self, doc: NodeId) -> bool {
@@ -153,7 +149,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     // (…a fast call: a sheet's cascade key and its owner's sheet memo read the mode on every refresh)
     crate::dom::register_fast(scope, ns, "docState", doc_state, DOC_STATE_FAST, context_id);
     crate::dom::register(scope, ns, "setDocState", set_doc_state, context_id);
-    crate::dom::register(scope, ns, "docAborted", doc_aborted, context_id);
     // (…and one: a node's name and an element's serialization ask whether its document is an HTML one)
     crate::dom::register_fast(scope, ns, "docIsHtml", doc_is_html, DOC_IS_HTML_FAST, context_id);
     crate::dom::register(scope, ns, "docUrl", doc_url, context_id);
@@ -168,7 +163,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
 
 // __dom.docState(docNid, field) -> the document's field (0 its mode — 0 no-quirks, 1 limited-quirks, 2 quirks; 1 its
 // readiness — 0 loading, 1 interactive, 2 complete; 2 its flags, the bindings'; 3 its markup insertion counter; 4 its
-// ignore-destructive-writes counter).
+// ignore-destructive-writes counter; 5 the number of the document its load lifecycle is of).
 fn doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     // (…the state a document starts with for one the engine holds none of, as the fast call answers)
     let doc = nid_arg(scope, &args, 0);
@@ -179,10 +174,11 @@ fn doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
 fn field_of(state: DocumentState, field: u32) -> u32 {
     match field {
         MODE => state.mode,
-        READY => state.ready,
+        READY => state.lifecycle.ready,
         FLAGS => state.flags,
         INSERTIONS => state.insertions,
         DESTRUCTIVE_IGNORED => state.destructive_ignored,
+        GENERATION => state.lifecycle.generation(),
         _ => 0,
     }
 }
@@ -205,13 +201,8 @@ const DOC_STATE_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::ne
     ),
 )];
 
-// __dom.docAborted(docNid) -> whether a navigation aborted the document as it parsed (`aborted`).
-fn doc_aborted(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
-    rv.set_bool(crate::dom::dom(scope).arena.document_states.aborted(doc));
-}
-
-// __dom.setDocState(docNid, field, value) — the document's field set.
+// __dom.setDocState(docNid, field, value) — the document's field set (its readiness alone of its load lifecycle's: a
+// document no parse loads, a DOMParser's, made loading and complete as it is parsed).
 fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(doc) = nid_arg(scope, &args, 0) else { return };
     let field = args.get(1).uint32_value(scope).unwrap_or(u32::MAX);
@@ -220,12 +211,7 @@ fn set_doc_state(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     let state = crate::dom::dom(scope).arena.document_states.0.entry(doc).or_default();
     match field {
         MODE => state.mode = value.min(2),
-        READY => {
-            state.ready = value.min(2);
-            if state.ready == READY_LOADING {
-                state.aborted = false;
-            }
-        }
+        READY => state.lifecycle.ready = value.min(2),
         FLAGS => state.flags = value,
         INSERTIONS => state.insertions = value,
         DESTRUCTIVE_IGNORED => state.destructive_ignored = value,

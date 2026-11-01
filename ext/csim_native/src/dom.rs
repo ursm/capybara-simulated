@@ -329,8 +329,8 @@ pub(crate) const STATE_LINK_MEDIA_SKIPPED: u32 = 1 << 21;
 // model: "fallback"): its resource failed to load, or it has none to process — the bindings' to note
 // (`setObjectFallback`).
 pub(crate) const STATE_OBJECT_FALLBACK: u32 = 1 << 22;
-// (…bits 23-25 a document's, the bindings' alone, which nothing here reads: native-query-shadow.js
-// `STATE_INITIAL_ABOUT_BLANK`, `STATE_HIDDEN`, `STATE_PAGE_SHOWING`)
+// (…bits 23-24 a document's, the bindings' alone, which nothing here reads: native-query-shadow.js
+// `STATE_INITIAL_ABOUT_BLANK`, `STATE_HIDDEN`)
 
 // The nodes DOM's tree accessors name (`relativeNode`): a node's parent, its parent where that is an element, its
 // first and last child, its previous and next sibling, and the element ones of those — and the bindings' own upward
@@ -2930,6 +2930,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::worker_import::install(scope, ns, context_id);
     crate::load_gates::install(scope, ns, context_id);
     crate::document_state::install(scope, ns, context_id);
+    crate::document_lifecycle::install(scope, ns, context_id);
     crate::toggle_tasks::install(scope, ns, context_id);
     crate::selected_coordinates::install(scope, ns, context_id);
     crate::realm_location::install(scope, ns, context_id);

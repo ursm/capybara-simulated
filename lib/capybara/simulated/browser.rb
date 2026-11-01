@@ -12173,7 +12173,7 @@ module Capybara
       # Rebuild the JS Context and load `html` into it. Called from
       # every code path that handles a full-page Rack response (`navigate`
       # for GETs, `navigate_post` for POSTs). `__csimLoadDocument` walks
-      # importmaps + module scripts during `runInlineScripts`; the bridge
+      # importmaps + module scripts during `theEnd`; the bridge
       # pushes the importmap back via `__csim_pushImportmap` before any
       # module loads so resolver lookups agree with the JS side.
       #
@@ -12389,8 +12389,8 @@ module Capybara
           return
         end
         @polling_grace = POST_NAV_POLL_GRACE_POLLS
-        # Its `load` is a task its parse queued as it ended (bridge.entry.js `queueLoadOfTheEnd`, HTML "the end"), which
-        # the page's due tasks run below — delayed, where its images are still in flight, until they land. Give their
+        # Its DOMContentLoaded and its `load` are tasks "the end" of its parse queued (bridge.entry.js
+        # `__csimTaskOfTheEnd`), which the page's due tasks run below — delayed, where its images are still in flight, until they land. Give their
         # fetch threads a short GVL-yielding window to land first: they overlap the boot's JS (rusty releases the GVL) and
         # are usually done already, but one that is not would slip its page's `load` past the visit and leave what a
         # post-visit read sees to thread timing. Bounded — a genuinely slow endpoint delays `load` to a later step
@@ -12424,8 +12424,8 @@ module Capybara
       #
       # `maxMs: 0` fires only what is ALREADY due, so a `setTimeout(fn, 50)` stays
       # pending and a test can still observe the state before it.
-      # The document's `load` is one of those tasks — "the end" queued it as its parse ended (bridge.entry.js
-      # `queueLoadOfTheEnd`) — so it runs in queue order with the page's own: a `setTimeout(0)` its parse or its
+      # The document's DOMContentLoaded and `load` are among those tasks — "the end" queued them (bridge.entry.js
+      # `__csimTaskOfTheEnd`) — the load in queue order with the page's own: a `setTimeout(0)` its parse or its
       # DOMContentLoaded handlers queued runs before it, one its load handlers queue after. (HTML leaves the order of
       # two task sources to the UA: Chrome 156 runs a DCL handler's `setTimeout(0)` after the load, Firefox a frame's
       # before it, both a parse-time one before it — measured 2026-11-01.)

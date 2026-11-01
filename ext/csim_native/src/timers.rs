@@ -18,6 +18,7 @@ use crate::dom::{dom, realm_id, register, RealmArena};
 
 struct Timer {
     due: f64,
+    turn: u8,
     seq: u64,
     handler: v8::Global<v8::Value>,
     args: Option<v8::Global<v8::Value>>,
@@ -38,8 +39,9 @@ fn clamped(timeout: f64, nesting: u32) -> f64 {
 #[derive(Default)]
 pub(crate) struct Timers {
     by_key: HashMap<i64, Timer>,
-    // The keys in the order they run: by when they are due, then by when they were scheduled.
-    order: BTreeSet<(Due, u64, i64)>,
+    // The keys in the order they run: by when they are due, then by their turn (`AHEAD` before `IN_TURN`), then by when
+    // they were scheduled.
+    order: BTreeSet<(Due, u8, u64, i64)>,
     last_id: i64,
     seq: u64,
     // Its animation frame callbacks (HTML "map of animation frame callbacks"), by the id `requestAnimationFrame` gave
@@ -98,15 +100,23 @@ impl Ord for Due {
     }
 }
 
+// A task's turn among those due at once: in the order scheduled (`IN_TURN`) — every timer, every task but one — or ahead
+// of them (`AHEAD`): "the end"'s DOMContentLoaded, which HTML queues on the DOM manipulation task source, and the event
+// loop may take before the timers and the messages a parse queued (HTML leaves the choice of a task source to it; Chrome
+// 156 and Firefox 159 both fire DOMContentLoaded before a zero timer or a message the parse queued — measured
+// 2026-11-01).
+pub(crate) const AHEAD: u8 = 0;
+const IN_TURN: u8 = 1;
+
 impl Timers {
-    fn add(&mut self, key: i64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, period: Option<f64>, nesting: u32) {
+    fn add(&mut self, key: i64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, turn: u8, period: Option<f64>, nesting: u32) {
         self.seq += 1;
-        self.order.insert((Due(due), self.seq, key));
-        self.by_key.insert(key, Timer { due, seq: self.seq, handler: timer.0, args: timer.1, period, nesting });
+        self.order.insert((Due(due), turn, self.seq, key));
+        self.by_key.insert(key, Timer { due, turn, seq: self.seq, handler: timer.0, args: timer.1, period, nesting });
     }
     fn clear(&mut self, key: i64) -> bool {
         let Some(t) = self.by_key.remove(&key) else { return false };
-        self.order.remove(&(Due(t.due), t.seq, key));
+        self.order.remove(&(Due(t.due), t.turn, t.seq, key));
         true
     }
     // HTML §8.6 timer task step 7: a repeating timer, its handler run, runs the timer initialization steps again — due
@@ -122,7 +132,7 @@ impl Timers {
         t.due = run + clamped(timeout, t.nesting);
         t.nesting += 1;
         t.seq = seq;
-        self.order.insert((Due(t.due), seq, key));
+        self.order.insert((Due(t.due), t.turn, seq, key));
     }
 }
 
@@ -155,7 +165,7 @@ impl Timers {
     fn idle_remaining(&self, now: f64) -> f64 {
         let gone = now - self.idle_began;
         let cap = if self.frames.is_empty() { IDLE_PERIOD_MAX_MS } else { FRAME_INTERVAL_MS };
-        let timer = self.order.first().map_or(f64::INFINITY, |&(Due(due), _, _)| due - now);
+        let timer = self.order.first().map_or(f64::INFINITY, |&(Due(due), ..)| due - now);
         (cap - gone).min(timer).max(0.0)
     }
     // An idle request callback out of both lists: cancelled, or timed out.
@@ -183,7 +193,7 @@ impl RealmArena {
     // document's window, after those queued before it — a `javascript:` URL's).
     pub(crate) fn queued_count(&mut self, cid: i32, (mark, clock): (u64, f64)) -> u32 {
         self.timers_of(cid).map_or(0, |t| {
-            t.order.iter().take_while(|&&(Due(due), _, _)| due <= clock).filter(|&&(_, seq, _)| seq <= mark).count() as u32
+            t.order.iter().take_while(|&&(Due(due), ..)| due <= clock).filter(|&&(_, _, seq, _)| seq <= mark).count() as u32
         })
     }
     fn timers_of(&mut self, cid: i32) -> Option<&mut Timers> {
@@ -340,7 +350,7 @@ fn idle_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             arena.task_keys.realms.insert(key, cid);
             let state = arena.enter(cid);
             let due = state.clock + timeout;
-            state.timers.add(key, (timed_out, Some(list)), due, None, 0);
+            state.timers.add(key, (timed_out, Some(list)), due, IN_TURN, None, 0);
             key
         });
         arena.enter(cid).timers.idle.push_back(IdleRequest { handle, callback, timeout });
@@ -428,10 +438,11 @@ fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     dom(scope).arena.enter(cid).clock = time;
 }
 
-// __dom.timerAdd(handler, args, timeout, repeats, task) -> its key: a timer of the calling realm's, falling due
+// __dom.timerAdd(handler, args, timeout, repeats, task, ahead) -> its key: a timer of the calling realm's, falling due
 // `timeout` ms after now on its clock — never, for one that is no finite time — and, `repeats`, again that long after
 // each run: a page's (`task` false: a positive id), nested in the timer task running and clamped by its nesting
-// level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped.
+// level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped — and, `ahead`,
+// runs ahead of those due with it (`AHEAD`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -439,6 +450,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let timeout = args.get(2).number_value(scope).unwrap_or(0.0);
     let repeats = args.get(3).is_true();
     let task = args.get(4).is_true();
+    let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let now = arena.enter(cid).clock;
@@ -460,7 +472,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     };
     // (…a realm that takes none answers with a key all the same, which names nothing)
     if takes {
-        arena.enter(cid).timers.add(key, (handler, list), due, period, if task { 0 } else { nesting + 1 });
+        arena.enter(cid).timers.add(key, (handler, list), due, turn, period, if task { 0 } else { nesting + 1 });
     }
     rv.set_double(key as f64);
 }
@@ -496,8 +508,8 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let now = arena.enter(cid).clock;
     let timers = &mut arena.enter(cid).timers;
     timers.end_task();
-    let Some(&(Due(due), seq, key)) = timers.order.first().filter(|&&(Due(due), _, _)| due <= limit) else { return };
-    timers.order.remove(&(Due(due), seq, key));
+    let Some(&(Due(due), turn, seq, key)) = timers.order.first().filter(|&&(Due(due), ..)| due <= limit) else { return };
+    timers.order.remove(&(Due(due), turn, seq, key));
     let run = due.max(now);
     let repeats = timers.by_key.get(&key).and_then(|t| t.period);
     let (handler, list) = match repeats {
@@ -567,7 +579,7 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         if !state.timers.frames.is_empty() {
             return rv.set_double(0.0);
         }
-        if let Some(&(Due(due), _, _)) = state.timers.order.first() {
+        if let Some(&(Due(due), ..)) = state.timers.order.first() {
             min = min.min(due - state.clock);
         }
         pending.extend(arena.stepped_realms(realm));
@@ -581,7 +593,7 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
 // __dom.timerNextDue() -> when the calling realm's next timer falls due, or undefined for none.
 fn timer_next_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    if let Some(&(Due(due), _, _)) = dom(scope).arena.enter(cid).timers.order.first() {
+    if let Some(&(Due(due), ..)) = dom(scope).arena.enter(cid).timers.order.first() {
         rv.set_double(due);
     }
 }
