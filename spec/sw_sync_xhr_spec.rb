@@ -31,6 +31,13 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
           setTimeout(() => self.clients.get(e.clientId).then((c) => c.postMessage('from-sw')), 100);
           return e.respondWith(new Promise((res) => setTimeout(() => res(new Response('sw-slow')), Number(new URL(e.request.url).searchParams.get('ms')))));
         }
+        if (tag === 'wait-page') {
+          // (…an answer only the page can give, which it cannot while its send() waits: a deadlock)
+          return e.respondWith(self.clients.get(e.clientId).then((c) => {
+            c.postMessage('ping');
+            return new Promise((res) => { self.pong = () => res(new Response('unblocked')); });
+          }));
+        }
         e.respondWith(new Response(`sw:${tag}:${e.request.mode}:${e.clientId ? 'client' : 'none'}`));
       });
     JS
@@ -111,6 +118,66 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
       }
     JS
     expect(poll_until { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(['sw-slow', 'sw-slow', 'microtask', 'message from-sw', 'message from-sw'])
+  end
+
+  # The wait is the worker's own time, nothing of the page's running meanwhile: a 15 s timer of its answers at once in
+  # real time, the page's clock on by those 15 s — not paced on the wall clock, the page then following a doubled one —
+  # and a second window's clock moved by that time too, never to the host window's.
+  it "waits the worker's own time, the waiting window's clock moved by it" do
+    session = controlled_session
+    sync = <<~JS
+      (() => {
+        const v0 = __virtualNow(), x = new XMLHttpRequest();
+        x.open('GET', '/data.txt?tag=slow&ms=15000', false);
+        x.send();
+        return [x.responseText, Math.round(__virtualNow() - v0)];
+      })()
+    JS
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    expect(session.evaluate_script(sync)).to eq(['sw-slow', 15_000])
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 5
+    session.execute_script('window.later = false; setTimeout(() => { window.later = true; }, 20000)')
+    poll_until { session.evaluate_script('window.later') }
+    session.within_window(session.open_new_window) do
+      session.visit '/'
+      poll_until { session.evaluate_script('!!navigator.serviceWorker.controller') }
+      expect(session.evaluate_script(sync)).to eq(['sw-slow', 15_000])
+    end
+  end
+
+  # A worker that waits on the page — a deadlock, the page's send() holding what it waits for — can answer nothing: the
+  # request is a network error at once (Chrome 156 sends no page's sync XHR to its worker; Firefox 159 runs the page's
+  # events inside send(), where XHR's "pause" lets none run — measured 2026-11-02).
+  it 'fails at once a request its worker can only answer with what the waiting page gives it' do
+    session = controlled_session
+    session.execute_script("navigator.serviceWorker.onmessage = (e) => { window.pinged = e.data; navigator.serviceWorker.controller.postMessage('pong'); }")
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const x = new XMLHttpRequest();
+        x.open('GET', '/data.txt?tag=wait-page', false);
+        try { x.send(); return x.responseText; } catch (e) { return e.name; }
+      })()
+    JS
+    expect([got, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t < 2]).to eq(['NetworkError', true])
+  end
+
+  # A worker's sync XHR keeps its `timeout`, of the answering worker's time: a TimeoutError where the answer comes later.
+  it "times a worker's sync XHR out by its timeout" do
+    session = controlled_session
+    session.execute_script(<<~JS)
+      window.got = null;
+      const src = `const out = [];
+        for (const timeout of [100, 500]) {
+          const x = new XMLHttpRequest();
+          x.open('GET', '${location.origin}/data.txt?tag=slow&ms=300', false);
+          x.timeout = timeout;
+          try { x.send(); out.push(x.responseText); } catch (e) { out.push(e.name); }
+        }
+        postMessage(out);`;
+      new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))).onmessage = (e) => { window.got = e.data; };
+    JS
+    expect(poll_until { session.evaluate_script('window.got') }).to eq(%w[TimeoutError sw-slow])
   end
 
   it 'is answered by the service worker from a dedicated worker, as its other requests are' do

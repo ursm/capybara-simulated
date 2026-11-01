@@ -479,7 +479,8 @@ module Capybara
         waited  = 0.0
         loop do
           @browser.apply_controller_changes
-          cut = @browser.worker_due_within(left, waited)
+          cut, spent = @browser.worker_due_within(left, waited)
+          waited    += spent
           # `__runLoopStep` steps child iframe realms itself (timers.js
           # `drainChildRealms`), folding their fired/dirtied into the result.
           r = @browser.running_event_loop { stepping { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } } }
