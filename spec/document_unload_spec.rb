@@ -262,4 +262,57 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
 
     expect(s.evaluate_script('frames[0].location.pathname')).to eq('/f2')
   end
+
+  # The documents are asked in tree order — the navigable's inclusive descendant navigables, each document's containers
+  # in shadow-including tree order (HTML "checking if unloading is canceled", "descendant navigables") — whichever frame's
+  # document was made first, and unloaded each after its frames' (HTML "unload a document and its descendants").
+  it 'asks the frames in tree order and unloads each after its own frames' do
+    log = <<~JS
+      const log = (s) => localStorage.setItem('log', (localStorage.getItem('log') || '') + s + ' ');
+      addEventListener('beforeunload', () => log('beforeunload:' + name));
+      addEventListener('unload', () => log('unload:' + name));
+    JS
+    app = lambda do |env|
+      body = case env['PATH_INFO']
+             when '/top' then <<~HTML
+               <div id="first"></div><script>
+                 #{log}
+                 const b = document.createElement('iframe');
+                 b.name = 'b';
+                 b.src = '/frame';
+                 b.onload = () => {
+                   const a = document.createElement('iframe');
+                   a.name = 'a';
+                   a.src = '/outer';
+                   a.onload = () => { window.ready = true };
+                   document.getElementById('first').append(a);
+                 };
+                 document.body.append(b);
+               </script>
+             HTML
+             when '/outer' then %(<iframe name="c" src="/frame"></iframe><script>#{log}</script>)
+             when '/frame' then "<script>#{log}</script>"
+             else env['PATH_INFO']
+             end
+      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+    end
+    s = simulated_session(app)
+    s.visit '/top'
+    s.execute_script("name = 'top'; localStorage.removeItem('log')")
+    poll_until { s.evaluate_script('window.ready === true') }
+    s.visit '/after'
+
+    expect(s.evaluate_script("localStorage.getItem('log')").split).to eq(
+      %w[
+        beforeunload:top
+        beforeunload:a
+        beforeunload:c
+        beforeunload:b
+        unload:c
+        unload:a
+        unload:b
+        unload:top
+      ]
+    )
+  end
 end

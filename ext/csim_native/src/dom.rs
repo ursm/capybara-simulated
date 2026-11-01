@@ -2925,6 +2925,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     crate::collections::install(scope, ns, context_id);
     crate::mutation_observers::install(scope, ns, context_id);
     crate::navigables::install(scope, ns, context_id);
+    crate::unload_walks::install(scope, ns, context_id);
     crate::frame_navigation::install(scope, ns, context_id);
     crate::frame_response::install(scope, ns, context_id);
     crate::worker_import::install(scope, ns, context_id);

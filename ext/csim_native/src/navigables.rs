@@ -103,12 +103,14 @@ pub(crate) struct Navigables {
     // The realms whose documents are being unloaded now — their beforeunload / pagehide / unload firing (HTML's
     // "unload counter" above 0): a navigation of their navigable is ignored meanwhile ("navigate" step 13), so a
     // teardown handler re-navigating its own frame neither tears it down again nor wins over the navigation unloading it.
-    unloading: HashSet<i32>,
+    pub(crate) unloading: HashSet<i32>,
     // …and those whose documents are being asked whether they may be unloaded — their beforeunload firing, the unload
     // counter raised as well ("check if unloading is canceled"), a navigation ignored as above — but not unloaded yet:
     // a frame of one re-navigated from it is asked itself, where a frame of one being unloaded was asked with it. Each
     // whether it is asked as a traversal applies its step (`session_history_takes`).
-    prompting: HashMap<i32, bool>,
+    pub(crate) prompting: HashMap<i32, bool>,
+    // …and the walks over a document's tree that raise them (unload_walks.rs).
+    pub(crate) walks: crate::unload_walks::Walks,
     // How many realms some realm's event loop steps with its own — child navigables with a realm their active document
     // is in, and those windows — read with no call by every realm's bindings (`__dom.childFrames`): none, the common
     // page's, keeps the event loop's step of its child realms and a dispatch's multi-realm path a load of a word.
@@ -466,6 +468,85 @@ impl RealmArena {
             parents.extend_from_slice(children);
         }
         found
+    }
+    // The realms of the active documents of realm `realm`'s document's child navigables, their containers in
+    // shadow-including tree order (HTML "descendant navigables": a document's navigable containers "in shadow-including
+    // tree order") — those stepped (`stepped_realm`), as `child_realms`.
+    pub(crate) fn child_realms_in_tree_order(&self, realm: i32) -> Vec<i32> {
+        let mut found: Vec<(NodeId, i32)> = self
+            .navigables
+            .children
+            .iter()
+            .filter(|&(&c, _)| self.get(c).is_some_and(|n| n.realm == realm))
+            .filter_map(|(&c, child)| self.stepped_realm(c, child).map(|r| (c, r)))
+            .collect();
+        if found.len() < 2 {
+            return found.into_iter().map(|(_, r)| r).collect();
+        }
+        // (…placed by a walk of the document's shadow-including tree: a host, its shadow tree, then its children — one
+        // in no tree of the document, which leaves its navigable, after them in the order it was made)
+        let containers: HashSet<NodeId> = found.iter().map(|&(c, _)| c).collect();
+        let mut place: HashMap<NodeId, usize> = HashMap::with_capacity(found.len());
+        let mut stack: Vec<NodeId> = self.realm_document(realm).into_iter().collect();
+        while let Some(id) = stack.pop() {
+            let Some(n) = self.get(id) else { continue };
+            if containers.contains(&id) {
+                place.insert(id, place.len());
+                if place.len() == containers.len() {
+                    break;
+                }
+            }
+            stack.extend(n.children.iter().rev());
+            stack.extend(n.shadow_root.into_iter().filter_map(|s| self.get(s)).flat_map(|s| s.children.iter().rev()));
+        }
+        found.sort_by_key(|&(c, r)| (place.get(&c).copied().unwrap_or(usize::MAX), r));
+        found.into_iter().map(|(_, r)| r).collect()
+    }
+    // …and those of realm `root`'s inclusive descendant navigables' (HTML "inclusive descendant navigables"): its own,
+    // then each child's inclusive descendants in turn — a tree order.
+    pub(crate) fn inclusive_descendant_realms(&self, root: i32) -> Vec<i32> {
+        self.inclusive_descendants_walk(root, false)
+    }
+    // …and in the order HTML "unload a document and its descendants" has them: each document after its descendants'.
+    pub(crate) fn inclusive_descendant_realms_children_first(&self, root: i32) -> Vec<i32> {
+        let mut found = self.inclusive_descendants_walk(root, true);
+        found.reverse();
+        found
+    }
+    // (…the children of each taken last first where `mirrored`: that walk reversed is the children-first one)
+    fn inclusive_descendants_walk(&self, root: i32, mirrored: bool) -> Vec<i32> {
+        let mut found = Vec::new();
+        let mut stack = vec![(root, 0)];
+        while let Some((realm, depth)) = stack.pop() {
+            found.push(realm);
+            if depth < MAX_NESTING {
+                let children = self.child_realms_in_tree_order(realm).into_iter().map(|r| (r, depth + 1));
+                if mirrored {
+                    stack.extend(children);
+                } else {
+                    stack.extend(children.rev());
+                }
+            }
+        }
+        found
+    }
+    // Whether realm `realm`'s document is realm `root`'s or the active document of one of its descendant navigables:
+    // its container in a live document of the tree under `root`, its own realm not discarded.
+    pub(crate) fn realm_under(&self, realm: i32, root: i32) -> bool {
+        let nav = &self.navigables;
+        let mut at = realm;
+        for _ in 0..MAX_NESTING {
+            if at == root {
+                return true;
+            }
+            if nav.discarded.contains(&at) {
+                return false;
+            }
+            let Some(container) = self.live_container(at).filter(|&c| self.frame_realm(c) == Some(at)) else { return false };
+            let Some(parent) = self.get(container).map(|n| n.realm) else { return false };
+            at = parent;
+        }
+        false
     }
     // …and those of its ancestor navigables: its container's document's, up.
     pub(crate) fn ancestor_realms(&self, realm: i32) -> Vec<i32> {
@@ -1262,8 +1343,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "incumbentOperation", incumbent_operation, context_id);
     crate::dom::register(scope, ns, "disownOpener", disown_opener, context_id);
     crate::dom::register(scope, ns, "ownContainer", own_container, context_id);
-    crate::dom::register(scope, ns, "setUnloading", set_unloading, context_id);
-    crate::dom::register(scope, ns, "setPrompting", set_prompting, context_id);
     crate::dom::register(scope, ns, "sessionHistoryTakes", session_history_takes, context_id);
     crate::dom::register(scope, ns, "unloading", unloading, context_id);
     crate::dom::register(scope, ns, "ancestorUnloading", ancestor_unloading, context_id);
@@ -1718,32 +1797,6 @@ fn own_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
     rv.set(crate::dom::node_value(scope, container));
 }
 
-// __dom.setUnloading(realm, on) — the realm's document begins (`on`) or ends being unloaded (`Navigables::unloading`).
-fn set_unloading(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(realm) = args.get(0).int32_value(scope) else { return };
-    let on = args.get(1).is_true();
-    let cid = realm_id(scope, &args);
-    let unloading = &mut crate::dom::realm(scope, cid).navigables.unloading;
-    if on {
-        unloading.insert(realm);
-    } else {
-        unloading.remove(&realm);
-    }
-}
-// __dom.setPrompting(realm, on, traversal) — the realm's document begins (`on`) or ends being asked whether it may be
-// unloaded (`Navigables::prompting`), `traversal` as a traversal applies its step.
-fn set_prompting(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(realm) = args.get(0).int32_value(scope) else { return };
-    let on = args.get(1).is_true();
-    let traversal = args.get(2).is_true();
-    let cid = realm_id(scope, &args);
-    let prompting = &mut crate::dom::realm(scope, cid).navigables.prompting;
-    if on {
-        prompting.insert(realm, traversal);
-    } else {
-        prompting.remove(&realm);
-    }
-}
 // __dom.sessionHistoryTakes() -> whether the session history takes the entry the calling realm's document makes now by
 // its URL and history update steps (`pushState`, `replaceState`, a fragment navigation) — the document's URL and
 // classic history API state its own either way (`session_history_takes`).
