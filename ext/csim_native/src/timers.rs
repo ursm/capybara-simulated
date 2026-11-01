@@ -39,8 +39,8 @@ fn clamped(timeout: f64, nesting: u32) -> f64 {
 #[derive(Default)]
 pub(crate) struct Timers {
     by_key: HashMap<i64, Timer>,
-    // The keys in the order they run: by when they are due, then by their turn (`AHEAD` before `IN_TURN`), then by when
-    // they were scheduled.
+    // The keys in the order they run: by when they are due, then by their turn (`AHEAD`, `IN_TURN`, `BEHIND`), then by
+    // when they were scheduled.
     order: BTreeSet<(Due, u8, u64, i64)>,
     last_id: i64,
     seq: u64,
@@ -100,13 +100,18 @@ impl Ord for Due {
     }
 }
 
-// A task's turn among those due at once: in the order scheduled (`IN_TURN`) — every timer, every task but one — or ahead
-// of them (`AHEAD`): "the end"'s DOMContentLoaded, which HTML queues on the DOM manipulation task source, and the event
-// loop may take before the timers and the messages a parse queued (HTML leaves the choice of a task source to it; Chrome
-// 156 and Firefox 159 both fire DOMContentLoaded before a zero timer or a message the parse queued — measured
-// 2026-11-01).
+// A task's turn among those due at once — HTML leaves the choice among task sources to the event loop, so this is how it
+// chooses: in the order scheduled (`IN_TURN`) — every timer, most tasks — or ahead of them (`AHEAD`): "the end"'s
+// DOMContentLoaded, which Chrome 156 and Firefox 159 both fire before a zero timer the parse queued; or behind them
+// (`BEHIND`): a Window's posted message task source — a message a page posted itself as it parsed is delivered after the
+// load that nothing delayed, in Chrome 156 and Firefox 159 alike (before it where its images delay it; and Chrome a
+// message before a later timer, Firefox after: measured 2026-11-01). (A MessagePort's messages are its own port message
+// queue's, another queue, which keeps its turn: Chrome delivers one before the rejection notify task its poster queued
+// after it, unhandled_rejection_spec.) And the tasks of another window's document this event loop runs (a pop-up's "the
+// end", which a message it posted its opener before them precedes: WPT replace-before-load/form-submit-popup).
 pub(crate) const AHEAD: u8 = 0;
 const IN_TURN: u8 = 1;
+const BEHIND: u8 = 2;
 
 impl Timers {
     fn add(&mut self, key: i64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, turn: u8, period: Option<f64>, nesting: u32) {
@@ -438,11 +443,11 @@ fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     dom(scope).arena.enter(cid).clock = time;
 }
 
-// __dom.timerAdd(handler, args, timeout, repeats, task, ahead) -> its key: a timer of the calling realm's, falling due
+// __dom.timerAdd(handler, args, timeout, repeats, task, turn) -> its key: a timer of the calling realm's, falling due
 // `timeout` ms after now on its clock — never, for one that is no finite time — and, `repeats`, again that long after
 // each run: a page's (`task` false: a positive id), nested in the timer task running and clamped by its nesting
-// level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped — and, `ahead`,
-// runs ahead of those due with it (`AHEAD`).
+// level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped — taking its
+// `turn` among those due with it (`AHEAD`, `IN_TURN`, `BEHIND`; a page's timer `IN_TURN`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -450,7 +455,7 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let timeout = args.get(2).number_value(scope).unwrap_or(0.0);
     let repeats = args.get(3).is_true();
     let task = args.get(4).is_true();
-    let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
+    let turn = if task { args.get(5).uint32_value(scope).and_then(|t| u8::try_from(t).ok()).filter(|&t| t <= BEHIND).unwrap_or(IN_TURN) } else { IN_TURN };
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let now = arena.enter(cid).clock;

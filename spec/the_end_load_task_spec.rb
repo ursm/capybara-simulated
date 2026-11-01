@@ -177,6 +177,29 @@ RSpec.describe 'the load "the end" queues' do
     )
   end
 
+  # A message the page posts itself as it parses is a task of the posted message task source, which the event loop takes
+  # behind the load that nothing delays (timers.rs `BEHIND`) — and before one its images delay. Chrome 156 and Firefox 159
+  # alike, measured 2026-11-01 (probes pm.html / dcltask.html); HTML leaves the choice among task sources to the UA.
+  {'nothing delays it' => ['', %w[load message]], 'an image delays it' => ['<img src="/i.png">', %w[message load]]}.each do |shape, (img, order)|
+    it "delivers a message the page posted itself as it parsed relative to its load where #{shape}" do
+      png = File.binread(File.join(__dir__, 'wpt/images/anim-gr.png'))
+      s = session_for(
+        '/'      => <<~HTML,
+          <!DOCTYPE html><meta charset="utf-8"><script>
+            window.log = [];
+            addEventListener('message', () => log.push('message'));
+            postMessage('', '*');
+            addEventListener('load', () => log.push('load'));
+          </script>#{img}
+        HTML
+        '/i.png' => [200, {'content-type' => 'image/png', 'x-csim-server-delay-ms' => '300'}, [png]]
+      )
+      s.visit '/'
+      s.document.synchronize(3) { raise Capybara::ExpectationNotMet if s.evaluate_script('log.length') < 2 }
+      expect(s.evaluate_script('log')).to eq(order)
+    end
+  end
+
   # …once, before its load, for a frame's document too — whose build fires its load as it ends, before any task of its
   # own runs — and none for one a navigation aborted as it parsed.
   it "fires a frame's DOMContentLoaded before its load, and none for a document aborted as it parsed" do
