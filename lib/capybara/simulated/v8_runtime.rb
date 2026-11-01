@@ -328,9 +328,34 @@ module Capybara
       def eval(code)         = ctx.eval(code.to_s)
       def eval_void(code)    = ctx.eval_void(code.to_s)
       def call(name, *args)
-        result = ctx.call(name, *args)
+        result = outermost { ctx.call(name, *args) }
         ScriptCache.warm_pending!
         result
+      end
+
+      # A request of the host's into V8, the frame realms disposed meanwhile let go of once it is the outermost one and has
+      # returned (`retire_realm`).
+      private def outermost
+        @call_depth = (depth = @call_depth.to_i) + 1
+        yield
+      ensure
+        @call_depth = depth
+        dispose_retired_realms if depth.zero? && @retired_realms
+      end
+      # A frame realm the page is done with, its context disposed once no request is under way: V8 refuses to dispose one
+      # inside a microtask checkpoint or while a request of it is on the stack — a container's `load` listener removing its
+      # frame is one, the load fired as a microtask — and RustyRacer's Context#dispose swallows the refusal, marking the
+      # context disposed all the same, so the context and its realm's whole heap lived until the isolate did (161 contexts,
+      # 748 MB for 120 frames removed so). A promise job of a realm disposed so that another realm queues later never runs:
+      # RustyRacer repoints a retired context to a microtask queue it never drains.
+      private def retire_realm(realm)
+        (@retired_realms ||= []) << realm
+      end
+      private def dispose_retired_realms
+        realms, @retired_realms = @retired_realms, nil
+        # (…the promise jobs queued in them run first — what a task of theirs settled as it was removed, an XHR's events)
+        drain_microtasks
+        realms.each {|realm| realm.dispose rescue nil }
       end
 
       # Route a host-fn call into a specific frame realm's context — or the
@@ -345,7 +370,7 @@ module Capybara
         return call(name, *args) if realm_id.nil? || realm_id.zero?
         fr = frame_realms[realm_id]
         return call(name, *args) unless fr
-        result = fr.call(name, *args)
+        result = outermost { fr.call(name, *args) }
         ScriptCache.warm_pending!
         result
       end
@@ -624,7 +649,7 @@ module Capybara
         # (…its document discarded, the navigables in it between two documents lost with it)
         evict_lost_window_proxies
         fr = frame_realms.delete(id)
-        fr.dispose rescue nil if fr
+        retire_realm(fr) if fr
         discarded_realm_ids << id.to_i
         nil
       end
