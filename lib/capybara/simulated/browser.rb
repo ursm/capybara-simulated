@@ -5533,7 +5533,11 @@ module Capybara
       # `:blocked`), nor one the window's settle parks for: `worker_awaits_worker?`)
       private def await_worker_reply(fetch_id, worker = nil)
         waiting = Thread.current[:csim_worker_record] unless Thread.current == @main_thread
-        waiting[:blocked] = waiting[:blocked].to_i + 1 if waiting
+        if waiting
+          waiting[:blocked]  = waiting[:blocked].to_i + 1
+          waiting[:resuming] = false
+          waiting[:awaiting] = fetch_id
+        end
         worker[:awaited] = worker[:awaited].to_i + 1 if worker && !waiting
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
@@ -5541,7 +5545,10 @@ module Capybara
         end
         nil
       ensure
-        waiting[:blocked] -= 1 if waiting
+        if waiting
+          waiting[:awaiting] = nil
+          waiting[:blocked] -= 1
+        end
         if worker && !waiting
           worker[:awaited] -= 1
           window_follows_awaited_worker(worker)
@@ -5792,6 +5799,8 @@ module Capybara
       private def sw_deliver_fetch_response(handle, fetch_id, resp, outbox, realm_id = 0)
         fid = fetch_id.to_i
         if fid.negative? || WorkerHost.direct?(fid)
+          # (…a worker waiting on it in place let go on, which a step of the window's waits for: `await_resumed_workers`)
+          @workers.values.each {|w| w[:resuming] = true if w[:awaiting] == fid }
           @worker_host.answer(fid, resp)
           return
         end
@@ -6091,9 +6100,22 @@ module Capybara
         end
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
         due.each {|w| w[:lagging] = !tick_answered?(w, deadline) }
+        await_resumed_workers(deadline)
         deliver_worker_messages
         nil
       end
+      # …and a worker the ticks' work let go on — one waiting in place on a service worker's answer the tick gave
+      # (`await_worker_reply`: a main script, a sync XHR), its `:resuming` — waited for too, up to `deadline`, until it
+      # waits again, on its inbox or on another answer: what it does with the answer it does at the time the answer came,
+      # not as late as the window has gone on by when its thread gets to it.
+      private def await_resumed_workers(deadline)
+        @workers.values.each do |w|
+          while w[:resuming] && w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+            sleep WORKER_RESUME_POLL
+          end
+        end
+      end
+      WORKER_RESUME_POLL = 0.001
       # …whether worker `w` answered its tick by `deadline` — or, blocked meanwhile on another worker's answer
       # (`await_worker_reply`: a main script, a sync XHR a service worker answers, which the window's steps let it make), is
       # waited for no more and counts as answered: it is not lagging, it waits on the window.
@@ -9468,6 +9490,8 @@ module Capybara
         ticked = false
         unless rt.call('__csimWorkerClosedRead')
           loop do
+            # (…waiting on its inbox, no worker a window's step waits for to go on: `await_resumed_workers`)
+            record[:resuming] = false if record
             msg = pop_with_timeout(inbox, WORKER_POLL_INTERVAL)
             break if msg == :terminate
             # …and the same answer from the boundary, which cannot wait for this queue.
