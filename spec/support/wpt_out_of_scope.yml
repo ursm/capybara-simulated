@@ -29567,36 +29567,6 @@ css/css-animations/KeyframeEffect-setKeyframes.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-css/css-animations/display-none-dont-cancel-pseudo.tentative.html:
-- name: 'A CSS Animation on a pseudo-element animating to "display: none" with "fill:
-    forwards" remains active after animation completion.'
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-css/css-animations/display-none-dont-cancel.tentative.html:
-- name: A CSS variable of display:none animating to display:inline should be inline
-    for the whole animation.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Animating a variable of "none" which gets set to display elsewhere should
-    not cancel the animation.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Animating from display:none to display:none should not cancel the animation.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: Animating from display:none to display:none with an intermediate variable
-    should not cancel the animation.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
-- name: display:none animating to display:inline should be inline for the whole animation.
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/event-dispatch.tentative.html:
 - name: Active -> Active (backwards)
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

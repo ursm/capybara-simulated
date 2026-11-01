@@ -1737,6 +1737,21 @@ impl StyleEngine {
         })
     }
 
+    // Whether `target` is rendered by its style WITHOUT the animations and transitions origins: what its CSS animations
+    // are terminated by (css-animations-2 §2.1: "display … none … would compute to none ignoring the Transitions and
+    // Animations origins" — an animation whose keyframe makes it `display: none` terminates none of them; WPT
+    // display-none-to-display-block-dont-cancel). Both are asked: one its animated style renders terminates none.
+    fn rendered_unanimated(&self, arena: &RealmArena, target: &waapi::Target) -> bool {
+        if is_rendered(arena, target) {
+            return true;
+        }
+        let shown = |target: &waapi::Target| {
+            target_style(arena, target).is_some_and(|style| !self.base_style(arena, target, &style).get_box().clone_display().is_none())
+        };
+        let element = waapi::Target { node: target.node, pseudo: None };
+        shown(&element) && (target.pseudo.is_none() || shown(target))
+    }
+
     // The style `id` has without its animations and transitions — its base style (web-animations §5.4.1), which a
     // neutral keyframe and a composite other than `replace` stand on.
     fn base_style(&self, arena: &RealmArena, target: &waapi::Target, style: &Arc<ComputedValues>) -> Arc<ComputedValues> {
@@ -1945,7 +1960,7 @@ impl StyleEngine {
             .flat_map(|node| model.css_by_owner[&node].iter().copied())
             .filter(|id| {
                 let owner = model.animations[id].css.as_ref().and_then(|css| css.owner.as_ref());
-                owner.is_some_and(|o| !is_rendered(arena, o))
+                owner.is_some_and(|o| !self.rendered_unanimated(arena, o))
             })
             .collect();
         for id in unrendered {

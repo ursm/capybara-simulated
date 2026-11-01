@@ -145,6 +145,21 @@ RSpec.describe 'CSS animation and transition events' do
     expect(drain(s, 3).map {|e| e.split(':').first(2).join(':') }).to eq(%w[animationcancel:grow animationstart:other])
   end
 
+  # An animation whose keyframes make its element `display: none` is no element made `display: none`: its animations are
+  # terminated only where the style computes to none without the animations and transitions origins too (css-animations-2
+  # §2.1; WPT display-none-dont-cancel.tentative, display-none-to-display-block-dont-cancel.tentative).
+  it 'cancels none of the animations whose keyframe makes the element display: none' do
+    s = page(<<~HTML)
+      <style>@keyframes appear { 0% { display: none } 100% { display: block } } #a { display: none } #a.on { display: block; animation: appear 1s }</style>
+      <div id="a">a</div>
+    HTML
+    watch(s)
+    s.execute_script("document.getElementById('a').className = 'on'")
+    log = drain(s, 3)
+    expect(log).to eq(['animationstart:appear:0:a:true'])
+    expect(s.evaluate_script("document.getElementById('a').getAnimations().length")).to eq(1)
+  end
+
   # A NEGATIVE delay starts the animation part way through, and the first event says how far
   # (Chrome: `grow 300ms linear -100ms` reports `animationstart` at 0.1, not 0).
   it 'reports what a negative delay skipped' do
