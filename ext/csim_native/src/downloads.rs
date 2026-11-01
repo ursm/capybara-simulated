@@ -125,9 +125,6 @@ pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str) -> String {
 fn header_bytes(text: &str) -> Vec<u8> {
     text.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
 }
-pub(crate) fn is_download_for_ruby(cd: Option<String>) -> bool {
-    cd.is_some_and(|cd| is_download(&header_bytes(&cd)))
-}
 pub(crate) fn filename_for_ruby(cd: Option<String>, url: String, hint: Option<String>) -> String {
     filename(cd.map(|cd| header_bytes(&cd)).as_deref(), &url, hint.as_deref().unwrap_or(""))
 }

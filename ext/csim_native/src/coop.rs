@@ -14,7 +14,7 @@ pub(crate) enum Value {
 }
 
 impl Value {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Value::UnsafeNone => "unsafe-none",
             Value::SameOriginAllowPopups => "same-origin-allow-popups",
@@ -23,7 +23,7 @@ impl Value {
             Value::NoopenerAllowPopups => "noopener-allow-popups",
         }
     }
-    fn named(name: &str) -> Value {
+    pub(crate) fn named(name: &str) -> Value {
         match name {
             "same-origin-allow-popups" => Value::SameOriginAllowPopups,
             "same-origin" => Value::SameOrigin,

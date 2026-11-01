@@ -4,7 +4,9 @@
 // policy a redirect's `Referrer-Policy` sets), the site Sec-Fetch-Site latches across the chain, and whether a hop to
 // another origin wants the navigation's reserved client made anew (one is origin-bound) — and the context its cookies
 // are sent and its responses' stored in (cookie_jar.rs `request_context`), by Fetch's "determine the same-site mode"
-// (`Nav::cookies`). The host keeps the transport, a service worker's round-trip, the document, the session history; it
+// (`Nav::cookies`) — and what each response makes of the navigation (`response`): a redirect followed, a network error,
+// a hand-off, no document (a 204 / 205, a download) or the document, a top-level traversable's opener policy enforced
+// on every one. The host keeps the transport, a service worker's round-trip, the document, the session history; it
 // asks this twice a hop (`begin_hop`, `response`).
 
 use std::cell::RefCell;
@@ -12,7 +14,9 @@ use std::cell::RefCell;
 use magnus::{function, method, prelude::*, Error, IntoValue, RArray, RHash, RModule, Ruby, TryConvert, Value};
 
 use crate::cookie_jar::request_context;
+use crate::coop::Value as Coop;
 use crate::fetch_chain::{Followed, Judged, RequestChain, MAX_REDIRECTS};
+use crate::response_headers::ResponseFields;
 use crate::referrer::{cross_site_for_cookies, fetch_site, http_origin, wider_site, RedirectTaint};
 
 struct Nav {
@@ -107,6 +111,57 @@ pub(crate) struct NavigationFetch {
     // client is null … Set request's origin to a new opaque origin").
     origin: String,
     st: RefCell<Nav>,
+    // A top-level traversable's navigation's opener policy enforcement, none for a frame's.
+    coop: RefCell<Option<CoopEnforcement>>,
+}
+
+// HTML's opener policy enforcement result as a navigation's responses come ("enforce a response's opener policy"): the
+// policy and origin the next response is judged against — the navigable's document's before the first (its origin none
+// until it is asked for), the previous response's after — and whether a browsing context group switch is needed, once
+// needed needed whatever comes after. The facts of the document it leaves are the host's to give, asked once and only
+// where a policy but "unsafe-none" is in play: its origin serialized, whether it is its initial about:blank, and its
+// navigable's popup sandboxing flag set.
+struct CoopEnforcement {
+    coop: Coop,
+    origin: Option<String>,
+    facts: Option<(String, bool, u32)>,
+    switch: bool,
+}
+
+impl CoopEnforcement {
+    // The response at `url` of opener policy `response` and Content-Security-Policy `csp`, enforced: false — a network
+    // error — for one of a policy but "unsafe-none" to a navigable sandboxed, by its popup sandboxing flags or that
+    // policy's `sandbox` (HTML "create navigation params by fetching" step 12.3, finalSandboxFlags); else the switch
+    // judged against what it follows by coop.rs `switch_needed` (HTML "check if COOP values require a browsing context
+    // group switch", the popup check where the document is its initial about:blank), and the next judged against this
+    // one. (…the host asked nothing where both are "unsafe-none", which match: every hop of a page that sets none)
+    fn enforce<E>(&mut self, response: Coop, csp: Option<&str>, url: &str, facts: impl FnOnce() -> Result<(String, bool, u32), E>) -> Result<bool, E> {
+        let origin = http_origin(url).unwrap_or_default();
+        if self.coop != Coop::UnsafeNone || response != Coop::UnsafeNone {
+            if self.facts.is_none() {
+                self.facts = Some(facts()?);
+            }
+            let (document_origin, initial, popup) = self.facts.clone().unwrap_or_default();
+            if response != Coop::UnsafeNone && popup | crate::sandbox::sandboxing(csp, None) != 0 {
+                return Ok(false);
+            }
+            let from = self.origin.get_or_insert(document_origin);
+            self.switch |= crate::coop::switch_needed(initial, from, self.coop, &origin, response);
+        }
+        self.coop = response;
+        self.origin = Some(origin);
+        Ok(true)
+    }
+}
+
+// (…a command and its payload, as the host reads it: `[name, *payload]`)
+fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
+    let out = ruby.ary_new_capa(payload.len() + 1);
+    let _ = out.push(name);
+    for v in payload {
+        let _ = out.push(*v);
+    }
+    out
 }
 
 // The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
@@ -127,7 +182,8 @@ impl NavigationFetch {
     // "as if navigable navigated itself" — which its redirect-taint is walked with in place of `origin`: its Origin, a
     // re-post's the one it was first sent with, and its Sec-Fetch-Site still a user's; nil none), `traversed_initiator`
     // (a top-level traversal's, of no initiator: its entry's document state's initiator origin, serialized — which its
-    // cookies are judged by alone, Fetch's step 2; nil none).
+    // cookies are judged by alone, Fetch's step 2; nil none), `coop` (a top-level traversable's: the opener policy of its
+    // document, by its name — coop.rs — which its responses' are enforced against: `response`; nil a frame's, none).
     fn new(ruby: &Ruby, request: RHash) -> Result<Self, Error> {
         let get = |key: &str| request.aref::<_, Value>(ruby.to_symbol(key));
         let text = |key: &str| -> Result<Option<String>, Error> { Option::<String>::try_convert(get(key)?) };
@@ -142,8 +198,10 @@ impl NavigationFetch {
         };
         let ancestors: Option<RArray> = Option::try_convert(get("ancestors")?)?;
         let ancestors = ancestors.map(|a| a.into_iter().map(Option::<String>::try_convert).collect::<Result<Vec<_>, _>>()).transpose()?;
+        let coop = text("coop")?.map(|name| CoopEnforcement { coop: Coop::named(&name), origin: None, facts: None, switch: false });
         Ok(NavigationFetch {
             origin: judged_origin,
+            coop: RefCell::new(coop),
             st: RefCell::new(Nav {
                 chain: RequestChain {
                     method: text("method")?.filter(|m| !m.is_empty()).map_or_else(|| "GET".to_owned(), |m| m.to_ascii_uppercase()),
@@ -196,42 +254,85 @@ impl NavigationFetch {
         ])
     }
 
-    // #redirect(status, location, policy) -> what a redirect response of the hop makes of the navigation, its Location
-    // `location`, its `Referrer-Policy` (parsed) `policy`: ['follow', body gone, new client] — the next hop, its request
-    // a GET where the redirect makes one, a hop to another origin wanting the reserved client made anew — ['hand_off'] —
-    // a URL of no fetch scheme (`mailto:`, an app's own), handed off to external software, the navigable keeping its
-    // document (HTML "create navigation params by fetching": non-fetch-scheme navigation params) — or ['fail']: a
-    // network error (a Location no URL, a fetch scheme no HTTP(S) one, a port blocked, the 21st hop).
-    fn redirect(ruby: &Ruby, rb_self: &Self, status: u32, location: magnus::RString, policy: Option<String>) -> Result<RArray, Error> {
-        let mut st = rb_self.st.borrow_mut();
-        let out = ruby.ary_new();
+    // #response(status, headers) { facts } -> what the hop's response — of status `status`, its header map `headers`
+    // (response_headers.rs; nil none) — makes of the navigation, HTML "create navigation params by fetching" and
+    // "navigate":
+    // - ['fail'] — a network error, its error document at `#target`: a response whose opener policy is enforced against a
+    //   navigable sandboxed (by its popup sandboxing flags or the response's Content-Security-Policy: HTML's
+    //   finalSandboxFlags, step 12.3), or a redirect that is not followed (`redirect`);
+    // - ['redirect', body gone, new client] — the next hop (`redirect`);
+    // - ['hand_off'] — a redirect to a URL of no fetch scheme, the navigable keeping its document;
+    // - ['no_content'] — a 204 / 205: the navigation aborted, the navigable at the document it is at, no `load` and no
+    //   session history entry (HTML "populate a session history entry's document"; Chrome, measured 2026-10-24: the
+    //   page's link and form, a frame's form, link, `location` and `src` alike);
+    // - ['download'] — a response that downloads (its Content-Disposition): handed off to be saved, no document made;
+    // - ['document'] — the document it makes.
+    // A top-level traversable's opener policy is enforced on each, a redirect's too (`enforce_coop`); the block gives the
+    // facts of the document the navigation leaves, `[origin, initial about:blank, popup sandboxing flags]`, where they
+    // are needed — asked once.
+    fn response(ruby: &Ruby, rb_self: &Self, status: u32, headers: Option<RHash>) -> Result<RArray, Error> {
+        let fields = ResponseFields::read(headers)?;
+        if !rb_self.enforce_coop(ruby, &fields)? {
+            return Ok(command(ruby, "fail", &[]));
+        }
+        if let Some(locations) = fields.redirect_locations(status) {
+            return rb_self.redirect(ruby, status, &locations, fields.referrer_policy);
+        }
+        let outcome = if matches!(status, 204 | 205) {
+            "no_content"
+        } else if fields.downloads() {
+            "download"
+        } else {
+            "document"
+        };
+        Ok(command(ruby, outcome, &[]))
+    }
+
+    // HTML "enforce a response's opener policy" (`CoopEnforcement::enforce`), true where the navigation goes on.
+    fn enforce_coop(&self, ruby: &Ruby, fields: &ResponseFields) -> Result<bool, Error> {
+        let mut slot = self.coop.borrow_mut();
+        let Some(result) = slot.as_mut() else { return Ok(true) };
+        let target = self.st.borrow().chain.target.clone();
+        result.enforce(fields.opener_policy(), fields.csp.as_deref(), &target, || ruby.yield_value(ruby.qnil()))
+    }
+
+    // What a redirect response of the hop makes of the navigation, its Location fields `locations`, its
+    // `Referrer-Policy` (parsed) `policy`: ['redirect', body gone, new client] — the next hop, its request a GET where the
+    // redirect makes one, a hop to another origin wanting the reserved client made anew — ['hand_off'] — a URL of no
+    // fetch scheme (`mailto:`, an app's own), handed off to external software, the navigable keeping its document (HTML
+    // "create navigation params by fetching": non-fetch-scheme navigation params) — or ['fail']: a network error (a
+    // Location no URL, one given more than once differently, a fetch scheme no HTTP(S) one, a port blocked, the 21st hop).
+    fn redirect(&self, ruby: &Ruby, status: u32, locations: &[Vec<u8>], policy: Option<&str>) -> Result<RArray, Error> {
+        let mut st = self.st.borrow_mut();
         // (…the 21st hop's redirect a network error as it is reached — Fetch "HTTP-redirect fetch": a request redirected 20
         // times already — not a hop of its own)
         if st.chain.dispatches > MAX_REDIRECTS {
-            let _ = out.push("fail");
-            return Ok(out);
+            return Ok(command(ruby, "fail", &[]));
         }
         let target = st.chain.target.clone();
         // (…the Referer it sent: the next hop's referrer source; the site it was at, latched)
         let sent = st.chain.referer();
         st.site = Some(wider_site(st.site, fetch_site(st.initiator.as_deref().unwrap_or(""), &target)));
-        let judged = Judged { cors: false, origin: &rb_self.origin, tainting_cors: false };
-        let location = crate::fetch_rules::ruby_bytes(location);
-        let location_text = String::from_utf8_lossy(&location).into_owned();
-        match st.chain.follow(status, &[location], &judged) {
+        let judged = Judged { cors: false, origin: &self.origin, tainting_cors: false };
+        match st.chain.follow(status, locations, &judged) {
             Followed::Follow(from, to_get) => {
-                st.chain.refer_on(sent, policy);
+                st.chain.refer_on(sent, policy.map(str::to_owned));
                 let new_client = http_origin(&from) != http_origin(&st.chain.target);
-                let _ = out.push("follow");
-                let _ = out.push(to_get);
-                let _ = out.push(new_client);
+                Ok(command(ruby, "redirect", &[to_get.into_value_with(ruby), new_client.into_value_with(ruby)]))
             }
             Followed::Answer | Followed::Fail => {
-                let handed_off = ada_url::Url::parse(&location_text, Some(&target)).is_ok_and(|u| !FETCH_SCHEMES.contains(&u.protocol()));
-                let _ = out.push(if handed_off { "hand_off" } else { "fail" });
+                let handed_off = match locations {
+                    [one] => ada_url::Url::parse(&String::from_utf8_lossy(one), Some(&target)).is_ok_and(|u| !FETCH_SCHEMES.contains(&u.protocol())),
+                    _ => false,
+                };
+                Ok(command(ruby, if handed_off { "hand_off" } else { "fail" }, &[]))
             }
         }
-        Ok(out)
+    }
+
+    // #coop_switch? -> whether the navigation's responses need a browsing context group switch (`enforce_coop`).
+    fn coop_switch(&self) -> bool {
+        self.coop.borrow().as_ref().is_some_and(|c| c.switch)
     }
 
     // #target / #request_method / #redirected? / #referrer / #cross_site?: the request as it stands, the Referer its last
@@ -258,7 +359,8 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     let class = native.define_class("NavigationFetch", ruby.class_object())?;
     class.define_singleton_method("new", function!(NavigationFetch::new, 1))?;
     class.define_method("begin_hop", method!(NavigationFetch::begin_hop, 0))?;
-    class.define_method("redirect", method!(NavigationFetch::redirect, 3))?;
+    class.define_method("response", method!(NavigationFetch::response, 2))?;
+    class.define_method("coop_switch?", method!(NavigationFetch::coop_switch, 0))?;
     class.define_method("target", method!(NavigationFetch::target, 0))?;
     class.define_method("request_method", method!(NavigationFetch::request_method, 0))?;
     class.define_method("redirected?", method!(NavigationFetch::redirected, 0))?;
@@ -295,6 +397,32 @@ mod tests {
             reloaded_cross: None,
             cross: false,
         }
+    }
+
+    #[test]
+    fn each_response_s_opener_policy_is_enforced_against_the_one_before_it() {
+        let fresh = |coop: Coop| CoopEnforcement { coop, origin: None, facts: None, switch: false };
+        let facts = |sandbox: u32| move || Ok::<_, ()>(("http://a.test".to_owned(), false, sandbox));
+        // (…none asked of the document where every policy is "unsafe-none")
+        let mut none = fresh(Coop::UnsafeNone);
+        assert_eq!(none.enforce(Coop::UnsafeNone, None, "http://b.test/", || Err(())), Ok(true));
+        assert!(!none.switch && none.facts.is_none());
+        // (…a redirect of "same-origin" switches whatever comes after)
+        let mut chain = fresh(Coop::UnsafeNone);
+        assert_eq!(chain.enforce(Coop::SameOrigin, None, "http://a.test/r", facts(0)), Ok(true));
+        assert!(chain.switch);
+        assert_eq!(chain.enforce(Coop::UnsafeNone, None, "http://a.test/x", facts(0)), Ok(true));
+        assert!(chain.switch);
+        // (…the same policy of the same origin, no switch; another origin's, one)
+        let mut same = fresh(Coop::SameOrigin);
+        assert_eq!(same.enforce(Coop::SameOrigin, None, "http://a.test/y", facts(0)), Ok(true));
+        assert!(!same.switch);
+        assert_eq!(same.enforce(Coop::SameOrigin, None, "http://b.test/y", facts(0)), Ok(true));
+        assert!(same.switch);
+        // (…a policy to a navigable sandboxed — by its popup flags or the response's CSP — a network error)
+        assert_eq!(fresh(Coop::UnsafeNone).enforce(Coop::SameOrigin, None, "http://a.test/", facts(crate::sandbox::SCRIPTS)), Ok(false));
+        assert_eq!(fresh(Coop::UnsafeNone).enforce(Coop::SameOrigin, Some("sandbox"), "http://a.test/", facts(0)), Ok(false));
+        assert_eq!(fresh(Coop::UnsafeNone).enforce(Coop::UnsafeNone, Some("sandbox"), "http://a.test/", facts(0)), Ok(true));
     }
 
     #[test]

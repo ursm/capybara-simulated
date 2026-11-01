@@ -4,8 +4,10 @@ require 'capybara/simulated'
 require_relative 'support/session_teardown'
 
 # A response's Location fields as they came — Rack 2's repeated header one String its fields joined by newlines, as
-# Set-Cookie's are — of which more than one is no Location to follow: a network error for a fetch (Fetch "extract
-# header list values"), no target for a navigation, which shows the redirect's own body.
+# Set-Cookie's are — of which more than one is a network error (Fetch "extract header list values" step 2: a header
+# whose ABNF allows a single one, given more than once, is failure; "HTTP-redirect fetch": a location URL that is
+# failure is a network error), a fetch's and a navigation's alike: the navigation commits an error document at the
+# redirect's URL rather than the redirect's own body.
 RSpec.describe 'a response with two Location fields' do
   let(:session) {
     simulated_session(lambda {|env|
@@ -28,8 +30,11 @@ RSpec.describe 'a response with two Location fields' do
     expect(got).to eq('TypeError')
   end
 
-  it 'is no target for a navigation' do
+  it 'fails a navigation to it' do
+    session.visit '/'
     session.visit '/two'
-    expect(session).to have_text('stayed')
+    expect(session).to have_no_text('stayed')
+    expect(session).to have_no_text('went')
+    expect(session.current_url).to end_with('/two')
   end
 end

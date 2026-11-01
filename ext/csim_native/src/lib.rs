@@ -104,6 +104,7 @@ mod select_options;
 mod session_history;
 mod fetch_chain;
 mod navigation_fetch;
+mod response_headers;
 mod worker_script_fetch;
 mod worker_host;
 mod clock_holds;
@@ -347,7 +348,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("fetch_site", magnus::function!(referrer::fetch_site_for_ruby, 3))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
     // Whether a response downloads, and the name it is saved under (downloads.rs).
-    native.define_module_function("download_response", magnus::function!(downloads::is_download_for_ruby, 1))?;
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;
     native.define_module_function("redirect_to_get", magnus::function!(fetch_rules::redirect_to_get_for_ruby, 2))?;
