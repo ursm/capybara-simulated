@@ -8679,6 +8679,8 @@ module Capybara
         @clock_holds.clear
         # (…the session's registrations its host's to clear, a reset of the session's: `sw_host`)
         Native.sw_clear(@sw_partition) if sw_host?
+        # (…and what was held for a reserved client of it: `sw_client_settled`)
+        @reserved_client_messages = nil
         # Keepalive threads are never KILLED — delivering the beacon is their
         # contract — but they no longer outlive the session boundary either:
         # dispose/reset! drain them (join, so the beacon still lands) via
