@@ -2245,7 +2245,11 @@ module Capybara
         transfer_buffer_fetch(out['refId'])
       end
 
-      def status_code      = (@last_response_status || 200)
+      # The response an about:blank document reports: it came of none — HTML makes it with no fetch — so 200 and no
+      # header, whichever way it was made: the window's first (one before any visit, a reset's, a new window's initial
+      # one), a navigation's to it, the one a navigation that made no document leaves, a window `window.open` made.
+      ABOUT_BLANK_RESPONSE = [200, {}.freeze].freeze
+      def status_code      = (@last_response_status || ABOUT_BLANK_RESPONSE[0])
       # Rack 3 lowercases header names; Capybara tests do `['Content-Type']`.
       def response_headers = Browser.capitalized_headers(@last_response_headers)
       # Headers as Capybara's drivers name them: each word capitalized.
@@ -2288,7 +2292,7 @@ module Capybara
       # (Driver#open_aux_window), which replaces it — one to about:blank none, the document at its URL instead.
       def open_initial_document(url = 'about:blank')
         self.page_url = url
-        record_response(200, {'content-type' => 'text/html'})
+        record_response(*ABOUT_BLANK_RESPONSE)
         boot_response_into_ctx('', initial: true)
       end
 
@@ -3648,6 +3652,7 @@ module Capybara
           @viewport_height = nil
         end
         @current_referer = ''
+        record_response(*ABOUT_BLANK_RESPONSE)
         @document_handle = 0
         # A test may leave a frame switched-to without switching back
         # (Capybara's reset_session spec covers exactly this); start the
@@ -7626,7 +7631,7 @@ module Capybara
       # …and its viewport (`resize_to`), its resize steps run: as the page's (`set_viewport`), in its realm.
       def window_realm_viewport(realm) = @runtime.realm_call(realm, '__csimViewportSize').map(&:to_i)
       # …and the response its document was made of, `[status, headers]` — one no response made, 200.
-      def window_realm_response(realm) = @runtime.window_realm_meta.dig(realm, :response) || [200, {}]
+      def window_realm_response(realm) = @runtime.window_realm_meta.dig(realm, :response) || ABOUT_BLANK_RESPONSE
       def set_window_realm_viewport(realm, w, h)
         invalidate_find_cache
         @runtime.realm_call(realm, '__csimSetViewport', w.to_i, h.to_i)
@@ -11878,7 +11883,7 @@ module Capybara
             end
             commits.(initiator && url_origin(initiator))
             self.page_url = url.to_s
-            record_response(200, {'content-type' => 'text/html'})
+            record_response(*ABOUT_BLANK_RESPONSE)
             return boot_response_into_ctx('')
           # A `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
