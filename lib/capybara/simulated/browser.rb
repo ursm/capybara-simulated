@@ -124,6 +124,10 @@ module Capybara
       # default — shared across the frame chunks of one poll so sub-stepping keeps
       # the same per-poll ceiling the single-step path had.
       RUN_LOOP_MAX_ITER = 10_000
+      # The response an about:blank document reports: it came of none — HTML makes it with no fetch — so 200 and no
+      # header, whichever way it was made: the window's first (one before any visit, a reset's, a new window's initial
+      # one), a navigation's to it, the one a navigation that made no document leaves, a window `window.open` made.
+      ABOUT_BLANK_RESPONSE = [200, {}.freeze].freeze
       # Horizon-gated fast-forward: when the page is observably idle (no timer due
       # now, no background IO) but a timer is parked within this horizon, jump the
       # virtual clock straight to it instead of waiting ~delay/step polls. A timer
@@ -265,6 +269,8 @@ module Capybara
         @session_storage              = Native.storage_partition_new
         @session_history.session_storage = @session_storage
         @sticky_headers               = {}
+        # (…the response its first document — an about:blank before any visit — reports)
+        record_response(*ABOUT_BLANK_RESPONSE)
         @timers_active                = false
         # Capybara config is set once per suite; cache the derived
         # origin so the per-request fallback path doesn't re-dispatch
@@ -795,6 +801,8 @@ module Capybara
         passed.delete(@action_url_baseline.to_s) if @action_url_baseline
         return if passed.empty?
 
+        # (…their age, which `current_url`'s staleness check reads, counted from as the host takes them: as the tick or the
+        # load they were made in ends)
         @recent_urls.concat(passed)
         @recent_urls.shift while @recent_urls.size > 8
         @recent_urls_last_push_at = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
@@ -2245,11 +2253,7 @@ module Capybara
         transfer_buffer_fetch(out['refId'])
       end
 
-      # The response an about:blank document reports: it came of none — HTML makes it with no fetch — so 200 and no
-      # header, whichever way it was made: the window's first (one before any visit, a reset's, a new window's initial
-      # one), a navigation's to it, the one a navigation that made no document leaves, a window `window.open` made.
-      ABOUT_BLANK_RESPONSE = [200, {}.freeze].freeze
-      def status_code      = (@last_response_status || ABOUT_BLANK_RESPONSE[0])
+      def status_code      = @last_response_status
       # Rack 3 lowercases header names; Capybara tests do `['Content-Type']`.
       def response_headers = Browser.capitalized_headers(@last_response_headers)
       # Headers as Capybara's drivers name them: each word capitalized.
@@ -10528,7 +10532,7 @@ module Capybara
           end
         return unless new_id
 
-        @runtime.window_realm_meta[new_id][:response] = response || [200, {}]
+        @runtime.window_realm_meta[new_id][:response] = response || ABOUT_BLANK_RESPONSE
         @runtime.window_realm_meta[new_id][:coop] = opener_policy || 'unsafe-none'
         # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
         if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
@@ -12167,11 +12171,8 @@ module Capybara
         commit_coop(about_blank ? 'unsafe-none' : opener_policy, opaque_origin, coop_switch) unless initial
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
-        @runtime.rebuild_ctx
-        # (…a new environment, as every document is, though its realm is the last one's: the id its navigation reserved —
-        # `event.resultingClientId` — else one of its own, adopted before its scripts run; the last one's let go of above,
-        # `sw_unload_document_clients`)
-        @runtime.adopt_page_client_id(client_id || mint_resulting_client_id)
+        # (…a new environment, as every document is, though its realm is the last one's: V8Runtime#init_page_realm)
+        @runtime.rebuild_ctx(client_id: client_id)
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)
         yield if block_given?
         # The lifecycle steps queued on the outgoing page's event loop are the new page's to run.
@@ -12803,13 +12804,14 @@ module Capybara
       # The current URL's parts, kept while it stays the same.
       def current_url_parts
         return nil unless (url = page_url)
-        return @current_url_parts if @current_url_parts_for == url
 
-        # (…the parts kept before the URL they are of: another thread — an event stream's reader — asks too, and must
-        # never find the URL's mark beside another's parts)
-        parts                  = parse_url(url)
-        @current_url_parts     = parts
-        @current_url_parts_for = url
+        # (…the URL and its parts kept as one frozen pair, swapped whole: another thread — an event stream's reader — asks
+        # too, and must never find one URL beside another's parts)
+        kept_url, parts = @current_url_parts
+        return parts if kept_url == url
+
+        parts = parse_url(url)
+        @current_url_parts = [url, parts].freeze
         parts
       end
 

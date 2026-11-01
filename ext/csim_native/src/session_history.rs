@@ -242,11 +242,12 @@ struct Traversable {
     // sandboxed document that opened it, where they propagate to the windows it opens), which every document of it is
     // sandboxed by (`popup_sandbox_of`).
     popup_sandbox: u32,
-    // The URL of the document its top-level navigable is at: the host's to say as a navigation commits a document, its
-    // document's own to change by its URL and history update steps (`pushState`, `replaceState`, a fragment
-    // navigation: `history_update`) — none before the first. And, while the host notes them (`noting`: as its event loop
-    // runs a turn or a document loads), the URLs those steps moved it from, which the host takes (`#note_url_changes`):
-    // the intermediates a polling `current_url` walks (browser.rb `record_url_transition`).
+    // The URL of the document its top-level navigable is at, a traversable a Browser hosts (the page's): the host's to
+    // say as a navigation commits a document, its document's own to change by its URL and history update steps
+    // (`pushState`, `replaceState`, a fragment navigation: `history_update`) — none before the first, nor for a window
+    // `window.open` made in an isolate, whose realm's `location` is the one URL it has. And, while the host notes them
+    // (`noting`: as its event loop runs a turn or a document loads), the URLs those steps moved it from, which the host
+    // takes (`#note_url_changes`): the intermediates a polling `current_url` walks (browser.rb `note_url_changes`).
     url: Option<String>,
     noting: bool,
     passed: Vec<String>,
@@ -2220,9 +2221,13 @@ fn frame_entry(arena: &crate::dom::RealmArena, realm: i32, create: bool) -> Opti
     let url = arena.realm_state(realm).map_or_else(String::new, |s| s.location.href().to_owned());
     let id = lock(&frame.traversable).ensure(frame.nav, frame.parent_nav, &url)?;
     let referrer = arena.realm_document(realm).and_then(|doc| arena.document_states.referrer(doc)).unwrap_or_default().to_owned();
-    if let Some(entry) = lock(&frame.traversable).state.entry_mut(id).filter(|e| e.data.text("referrer").is_none()) {
+    let mut guard = lock(&frame.traversable);
+    let t = &mut *guard;
+    if let Some(entry) = t.state.entry_mut(id).filter(|e| e.data.text("referrer").is_none()) {
         Arc::make_mut(&mut entry.data).set_text("referrer", referrer);
+        t.version += 1;
     }
+    drop(guard);
     Some((frame, id))
 }
 
@@ -2254,7 +2259,7 @@ fn frame_entry_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
 // __dom.historyUpdate(url, state, push) — HTML "URL and history update steps" of the calling realm's document, its
 // `history.pushState` (`push`) or `replaceState`, or a fragment navigation (`Traversable::update`), recorded in the
 // session history of its traversable (`traversable_of`): the page's, a window's `window.open` made in this isolate,
-// a frame's of either — and, a top-level document's, its URL its traversable's (`move_url`). None while its document is
+// a frame's of either — and, the page's document's, its URL its traversable's (`move_url`). None while its document is
 // being unloaded (navigables.rs `session_history_takes`), nor for a realm of no traversable (a frame removed, a window
 // navigated away from): its URL and state its own all the same.
 fn history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
@@ -2269,7 +2274,9 @@ fn history_update_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
     let Some((traversable, window)) = traversable_of(arena, cid) else { return };
     if window.map_or(cid == 0, |window| window == cid) {
         let mut t = lock(&traversable);
-        t.move_url(&url);
+        if window.is_none() {
+            t.move_url(&url);
+        }
         t.update(TOP, TOP, &url, state, push);
     } else if let Some((frame, _)) = frame_entry(arena, cid, true) {
         lock(&frame.traversable).update(frame.nav, frame.parent_nav, &url, state, push);

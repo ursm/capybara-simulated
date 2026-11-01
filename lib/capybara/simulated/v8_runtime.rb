@@ -621,15 +621,13 @@ module Capybara
       # (`event.resultingClientId` resolves to THIS client after commit). Seeded BEFORE the document loads so the realm's
       # own client reports (sw-client.js clientId()) already carry it; the browser-side alias keeps message routing and
       # record minting coherent (sw_adopt_client_id). A frame's and a window's alike, and the page's (`realm` the main
-      # context, `realm_id` 0: Browser#boot_response_into_ctx).
+      # context, `realm_id` 0: `init_page_realm`).
       def adopt_client_id(realm, client_id, realm_id: realm.id)
         return if client_id.to_s.empty?
 
         realm.eval_void("globalThis.__dom.realmIdentify('clientId', #{JSON.generate(client_id.to_s)});")
         @browser.sw_adopt_client_id(realm_id, client_id.to_s)
       end
-      # …the page's document's: realm 0's, which each document of the page reuses.
-      def adopt_page_client_id(client_id) = adopt_client_id(ctx, client_id, realm_id: 0)
       # A navigable gone on from realm `from`'s document to realm `to`'s: the WindowProxy of it every realm holds over the
       # new one's window — one object however its active document changes (HTML) — before the new document's scripts run.
       def retarget_window_proxies(from, to)
@@ -741,8 +739,10 @@ module Capybara
       # code warm across visits (measured −4.5..19% suite wall). Only a refused
       # reset falls back to the cold route: dispose the isolate and build a
       # fresh one (synchronously, on this thread).
-      # (…`keep_windows`: a navigation of the page, which the windows it opened outlive — not the session's reset)
-      def rebuild_ctx(keep_windows: true)
+      # (…`keep_windows`: a navigation of the page, which the windows it opened outlive — not the session's reset;
+      # `client_id` the reserved client id of the navigation whose document the realm is for: `init_page_realm`)
+      def rebuild_ctx(keep_windows: true, client_id: nil)
+        @page_client_id = client_id
         # (…a new page's clock starting where its realm's does, not where the last page's left it)
         @clock = nil
         # Produce any queued bytecode-cache blobs while every queued target
@@ -789,7 +789,7 @@ module Capybara
             # contexts N -> 1). See `relieve_heap_pressure`.
             relieve_heap_pressure
             attach_host_fns(@ctx)
-            init_realm(@ctx)
+            init_page_realm(@ctx)
             # (…the WindowProxies of the page's navigable the windows it kept hold — their `opener` — over its new
             # document's window, as a navigable's are over each document it goes on to; none where the page left their
             # browsing context group for another, its new document a new browsing context's, whose WindowProxy no window
@@ -965,8 +965,17 @@ module Capybara
       def build_ctx
         c = Ctx.new(snapshot: @snapshot || self.class.snapshot, timeout: CALL_TIMEOUT_MS)
         attach_host_fns(c)
-        init_realm(c)
+        init_page_realm(c)
         c
+      end
+      # …the page's: a new environment, as each document is though its realm is the last one's — its service-worker
+      # client the one its navigation reserved (`rebuild_ctx`'s `client_id`), else one of its own (the session's first
+      # document, a reset's, an about:blank, blob: or error document), adopted before its scripts run; the last one's let
+      # go of as it unloaded (Browser#sw_unload_document_clients).
+      def init_page_realm(c)
+        init_realm(c)
+        adopt_client_id(c, @page_client_id || @browser.mint_resulting_client_id, realm_id: 0)
+        @page_client_id = nil
       end
 
       # A window realm's own state (`__csimInitRealm()`: its document, the Worker constructors) and the user agent a test
