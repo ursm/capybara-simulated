@@ -29,7 +29,9 @@ const RUST_OUT = join(ROOT, 'ext', 'csim_native', 'src', 'reflect_keywords.rs');
 // adds to it that no implementation here answers yet, and why — a mixin it includes, by name; a partial interface of
 // it, or a partial of a mixin it includes, by the spec's name. Anything else added is merged. `omitMembers`: single
 // members no implementation answers, by name (and why). `namedProperties` / `indexedProperties`: how an installed
-// interface's objects answer its named / indexed property getter themselves (a Proxy of the class's). `nativeIndexed`:
+// interface's objects answer its named / indexed property getter themselves (a Proxy of the class's). `namedGetter`: an
+// interface with an indexed getter whose named getter the Proxy `withIndexedGetter` makes answers too — by the
+// implementation's `supportedNames(slots)` and its named getter's steps (`namedItem`). `nativeIndexed`:
 // an interface the binding makes whose objects with an indexed getter are made natively (webidl.js
 // `nativeIndexedObject`), not as the Proxy `withIndexedGetter` makes. `crossOrigin`: the interface's
 // CrossOriginProperties (HTML §7.2.1.3.1), what an object of it answers to another origin's script — each member by its
@@ -336,11 +338,11 @@ const INTERFACES = [
     namedProperties: "the undetectable object's interceptors (legacy.rs)",
     indexedProperties: 'the same interceptors'
   }],
-  // (…the PDF viewer plugins and their MIME types, none where the user agent views no PDF inline — this one, whose
-  // `pdfViewerEnabled` is false (HTML §8.9.1.6): every list empty, so none has a named property)
-  ['html', 'PluginArray', { namedProperties: 'none: the list is empty (no PDF viewer)' }],
-  ['html', 'MimeTypeArray', { namedProperties: 'none: the list is empty (no PDF viewer)' }],
-  ['html', 'Plugin', { namedProperties: 'none: no Plugin is made (no PDF viewer)' }],
+  // (…the PDF viewer plugins and their MIME types, HTML §8.9.1.6's fixed lists where the user agent views PDFs inline —
+  // this one, whose `pdfViewerEnabled` is true: each named by its name or type, [LegacyUnenumerableNamedProperties])
+  ['html', 'PluginArray', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
+  ['html', 'MimeTypeArray', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
+  ['html', 'Plugin', { namedProperties: 'the Proxy withIndexedGetter makes', namedGetter: true }],
   ['html', 'MimeType'],
   ['html', 'External'],
   ['html', 'CustomElementRegistry', { install: true }],
@@ -1616,7 +1618,9 @@ function generateInterface(def, options = {}) {
     ? `new ${name}(PLATFORM, ...state)`
     : options.nativeIndexed
       ? `{ const s = nativeIndexedObject(${name}.prototype, KEY, (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s)); impl.init(s, ...state); return s.owner; }`
-      : `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`;
+      : options.namedGetter
+        ? `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s), (s) => impl.supportedNames(s), (s, n) => impl.namedItem(s, n))`
+        : `withIndexedGetter(new ${name}(PLATFORM, ...state), (s, i) => impl.${indexed}(s, i), (s) => impl.get_length(s))`;
   lines.push(`  return { interface: ${name}, create: (...state) => ${make} };`);
   lines.push(`}`);
   return lines.join('\n');

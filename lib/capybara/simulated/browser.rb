@@ -6787,10 +6787,16 @@ module Capybara
         end
         # (…a response the host cannot hand on — a NUL in a header — a network error at its URL, as one of no response is,
         # the opener policy switch its hops needed carried all the same: navigation_fetch.rs `coop_switch?`)
-        out = response_hash(hop.status, hop.headers, hop.document || read_rack_body(hop.rack_body), target, fetch.redirected?) or return failed.()
+        # (…a PDF's body none of its document's, unread: closed with the hop)
+        body = hop.command == 'inline' ? '' : hop.document || read_rack_body(hop.rack_body)
+        out  = response_hash(hop.status, hop.headers, body, target, fetch.redirected?) or return failed.()
         # The final reserved client id — the JS frame builder hands it to the new realm
         # (create_frame_realm tells the realm its client id + records the adoption).
         out['resulting_client_id'] = hop.client_id
+        # (…the type its body said, where it did — and whether it is a PDF, its viewer's inline content: frame_response.rs,
+        # `navigate_window_realm`)
+        out['document_type'] = hop.document_type if hop.document_type
+        out['inline'] = true if hop.command == 'inline'
         # (…and the method its last request was made with: a POST's a GET where a redirect made it one, a 307 / 308's a POST
         # still — the resource its entry keeps)
         out['method'] = fetch.request_method
@@ -6804,9 +6810,10 @@ module Capybara
 
       # What a navigation's last hop made of it (`run_navigation_fetch`): navigation_fetch.rs `response`'s command
       # ('fail', 'hand_off', 'no_content', 'download' or 'document'), the response — its status, headers and body, a Rack
-      # one unread (`rack_body`) or a service worker's bytes (`document`) — the reserved client id it carried, and the
-      # referrer source and policy of the request it was made by.
-      NavigationHop = Struct.new(:command, :status, :headers, :rack_body, :document, :client_id, :referrer_source, :referrer_policy)
+      # one unread (`rack_body`) or a service worker's bytes (`document`) — the reserved client id it carried, the
+      # referrer source and policy of the request it was made by, and the MIME type its document is made as where its
+      # body said it (`document_type`, MIME Sniffing's computed type: its headers left as the server sent them).
+      NavigationHop = Struct.new(:command, :status, :headers, :rack_body, :document, :client_id, :referrer_source, :referrer_policy, :document_type)
 
       # A navigation's fetch (navigation_fetch.rs), hop by hop: each hop to the service worker that controls it, where the
       # engine says one may (`begin_hop`'s worker site: the top-level site its registration is matched in), else to the
@@ -6880,17 +6887,16 @@ module Capybara
           # a redirect's too: navigation_fetch.rs `response` — a network one's Set-Cookie stored as it comes)
           command, to_get, new_client = fetch.response(status, headers, (cookie_now unless document)) { coop_facts(coop_realm) }
           # (…one whose body says whether it is a document, and its type: MIME Sniffing's computed MIME type of its first
-          # bytes, mime.rs `document_type` — the type the document is made as, where it is another than the one supplied)
+          # bytes, mime.rs `load` — the type the document is made as, its headers as they came)
+          type = nil
           if command == 'sniff'
             document ||= read_rack_body(rack_body)
             rack_body = nil
             supplied  = (ct = header_field(headers, 'content-type')) && header_text(ct)
-            type      = Native.navigation_document_type(supplied, document.byteslice(0, 1445))
-            command   = type ? 'document' : 'download'
-            headers   = header_map(headers).reject {|k, _| k.to_s.casecmp?('content-type') }.merge('content-type' => type) if type && !supplied.to_s.downcase.start_with?(type)
+            command, type = Native.navigation_load(supplied, document.byteslice(0, 1445))
           end
           close_rack_body(rack_body) unless command == 'document' || command == 'download'
-          return NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy) unless command == 'redirect'
+          return NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy, type) unless command == 'redirect'
 
           redirected&.call
           req_body, content_type = ''.b, nil if to_get
@@ -10369,16 +10375,17 @@ module Capybara
         made = {}
         body, ctype = nil
         if (blob = host_blob(blob))
-          # (…one of a type that makes no document saved, the window left at the one it is at: mime.rs `document_type`)
+          # (…one of a type that makes no document saved, the window left at the one it is at; a PDF its viewer's inline
+          # content: mime.rs `load`)
           given = blob[:type].to_s
-          type  = Native.navigation_document_type(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
-          unless type
+          load, type = Native.navigation_load(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
+          if load == 'download'
             from_document(initiator) { save_downloaded_response(url, {'content-type' => given}, [blob[:bytes].to_s]) }
             return
           end
 
-          body  = document_payload(blob[:bytes])
-          ctype = given.empty? ? type : given
+          body, ctype = load == 'inline' ? ['', 'text/html'] : [document_payload(blob[:bytes]), given.empty? ? type : given]
+          made[:doc_origin] = 'null' if load == 'inline'
         end
         # (…of a URL a navigation fails on before any request — another about: one than about:blank, a blob: one no store
         # resolved as it began, a POST to no HTTP(S) URL — an error document, as the page's and a frame's are; none at all
@@ -10397,6 +10404,7 @@ module Capybara
           end
 
           body, ctype = document_payload(bytes), mime if verdict == 'document'
+          body, ctype = '', 'text/html' if verdict == 'inline'
           made[:doc_origin] = 'null'
           start = 'fail' if verdict == 'fail'
         end
@@ -10445,6 +10453,7 @@ module Capybara
           # or 308 keeps it, Fetch "HTTP-redirect fetch")
           post = nil if resp['method'] == 'GET'
           ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers)
+          ctype     = resp['document_type'] || ctype
           body, url = document_payload(resp['body_bytes'] || resp['body']), resp['url'] || url
           ctype   ||= 'text/html'
           made = {
@@ -10455,6 +10464,11 @@ module Capybara
             refresh:         refresh
           }
           made[:doc_origin] = 'null' if resp['error']
+          # (…a PDF its viewer's document for inline content: `boot_inline_document`)
+          if resp['inline']
+            body, ctype, opener_policy = '', 'text/html', nil
+            made = {doc_origin: 'null', referrer: resp['referrer'], client_id: resp['resulting_client_id']}
+          end
           # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
           # this isolate for a Browser of its own, the document it makes that one's — HTML "obtain a browsing context to
           # use for a navigation response")
@@ -11212,6 +11226,9 @@ module Capybara
           return frame_navigation_made_no_document(realm_id)
         when 'download'
           return save_downloaded_response(target, hop.headers, hop.rack_body || [hop.document.to_s], realm: realm_id)
+        # (…a PDF its viewer's document for inline content: `boot_inline_document`)
+        when 'inline'
+          return commit_frame_document(realm_id, entry, target, '', 'text/html', doc_origin: 'null', client_id: hop.client_id)
         end
 
         # (…its entry's document state the request's — its referrer before its policy applied and that policy, a POST's
@@ -11223,6 +11240,7 @@ module Capybara
         # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
         # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
         ctype, csp, document_policy, refresh = Native.document_params(hop.headers)
+        ctype = hop.document_type || ctype
         response = {client_id: hop.client_id, csp: csp, referrer: fetch.referrer, referrer_policy: document_policy, refresh: refresh}
         response.update(commit) unless fetch.redirected?
         commit_frame_document(realm_id, entry, target, hop.document || read_rack_body(hop.rack_body), ctype || 'text/html', **response)
@@ -11937,10 +11955,11 @@ module Capybara
             blob ||= blob_snapshot(url)
             return error_document.(url) unless blob
 
-            # (…one of a type that makes no document saved, as a response of it is: mime.rs `document_type`)
+            # (…one of a type that makes no document saved, as a response of it is, a PDF its viewer's: mime.rs `load`)
             given = blob[:type].to_s
-            type  = Native.navigation_document_type(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
-            return download_in_place(url, {'content-type' => given}, [blob[:bytes].to_s]) unless type
+            load, type = Native.navigation_load(given.empty? ? nil : given, blob[:bytes].to_s.byteslice(0, 1445))
+            return download_in_place(url, {'content-type' => given}, [blob[:bytes].to_s]) if load == 'download'
+            return boot_inline_document(url, 200, {'content-type' => given}, commits) if load == 'inline'
 
             commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
             return boot_blob_document(url, blob[:bytes], given.empty? ? type : given, flushed: true)
@@ -11951,6 +11970,7 @@ module Capybara
             verdict, mime, bytes = Native.data_navigation(url.to_s)
             return error_document.(url) if verdict == 'fail'
             return download_in_place(url, {'content-type' => mime}, [bytes]) if verdict == 'download'
+            return boot_inline_document(url, 200, {'content-type' => mime}, commits) if verdict == 'inline'
 
             commits.(nil)
             @current_url = url.to_s
@@ -11998,6 +12018,8 @@ module Capybara
           # A response that downloads makes no document: a window stays at the one it has (`download_in_place`).
           when 'download'
             return download_in_place(target, hop.headers, hop.rack_body || [hop.document])
+          when 'inline'
+            return boot_inline_document(target, hop.status, hop.headers, commits)
           end
 
           @current_url = target
@@ -12008,7 +12030,7 @@ module Capybara
           # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
           # `$(document).on(...)` delegates) — snapshot warmup keeps the
           # rebuild itself cheap; app-bundle re-eval dominates.
-          boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?)
+          boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?, content_type: hop.document_type)
         ensure
           @navigating = prior_navigating
           # No document committed (a download, a raise mid-fetch) → the page that
@@ -12065,6 +12087,16 @@ module Capybara
       # session history its document's (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a),
       # and what its flushed timers planned still stands, the page they ran in being the one that stays. One that has none
       # yet stays at its initial about:blank (`navigation_made_no_document`).
+      # HTML "create a document for inline content that doesn't have a DOM", a PDF's — its viewer's (mime.rs `Load::Inline`):
+      # an empty `text/html` document at the response's URL, of a new opaque origin, and of no policy its response sets — no
+      # Content-Security-Policy, Referrer-Policy, Refresh or opener policy (a new policy container); the response recorded as
+      # it came. (`commits` the navigation's, which clears the navigable's name by the origin it leaves.)
+      private def boot_inline_document(url, status, headers, commits)
+        commits.(nil)
+        @current_url = url.to_s
+        record_response(status, headers)
+        boot_response_into_ctx('', opaque_origin: true, inline: true)
+      end
       private def download_in_place(url, headers, body)
         save_downloaded_response(url, headers, body)
         navigation_made_no_document(url)
@@ -12151,7 +12183,9 @@ module Capybara
       # for the wait.
       # (…`coop_switch` the enforcement result's of the navigation whose response it is — whether its browsing context group
       # is to be left — none for a document no response enforced made: `commit_coop`)
-      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil)
+      # (…`content_type` the type its body said where it did — MIME Sniffing's computed one — over the response's)
+      # (…`inline` an inline content document's: `boot_inline_document`)
+      def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil, content_type: nil, inline: false)
         # (The outgoing page's due-now init ran back at the navigation's entry
         # point — `flush_outgoing_page_init`, called before anything commits.)
         # This IS the commit, so whatever that page stashed dies with it.
@@ -12178,7 +12212,8 @@ module Capybara
         drop_document_websockets
         # (…what its response makes it: its content type, its policy container's CSP and referrer policy, its declarative
         # refresh, its opener policy — response_headers.rs `document_params`)
-        ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(@last_response_headers)
+        ctype, csp, referrer_policy, refresh, opener_policy = inline ? ['text/html', nil, nil, nil, 'unsafe-none'] : Native.document_params(@last_response_headers)
+        ctype = content_type || ctype
         # Whether it is cross-origin isolated (HTML "obtain a cross-origin opener policy" and "obtain an embedder policy"):
         # its opener policy `same-origin` made "same-origin-plus-COEP" by `Cross-Origin-Embedder-Policy: require-corp` or
         # `credentialless` — every document here being in a secure context, as `isSecureContext` says (a real browser's

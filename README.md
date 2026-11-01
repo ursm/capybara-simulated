@@ -124,10 +124,13 @@ puts page.text
 
 A navigation whose response is not a document is a download, as in a browser — and unlike `rack_test`, which shows any
 response as `page.body`. That covers a `Content-Disposition: attachment` response, a `<a download>` link, and any
-response whose type no document is made of (HTML "load a document"): `text/csv`, `application/pdf` (there is no PDF
-viewer), `application/zip`, `application/octet-stream`, a response with no `Content-Type` whose body is binary, and the
-like. The page stays where it was, and `current_url` keeps reporting the document it shows (`about:blank` for a window
-that has none yet). The file is saved to the first of these that is set:
+response whose type no document is made of (HTML "load a document"): `text/csv`, `application/zip`,
+`application/octet-stream`, a response with no `Content-Type` whose body is binary, and the like. The page stays where it
+was, and `current_url` keeps reporting the document it shows (`about:blank` for a window that has none yet). A PDF is
+no download: the driver has a PDF viewer, as Chrome and Firefox do (`navigator.pdfViewerEnabled` is true), and a PDF
+navigation shows its (empty) viewer document at the PDF's URL. A response with no `Content-Type` is sniffed (MIME
+Sniffing): a body that begins with one of the tags the sniffer knows (`<html`, `<p`, `<div`, …) renders as HTML, any
+other text — one beginning with `<h2>`, say — as plain text. The file is saved to the first of these that is set:
 
 1. `ENV['CSIM_DOWNLOADS_DIR']`
 2. `Capybara.save_path`

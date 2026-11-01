@@ -63,7 +63,7 @@ struct Response<'s> {
     refresh: Option<String>,
     csp: Option<String>,
     // (…a network error's: no response, its document an error document of a new opaque origin — HTML "create a document
-    // for inline content", as a top-level one's is)
+    // for inline content", as a top-level one's is — and a PDF's, its viewer's document made by those steps too)
     error: bool,
 }
 
@@ -103,17 +103,22 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
             r.url = url;
         }
         // (…a data: URL its own response, its MIME type `text/plain;charset=US-ASCII` where it names none — a malformed
-        // one a network error, the empty document; one of a type that makes no document (mime.rs `document_type`) a
-        // download, which the host saves as it does a fetched one's, the frame left at the one it is at — and a blob: URL
+        // one a network error, the empty document; one of a type that makes no document (mime.rs `load`) a download,
+        // which the host saves as it does a fetched one's, the frame left at the one it is at; a PDF its viewer's inline
+        // content, an empty document of a new opaque origin — and a blob: URL
         // the blob's bytes, kept as the document loaded last, which a reload of it revoked by then loads again: HTML keeps
         // the blob alive for the document)
         FrameSource::Data(url) => match crate::data_url::process(&url) {
-            Some((mime, bytes)) if crate::mime::document_type(Some(&mime), &bytes).is_none() => {
+            Some((mime, bytes)) if crate::mime::load(Some(&mime), &bytes) == crate::mime::Load::Download => {
                 r.url = url;
                 match navigate(scope, host, cid, container, reload, &mut r)? {
                     FRAME_BUILD => {}
                     kept_or_deferred => return Ok(code(scope, kept_or_deferred)),
                 }
+            }
+            Some((mime, bytes)) if crate::mime::load(Some(&mime), &bytes) == crate::mime::Load::Inline => {
+                r.error = true;
+                r.url = url;
             }
             parsed => {
                 if let Some((mime, bytes)) = parsed {
@@ -311,6 +316,19 @@ fn navigate<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Functi
         if let Some(content_type) = header(scope, "content-type").filter(|s| !s.is_empty()) {
             r.content_type = content_type;
         }
+    }
+    // (…the type its body said, where it did — MIME Sniffing's computed one: navigation_fetch.rs `sniff` — over the
+    // header's)
+    if let Some(sniffed) = string(scope, "document_type") {
+        r.content_type = sniffed;
+    }
+    // (…a PDF its viewer's document for inline content that doesn't have a DOM: an empty `text/html` one of a new opaque
+    // origin and of no policy the response sets — HTML "load a document")
+    if flag(scope, "inline") {
+        r.body = crate::dom::u8_array(scope, Vec::new());
+        r.content_type = "text/html".to_owned();
+        (r.csp, r.policy, r.refresh) = (None, None, None);
+        r.error = true;
     }
     if no_document {
         r.url = "about:blank".to_owned();

@@ -179,8 +179,10 @@ pub(crate) fn document_kind(essence: &str) -> u32 {
 // How a navigation's response loads (HTML "load a document"): by its computed MIME type (MIME Sniffing §7.1, `computed`)
 // — a document of an HTML, XML, JavaScript or JSON MIME type, `text/css`, `text/plain`, `text/vtt`,
 // `multipart/x-mixed-replace`, or a supported image, audio or video type (a media document: the image types the decoder
-// reads, image_decode.rs, and the media types `canPlayType` answers, media.rs) — or, of any other, handed off as a
-// download: PDF among them, there being no PDF viewer (`navigator.pdfViewerEnabled` false). Chrome and Firefox download
+// reads, image_decode.rs, and the media types `canPlayType` answers, media.rs); a PDF (`application/pdf`, `text/pdf`)
+// a document for inline content that doesn't have a DOM, its PDF viewer's (`Load::Inline`: "PDF viewer supported" is
+// implementation-defined, and Chrome and Firefox both view PDFs — `navigator.pdfViewerEnabled` true); any other handed
+// off as a download (`Load::Download`). Chrome and Firefox download
 // `application/octet-stream` and `application/zip` alike (measured 2026-11-01), and Chrome an unsupported `image/x-foo`
 // and `text/csv` as HTML says; it renders an unknown `text/*` and downloads `application/atom+xml`, departures of its own
 // from HTML's explicit rule.
@@ -190,7 +192,7 @@ pub(crate) fn makes_document(essence: &str) -> bool {
         || document_kind(essence) != DOCUMENT_HTML
         || essence == "multipart/x-mixed-replace"
         || SUPPORTED_IMAGES.contains(&essence)
-        || (matches!(essence.split_once('/').map(|(k, _)| k), Some("audio" | "video")) && !crate::media::can_play_type(essence).is_empty())
+        || ((matches!(essence.split_once('/').map(|(k, _)| k), Some("audio" | "video")) || essence == "application/ogg") && !crate::media::can_play_type(essence).is_empty())
 }
 const SUPPORTED_IMAGES: [&str; 9] = [
     "image/png",
@@ -234,11 +236,23 @@ pub(crate) fn computed(content_type: Option<&str>, head: &[u8]) -> String {
         None => unknown(head),
     }
 }
-// …whether a navigation's response makes a document (`makes_document`) of its computed type — that type, None for a
-// download.
-pub(crate) fn document_type(content_type: Option<&str>, head: &[u8]) -> Option<String> {
+// …what a navigation's response loads as, by its computed type: a document of that type (`makes_document`), a PDF
+// viewer's inline content, or a download.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Load {
+    Document(String),
+    Inline,
+    Download,
+}
+pub(crate) fn load(content_type: Option<&str>, head: &[u8]) -> Load {
     let essence = if needs_body(content_type) { computed(content_type, head) } else { supplied(content_type).unwrap_or_else(|| "text/html".to_owned()) };
-    makes_document(&essence).then_some(essence)
+    if matches!(essence.as_str(), "application/pdf" | "text/pdf") {
+        Load::Inline
+    } else if makes_document(&essence) {
+        Load::Document(essence)
+    } else {
+        Load::Download
+    }
 }
 // A binary data byte (§3).
 fn binary(b: u8) -> bool {
@@ -247,13 +261,14 @@ fn binary(b: u8) -> bool {
 fn bom(head: &[u8]) -> bool {
     head.starts_with(&[0xFE, 0xFF]) || head.starts_with(&[0xFF, 0xFE]) || head.starts_with(&[0xEF, 0xBB, 0xBF])
 }
-// §7.2: text where it has a BOM or no binary data byte — the supplied `text/plain` then (None) — else the image or media
-// type its signature is, else `application/octet-stream`.
+// §7.2: text where it has a BOM or no binary data byte — the supplied `text/plain` then (None) — else
+// `application/octet-stream`, never a type its signature would be: the rules are not to yield a scriptable type from a
+// resource its server called text (Chrome sniffs an image of one; the spec's text is explicit).
 fn text_or_binary(head: &[u8]) -> Option<String> {
     if bom(head) || !head.iter().any(|&b| binary(b)) {
         return None;
     }
-    Some(signature(head).unwrap_or("application/octet-stream").to_owned())
+    Some("application/octet-stream".to_owned())
 }
 // §7.1 the rules for identifying an unknown MIME type, the sniff-scriptable flag set: an HTML or XML signature after
 // leading white space, PDF, PostScript, a BOM's text, an image, media or archive signature — else `text/plain` where it
@@ -282,8 +297,10 @@ fn unknown(head: &[u8]) -> String {
     };
     found.map_or_else(|| if head.iter().any(|&b| binary(b)) { "application/octet-stream" } else { "text/plain" }.to_owned(), str::to_owned)
 }
-// The image (§6.1), media (§6.2, WebM / MP3 / Ogg / WAVE / MP4 by their plain signatures) and archive (§6.3) type a
-// resource header's signature is.
+// The image (§6.1), media (§6.2) and archive (§6.3) type a resource header's signature is. The media ones by their plain
+// signatures alone, simplified on purpose: MP4 by an `ftyp` box whose major brand begins `mp4` (§6.2.1 walks every
+// compatible brand), WebM by its EBML magic (§6.2.2 parses the DocType element), MP3 by an ID3 tag (§6.2.3 also matches a
+// bare frame header) — none of them a type a navigation here makes a document of the bytes of.
 fn signature(head: &[u8]) -> Option<&'static str> {
     let riff = |kind: &[u8]| head.len() >= 12 && head.starts_with(b"RIFF") && &head[8..12] == kind;
     Some(match head {
@@ -309,12 +326,16 @@ fn signature(head: &[u8]) -> Option<&'static str> {
         _ => return None,
     })
 }
-// Native.navigation_document_type(content type, head) -> `document_type`: the type a response of `Content-Type`
-// `content_type` (nil none) whose body begins with `head` makes a document of, nil for a download.
-pub(crate) fn document_type_for_ruby(content_type: Option<String>, head: magnus::RString) -> Option<String> {
+// Native.navigation_load(content type, head) -> `load`: what a response of `Content-Type` `content_type` (nil none)
+// whose body begins with `head` loads as — ['document', its type], ['inline'] or ['download'].
+pub(crate) fn load_for_ruby(content_type: Option<String>, head: magnus::RString) -> (&'static str, Option<String>) {
     // SAFETY: read at once, before anything could run Ruby code that moves or frees it.
     let head = unsafe { head.as_slice() };
-    document_type(content_type.as_deref(), head)
+    match load(content_type.as_deref(), head) {
+        Load::Document(essence) => ("document", Some(essence)),
+        Load::Inline => ("inline", None),
+        Load::Download => ("download", None),
+    }
 }
 // __dom.documentKind(essence) -> `document_kind`.
 fn document_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -397,11 +418,17 @@ mod tests {
 
     #[test]
     fn a_navigation_response_of_no_document_type_downloads() {
-        let doc = |t: Option<&str>, head: &[u8]| document_type(t, head);
+        let doc = |t: Option<&str>, head: &[u8]| match load(t, head) {
+            Load::Document(essence) => Some(essence),
+            _ => None,
+        };
+        assert_eq!(load(Some("application/pdf"), b""), Load::Inline);
+        assert_eq!(load(None, b"%PDF-1.4"), Load::Inline);
+        assert_eq!(load(Some("text/plain"), b"\x89PNG\r\n\x1a\n\x00"), Load::Download);
         for t in ["text/html; charset=utf-8", "TEXT/HTML", "text/plain;charset=utf-8", "application/xhtml+xml", "image/png", "video/mp4", "application/json"] {
             assert!(doc(Some(t), b"").is_some(), "{t}");
         }
-        for t in ["application/octet-stream", "application/zip", "text/csv", "application/pdf", "image/x-foo", "audio/x-nothing"] {
+        for t in ["application/octet-stream", "application/zip", "text/csv", "image/x-foo", "audio/x-nothing"] {
             assert_eq!(doc(Some(t), b""), None, "{t}");
         }
         // (…none supplied, an invalid one, an unknown one: sniffed — HTML, text, binary)
@@ -410,7 +437,6 @@ mod tests {
         assert_eq!(doc(Some(""), b"plain words").as_deref(), Some("text/plain"));
         assert_eq!(doc(Some("unknown/unknown"), b"\x89PNG\r\n\x1a\n").as_deref(), Some("image/png"));
         assert_eq!(doc(Some("*/*"), b"PK\x03\x04"), None);
-        assert_eq!(doc(Some("application/unknown"), b"%PDF-1.4"), None);
         assert_eq!(doc(None, b"\x00\x01binary"), None);
         // (…an Apache-bug `text/plain` binary — a download — or text; another spelling as it is)
         assert_eq!(doc(Some("text/plain"), b"\x00\x01binary"), None);

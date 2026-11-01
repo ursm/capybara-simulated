@@ -213,7 +213,8 @@ pub(crate) fn data_navigation(url: &str) -> (&'static str, Option<(String, Vec<u
     let is_data = url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:"));
     match is_data.then(|| crate::data_url::process(url)).flatten() {
         None => ("fail", None),
-        Some(r) if crate::mime::document_type(Some(&r.0), &r.1).is_none() => ("download", Some(r)),
+        Some(r) if crate::mime::load(Some(&r.0), &r.1) == crate::mime::Load::Download => ("download", Some(r)),
+        Some(r) if crate::mime::load(Some(&r.0), &r.1) == crate::mime::Load::Inline => ("inline", Some(r)),
         Some(r) => ("document", Some(r)),
     }
 }
@@ -222,7 +223,7 @@ pub(crate) fn data_navigation(url: &str) -> (&'static str, Option<(String, Vec<u
 fn data_downloads(url: &str) -> bool {
     match crate::data_url::mime_type(url) {
         Some(mime) if crate::mime::needs_body(Some(&mime)) => data_navigation(url).0 == "download",
-        Some(mime) => crate::mime::document_type(Some(&mime), b"").is_none(),
+        Some(mime) => crate::mime::load(Some(&mime), b"") == crate::mime::Load::Download,
         None => false,
     }
 }
@@ -406,7 +407,8 @@ impl NavigationFetch {
     //   page's link and form, a frame's form, link, `location` and `src` alike);
     // - ['download'] — a response that downloads (its Content-Disposition, or a type that makes no document: mime.rs
     //   `document_type`): handed off to be saved, no document made;
-    // - ['sniff'] — one whose body says which, and the type of its document (`Native.navigation_document_type`);
+    // - ['inline'] — a PDF, its viewer's document for inline content (mime.rs `Load::Inline`);
+    // - ['sniff'] — one whose body says which, and the type of its document (`Native.navigation_load`);
     // - ['document'] — the document it makes.
     // A top-level traversable's opener policy is enforced on each, a redirect's too (`enforce_coop`); the block gives the
     // facts of the document the navigation leaves, `[origin, initial about:blank, popup sandboxing flags]`, where they
@@ -427,6 +429,8 @@ impl NavigationFetch {
             "no_content"
         } else if fields.downloads() {
             "download"
+        } else if fields.inline() {
+            "inline"
         } else if fields.sniffs() {
             "sniff"
         } else {

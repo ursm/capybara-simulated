@@ -189,10 +189,17 @@ impl ResponseFields {
     }
 
     // Whether the response downloads: its Content-Disposition says so (downloads.rs `is_download`), or its Content-Type is
-    // of no document (mime.rs `document_type`) — where that needs no body (`sniffs`).
+    // of no document (mime.rs `load`) — where that needs no body (`sniffs`).
     pub(crate) fn downloads(&self) -> bool {
+        self.content_disposition.as_deref().is_some_and(crate::downloads::is_download) || self.loads(crate::mime::Load::Download)
+    }
+    // …whether it is a PDF viewer's inline content (mime.rs `Load::Inline`).
+    pub(crate) fn inline(&self) -> bool {
+        self.loads(crate::mime::Load::Inline)
+    }
+    fn loads(&self, what: crate::mime::Load) -> bool {
         let ct = self.content_type.as_deref();
-        self.content_disposition.as_deref().is_some_and(crate::downloads::is_download) || (!crate::mime::needs_body(ct) && crate::mime::document_type(ct, b"").is_none())
+        !crate::mime::needs_body(ct) && crate::mime::load(ct, b"") == what
     }
     // …whether it does — and the type of the document it makes — is for its body to say: MIME Sniffing's computed
     // MIME type of one of no type to go by, or of an Apache-bug `text/plain` (mime.rs `needs_body`).
