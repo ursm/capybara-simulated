@@ -3,7 +3,7 @@
 // (a Rack 2 app's may be mixed-case), a value a String or, Rack 3's form, an Array of fields; several fields of a name a
 // Rack 2 app joins with newlines — or a service worker's response's, its fields combined already.
 
-use magnus::{prelude::*, r_hash::ForEach, Error, RArray, RHash, RString, Value};
+use magnus::{prelude::*, r_hash::ForEach, Error, RArray, RHash, RString, Ruby, Value};
 
 use crate::fetch_rules::ruby_bytes;
 use crate::http_cache::combine;
@@ -129,4 +129,20 @@ impl ResponseFields {
     pub(crate) fn opener_policy(&self) -> crate::coop::Value {
         crate::coop::obtain(self.coop.as_deref(), self.coep.as_deref())
     }
+}
+
+// Native.document_params(headers) -> [content type, Content-Security-Policy, referrer policy, Refresh, opener policy]:
+// what the document a response of header map `headers` (nil none) makes is made with (HTML "create and initialize a
+// Document object": its MIME type and charset, its policy container's CSP list and referrer policy, its declarative
+// refresh; and "obtain an opener policy") — nil each it has none of (a content type none where it is empty), the opener
+// policy by its name (coop.rs).
+pub(crate) fn document_params(ruby: &Ruby, headers: Option<RHash>) -> Result<RArray, Error> {
+    let fields = ResponseFields::read(headers)?;
+    let out = ruby.ary_new_capa(5);
+    out.push(fields.content_type.clone().filter(|t| !t.is_empty()))?;
+    out.push(fields.csp.clone())?;
+    out.push(fields.referrer_policy)?;
+    out.push(fields.refresh.clone())?;
+    out.push(fields.opener_policy().name())?;
+    Ok(out)
 }

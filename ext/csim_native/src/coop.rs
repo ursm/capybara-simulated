@@ -79,10 +79,6 @@ pub(crate) fn switch_needed(initial_about_blank: bool, document_origin: &str, do
     !matching(document, document_origin, response, response_origin)
 }
 
-// Native.coop_value(coop, coep) -> the value `obtain` gives, by its name.
-pub(crate) fn value_for_ruby(coop: Option<String>, coep: Option<String>) -> String {
-    obtain(coop.as_deref(), coep.as_deref()).name().to_owned()
-}
 // Native.coop_switch(initial_about_blank, document_origin, document_value, response_origin, response_value) ->
 // `switch_needed`, the values by their names.
 pub(crate) fn switch_for_ruby(initial_about_blank: bool, document_origin: String, document: String, response_origin: String, response: String) -> bool {

@@ -10424,13 +10424,15 @@ module Capybara
           # (…its entry's resource the POST that made it — none where a redirect made it a GET: a 301, 302 or 303's; a 307
           # or 308 keeps it, Fetch "HTTP-redirect fetch")
           post = nil if resp['method'] == 'GET'
-          body, ctype, url = document_payload(resp['body_bytes'] || resp['body']), response_content_type(headers), resp['url'] || url
+          ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(headers)
+          body, url = document_payload(resp['body_bytes'] || resp['body']), resp['url'] || url
+          ctype   ||= 'text/html'
           made = {
-            csp:             response_csp(headers),
+            csp:             csp,
             referrer:        resp['referrer'],
-            referrer_policy: referrer_policy_header(headers),
+            referrer_policy: referrer_policy,
             client_id:       resp['resulting_client_id'],
-            refresh:         refresh_header(headers)
+            refresh:         refresh
           }
           made[:doc_origin] = 'null' if resp['error']
           # (…a response whose opener policy its browsing context group cannot hold, a group of its own: the window leaves
@@ -10476,7 +10478,7 @@ module Capybara
         return unless new_id
 
         @runtime.window_realm_meta[new_id][:response] = response || [200, {}]
-        @runtime.window_realm_meta[new_id][:coop] = response ? response_coop(response[1]) : 'unsafe-none'
+        @runtime.window_realm_meta[new_id][:coop] = opener_policy || 'unsafe-none'
         # (…a traversal's document given the state its entry's controls were left in, as the page's is: `restore_form_state`)
         if kind == 'traverse' && (state = history&.entry(history.active(0))&.fetch(:form_state, nil))
           @runtime.realm_call(new_id, '__csimRestoreFormState', state)
@@ -10757,9 +10759,6 @@ module Capybara
         # (…its tokens matched as they are, case and all: an unknown one — `No-Referrer` — none, as the spec's parse has it)
         Native.referrer_policy_header(Array(rp).join(','))
       end
-      # …and its `Refresh` header's value, its document's declarative refresh (HTML "create and initialize a Document
-      # object"), none for none — one given more than once combined as Fetch's "get a header" does.
-      def refresh_header(headers) = (value = header_field(headers || {}, 'refresh')) && Array(value).join(', ')
       # The client a subresource request of realm `realm`'s document is made as (Fetch "client"), the engine's (referrer.rs
       # `requestClient`) — a frame gone, the page's:
       # - its URL, whose origin it is of and whose site its cookies and Sec-Fetch-Site are judged by: a local document's
@@ -11240,9 +11239,10 @@ module Capybara
           document ||= read_rack_body(resp_body)
           # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
           # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
-          response = {client_id: rid, csp: response_csp(headers), referrer: fetch.referrer, referrer_policy: referrer_policy_header(headers), refresh: refresh_header(headers)}
+          ctype, csp, referrer_policy, refresh = Native.document_params(headers)
+          response = {client_id: rid, csp: csp, referrer: fetch.referrer, referrer_policy: referrer_policy, refresh: refresh}
           response.update(commit) unless fetch.redirected?
-          return commit_frame_document(realm_id, entry, target, document, response_content_type(headers), **response)
+          return commit_frame_document(realm_id, entry, target, document, ctype || 'text/html', **response)
         end
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
@@ -11756,13 +11756,6 @@ module Capybara
         end
       end
 
-      # Response content-type, defaulting to text/html — its fields combined, a header value being a bare string or an
-      # array of fields (Rack 3's form), as "extract a MIME type" reads the header list.
-      def response_content_type(headers)
-        ct = headers.find {|k, _| k.to_s.downcase == 'content-type' }&.last
-        ct = header_text(ct)
-        ct.empty? ? 'text/html' : ct
-      end
 
       # (…`blob`: a `blob:` URL's blob as the navigation began — `{bytes:, type:}`, `blob_snapshot` — which a revoke after
       # it began does not take back: HTML resolves the URL's blob URL entry as it parses it)
@@ -12146,31 +12139,8 @@ module Capybara
         !(@current_url.to_s.empty? || @current_url == 'about:blank')
       end
 
-      # Rebuild the JS Context and load `html` into it. Called from
-      # every code path that handles a full-page Rack response (`navigate`
-      # for GETs, `navigate_post` for POSTs). `__csimLoadDocument` walks
-      # importmaps + module scripts during `theEnd`; the bridge
-      # pushes the importmap back via `__csim_pushImportmap` before any
-      # module loads so resolver lookups agree with the JS side.
-      #
-      # The post-nav grace bridges Capybara's outer-synchronize gap when
-      # the new page has no scripts of its own to flip `@timers_active`
-      # (e.g. Avo's `redirect_to main_app.hey_path` → static view). Kept
-      # small (~10 retry intervals) so failing-assertion paths don't pay
-      # for the wait.
-      # Whether the document's response makes it cross-origin isolated (HTML "obtain a cross-origin opener policy" and
-      # "obtain an embedder policy"): `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy:
-      # require-corp` or `credentialless` — every document here being in a secure context, as `isSecureContext` says
-      # (a real browser's http://www.example.com would not be; its http://127.0.0.1 would). Not modelled: a cross-origin
-      # frame's own `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service
-      # worker's own COEP (it is never isolated here).
-      # A document's opener policy (coop.rs `obtain`), of its response's headers `headers`.
-      private def response_coop(headers)
-        header = ->(name) { (headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last&.then { header_text(_1) } }
-        Native.coop_value(header.('cross-origin-opener-policy'), header.('cross-origin-embedder-policy'))
-      end
-      # …that of the top-level document realm `realm`'s is in: the page's, or a window's `window.open` made in this
-      # isolate — its initial about:blank's its creator's (`creator_coop`) — none for a realm with no top-level document.
+      # The opener policy of the top-level document realm `realm`'s is in: the page's, or a window's `window.open` made in
+      # this isolate — its initial about:blank's its creator's (`creator_coop`) — none for a realm with no top-level document.
       def document_coop(realm)
         top = @runtime.top_level_realm(realm)
         (top&.zero? ? @page_coop : @runtime.window_realm_meta.dig(top, :coop)) || 'unsafe-none'
@@ -12216,11 +12186,18 @@ module Capybara
         @runtime.page_left_group!
         @browsing_context_group = "g#{object_id}.#{@group_seq = @group_seq.to_i + 1}"
       end
-      private def cross_origin_isolated_response?
-        policy = ->(name) { (@last_response_headers || {}).find {|k, _| k.to_s.casecmp?(name) }&.last.then { header_text(_1).split(';').first.to_s.strip } }
-        policy.('cross-origin-opener-policy') == 'same-origin' && %w[require-corp credentialless].include?(policy.('cross-origin-embedder-policy'))
-      end
-
+      # Rebuild the JS Context and load `html` into it. Called from
+      # every code path that handles a full-page Rack response (`navigate`
+      # for GETs, `navigate_post` for POSTs). `__csimLoadDocument` walks
+      # importmaps + module scripts during `theEnd`; the bridge
+      # pushes the importmap back via `__csim_pushImportmap` before any
+      # module loads so resolver lookups agree with the JS side.
+      #
+      # The post-nav grace bridges Capybara's outer-synchronize gap when
+      # the new page has no scripts of its own to flip `@timers_active`
+      # (e.g. Avo's `redirect_to main_app.hey_path` → static view). Kept
+      # small (~10 retry intervals) so failing-assertion paths don't pay
+      # for the wait.
       # (…`coop_switch` the enforcement result's of the navigation whose response it is — whether its browsing context group
       # is to be left — none for a document no response enforced made: `commit_coop`)
       def boot_response_into_ctx(html, opaque_origin: false, initial: false, coop_switch: nil)
@@ -12248,12 +12225,21 @@ module Capybara
         terminate_document_workers
         sw_unload_document_clients
         drop_document_websockets
-        # (…an about:blank document's its creator's — the document that navigated to it, or a pop-up's opener: it takes
-        # its creator's policy container, the policies with it)
-        @runtime.cross_origin_isolated = cross_origin_isolated_response? unless @current_url.to_s.match?(ABOUT_BLANK)
+        # (…what its response makes it: its content type, its policy container's CSP and referrer policy, its declarative
+        # refresh, its opener policy — response_headers.rs `document_params`)
+        ctype, csp, referrer_policy, refresh, opener_policy = Native.document_params(@last_response_headers)
+        # Whether it is cross-origin isolated (HTML "obtain a cross-origin opener policy" and "obtain an embedder policy"):
+        # its opener policy `same-origin` made "same-origin-plus-COEP" by `Cross-Origin-Embedder-Policy: require-corp` or
+        # `credentialless` — every document here being in a secure context, as `isSecureContext` says (a real browser's
+        # http://www.example.com would not be; its http://127.0.0.1 would). Not modelled: a cross-origin frame's own
+        # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own
+        # COEP (it is never isolated here). (…an about:blank document's its creator's — the document that navigated to it,
+        # or a pop-up's opener: it takes its creator's policy container, the policies with it)
+        about_blank = @current_url.to_s.match?(ABOUT_BLANK)
+        @runtime.cross_origin_isolated = opener_policy == 'same-origin-plus-COEP' unless about_blank
         # (…and its opener policy, what a navigation of the page after is judged by — the page's browsing context group left
         # for a new one where it needs: `commit_coop`)
-        commit_coop(@current_url.to_s.match?(ABOUT_BLANK) ? 'unsafe-none' : response_coop(@last_response_headers), opaque_origin, coop_switch) unless initial
+        commit_coop(about_blank ? 'unsafe-none' : opener_policy, opaque_origin, coop_switch) unless initial
         # (…the page's next document a fetch group of its own: its keepalive quota anew — keepalive.rs `retire`)
         Native.keepalive_retire(@keepalive_session, 0)
         @runtime.rebuild_ctx
@@ -12278,8 +12264,6 @@ module Capybara
         # The response content type drives both the parser choice (XML vs HTML —
         # XHTML/XML/SVG parse case-sensitively, no html/head/body skeleton,
         # `isHtmlDocument` false) and the encoding's HTTP-charset signal.
-        ct = (@last_response_headers || {}).find {|k, _| k.to_s.downcase == 'content-type' }&.last
-        ct = ct && header_text(ct)
         opts = {
           'traceActive'        => !@trace.nil?,
           'timezone'           => ENV['TZ'].to_s,
@@ -12287,7 +12271,7 @@ module Capybara
           'url'                => @current_url.to_s,
           'html'               => document_payload(html)
         }
-        opts['contentType'] = ct.to_s if ct && !ct.to_s.empty?
+        opts['contentType'] = ctype if ctype
         # `document.lastModified` reflects the response Last-Modified header (parsed
         # to local time); absent → the current time (handled JS-side).
         lm = response_headers['Last-Modified']   # response_headers normalizes keys to Capitalized-Dash form
@@ -12302,11 +12286,8 @@ module Capybara
         # (…and its referrer, its navigation's request's: `@current_referer`)
         opts['referrer'] = @current_referer unless @current_referer.to_s.empty?
         # (…and the referrer policy its response's header sets, its policy container's)
-        policy = referrer_policy_header(@last_response_headers)
-        opts['referrerPolicy'] = policy if policy
-        csp = response_csp(@last_response_headers || {})
+        opts['referrerPolicy'] = referrer_policy if referrer_policy
         opts['csp'] = csp if csp
-        refresh = refresh_header(@last_response_headers)
         opts['refresh'] = refresh if refresh
         # (…the worker controlling it: its navigation's — not one still activating, which the navigation's wait for it
         # gave up on, the navigation having gone to the network: `await_sw_activation`)
@@ -13051,11 +13032,6 @@ module Capybara
       # around it), each byte the code point it is.
       def header_text(value)
         Native.combined_field(value).to_s.b.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8)
-      end
-      # …and a response's Content-Security-Policy as script reads it — its headers' fields joined, none where it has none.
-      def response_csp(headers)
-        csp = headers.select {|k, _| k.to_s.casecmp?('content-security-policy') }.map {|_, v| header_text(v) }
-        csp.join(',') unless csp.empty?
       end
 
       # The Fetch "redirect status" set — ONLY these are followed. 300 (multiple
