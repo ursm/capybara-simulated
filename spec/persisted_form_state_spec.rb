@@ -106,4 +106,26 @@ RSpec.describe 'persisted form state' do
     s.go_back
     expect(s.evaluate_script('log')).to eq(['o so restore', 'l st restore'])
   end
+
+  # The state is saved to the entry once the document it leaves is unloaded (HTML "apply the history step": "activate
+  # history entry" saves persisted state in the continuation that runs after "unload a document and its descendants"),
+  # so a value its pagehide or unload handler writes is the one a traversal back puts back — as a frame's entry keeps it.
+  it "keeps what the leaving document's pagehide handler wrote" do
+    doc = <<~HTML
+      <!DOCTYPE html>
+      <form><input id="p"><input id="u"></form>
+      <script>
+        addEventListener('pagehide', () => { p.value = 'from pagehide'; });
+        addEventListener('unload', () => { u.value = 'from unload'; });
+      </script>
+      <a href="/other">away</a>
+    HTML
+    app = lambda {|env| [200, {'content-type' => 'text/html'}, [env['PATH_INFO'] == '/other' ? '<p>other</p>' : doc]] }
+    s = simulated_session(app)
+    s.visit '/'
+    s.execute_script("p.value = 'typed'; u.value = 'typed'")
+    s.click_link 'away'
+    s.go_back
+    expect(s.evaluate_script('[p.value, u.value]')).to eq(['from pagehide', 'from unload'])
+  end
 end

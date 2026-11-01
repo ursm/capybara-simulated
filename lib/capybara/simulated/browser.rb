@@ -2526,7 +2526,7 @@ module Capybara
         end
         step, changes = plan
         if (page = changes&.find {|nav, _, same_document| nav.zero? && !same_document })
-          capture_outgoing_form_state
+          leave_page_entry
           # (…the history as it stood kept, for an entry whose response now makes no document — a download, a 204 —
           # which leaves the page at the document it is at, and its step with it)
           save_navigation_history
@@ -2635,15 +2635,18 @@ module Capybara
         @runtime.realm_call(realm, '__csimQueueHashChange', old_url, entry[:url]) if fragment_of(old_url) != fragment_of(entry[:url])
       end
 
-      # Snapshot the OUTGOING document's form-control state into the history entry
-      # we are leaving, so a later back/forward traversal to it restores the
-      # values the user/script had set (HTML "persisted user state"), not the
-      # markup defaults. Captured while the outgoing VM is still live — before
-      # record_history adds the next entry or boot rebuilds the context.
-      def capture_outgoing_form_state
-        return unless (id = @session_history.active(0))
-        state = @runtime.call('__csimCaptureFormState')
-        @session_history.update(id, {form_state: state}) if state
+      # The history entry the page's document leaves, as a navigation of it begins — before record_history adds the next
+      # entry — which takes the OUTGOING document's form-control state once that document is unloaded
+      # (`capture_left_page_form_state`), so a later back/forward traversal to it restores the values the user, a script
+      # or its pagehide handler set (HTML "persisted user state"), not the markup defaults: Chrome keeps a value a
+      # pagehide handler writes, as a frame's entry keeps it (`frame_document_unloaded`).
+      def leave_page_entry = (@page_leaving_entry = @session_history.active(0))
+      # …taken as the document it was of is unloaded, its handlers run, its VM still live (`boot_response_into_ctx`).
+      private def capture_left_page_form_state
+        id, @page_leaving_entry = @page_leaving_entry, nil
+        return unless id && (state = @runtime.call('__csimCaptureFormState'))
+
+        @session_history.update(id, {form_state: state})
       end
 
       # Re-apply a history entry's captured form state after its document has been
@@ -10481,7 +10484,7 @@ module Capybara
         # Document visible all the same)
         frozen_history { @runtime.realm_call(realm_id, '__csimFireWindowUnloadDeep') }
         # (…its entry taking its controls' state as its handlers left it, which a traversal back to it restores: as the
-        # page's, `capture_outgoing_form_state` — none of an initial about:blank, which no entry is of)
+        # page's, `capture_left_page_form_state` — none of an initial about:blank, which no entry is of)
         history = window_history(realm_id)
         if (id = history&.active(0)) && (state = @runtime.realm_call(realm_id, '__csimCaptureFormState'))
           history.update(id, {form_state: state})
@@ -11930,7 +11933,7 @@ module Capybara
           # (…none for about:blank in a window of no entry yet — its initial about:blank, which a navigation to about:blank
           # leaves the initial one, the next navigation replacing it: HTML "navigate", historyHandling "replace")
           unless from_history || (url.to_s.match?(ABOUT_BLANK) && !@session_history.active(0))
-            capture_outgoing_form_state
+            leave_page_entry
             # (…the request as it was sent — a POST's body and origin, its referrer and referrer policy — what a reload or
             # a traversal refers by again, a POST's re-posts: HTML's document state)
             # (…and its initiator origin, HTML's document state keeps, a traversal's step 2 reads: none of a user's)
@@ -12263,6 +12266,8 @@ module Capybara
         # history ignored: its entry, and the URL, are the next document's by now — a gap, Chrome's pushState of one
         # adding the old document a step)
         frozen_history { fire_document_teardown }
+        # (…its controls' state, as its handlers left it, kept by the entry it leaves)
+        capture_left_page_form_state
         # (…the document state the next one is of the one its `window.name` reads and writes from here on: the leaving
         # one's pagehide wrote its own)
         @session_history.show
@@ -12480,7 +12485,7 @@ module Capybara
       # and both more browser-like: the outgoing page's due-now cookie / storage /
       # `serviceWorker.register()` writes now land BEFORE the navigation request is
       # dispatched (so the request carries what a browser's would), and
-      # `capture_outgoing_form_state` sees values its timers set. One is invisible
+      # `capture_left_page_form_state` sees values its timers set. One is invisible
       # rather than intended: `@navigating` is still false here, so a URL the flush
       # produces doesn't join `@recent_urls` — which is what keeps a polling
       # `have_current_path` from seeing the discarded page's URL.
