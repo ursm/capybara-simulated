@@ -494,6 +494,16 @@ module Capybara
         out
       end
 
+      # …the window's tasks due by `at`, a time its clock has passed — a page's timers a window that waited on a worker in
+      # place (Browser#await_worker_reply) owes from before the time the worker's message to deliver now was posted at, which
+      # run first, in the order of their times — none from inside a call of the host's into the window, which a step must
+      # not nest in.
+      def run_due_by(at)
+        return if @call_depth.to_i.positive? || !@clock || at >= @clock
+
+        run_loop_step((at - @clock).floor)
+      end
+
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
