@@ -326,6 +326,7 @@ module Capybara
         @last_polled_gens             = {}
         @idle_settle_polls            = 0
         @ticking                      = false
+        @event_loop_running           = false
         # The classic history API state the document a reload or traversal makes starts with (replay_history_entry).
         @restoring_history_state      = nil
         @cors_preflight_cache         = Native.cors_preflight_cache_new
@@ -777,10 +778,11 @@ module Capybara
       end
 
       # The URLs the page's document's own history updates (pushState / replaceState / a fragment navigation) moved it
-      # from during a page-load drain or a settle tick driven by a user action — which its traversable notes while one
-      # runs, and only then (session_history.rs `Traversable::passed`) — each queued for surface-via-`current_url` so a
-      # polling matcher walks the intermediate chain; from now on noted where one runs (called as `@ticking` /
-      # `@navigating` change). Out-of-band JS-driven pushStates
+      # from while the driver ran the page ahead of Capybara — a load, a poll's tick, or any event-loop step it runs (an
+      # action's settle, the timers it drains: `running_event_loop`) — which its traversable notes while one runs, and
+      # only then (session_history.rs `Traversable::passed`) — each queued for surface-via-`current_url` so a polling
+      # matcher walks the intermediate chain; from now on noted where one runs (called as `@ticking`, `@navigating` and
+      # `@event_loop_running` change). Out-of-band JS-driven pushStates
       # (`execute_script("history.pushState(...)")`) bypass the queue —
       # they have no chain of microtask-driven transitions to walk,
       # and the caller expects to read the new URL one-shot. Bounded
@@ -792,7 +794,7 @@ module Capybara
       # during a tick, so by the time Capybara polls the page's URL
       # is already the final URL.
       private def note_url_changes
-        passed = @session_history.note_url_changes(@ticking || @navigating)
+        passed = @session_history.note_url_changes(@ticking || @navigating || @event_loop_running)
         # The URL the action started from is the starting point, not an
         # intermediate it walked through — don't surface it to a polling
         # (or one-shot) `current_url` as a step. Genuine mid-action
@@ -806,6 +808,21 @@ module Capybara
         @recent_urls.concat(passed)
         @recent_urls.shift while @recent_urls.size > 8
         @recent_urls_last_push_at = Process.clock_gettime(Process::CLOCK_MONOTONIC, :millisecond)
+      end
+
+      # …around an event-loop step the runtime runs of the page (V8Runtime#run_loop_step, #drain_timers): its tasks are the
+      # page running ahead of Capybara wherever the driver runs them — a tick, an action's settle and the timers it drains.
+      def running_event_loop
+        return yield if @event_loop_running
+
+        begin
+          @event_loop_running = true
+          note_url_changes
+          yield
+        ensure
+          @event_loop_running = false
+          note_url_changes
+        end
       end
 
       # The URL of the document the page is at — its traversable's (session_history.rs `Traversable::url`), which a
@@ -2360,9 +2377,17 @@ module Capybara
       # Capybara-initiated `page.go_back` runs from Ruby, not inside a
       # JS call, so it's safe to rebuild the Context synchronously. The
       # `force:` flag bypasses the deferral that `history_go` uses to
-      # avoid terminating the running JS context.
-      def go_back        ; history_go(-1, force: true) ; end
-      def go_forward     ; history_go(+1, force: true) ; end
+      # avoid terminating the running JS context. A user action like any other: the URL the
+      # page is at as it begins its starting point, no intermediate a polling `current_url` walks
+      # — what the outgoing page's due timers do first included (`mark_action_baseline`).
+      def go_back
+        mark_action_baseline
+        history_go(-1, force: true)
+      end
+      def go_forward
+        mark_action_baseline
+        history_go(+1, force: true)
+      end
 
 
       # Traverse the page's session history by `delta` steps — the joint history of the page and its frames

@@ -439,7 +439,7 @@ module Capybara
         # loops themselves (timers.js `drainChildRealms`), so this one call covers
         # child frames too — no separate Ruby-side fan-out (which would
         # double-advance their clocks and fire intervals twice).
-        walks_guarded { max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i) }
+        @browser.running_event_loop { walks_guarded { max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i) } }
       end
 
       # One event-loop step (task → microtask-checkpoint → render). Returns the
@@ -450,7 +450,7 @@ module Capybara
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
         # `__runLoopStep` steps child iframe realms itself (timers.js
         # `drainChildRealms`), folding their fired/dirtied into the result.
-        r = walks_guarded { ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen) }
+        r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen) } }
         return { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
 
         @clock = r['now'].to_f
