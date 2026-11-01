@@ -466,13 +466,17 @@ module Capybara
       # the step) is the authoritative find-cache-invalidation signal, since a
       # render-phase rAF / microtask-delivered MutationObserver can mutate the DOM
       # without firing a timer (fired == 0).
+      # (…a service worker's timer due within it the step stops at, and the worker runs it before the window goes on:
+      # Browser#worker_due_within, #run_workers_due — one virtual time for the two event loops, the window's)
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
+        cut = @browser.worker_due_within(max_ms.to_i)
         # `__runLoopStep` steps child iframe realms itself (timers.js
         # `drainChildRealms`), folding their fired/dirtied into the result.
-        r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen) } }
+        r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', (cut || max_ms).to_i, max_iter.to_i, !!yield_on_gen) } }
         return { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
 
         @clock = r['now'].to_f
+        @browser.run_workers_due if cut
         r
       end
 

@@ -3045,7 +3045,8 @@ module Capybara
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
       # precise virtual duration.
       def tick_real_time(step_ms: nil)
-        return unless @timers_active || async_io_pending? || background_steps_pending?
+        # (…a service worker's timer too: its clock is the window's, which moves only as this advances it — `worker_due_within`)
+        return unless @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && sw_next_timer_at)
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -3063,7 +3064,7 @@ module Capybara
           # step SIZE below is deterministic.
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
-          if @timers_active && effective_step > 0
+          if (@timers_active || (!@workers.empty? && sw_next_timer_at)) && effective_step > 0
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence
@@ -3455,6 +3456,11 @@ module Capybara
         # ONE V8 crossing: `delay` = ms until the nearest timer; 0 = runnable now
         # (a rAF or a due-now timer — equivalent to `has_ready_timer?`), -1 = none.
         delay = @runtime.next_timer_delay_ms
+        # …or a service worker's, whose timers fire on the window's clock (`worker_due_within`): the nearer of the two.
+        if (worker = sw_next_timer_at)
+          worker = [(worker - @runtime.clock).ceil, 0].max
+          delay  = delay.negative? ? worker : [delay, worker].min
+        end
         # (2) Runnable now → fixed step, reset guard (not a quiet pre-debounce window).
         if delay.zero?
           @ff_transient_polls = 0
@@ -5501,12 +5507,17 @@ module Capybara
       # The reply to `fetch_id` a thread waits for in place (`WorkerHost#await_direct`, `#await_navigation`), awaited for
       # WORKER_ROUND_TRIP_BUDGET with the GVL released, a poll interval at a time — nil where none came, or the wait was
       # let go of meanwhile (a session's reset).
+      # (…the window's event loop stopped while it waits, its service workers' clocks move on real time meanwhile —
+      # `@awaiting_worker_replies`, which their threads read — as no window step can move them)
       private def await_worker_reply(fetch_id)
+        @awaiting_worker_replies = @awaiting_worker_replies.to_i + 1
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
           reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min) and return reply
         end
         nil
+      ensure
+        @awaiting_worker_replies -= 1
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Counted as a fetch
@@ -5996,6 +6007,39 @@ module Capybara
           @websocket_lock.synchronize { @websocket_workers.value?(handle) }
       end
       private def sw_next_timer_at = @workers.each_value.filter_map {|w| w[:next_timer_at] if w[:service] && w[:thread]&.alive? }.min
+
+      # One virtual time for the window's event loop and its service workers', the window's: a worker's clock follows it
+      # (`worker_clock_step`), and a step of the window's that a worker's timer falls within stops at that timer —
+      # `worker_due_within`, the ms from now to it, nil for none (none at all for a window with no live service worker,
+      # the common case: one hash read) — the worker then running what is due (`run_workers_due`) and what it posted
+      # delivered, before the window goes on. So a worker's `setInterval` posting to a page is heard at its own times,
+      # between the page's timers, not in a burst a poll of real time later.
+      def worker_due_within(max_ms)
+        return nil if @workers.empty? || max_ms <= 0
+
+        at = sw_next_timer_at or return nil
+        # (…one due already — the window moved past it since the worker last ran — run first, at the window's time now)
+        if at <= @runtime.clock
+          run_workers_due
+          at = sw_next_timer_at or return nil
+        end
+        due = (at - @runtime.clock).ceil
+        due.positive? && due < max_ms ? due : nil
+      end
+      # …each live service worker with a timer due by the window's time now ticked — its due timers run on its thread —
+      # and waited for, a bounded wait (WORKER_ROUND_TRIP_BUDGET), then what they posted delivered.
+      def run_workers_due
+        now = @runtime.clock
+        due = @workers.each_value.select {|w| w[:service] && w[:thread]&.alive? && w[:next_timer_at] && w[:next_timer_at] <= now }
+        return if due.empty?
+
+        ticks = due.map {|w| [w, w[:ticks].to_i] }
+        due.each {|w| w[:inbox] << {kind: 'tick'} }
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        sleep 0.0005 until ticks.all? {|w, t| w[:ticks].to_i > t || !w[:thread]&.alive? } || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        deliver_worker_messages
+        nil
+      end
 
       # The navigations deferred on an activating worker, made again — each as a navigation intent of this window's, as
       # it next takes its tasks (`consume_sw_deferred_navigations`), where it is still its navigable's ongoing navigation
@@ -9281,11 +9325,16 @@ module Capybara
             # `eval`, keep the per-tick cost off the V8 compile path (rule 3).
             # (…a poll interval at least on a quiet tick, the one real time passed in: a tick of a message, however many
             # come, moves it only as far as the window has moved)
-            run_worker_timers.call(msg.nil? ? WORKER_POLL_INTERVAL * 1000 : 0)
+            # (…a service worker's none — its clock the window's alone, which steps it to each of its timers:
+            # `worker_due_within` — but while the window waits on a worker's reply in place, its loop stopped: `await_worker_reply`)
+            run_worker_timers.call(msg.nil? && (!service || @awaiting_worker_replies.to_i.positive?) ? WORKER_POLL_INTERVAL * 1000 : 0)
+            # (…a tick the window asked of it, its timers due at the window's time now run just above: `run_workers_due`)
+            if msg.is_a?(Hash) && msg[:kind] == 'tick'
+              msg = nil
             # A main-side BroadcastChannel post to this worker arrives as a {kind:'broadcast'} hash;
             # deliver it to the worker's channels (the receiver's own origin gate drops cross-origin).
             # A plain string is a postMessage to the worker.
-            if msg.is_a?(Hash) && msg[:kind] == 'broadcast'
+            elsif msg.is_a?(Hash) && msg[:kind] == 'broadcast'
               # Ack so the main thread releases the broadcast-pending it counted for this delivery
               # (a listen-only worker never posts back — the ack is the only signal it processed
               # it). Under `ensure`: the ack is CONTRACTUAL (settle's bounded wait relies on it —
@@ -9462,6 +9511,7 @@ module Capybara
               record[:next_timer] = next_timer
               # (…and when, on the window's clock, which the worker's follows: what a wait on it steps the window to)
               record[:next_timer_at] = (@runtime.clock + next_timer if next_timer >= 0)
+              record[:ticks] = record[:ticks].to_i + 1
             end
             # A lifecycle phase whose `waitUntil` was parked at boot may have settled off
             # the message dispatch / timer drain above (the extendable-event SYN/ACK, the
