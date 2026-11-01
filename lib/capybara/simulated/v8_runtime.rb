@@ -986,8 +986,12 @@ module Capybara
       # client the one its navigation reserved (`rebuild_ctx`'s `client_id`), else one of its own (the session's first
       # document, a reset's, an about:blank, blob: or error document), adopted before its scripts run; the last one's let
       # go of as it unloaded (Browser#sw_unload_document_clients).
+      # (…at about:blank until a document of a navigation's says otherwise: the session's page before any visit, and after
+      # a reset, is the about:blank document a browsing context is made with — its URL as `ABOUT_BLANK_RESPONSE` its
+      # response)
       def init_page_realm(c)
         init_realm(c)
+        c.call('__csimUpdateLocation', 'about:blank')
         adopt_client_id(c, @page_client_id || @browser.mint_resulting_client_id, realm_id: 0)
         @page_client_id = nil
       end
