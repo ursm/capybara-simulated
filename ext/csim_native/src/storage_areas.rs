@@ -259,8 +259,9 @@ impl crate::dom::RealmArena {
     // The realms of the documents a `storage` event of a change made as document number `made` was the last begun goes
     // to (HTML "broadcast": each Document whose Storage of the area is not the one changed): the documents of the
     // isolate's trees — the page's, and those of the windows `window.open` made in it — that were there then, a document
-    // begun since (a navigation's, the realm reused or not) none of them, but `source`'s, the one that made it. Which of
-    // them have the area is theirs to tell (storage.js `__csim_deliverStorageEvents`).
+    // begun since (a navigation's, the realm reused or not) none of them, nor one no longer fully active (a closed
+    // window's, a destroyed page's: HTML's task would not run), but `source`'s, the one that made it. Which of them have
+    // the area is theirs to tell (storage.js `__csim_deliverStorageEvents`).
     pub(crate) fn storage_event_targets(&self, source: Option<i32>, made: u32) -> Vec<i32> {
         let mut realms: Vec<i32> = std::iter::once(0).chain(self.stepped_windows()).collect();
         let tops = realms.clone();
@@ -270,7 +271,9 @@ impl crate::dom::RealmArena {
         realms.sort_unstable();
         realms.dedup();
         realms.retain(|&r| {
-            Some(r) != source && self.realm_document(r).is_none_or(|doc| self.document_states.lifecycle(doc).began() <= made)
+            Some(r) != source
+                && self.navigables.fully_active(r)
+                && self.realm_document(r).is_none_or(|doc| self.document_states.lifecycle(doc).began() <= made)
         });
         realms
     }
@@ -340,5 +343,8 @@ mod inbox_tests {
         // (…the page navigated since, its realm reused: its next document was not there)
         document(&mut arena, 0);
         assert_eq!(arena.storage_event_targets(None, made), vec![1, 2]);
+        // (…nor a window discarded since)
+        arena.forget_navigables_of(2, false);
+        assert_eq!(arena.storage_event_targets(None, made), vec![1]);
     }
 }

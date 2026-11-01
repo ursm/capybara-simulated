@@ -265,7 +265,9 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
 
   # The documents are asked in tree order — the navigable's inclusive descendant navigables, each document's containers
   # in shadow-including tree order (HTML "checking if unloading is canceled", "descendant navigables") — whichever frame's
-  # document was made first, and unloaded each after its frames' (HTML "unload a document and its descendants").
+  # document was made first, and unloaded each after its frames' (HTML "unload a document and its descendants"). Both
+  # explicit, both departed from by Chrome 156 and Firefox 159 (measured 2026-11-01): they ask `b` (made first) before
+  # `a`, and unload the page first (Chrome: top a c b; Firefox: top b a c).
   it 'asks the frames in tree order and unloads each after its own frames' do
     log = <<~JS
       const log = (s) => localStorage.setItem('log', (localStorage.getItem('log') || '') + s + ' ');
