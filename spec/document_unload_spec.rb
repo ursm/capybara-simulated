@@ -180,28 +180,30 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
   # …and a frame's: the entries its beforeunload handler pushes — the frame's own, and its parent's — come before the
   # entry of the navigation that asked it, which its response finalizes after (HTML "navigate"; Chrome 156, Firefox 159
   # and the spec agree, measured 2026-11-01: back goes to both pushed entries, then to the frame's first document).
-  it "keeps the entries a frame's beforeunload handler pushes before its navigation's" do
-    app = lambda do |env|
-      body = case env['PATH_INFO']
-             when '/uf' then "<script>addEventListener('beforeunload', () => { history.pushState(null, '', '/uf?bu'); parent.history.pushState(null, '', '/?parent-bu'); });</script>uf"
-             when '/next' then 'next'
-             else '<iframe id="f" src="/uf"></iframe>'
-             end
-      [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+  {'an http(s) URL' => "'/next'", 'a blob: URL' => "URL.createObjectURL(new Blob(['next'], {type: 'text/html'}))"}.each do |what, to|
+    it "keeps the entries a frame's beforeunload handler pushes before its navigation's to #{what}" do
+      app = lambda do |env|
+        body = case env['PATH_INFO']
+               when '/uf' then "<script>addEventListener('beforeunload', () => { history.pushState(null, '', '/uf?bu'); parent.history.pushState(null, '', '/?parent-bu'); });</script>uf"
+               when '/next' then 'next'
+               else '<iframe id="f" src="/uf"></iframe>'
+               end
+        [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{body}"]]
+      end
+      s = simulated_session(app)
+      s.visit '/'
+      s.execute_script("f.contentWindow.location = #{to}")
+      poll_until { s.evaluate_script('f.contentWindow.document.body?.textContent') == 'next' }
+      expect(s.evaluate_script('history.length')).to eq(4)
+      at = -> { s.evaluate_script('[location.pathname + location.search, f.contentWindow.location.pathname + f.contentWindow.location.search]') }
+      steps = Array.new(3) do
+        was = at.call
+        s.execute_script('history.back()')
+        poll_until { at.call != was }
+        at.call
+      end
+      expect(steps).to eq([['/?parent-bu', '/uf?bu'], ['/', '/uf?bu'], ['/', '/uf']])
     end
-    s = simulated_session(app)
-    s.visit '/'
-    s.execute_script("f.contentWindow.location = '/next'")
-    poll_until { s.evaluate_script('f.contentWindow.location.pathname') == '/next' }
-    expect(s.evaluate_script('history.length')).to eq(4)
-    at = -> { s.evaluate_script('[location.pathname + location.search, f.contentWindow.location.pathname + f.contentWindow.location.search]') }
-    steps = Array.new(3) do
-      was = at.call
-      s.execute_script('history.back()')
-      poll_until { at.call != was }
-      at.call
-    end
-    expect(steps).to eq([['/?parent-bu', '/uf?bu'], ['/', '/uf?bu'], ['/', '/uf']])
   end
 
   # …its unload counter raised as it unloads (HTML): a navigation, a document.write, a dialog of a handler ignored, and

@@ -10313,8 +10313,7 @@ module Capybara
               # the current one replaced.
               navigate_realm_self_get(realm_id, url, record: !replace, referrer: referrer, initiator: initiator, user_activated: activated)
             else
-              replace ? replace_frame_entry(realm_id, url) : record_frame_nav(realm_id, url)
-              frame_realm_host_call(@runtime.frame_realm_parent(realm_id), '__csimNavigateFrameByRealm', realm_id, url, sandbox)
+              navigate_frame_by_realm(realm_id, url, !replace, sandbox)
             end
           end
         rescue StandardError => e
@@ -11037,10 +11036,10 @@ module Capybara
         # relative URL against the frame's base on rebuild — routed through the frame's PARENT realm
         # (where the owning iframe lives), not unconditionally to main.
         parent = @runtime.frame_realm_parent(realm_id)
-        unless get_url.is_a?(String) && http_url?(get_url)
-          record_frame_navigation(realm_id, get_url, record) unless is_reload || is_history
-          return frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, get_url)
-        end
+        # (…its document asked whether it may be unloaded first, and its entry recorded after: what its beforeunload
+        # handlers pushed — the frame's entries, its parent's — comes before it, HTML "navigate" asking it before the
+        # fetch whose response finalizes the navigation's entry; Chrome and Firefox agree)
+        return navigate_frame_by_realm(realm_id, get_url, record, nil, recorded: !is_reload && !is_history) unless get_url.is_a?(String) && http_url?(get_url)
         # The realm may have been disposed earlier in THIS drain batch — an ancestor frame that also
         # self-navigated discarded this descendant (dispose_frame_realm_tree). Bail before issuing a
         # network fetch whose response (reload_frame_realm_by_id) would find no container and be thrown
@@ -11048,12 +11047,22 @@ module Capybara
         return unless @runtime.frame_realm_alive?(realm_id)
         return unless prompt_to_unload_frame(realm_id, parent)
 
-        # (…its entry recorded once its document was asked whether it may be unloaded: what its beforeunload handlers
-        # pushed — the frame's entries, its parent's — comes before it, HTML "navigate" asking it before the fetch whose
-        # response finalizes the navigation's entry; Chrome and Firefox agree)
         record_frame_navigation(realm_id, get_url, record) unless is_reload || is_history
         navigate_realm_self(realm_id, get_url, nil, nil, is_reload: is_reload, is_history: is_history, origin_null: origin_null, referrer: referrer,
                                                          initiator: initiator, origin_url: origin_url, user_activated: user_activated)
+      end
+      # …a frame's navigation to a URL no fetch here answers (blob:, data:, about:, javascript:, a relative one), by the
+      # src-reassignment path in the realm whose document holds its container: its document asked whether it may be
+      # unloaded first, and its entry (`record`, or the current one replaced) recorded after, as an http(s) one's
+      # (`navigate_realm_self_get`) — none asked for a `javascript:` URL, which unloads nothing (HTML "navigate"
+      # evaluates it in the document it is at), whose entry none is either (`record_frame_nav`).
+      private def navigate_frame_by_realm(realm_id, url, record, begun, recorded: true)
+        parent = @runtime.frame_realm_parent(realm_id)
+        prompted = !url.to_s.match?(/\Ajavascript:/i)
+        return if prompted && !prompt_to_unload_frame(realm_id, parent)
+
+        record_frame_navigation(realm_id, url, record) if recorded
+        frame_realm_host_call(parent, '__csimNavigateFrameByRealm', realm_id, url, begun, prompted)
       end
       # A self-targeted POST form submit in the initiating frame realm. POST the
       # entity body to the action URL, then rebuild that frame's realm from the
