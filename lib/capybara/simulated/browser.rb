@@ -128,6 +128,9 @@ module Capybara
       # header, whichever way it was made: the window's first (one before any visit, a reset's, a new window's initial
       # one), a navigation's to it, the one a navigation that made no document leaves, a window `window.open` made.
       ABOUT_BLANK_RESPONSE = [200, {}.freeze].freeze
+      # …and its URL, the one the page is at before any visit and after a reset (V8Runtime#init_page_realm), which no
+      # navigation's commit recorded.
+      ABOUT_BLANK_URL = 'about:blank'
       # Horizon-gated fast-forward: when the page is observably idle (no timer due
       # now, no background IO) but a timer is parked within this horizon, jump the
       # virtual clock straight to it instead of waiting ~delay/step polls. A timer
@@ -750,7 +753,7 @@ module Capybara
       # pumps `tick_real_time`, so calling it re-entrantly from inside a host-fn
       # callback (the driver building an aux window mid-`window.open`) corrupts
       # the caller's parse/event-loop state. Use this for identity reads.
-      def raw_current_url = page_url.to_s
+      def raw_current_url = page_url || ABOUT_BLANK_URL
 
       def current_url
         tick_real_time
@@ -774,7 +777,7 @@ module Capybara
           @recent_urls.clear if age_ms > RECENT_URLS_STALE_AGE_MS
         end
         return @recent_urls.shift if @recent_urls.any?
-        page_url || ''
+        page_url || ABOUT_BLANK_URL
       end
 
       # The URLs the page's document's own history updates (pushState / replaceState / a fragment navigation) moved it
@@ -2968,10 +2971,7 @@ module Capybara
 
       def current_path
         tick_real_time
-        url = page_url.to_s
-        return '' if url.empty?
-
-        parse_url(url)&.fetch(:pathname) || ''
+        parse_url(page_url || ABOUT_BLANK_URL)&.fetch(:pathname) || ''
       end
 
       # Capybara polls find / has_? via `synchronize` while

@@ -234,8 +234,13 @@ module Capybara
           File.open("#{cache_path}.lock", File::CREAT | File::RDWR) do |lock|
             lock.flock(File::LOCK_EX)
             if (bytes = read_verified_snapshot(cache_path))
-              # (…in use: its mtime what the pruning of another key's measures it by)
-              File.utime(nil, nil, cache_path)
+              # (…in use: its mtime what the pruning of another key's measures it by — best-effort, a read-only cache
+              # directory's snapshot loaded all the same)
+              begin
+                File.utime(nil, nil, cache_path)
+              rescue SystemCallError
+                nil
+              end
               return RustyRacer::Snapshot.load(bytes)
             end
             snap  = build_snapshot_uncached
