@@ -7662,6 +7662,11 @@ module Capybara
           apply_sw_claims(claims)
           apply_sw_phases(phases)
         end
+        # A client a claim took was its old registration's controllee no more — which may let a worker waiting there
+        # activate, or an unregistered registration clear, as a client's unload does (`unregister_client`): its
+        # worker's own `sw_try_activate`, drained with the claim, came before it was applied.
+        try_clear_uninstalls
+        sw_try_activate
       end
       private def controller_changes_held? = !@held_controller_changes.empty?
 
@@ -9297,6 +9302,9 @@ module Capybara
           raise "worker script blocked: #{url}" if fetched == :error
           raise "worker script not found: #{url}" unless fetched
 
+          # The script runs at the time its response came, the window's now — the time the wait took no time of the
+          # script's own: a timer it sets starts from there, not owed the wait.
+          worker_clock_step.call(@runtime ? @runtime.clock : 0.0)
           body = RuntimeShared.utf8_text(fetched[:body])
           # Across a redirect chain the worker's identity moves: its location becomes the
           # FINAL RESPONSE URL (the base importScripts()/fetch() resolve against), and its
