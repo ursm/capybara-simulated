@@ -240,6 +240,25 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     end
   end
 
+  # (…a window a link opened by a name, a form's POST to that name taken by it — no second window. One opened `noopener`
+  # is of another browsing context group, which the name search never reaches: a second window then, as Chrome 156
+  # measured)
+  {'a link' => ['', 2], 'a noopener link' => [' rel=noopener', 3]}.each do |what, (rel, windows)|
+    it "takes a form's POST by the name #{what} opened it with" do
+      session.execute_script(<<~JS)
+        document.body.insertAdjacentHTML('beforeend', '<a id="opens" href="/second" target="named"#{rel}>opens</a>' +
+          '<form id="pf" method="post" action="/posted" target="named"><input name="q" value="link"></form>');
+      JS
+      session.find('#opens').click
+      expect(session.windows.size).to eq(2)
+      session.execute_script("document.getElementById('pf').submit()")
+      expect(session.windows.size).to eq(windows)
+      session.within_window(session.windows.last) do
+        expect(session).to have_css('#posted', text: 'POST q=link')
+      end
+    end
+  end
+
   # HTML "create and initialize a Document object": a navigation of its initial about:blank to a document of its origin
   # keeps its Window — what its opener set on it, its listeners — but nothing of the document it replaces; one whose
   # document was opened (`document.open()`) is no initial about:blank, and keeps none.
