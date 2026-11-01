@@ -6461,6 +6461,8 @@ service-workers/service-worker/clients-matchall-order.https.html:
 - Clients.matchAll() returns uncontrolled windows in focus order.  Case 1.
 - Clients.matchAll() returns uncontrolled windows in focus order.  Case 2.
 - "[harness] TIMEOUT"
+service-workers/service-worker/controlled-iframe-postMessage.https.html:
+- Verify frame does get messages in order
 service-workers/service-worker/credentials.https.html:
 - Module with an imported statement should not have credentials
 - Script with service worker served as modules should not have credentials

@@ -119,16 +119,6 @@
   (same class as infinite_backtracking). Needs engine-level eval preemption
   (Isolate::TerminateExecution surfaced through rusty_racer) plus Clear-Site-Data
   semantics before it can run.
-"service-workers/service-worker/controlled-iframe-postMessage.https.html": >-
-  Its worker's navigation fetch handler awaits clients.get(event.resultingClientId)
-  before it calls respondWith — and that get waits for the navigation's document
-  (Service Workers 4.4.1: until the reserved client is execution ready or
-  discarded), which the response it withholds would make: a deadlock by the spec.
-  The driver breaks it only by its wall-clock round-trip budget (1 s,
-  WORKER_ROUND_TRIP_BUDGET) falling back to the network, so which of its message
-  subtests pass depends on machine load — 3/4 alone, other sets under the gate's
-  parallel load. Skipped as a hang, not listed; rejoin it with a deterministic
-  answer to that deadlock.
 "service-workers/cache-storage/cache-abort.https.any.js": >-
   Aborts an in-flight cache.add/addAll/put whose request targets
   fetch/api/resources/infinite-slow-response.py — a handler that streams an unbounded
