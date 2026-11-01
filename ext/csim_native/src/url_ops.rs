@@ -505,10 +505,6 @@ fn url_is_fragment_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::Functi
     let (current, url) = (usv(scope, args.get(0)), usv(scope, args.get(1)));
     rv.set_bool(is_fragment_navigation(&current, &url));
 }
-// …for the host.
-pub(crate) fn is_fragment_navigation_for_ruby(current: String, url: String) -> bool {
-    is_fragment_navigation(&current, &url)
-}
 
 // HTML "can have its URL rewritten": whether a document at `current` may have its URL replaced by `target` — by
 // pushState / replaceState — the two alike in scheme, username, password, host and port; an HTTP(S) one in nothing

@@ -934,8 +934,8 @@ module Capybara
       # The active browsing context's own URL: the frame document's URL inside
       # a `within_frame` block, else the main page URL. Used to resolve a
       # frame-relative navigation and to set its request referrer, so
-      # `resolve_against_current` / `pure_fragment_navigation?` work the same
-      # whether the navigation originates in the main page or a frame.
+      # `resolve_against_current` works the same whether the navigation
+      # originates in the main page or a frame.
       # (…the page's while the entered frame's realm is gone: its rebuild, `reload_current_frame_realm`, whose new document's
       # loads — its scripts, sheets and images, each URL resolved already — ask as it is built, before the frame is
       # pointed at it)
@@ -1437,11 +1437,8 @@ module Capybara
               blob:           action['blob'],
               user_activated: action['userActivated'] == true
             )
-          # In-page anchor links (`#frag` / current-page + `#frag`) move
-          # the hash but don't fetch a new document. Pure-fragment also
-          # short-circuits the `<a>`s test fixtures use as click sinks.
-          elsif pure_fragment_navigation?(url, use_base: true)
-            update_current_hash(resolve_against_current(url, use_base: true))
+          # (…a link to a fragment of its document none: its realm navigated it in place as it was followed, before it planned
+          # any — dom-nodes.js `fragmentNavigate`)
           else
             # Drain any work the click handler queued before the VM gets
             # rebuilt — analytics libraries (Ahoy / segment / GA) queue
@@ -1534,30 +1531,6 @@ module Capybara
         # (…named by the link's `download` value where its Content-Disposition names nothing, else by its response's URL:
         # HTML "get the suggested filename", the last one its redirects led to)
         save_downloaded_response(result['url'], result['headers'] || {}, [result['body_raw'].to_s], hint: filename_hint)
-      end
-
-      # HTML "navigate": a navigation to `url` is one to a fragment of the current document where `url` has a fragment
-      # (`#` too — `location.hash = ''` gives one) and equals the document's URL but for their fragments (url_ops.rs) —
-      # `url` as written resolved against the document's URL, or, a link's (`use_base`), against its base URL, where an
-      # `<a href="#x">` under `<base href="/other/">` goes to another document.
-      def pure_fragment_navigation?(url, use_base: false)
-        doc_url = current_browsing_context_url
-        !doc_url.nil? && Native.url_fragment_navigation(doc_url.to_s, resolve_against_current(url, use_base: use_base).to_s)
-      end
-
-      def update_current_hash(url)
-        return if @current_url.nil?
-        new_url = resolve_against_current(url)
-        @current_url = new_url
-        # JS-driven same-document fragment navigations (anchor clicks AND
-        # `location.hash`/`href`/`assign` sets) are now handled entirely in
-        # the VM by `tryFragmentNavigate` — they update the JS location and
-        # fire `hashchange` there and never round-trip through here. This
-        # path remains only as a defensive fallback for a fragment URL that
-        # reaches the Ruby navigate/pending drain by some other route; keep
-        # the VM's location object in sync so its `location.href` getter
-        # doesn't read stale.
-        @runtime.call('__csimUpdateLocation', new_url)
       end
 
       def set_value_with_events(handle, value)
@@ -2186,8 +2159,6 @@ module Capybara
             blob:           pending['blob'],
             user_activated: pending['userActivated'] == true
           )
-        elsif pure_fragment_navigation?(url, use_base: true)
-          update_current_hash(resolve_against_current(url, use_base: true))
         else
           tick_real_time
           navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(pending['blob']), policy: pending['referrerPolicy'],
@@ -10287,22 +10258,15 @@ module Capybara
         url, replace, initiator_realm, source, policy, activated, blob, ongoing = @runtime.call('__csimTakeLocation')
         return unless url
 
-        initiator = initiator_realm && [initiator_realm.to_i, [source, policy]]
-        blob = host_blob(blob)
         # The page's `location` navigates the page, whichever realm's script set it — a frame's own is its container's to
-        # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates.
+        # navigate (location.js `dispatchNav`), an entered one's too — each judged against the document it navigates, by
+        # the document that began it, else the page's own. (…none to a fragment of its document, which its realm navigated
+        # in place before it planned any: location.js `navigateTo`, url_ops.rs `urlIsFragmentNavigation`; nor one a
+        # top-level traversable refuses: `navigate_top_from`)
+        realm, referrer = initiator_realm ? [initiator_realm.to_i, [source, policy]] : [0, realm_referrer_initiator(0)]
+        blob = host_blob(blob)
         in_top_context do
-          # A `location.href`/`assign`/`hash` set to a same-document fragment (e.g. `location.hash = ''`) is NOT a
-          # document fetch — move the hash without rebuilding the VM, matching the anchor-click navigate branch. Without
-          # this a hash assignment reloaded the page, discarding all JS state.
-          if pure_fragment_navigation?(url)
-            update_current_hash(url)
-          elsif initiator
-            realm, referrer = initiator
-            navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
-          else
-            navigate_top_from(0, realm_referrer_initiator(0), url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
-          end
+          navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
         end
       end
       # The navigations of frames planned for the host — a frame's own `location`'s, a link's targeting one — taken as the
