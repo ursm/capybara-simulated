@@ -23,8 +23,10 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "frameResponse", frame_response_op, context_id);
 }
 
-// __dom.frameResponse(container, host) -> what a build of the frame `container`'s document makes of its response —
-// `host` the bindings' (subresource-host.js) — `[FRAME_DEFERRED]`, `[FRAME_KEPT]`, or `[FRAME_BUILD, url, locationHref,
+// __dom.frameResponse(container, host, initial) -> what a build of the frame `container`'s document makes of its response
+// — `host` the bindings' (subresource-host.js); `initial`, the build of its initial about:blank document, made as its
+// window is read before the navigation under way has its response, which this leaves to that navigation's build —
+// `[FRAME_DEFERRED]`, `[FRAME_KEPT]`, or `[FRAME_BUILD, url, locationHref,
 // body, contentType, javascriptSource, aboutBase, clientId, referrer, policy, refresh, documentOrigin, locationOrigin,
 // sandbox]`: the document's URL, the one its location reports (about:srcdoc, about:blank), its body (its bytes, a
 // srcdoc's text), its type, the script a javascript: URL runs in it, the base URL an about: document inherits from its
@@ -42,8 +44,9 @@ fn frame_response_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbac
         // SAFETY: the handle lives while the object, an argument, does.
         .and_then(|ptr| unsafe { ptr.as_ref() }.document(scope))
         .and_then(|d| crate::node_handle::nid_of(scope, d.into()));
+    let initial = args.get(2).is_true();
     let cid = realm_id(scope, &args);
-    if let Ok(answer) = frame_response(scope, host, cid, container, doc) {
+    if let Ok(answer) = frame_response(scope, host, cid, container, doc, initial) {
         rv.set(answer);
     }
 }
@@ -64,12 +67,12 @@ struct Response<'s> {
     error: bool,
 }
 
-fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, doc: Option<NodeId>) -> Result<v8::Local<'s, v8::Value>, Terminated> {
+fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::Function>, cid: i32, container: NodeId, doc: Option<NodeId>, initial: bool) -> Result<v8::Local<'s, v8::Value>, Terminated> {
     let code = |scope: &mut v8::PinScope<'s, '_>, code: u32| {
         let code = v8::Integer::new_from_unsigned(scope, code).into();
         v8::Array::new_with_elements(scope, &[code]).into()
     };
-    let (source, reload) = realm(scope, cid).frame_source(container, doc);
+    let (source, reload) = if initial { (FrameSource::None, false) } else { realm(scope, cid).frame_source(container, doc) };
     let empty = v8::String::empty(scope).into();
     let mut r = Response { url: String::new(), body: empty, content_type: "text/html".to_owned(), javascript: None, client_id: None, referrer: None, policy: None, refresh: None, csp: None, error: false };
     let (carried, srcdoc) = (matches!(source, FrameSource::Navigation(_)), matches!(source, FrameSource::Srcdoc(_)));
@@ -138,13 +141,17 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
     }
     // The document's origins and sandboxing flags, as this realm — its creator's — makes them.
     let arena = realm(scope, cid);
-    let sandbox = arena.take_frame_sandbox(container);
+    // (…the sandboxing its initial about:blank document is made with the container's as it stands, which leaves the
+    // navigation its own: HTML "create a new child navigable")
+    let sandbox = if initial { arena.frame_sandbox(container) } else { arena.take_frame_sandbox(container) };
     let mut created = crate::realm_location::frame_origins(arena, cid, &r.url, sandbox.as_deref(), r.csp.as_deref());
     if r.error {
         created.document = Some("null".to_owned());
     }
     // The response is in: the URL the navigation started with let go of.
-    arena.take_frame_src_url(container);
+    if !initial {
+        arena.take_frame_src_url(container);
+    }
     // The URL its location reports — about:srcdoc for a srcdoc, about:blank for none and for a javascript: URL's, whose
     // result's document keeps its initial one's — and the base URL an about: one inherits from its creator, this
     // realm's document.

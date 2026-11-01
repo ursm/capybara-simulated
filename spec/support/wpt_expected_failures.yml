@@ -16,7 +16,6 @@
 FileAPI/url/sandboxed-iframe.html:
 - Blob URL fragment is implemented.
 - Blob URLs can be used in iframes, and are treated same origin
-- "[harness] TIMEOUT"
 FileAPI/url/url-in-tags.window.js:
 - Blob URL fragment is implemented.
 - "[harness] TIMEOUT"
@@ -5909,9 +5908,6 @@ html/semantics/interactive-elements/the-dialog-element/fixed-position-child-with
 html/semantics/interactive-elements/the-dialog-element/focus-after-close.html:
 - Focus should not scroll if the previously focused element is outside the viewport
 - "[harness] TIMEOUT"
-html/semantics/interactive-elements/the-dialog-element/inert-focus-in-frames.html:
-- Tests inert node focusing across frames and iframes.
-- "[harness] TIMEOUT"
 html/semantics/interactive-elements/the-dialog-element/inert-node-is-unselectable.html:
 - Test that inert nodes cannot be selected. The test passes if the only text you can
   select is inside the dialog.
@@ -6504,7 +6500,6 @@ service-workers/service-worker/clients-matchall-order.https.html:
 - Clients.matchAll() returns controlled windows and frames in focus order.
 - Clients.matchAll() returns controlled windows in focus order.  Case 1.
 - Clients.matchAll() returns controlled windows in focus order.  Case 2.
-- Clients.matchAll() returns non-focused controlled windows in creation order.
 - Clients.matchAll() returns non-focused uncontrolled windows in creation order.
 - Clients.matchAll() returns uncontrolled windows in focus order.  Case 1.
 - Clients.matchAll() returns uncontrolled windows in focus order.  Case 2.
@@ -6519,7 +6514,6 @@ service-workers/service-worker/data-iframe.html:
 - 'navigator.serviceWorker is not available in a data: iframe'
 service-workers/service-worker/detached-context.https.html:
 - accessing a ServiceWorker object from a removed iframe
-- accessing navigator.serviceWorker on a detached iframe
 service-workers/service-worker/embed-and-object-are-not-intercepted.https.html:
 - "[harness] TIMEOUT"
 - post-load navigation of EMBED elements should not be intercepted by service workers

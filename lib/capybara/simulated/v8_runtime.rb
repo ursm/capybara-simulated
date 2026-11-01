@@ -990,6 +990,43 @@ module Capybara
                                frame_sandbox, referrer: referrer, referrer_policy: @browser.referrer_policy_header({'referrer-policy' => policy_header}), refresh: refresh)
           end
         })
+        # …and a frame's initial about:blank navigated to a document of its origin: loaded into the same realm, its Window
+        # kept (`reuse_frame_realm`).
+        c.attach('__csim_reuseFrameRealm', ->(
+          id,
+          url,
+          body,
+          content_type,
+          parent_id,
+          frame_doc_origin = nil,
+          frame_location_origin = nil,
+          js_url_source = nil,
+          frame_about_base = nil,
+          frame_viewport = nil,
+          client_id = nil,
+          frame_margins = nil,
+          frame_sandbox = 0,
+          referrer = nil,
+          policy_header = nil,
+          refresh = nil
+        ) {
+          RuntimeShared.safe_call do
+            reuse_frame_realm(
+              id.to_i, url, body, content_type, parent_id,
+              doc_origin:      frame_doc_origin,
+              location_origin: frame_location_origin,
+              js_url_source:   js_url_source,
+              about_base:      frame_about_base,
+              viewport:        frame_viewport,
+              client_id:       client_id,
+              margins:         frame_margins,
+              sandbox:         frame_sandbox,
+              referrer:        referrer,
+              referrer_policy: @browser.referrer_policy_header({'referrer-policy' => policy_header}),
+              refresh:         refresh
+            )
+          end
+        })
         # Re-navigating an iframe (src/srcdoc reassigned) builds a fresh realm;
         # the bridge calls this to tear down the superseded one so it doesn't
         # linger in @frame_realms and get re-drained on every poll tick.
@@ -1162,6 +1199,86 @@ module Capybara
           }
           })();
         JS
+        load_frame_document(
+          realm, url, body, content_type, parent_id,
+          link:            container,
+          doc_origin:      frame_doc_origin,
+          location_origin: frame_location_origin,
+          js_url_source:   js_url_source,
+          about_base:      frame_about_base,
+          viewport:        frame_viewport,
+          client_id:       client_id,
+          margins:         frame_margins,
+          sandbox:         frame_sandbox,
+          history_state:   history_state,
+          referrer:        referrer,
+          referrer_policy: referrer_policy,
+          refresh:         refresh
+        )
+        realm.id
+      rescue StandardError => e
+        @browser.log_console('warn', "frame realm load failed: #{e.message}")
+        # A realm created before the failure (load threw) is untracked — not in
+        # frame_realms — so nothing would ever drain or dispose it. Tear it down here
+        # (safe: it's non-executing in the rescue), taken off its container's navigable,
+        # which was linked to it before the load (none of its parent's child realms):
+        # dispose_frame_realm unwinds what it registered — the module handles its scripts
+        # compiled before the throw among them — and marks it discarded, the WindowProxies
+        # retargeted over it kept for the navigable's next document or its destruction to
+        # retarget or drop; the explicit dispose is the backstop, as it is untracked.
+        if realm
+          realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, -1) rescue nil if container
+          dispose_frame_realm(realm.id, keep_proxies: true)
+          realm.dispose rescue nil
+        end
+        nil
+      end
+
+      # Navigate frame realm `id` from its initial about:blank to a document of that one's origin: loaded into the same
+      # realm, its Window kept — HTML "create and initialize a Document object" reuses the initial about:blank's Window
+      # for a document of its origin, so what the parent did to the window before the navigation's response was in (its
+      # properties, its listeners: `frame.contentWindow.onload = …`) the new document's Window has (Chrome 156 and
+      # Firefox 159 measured: an expando and a load listener set as the parent parsed). Its Document object is the one
+      # its realm has, renewed (dom-nodes.js `__csimRenewDocument`) and parsed again — the gap CLAUDE.md lists for a
+      # window's. Its id, or nil where the realm is gone.
+      def reuse_frame_realm(id, url, body, content_type, parent_id, **made)
+        realm = frame_realms.delete(id) or return nil
+        loading_frame_realms[id] = realm
+        realm.call('__csimRenewDocument')
+        load_frame_document(realm, url, body, content_type, parent_id, reused: true, **made)
+        id
+      rescue StandardError => e
+        @browser.log_console('warn', "frame realm load failed: #{e.message}")
+        loading_frame_realms.delete(id)
+        frame_realms[id] = realm if realm
+        id
+      end
+
+      # …and the document it is made for, loaded into frame realm `realm` — a new one's, `link` the container whose
+      # navigable it is the active document of from now on, or its initial about:blank's, whose Window the document keeps
+      # (`reused`: `reuse_frame_realm`): what its response and its container give it seeded first, then parsed, its load
+      # fired; the realm registered as alive.
+      def load_frame_document(
+        realm,
+        url,
+        body,
+        content_type,
+        parent_id,
+        link: nil,
+        reused: false,
+        doc_origin: nil,
+        location_origin: nil,
+        js_url_source: nil,
+        about_base: nil,
+        viewport: nil,
+        client_id: nil,
+        margins: nil,
+        sandbox: 0,
+        history_state: nil,
+        referrer: nil,
+        referrer_policy: nil,
+        refresh: nil
+      )
         # Pass the URL + document body as call ARGUMENTS, not interpolated into
         # an eval string: the marshaller carries them losslessly, so arbitrary
         # HTML / control bytes survive (Ruby's String#inspect is NOT a faithful
@@ -1182,27 +1299,28 @@ module Capybara
         # the engine's from then on: which navigable that is, and whether its document is the first that navigable has —
         # its initial about:blank where it is about:blank: `first_frame_realm?`; a container inserted again a new
         # navigable's)
-        retarget_from = container ? realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, realm.id).to_i : -1
+        retarget_from = link ? realm_call(parent_id.to_i, '__csimLinkFrameRealm', link, realm.id).to_i : -1
         # The frame's viewport is its container's content box, measured by the parent realm. Seed it
         # BEFORE the document loads so load-time `innerWidth` reads and `@media` evaluation see the
         # frame's own size rather than the top window's. `nil` = an unrendered container, which is a
         # 0x0 window — pass it through rather than skipping, or the frame keeps the top-level size.
-        realm.call('__csimFrameViewportChanged', frame_viewport)
+        realm.call('__csimFrameViewportChanged', viewport)
         # …and the container's `marginwidth` / `marginheight`, which the framed body's first style already reads.
-        realm.call('__csimFrameMarginsChanged', *frame_margins) if frame_margins
+        realm.call('__csimFrameMarginsChanged', *margins) if margins
         # Seed the frame's sandboxing and its document origin (opaque/inherited) BEFORE the
         # document loads, so its load-time scripts read the right self.origin and run (or
         # not) under its sandbox. nil → a real-URL frame whose origin is its own location origin.
-        realm.eval_void("__dom.setSandbox(#{frame_sandbox.to_i});") unless frame_sandbox.to_i.zero?
-        realm.call('__csimSetDocumentOrigin', frame_doc_origin.to_s) unless frame_doc_origin.nil?
+        # (…a realm kept for the document — its initial about:blank's, `reuse_frame_realm` — reseeded whatever it had)
+        realm.eval_void("__dom.setSandbox(#{sandbox.to_i});") unless sandbox.to_i.zero? && !reused
+        realm.call('__csimSetDocumentOrigin', doc_origin&.to_s) unless doc_origin.nil? && !reused
         # The frame's location.origin (opaque "null" for about:blank / srcdoc /
         # javascript:); decoupled from the location string so navigation is intact.
-        realm.call('__csimSetLocationOrigin', frame_location_origin.to_s) unless frame_location_origin.nil?
+        realm.call('__csimSetLocationOrigin', location_origin&.to_s) unless location_origin.nil? && !reused
         # An about:blank / about:srcdoc frame's URL is opaque, but its base URL (for
         # relative-URL resolution) is INHERITED from the creator. Seed that inherited
         # base BEFORE the document loads so its load-time scripts resolve relative URLs
         # against the parent, even though location.href reports about:blank/srcdoc.
-        realm.call('__csimSetAboutBaseURL', frame_about_base.to_s) unless frame_about_base.to_s.empty?
+        realm.call('__csimSetAboutBaseURL', about_base.to_s) unless about_base.to_s.empty? && !reused
         # If a service worker's scope covers this frame's URL, the frame is a CONTROLLED client:
         # wire its `navigator.serviceWorker.controller` BEFORE its document loads, so the frame's
         # load-time scripts see the controller and route their subresource fetch() / XHR / EventSource
@@ -1224,7 +1342,7 @@ module Capybara
         # response (sandboxed-iframe-fetch-event, "Service worker should NOT control the sandboxed
         # page"). allow-same-origin restores the parent origin, and a real-URL frame carries no
         # explicit origin at all (nil = its own location origin) — both are controlled normally.
-        if frame_doc_origin.to_s != 'null'
+        if doc_origin.to_s != 'null'
           ctrl   = @browser.sw_client_controller_for(url.to_s, @browser.blob_partition_site(parent_id))
           ctrl ||= @browser.sw_inherited_controller_for(parent_id) if opaque
           if ctrl
@@ -1275,23 +1393,6 @@ module Capybara
         # (dispatches to an empty listener list). Guarded so a frame whose load
         # handler throws doesn't abort the build.
         realm.call('__csimFireWindowLoad') rescue nil
-        realm.id
-      rescue StandardError => e
-        @browser.log_console('warn', "frame realm load failed: #{e.message}")
-        # A realm created before the failure (load threw) is untracked — not in
-        # frame_realms — so nothing would ever drain or dispose it. Tear it down here
-        # (safe: it's non-executing in the rescue), taken off its container's navigable,
-        # which was linked to it before the load (none of its parent's child realms):
-        # dispose_frame_realm unwinds what it registered — the module handles its scripts
-        # compiled before the throw among them — and marks it discarded, the WindowProxies
-        # retargeted over it kept for the navigable's next document or its destruction to
-        # retarget or drop; the explicit dispose is the backstop, as it is untracked.
-        if realm
-          realm_call(parent_id.to_i, '__csimLinkFrameRealm', container, -1) rescue nil if container
-          dispose_frame_realm(realm.id, keep_proxies: true)
-          realm.dispose rescue nil
-        end
-        nil
       end
 
       # A document a navigation of a window `window.open` made in this isolate made, loaded into realm `realm` — a new

@@ -226,7 +226,8 @@ are the next document's, so the proxy answers as a discarded browsing context's
 (`closed`, no `parent` / `top` / `opener`, `postMessage`, `close()` and its
 Location's navigations doing nothing) and reaches nothing of it
 (`__csimEvictWindowProxy`'s successor, platform-globals.js); and a window
-`window.open` made in its opener's isolate keeps its Window when its initial
+`window.open` made in its opener's isolate — or a frame, whose initial about:blank
+was read while its `src`'s navigation was under way — keeps its Window when its initial
 about:blank navigates to a document of its origin, as HTML says, but keeps its
 Document object too, renewed (its listeners, handlers, observer registrations,
 adopted sheets, fonts, selection range, design mode, visibility and initial-about:blank flag
@@ -234,7 +235,12 @@ reset, its sockets and event sources closed) and parsed again, where HTML makes 
 per realm — its handle 0, its arena root, the module state of every binding of the
 realm read it — so a second Document of a live realm would need every one of those
 re-keyed; its expandos, and its `html` / `head` / `body` objects, which the parse
-keeps, outlive it (`reuse_window_realm`, v8_runtime.rb); and a service
+keeps, outlive it (`reuse_window_realm` / `reuse_frame_realm`, v8_runtime.rb); so
+the initial about:blank of a frame with no `src`, which loaded as it was inserted,
+is not kept for a later navigation's document, where HTML keeps it — Chrome and
+Firefox make a new Window there too (measured 2026-11-01), and keeping it would
+give the common script-written frame the Document gap above (bridge.entry.js
+`__csimFrameWindow`); and a service
 worker runs on the event loop of the Browser that hosts the session's
 (the primary window's, `Browser#sw_host`), so its clock is that window's
 virtual clock — another window's controlled fetch, answered there, holds no

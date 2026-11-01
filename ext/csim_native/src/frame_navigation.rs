@@ -94,6 +94,9 @@ const CONTEXT_READY: u32 = 1 << 6;
 const SRC_REFUSED: u32 = 1 << 7;
 // Its element's `load` for the navigation under way still to fire (frame-nav.js `FN_LOAD_OWED`).
 const LOAD_OWED: u32 = 1 << 8;
+// The navigation's document built on a task not run yet (frame-nav.js `FN_BUILD_QUEUED`): a read of the frame's window
+// meanwhile is answered with its initial about:blank document's.
+const BUILD_QUEUED: u32 = 1 << 10;
 
 // A navigation the host makes of a frame's navigable, planned by the frame's own document or a hyperlink that targets it
 // (HTML "plan to navigate": the navigable's one, a later one replacing it — a form's of its parent's document as well):
@@ -1190,6 +1193,7 @@ fn frame_load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
             crate::dom::realm(scope, cid).frame_navigation(container).contents[CONTENT_NAV] = Some(content);
         }
     }
+    crate::dom::realm(scope, cid).set_frame_nav(container, BUILD_QUEUED, true);
     answer(scope, rv, LOAD_BUILD, delay, generation);
 }
 // __dom.frameLoadDue(container, generation, now) -> `DUE_*` of the container's `load` for navigation `generation` as it
