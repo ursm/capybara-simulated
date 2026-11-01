@@ -5051,6 +5051,20 @@ module Capybara
         # (…of its storage key: its owner's top-level site — the creating document's, a nested worker's parent's, a service
         # worker's its registration's, `site`)
         site ||= parent_worker ? @workers.dig(parent_worker, :partition) : blob_partition_site(realm_id.to_i)
+        # A SharedWorker connects to the shared worker of its constructor URL and name in its storage key where one runs —
+        # HTML "SharedWorker constructor" — no worker of its own spawned: its realm one more of the worker's owners, its
+        # port posted to it as a connection (workers.js). One of another type fails the constructor's worker: an `error`
+        # event, no connection (Chrome 156 and Firefox 159 alike).
+        if shared
+          key = [url.to_s, name.to_s, creator_key.to_s, site.to_s]
+          if (running = @workers.find {|_h, w| w[:shared_key] == key && w[:thread]&.alive? && !w[:stopping] })
+            h, w = running
+            return worker_fail(handle, 'The shared worker is of another type') if w[:type] != worker_type(script_type)
+
+            w[:owners] << realm_id.to_i unless w[:owners].include?(realm_id.to_i)
+            return h
+          end
+        end
         ctrl = service ? 0 : worker_controller_handle(target, shared, controller_handle, site).to_i
         # A worker whose MAIN SCRIPT a fetch-handling SW controls fetches it THROUGH that SW
         # (worker-client-id: the SW synthesizes the script), deferred to run_worker
@@ -5124,6 +5138,13 @@ module Capybara
         record[:next_timer_at] = record[:origin]
         # (…and its type, which the destination of the imports the Update probes is of)
         record[:module] = script_type.to_s == 'module' if service
+        # (…a shared worker's constructor URL, name and storage key, what another SharedWorker connects to it by, its type,
+        # which that one's must be, and its owners: the realms connected to it, which it is discarded with the last of)
+        if shared
+          record[:shared_key] = [url.to_s, name.to_s, creator_key.to_s, site.to_s]
+          record[:type]       = worker_type(script_type)
+          record[:owners]     = [realm_id.to_i]
+        end
         # (…its storage partition its owner document's — a nested worker's its parent's — as it was made: blob_rules.rs
         # `partition_site`)
         record[:partition] = site
@@ -5142,7 +5163,7 @@ module Capybara
         end
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
-        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, script_type.to_s.empty? ? 'classic' : script_type.to_s) if service
+        Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type)) if service
         @workers[handle] = record
         thread = Thread.new do
           Thread.current.report_on_exception = false
@@ -5191,6 +5212,9 @@ module Capybara
         end
         handle
       end
+
+      # A worker's type, as its options give it: 'classic' where they give none.
+      private def worker_type(script_type) = script_type.to_s.empty? ? 'classic' : script_type.to_s
 
       # Fail a worker that can't be created (blocked / unloadable script): queue an
       # error event so the JS Worker/SharedWorker fires `onerror`, spawn no thread,
@@ -6542,7 +6566,7 @@ module Capybara
         rid = realm_id.to_i
         return nil if rid.zero?
 
-        discard_workers(@workers.to_a.select {|_h, w| w[:realm] == rid && !w[:service] }.to_h)
+        discard_workers(@workers.to_a.reject {|_h, w| w[:service] || owners_left?(w) {|r| r == rid } }.to_h)
       end
 
       # …and every one the window's document — and its frames, and their workers — created, as a navigation replaces
@@ -6550,7 +6574,15 @@ module Capybara
       # (…not those of the windows it opened, which outlive it: v8_runtime.rb `window_realm_trees`)
       private def terminate_document_workers
         windows = @runtime.window_realm_trees
-        discard_workers(@workers.to_a.reject {|_h, w| w[:service] || windows.include?(w[:realm]) }.to_h)
+        discard_workers(@workers.to_a.reject {|_h, w| w[:service] || owners_left?(w) {|r| !windows.include?(r) } }.to_h)
+      end
+      # …whether worker `w` has an owner left once those `gone` names are gone: a dedicated worker's its creator, a shared
+      # worker's any realm connected to it, its set of them let go of those.
+      private def owners_left?(w, &gone)
+        return !gone.call(w[:realm]) unless w[:owners]
+
+        w[:owners].reject!(&gone)
+        !w[:owners].empty?
       end
 
       # (…`doomed` and — transitively — their NESTED workers, recorded with realm 0 + parent_worker: their Worker
