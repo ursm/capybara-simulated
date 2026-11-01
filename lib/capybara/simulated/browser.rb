@@ -5136,7 +5136,7 @@ module Capybara
         # contend for it are that stop and the worker's own dispose, and holding it across a native
         # call must not block anything else in the browser.
         # `url`: the worker's own URL — its script's, after redirects — which a nested worker's script fetch is judged against.
-        record = {thread: nil, inbox: inbox, took: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
+        record = {thread: nil, inbox: inbox, took: {}, answered: {}, answering: {}, service: service, realm: parent_worker ? 0 : realm_id.to_i, parent_worker: parent_worker, sw_scope: service ? sw_scope.to_s : nil, url: target, creator_key: creator_key, cluster_key: cluster_key, isolated: !service && isolated == true, rt: nil, rt_lock: Mutex.new, ticked: Thread::Queue.new}
         # The Update algorithm byte-checks a new fetch against the running version's
         # script (+ its recorded imports — sw_note_import fills that map as the worker
         # evaluates). SW scripts are small; only service workers pay the retention.
@@ -5614,17 +5614,21 @@ module Capybara
         stalled  = 0
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
-          reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min) and return reply
+          reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min)
           # (…none from a worker whose thread is gone — a request it never took answered as it was reaped, so this one it
           # took and dropped)
-          break if worker && worker[:thread] && !worker[:thread].alive?
-          next unless worker && (took = worker[:took][fetch_id])
-
-          spent = worker[:now].to_f - took
-          if timeout_ms.positive? && spent >= timeout_ms
+          break if !reply && worker && worker[:thread] && !worker[:thread].alive?
+          took = worker && worker[:took][fetch_id]
+          # (…the worker's time it took so far, to its answer where that is out)
+          spent = took && ((reply && worker[:answered][fetch_id]) || worker[:now]).to_f - took
+          # (…an answer later than the timeout no answer: the timeout came first)
+          if spent && timeout_ms.positive? && spent >= timeout_ms
             limit = timeout_ms
             return TIMEOUT_REPLY
           end
+          return reply if reply
+          next unless took
+
           break if spent >= limit
 
           # (…seen so twice running, a poll apart: its state read between its steps)
@@ -5638,11 +5642,16 @@ module Capybara
           waiting[:blocked] -= 1
         end
         if worker
-          took = worker[:took].delete(fetch_id)
+          took     = worker[:took].delete(fetch_id)
+          answered = worker[:answered].delete(fetch_id)
+          moved    = took ? ((answered || worker[:now]).to_f - took).clamp(0, limit) : 0
           worker[:answering].delete(fetch_id)
-          unless waiting
+          if waiting
+            # (…a worker's script waiting inside a sync XHR: its clock on by the time the answer took, as a window's is)
+            waiting[:clock_moved_by]&.call(moved) if moved.positive?
+          else
             worker[:awaited] -= 1
-            window_follows_awaited_worker(worker, follower, took ? (worker[:now].to_f - took).clamp(0, limit) : 0)
+            window_follows_awaited_worker(worker, follower, moved)
           end
         end
       end
@@ -5932,7 +5941,11 @@ module Capybara
           @workers.values.each {|w| w[:resuming] = true if w[:awaiting] == fid }
           # (…its answer out: the worker's time back on the window's, the window on with it — not run on past it while the
           # waiting thread wakes)
-          @workers[handle]&.dig(:answering)&.delete(fid)
+          if (rec = @workers[handle])
+            rec[:answering].delete(fid)
+            # (…at its time, which its waiter counts to: `await_worker_reply`)
+            rec[:answered][fid] = rec[:now] if rec[:took].key?(fid)
+          end
           @worker_host.answer(fid, resp)
           return
         end
@@ -9434,6 +9447,9 @@ module Capybara
         rt          = V8Runtime.build_worker(self, post_back, broadcast_out, sw_hooks, kind: worker_kind, name: name, isolated: record&.dig(:isolated) == true)
         # Hand the runtime to the session boundary (`stop_worker_js`) the moment it exists.
         record[:rt_lock].synchronize { record[:rt] = rt } if record
+        # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
+        # waited for inside a sync XHR (`await_worker_reply`): its time and its isolate's together.
+        record[:clock_moved_by] = ->(ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms) } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
         # is a no-op until `traceActive` is set (console.js). The main realm turns it on
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
