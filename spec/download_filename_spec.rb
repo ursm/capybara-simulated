@@ -103,6 +103,23 @@ RSpec.describe 'a download' do
     expect(Dir.children(@dir).sort).to eq(%w[report-a.csv report-b.csv])
   end
 
+  # (…a Content-Disposition of the `inline` type, or of none, no download for the filename it names: Chrome 156 and
+  # Firefox 159 render `inline; filename=x.txt` and `filename=y.txt`, and download `foo; filename=z.txt` — RFC 6266
+  # §4.2's unknown type, handled as `attachment`)
+  it 'is no response whose disposition is inline, whatever filename it names' do
+    s = simulated_session(lambda {|env|
+      cd = {'/inline' => 'inline; filename=x.txt', '/bare' => 'filename=y.txt', '/foo' => 'foo; filename=z.txt'}[env['PATH_INFO']]
+      next [200, {'content-type' => 'text/plain', 'content-disposition' => cd}, ["at #{env['PATH_INFO']}"]] if cd
+
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><title>start</title>']]
+    })
+    s.visit '/'
+    s.visit '/inline'
+    s.visit '/bare'
+    s.visit '/foo'
+    expect([s.current_path, s.text, Dir.children(@dir)]).to eq(['/bare', 'at /bare', ['z.txt']])
+  end
+
   # (…a `blob:` link's as any other's: its `download` value a file's name alone — never a path out of the directory — and
   # none at all from a frame sandboxed without `allow-downloads`)
   it "names a blob: link's download as any other's, and refuses a sandboxed frame's" do

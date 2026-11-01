@@ -1,14 +1,14 @@
 // A response a navigation saves rather than renders, and the name it is saved under: one whose `Content-Disposition`
-// is `attachment` or names a file (RFC 6266 §4.2 — any explicit filename makes it a download, as Chrome has it), saved
-// under that filename (§4.3), else the one a `<a download>` suggests, else the last segment of its URL's path. The host
-// fetches it and writes the file.
+// type is `attachment` — or one unknown, which RFC 6266 §4.2 has handled as `attachment` — saved under its filename
+// (§4.3), else the one a `<a download>` suggests, else the last segment of its URL's path. The host fetches it and
+// writes the file.
 
-// Whether a response whose `Content-Disposition` is `cd` downloads: its type `attachment`, or a `filename` parameter.
+// Whether a response whose `Content-Disposition` is `cd` downloads: its disposition type neither `inline` nor none (a
+// header that begins with a parameter has none) — a filename alone no reason: Chrome 156 and Firefox 159 render an
+// `inline; filename=x.txt` and a `filename=y.txt` one and download a `foo; filename=z.txt` one (measured 2026-11-01).
 pub(crate) fn is_download(cd: &[u8]) -> bool {
-    cd.split(|&b| b == b';').any(|part| {
-        let part = part.trim_ascii_start().to_ascii_lowercase();
-        part.starts_with(b"attachment") || part.strip_prefix(b"filename").is_some_and(|rest| rest.trim_ascii_start().starts_with(b"="))
-    })
+    let kind = cd.split(|&b| b == b';').next().unwrap_or_default().trim_ascii();
+    !kind.is_empty() && !kind.eq_ignore_ascii_case(b"inline") && !kind.contains(&b'=')
 }
 
 // The parameters of a `Content-Disposition` (after its type), by name lowercased — the first of each — a quoted-string's
@@ -167,8 +167,9 @@ mod tests {
     fn a_disposition_downloads_as_an_attachment_or_with_a_filename() {
         assert!(is_download(b"attachment"));
         assert!(is_download(b"Attachment; filename=a.txt"));
-        assert!(is_download(b"inline; filename=\"a.txt\""));
-        assert!(is_download(b"inline; FILENAME = a.txt"));
+        assert!(!is_download(b"inline; filename=\"a.txt\""));
+        assert!(!is_download(b"filename=a.txt"));
+        assert!(is_download(b"foo; filename=a.txt"));
         assert!(!is_download(b"inline"));
         assert!(!is_download(b"inline; name=a"));
     }
