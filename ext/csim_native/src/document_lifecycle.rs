@@ -17,7 +17,7 @@ pub(crate) struct Lifecycle {
     pub(crate) ready: u32,
     // The number of the document loaded into the Document object — one is used again: a reload in place, the initial
     // about:blank's Window a navigation to a document of its origin keeps, a `document.open()` — what "the end"'s tasks
-    // name the document they are for by, a later one's none of theirs.
+    // name the document they are for by, a later one's none of theirs (`DocumentStates::next_generation`).
     generation: u32,
     // Its DOMContentLoaded fired (HTML "the end" step 6, a task), its load fired at its window (step 9, a task once nothing
     // delays it), its page showing (step 9: true as `pageshow` fires, false as "unload a document" fires `pagehide`),
@@ -59,10 +59,14 @@ impl Lifecycle {
         self.generation
     }
     // A document begins to load into the Document object (HTML "create and initialize a Document object", the parse
-    // that follows): loading, the next of its documents, nothing of "the end" done for it.
-    fn begin(&mut self) -> u32 {
-        *self = Lifecycle { ready: READY_LOADING, generation: self.generation.wrapping_add(1), ..Lifecycle::default() };
-        self.generation
+    // that follows), numbered `generation`: loading, nothing of "the end" done for it.
+    fn begin(&mut self, generation: u32) {
+        *self = Lifecycle { ready: READY_LOADING, generation, ..Lifecycle::default() };
+    }
+    // HTML "update the current document readiness" to `ready`: whether that changed it — what fires `readystatechange`,
+    // the bindings' to fire.
+    fn update_readiness(&mut self, ready: u32) -> bool {
+        std::mem::replace(&mut self.ready, ready) != ready
     }
     // HTML "abort a parser", where its parser is active: whether it was.
     pub(crate) fn abort_parser(&mut self) -> bool {
@@ -72,24 +76,26 @@ impl Lifecycle {
         self.aborted = true;
         true
     }
-    // HTML document open steps: a document of its own written into it from here, loading again — "the end" of its parse
-    // owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) — its
-    // container's load muted where it was being fired as it was opened. (Its readiness is the opener's to update, which
-    // fires `readystatechange`.)
-    fn open(&mut self, muted: bool) {
-        self.generation = self.generation.wrapping_add(1);
+    // HTML document open steps: a document of its own written into it from here, numbered `generation` — "the end" of its
+    // parse owed nothing of what the last one had (a task of that one's still queued, for its number, fires nothing) —
+    // its container's load muted where it was being fired as it was opened, and loading again: whether that changed its
+    // readiness.
+    fn open(&mut self, generation: u32, muted: bool) -> bool {
+        self.generation = generation;
         self.content_loaded = false;
         self.load_fired = false;
         self.completely_loaded = false;
         self.aborted = false;
         self.opened = true;
         self.mute_iframe_load |= muted;
+        self.update_readiness(READY_LOADING)
     }
 }
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     crate::dom::register(scope, ns, "docLoadBegin", load_begin, context_id);
     crate::dom::register(scope, ns, "docOpen", open, context_id);
+    crate::dom::register(scope, ns, "docTheEnd", the_end, context_id);
     crate::dom::register(scope, ns, "docContentLoadedDue", content_loaded_due, context_id);
     crate::dom::register(scope, ns, "docLoadDue", load_due, context_id);
     crate::dom::register(scope, ns, "docLoadSteps", load_steps, context_id);
@@ -113,15 +119,27 @@ fn load_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     if let Some(state) = arena.realm_state_mut(cid) {
         state.load_delay = 0;
     }
-    rv.set_uint32(arena.document_states.lifecycle_mut(doc).begin());
+    let generation = arena.document_states.next_generation();
+    arena.document_states.lifecycle_mut(doc).begin(generation);
+    rv.set_uint32(generation);
 }
 
-// __dom.docOpen(docNid, muted) — the document opened (`Lifecycle::open`), `muted` where its container's load is being
-// fired now.
-fn open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(doc) = nid_arg(scope, &args, 0) else { return };
+// __dom.docOpen(docNid, muted) -> whether the document's readiness changed as it is opened (`Lifecycle::open`), `muted`
+// where its container's load is being fired now.
+fn open(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
     let muted = args.get(1).is_true();
-    lifecycle_of(scope, doc).open(muted);
+    let states = &mut crate::dom::dom(scope).arena.document_states;
+    let generation = states.next_generation();
+    rv.set_bool(states.lifecycle_mut(doc).open(generation, muted));
+}
+
+// __dom.docTheEnd(docNid) -> whether HTML "the end" step 3 changed the document's readiness: `interactive` from
+// `loading` (none of a document past that already).
+fn the_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(doc) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let lc = lifecycle_of(scope, doc);
+    rv.set_bool(lc.ready == READY_LOADING && lc.update_readiness(READY_INTERACTIVE));
 }
 
 // __dom.docContentLoadedDue(docNid, generation) -> whether "the end"'s DOMContentLoaded task for document `generation`
@@ -156,17 +174,19 @@ fn load_due(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     });
 }
 
-// What the load steps of a document come to (`docLoadSteps`).
+// What the load steps of a document come to (`docLoadSteps`) — `LOAD_FIRE` with `READY_CHANGED` where its readiness
+// changed to complete.
 const LOAD_NONE: u32 = 0;
 const LOAD_ABORTED: u32 = 1;
 const LOAD_DELAYED_NOW: u32 = 2;
 const LOAD_FIRE: u32 = 3;
+const READY_CHANGED: u32 = 4;
 
 // __dom.docLoadSteps(runGate) -> what HTML "the end" steps 8-9 come to for the calling realm's document as its load task
 // runs: nothing where its load fired already; `LOAD_ABORTED` where a navigation aborted it as it parsed — its load
 // delays its parent's no more; else its load gates run (`runGate(id)` each: load_gates.rs `flush`), then
 // `LOAD_DELAYED_NOW` where something delays its load still (its images, its frames: `load_delayed_here`) — fired once
-// nothing does — or `LOAD_FIRE`: its load fired from here, nothing delaying it.
+// nothing does — or `LOAD_FIRE`: its load fired from here, nothing delaying it, its readiness `complete` (step 9.1).
 fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     rv.set_uint32(LOAD_NONE);
     let cid = realm_id(scope, &args);
@@ -197,8 +217,10 @@ fn load_steps(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         return rv.set_uint32(LOAD_DELAYED_NOW);
     }
     set_load_delay(scope, cid, 0);
-    lifecycle_of(scope, doc).load_fired = true;
-    rv.set_uint32(LOAD_FIRE);
+    let lc = lifecycle_of(scope, doc);
+    lc.load_fired = true;
+    let changed = lc.update_readiness(READY_COMPLETE);
+    rv.set_uint32(LOAD_FIRE | if changed { READY_CHANGED } else { 0 });
 }
 fn set_load_delay(scope: &mut v8::PinScope<'_, '_>, cid: i32, delay: u8) {
     if let Some(state) = crate::dom::realm(scope, cid).realm_state_mut(cid) {
@@ -258,40 +280,47 @@ mod tests {
     fn a_document_loaded_again_owes_the_end_anew() {
         let mut lc = Lifecycle::default();
         assert_eq!(lc.ready, READY_COMPLETE);
-        let first = lc.begin();
-        lc.ready = READY_INTERACTIVE;
+        lc.begin(1);
+        assert!(lc.update_readiness(READY_INTERACTIVE));
         lc.content_loaded = true;
         lc.load_fired = true;
         lc.page_showing = true;
-        let second = lc.begin();
-        assert_ne!(first, second);
-        assert_eq!(lc.ready, READY_LOADING);
+        lc.begin(2);
+        assert_eq!((lc.generation, lc.ready), (2, READY_LOADING));
         assert!(!lc.content_loaded && !lc.load_fired && !lc.page_showing && !lc.aborted);
+    }
+
+    #[test]
+    fn a_readiness_update_says_whether_it_changed_it() {
+        let mut lc = Lifecycle::default();
+        assert!(!lc.update_readiness(READY_COMPLETE));
+        assert!(lc.update_readiness(READY_LOADING));
     }
 
     #[test]
     fn only_an_active_parser_is_aborted() {
         let mut lc = Lifecycle::default();
         assert!(!lc.abort_parser());
-        lc.begin();
+        lc.begin(1);
         assert!(lc.abort_parser());
         assert!(lc.aborted);
-        lc.begin();
+        lc.begin(2);
         assert!(!lc.aborted);
     }
 
     #[test]
     fn an_open_document_owes_its_written_content_the_end() {
         let mut lc = Lifecycle::default();
-        let parsed = lc.begin();
+        lc.begin(1);
+        lc.update_readiness(READY_COMPLETE);
         lc.content_loaded = true;
         lc.load_fired = true;
-        lc.open(true);
-        assert_ne!(lc.generation, parsed);
+        assert!(lc.open(2, true));
+        assert_eq!((lc.generation, lc.ready), (2, READY_LOADING));
         assert!(!lc.content_loaded && !lc.load_fired && lc.opened && lc.mute_iframe_load);
-        lc.open(false);
+        assert!(!lc.open(3, false));
         assert!(lc.mute_iframe_load);
-        lc.begin();
+        lc.begin(4);
         assert!(!lc.opened && !lc.mute_iframe_load);
     }
 }

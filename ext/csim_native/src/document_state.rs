@@ -77,8 +77,9 @@ const TEXT_ENCODING: usize = 1;
 const TEXT_DOMAIN: usize = 3;
 const TEXT_ABOUT_BASE: usize = 4;
 
+// (…and the number the last document a Document object began to hold was given: `next_generation`)
 #[derive(Default)]
-pub(crate) struct DocumentStates(HashMap<NodeId, DocumentState>, HashMap<NodeId, DocumentTexts>);
+pub(crate) struct DocumentStates(HashMap<NodeId, DocumentState>, HashMap<NodeId, DocumentTexts>, u32);
 
 impl DocumentStates {
     pub(crate) fn is_empty(&self) -> bool {
@@ -111,6 +112,12 @@ impl DocumentStates {
     }
     pub(crate) fn lifecycle_mut(&mut self, doc: NodeId) -> &mut Lifecycle {
         &mut self.0.entry(doc).or_default().lifecycle
+    }
+    // The number of the next document a Document object begins to hold — one count across the arena, so a (document,
+    // number) pair names one document only, whatever Document object a freed one's id is reused for.
+    pub(crate) fn next_generation(&mut self) -> u32 {
+        self.2 = self.2.wrapping_add(1);
+        self.2
     }
     // Whether `doc` will declaratively refresh, and that it will.
     pub(crate) fn will_refresh(&self, doc: NodeId) -> bool {
