@@ -122,14 +122,18 @@ RSpec.describe 'CSS animation and transition events' do
   # …and ONE per frame, not one per boundary: a frame that spans several iterations owes a single
   # event, naming the iteration it landed on (Chrome-measured — 19 boundaries over four frames fire
   # four events). Here 40ms iterations against the driver's 100ms step cross two or three at a time.
+  # The update that starts the animation commits its start time and sends nothing; the next one, a
+  # step later, finds it gone from idle to active — css-animations-2 §4.2's table owes `animationstart`
+  # alone for that change, whatever boundaries it crossed meanwhile (at a browser's 16ms frame it
+  # crosses none) — so the first `animationiteration` is the step after that's.
   it 'fires one animationiteration per frame, not per boundary' do
     s = page('<div id="a"></div>')
     watch(s)
     s.execute_script("document.getElementById('a').style.animation = 'grow 40ms linear 8'")
-    iterations = drain(s, 6).grep(/animationiteration/)
-    expect(iterations).to eq(['animationiteration:grow:0.08:a:true',
-                              'animationiteration:grow:0.2:a:true',
-                              'animationiteration:grow:0.28:a:true'])
+    log = drain(s, 6)
+    expect(log.first).to eq('animationstart:grow:0:a:true')
+    expect(log.grep(/animationiteration/)).to eq(['animationiteration:grow:0.2:a:true',
+                                                  'animationiteration:grow:0.28:a:true'])
   end
 
   # Replacing a running animation by another at the same position: the replaced one's cancel and the new one's start are

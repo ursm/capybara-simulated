@@ -3079,6 +3079,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleRestyled", style_restyled, context_id);
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
+    register(scope, ns, "styleCommitPending", style_commit_pending, context_id);
     register(scope, ns, "styleTakeAnimationEvents", style_take_animation_events, context_id);
     crate::animation_ops::install(scope, ns, context_id);
     crate::walk_ops::install(scope, ns, context_id);
@@ -5706,6 +5707,30 @@ fn style_tick_unguarded(
     }
     arena.mark_retargeted(&retargeted);
     threw_verify_failures(scope, failures);
+}
+
+// __dom.styleCommitPending(): the animations made since the rendering update moved the timeline started at its time
+// (`Animations::commit_pending`), and the style flushed with them — the events they owe left to the next update's.
+fn style_commit_pending(
+    scope: &mut v8::PinScope<'_, '_>,
+    args: v8::FunctionCallbackArguments<'_>,
+    _rv: v8::ReturnValue<'_, v8::Value>,
+) {
+    let cid = realm_id(scope, &args);
+    style_op(scope, cid, |scope| {
+        let now = realm_clock(scope, &args);
+        let d = dom(scope);
+        let (Some(engine), Some(arena)) = (d.styles.get_mut(&cid), d.arena.enter_known(cid)) else { return };
+        engine.web_animations_op(|animations| animations.commit_pending(now));
+        engine.flush(arena, now);
+        let failures = engine.take_verify_failures();
+        let retargeted = engine.web_animations.take_retargeted();
+        if engine.reconcile_animated(arena, &retargeted) {
+            arena.generations.bump(GEN_CASCADE);
+        }
+        arena.mark_retargeted(&retargeted);
+        threw_verify_failures(scope, failures);
+    });
 }
 
 // __dom.styleTakeAnimationEvents() -> [type, target, pseudo, name, time, animation, timelineTime, …]: the document's

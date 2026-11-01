@@ -1247,6 +1247,25 @@ impl Animations {
         self.retire_completed_transitions(&ids);
     }
 
+    // …and the pending tasks alone run at `now`, the timeline's time — what a rendering update commits as it renders the
+    // frame the animations were made in (WPT web-animations start-time-compat: an animation started in an animation frame
+    // callback, or by the style that update made, starts at its timeline time): no events owed by it, which the next
+    // update's "update animations and send events" generates and sorts (`tick`).
+    pub(crate) fn commit_pending(&mut self, now: f64) {
+        self.set_timeline_time(now);
+        let mut ids: Vec<(u64, AnimationId)> = self.animations.iter().filter(|(_, a)| a.pending.is_some()).map(|(&id, a)| (a.sequence, id)).collect();
+        ids.sort_unstable();
+        for (_, id) in ids {
+            let a = &self.animations[&id];
+            match (a.pending, self.timeline_time_of(a)) {
+                (Some(PendingTask::Play), Some(ready)) => self.run_pending_play(id, ready),
+                (Some(PendingTask::Pause), Some(ready)) => self.run_pending_pause(id, ready),
+                _ => continue,
+            }
+            self.touch(id);
+        }
+    }
+
     // The document timeline's time becomes `now` — the page's clock, read whenever an animation is asked about or
     // composed (a frame of this engine's clock is a tenth of a second, where a browser's is a sixtieth: between two,
     // a page reading an animation reads the clock). What runs moves with it.
