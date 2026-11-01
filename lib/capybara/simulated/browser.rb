@@ -7864,12 +7864,10 @@ module Capybara
 
       # Queue a storage event for THIS window's documents. `source_realm_id` is the changing realm
       # within this isolate (skipped at delivery); nil (a cross-window fan-out) matches no realm, so
-      # it reaches every one.
-      # (…its targets the documents there are NOW, the source's skipped: a frame made after the change fires none for it —
-      # HTML "broadcast": each Document whose storage area is the changed one, as the change is made)
+      # it reaches every one. (…the documents there are as it is made, the inbox stamps it with: storage_areas.rs
+      # `StorageEventInbox`)
       def enqueue_storage_event(kind, key, old, new, url, area, source_realm_id = nil)
-        targets = [0, *@runtime.frame_realm_ids].reject {|id| id == source_realm_id }
-        @storage_inbox.push(kind.to_s, key, old, new, url.to_s, area.to_s, targets)
+        @storage_inbox.push(kind.to_s, key, old, new, url.to_s, area.to_s, source_realm_id)
       end
 
       # What was asked of the session's other windows, which no step of their own takes while this one is the active
@@ -7909,11 +7907,11 @@ module Capybara
         end
         events = @storage_inbox.take
         unless events.empty?
-          # The `storage` event fires at every document of the area's EXCEPT the one that changed it: the realms there
-          # were as the change was made (`targets`), the source's skipped, those still alive.
-          events.each do |kind, key, old, new, url, area, targets|
+          # The `storage` event fires at every document of the area's EXCEPT the one that changed it: those there were
+          # as the change was made and are still, the source's skipped (storage_areas.rs `storage_event_targets`).
+          events.each do |kind, key, old, new, url, area, source, made|
             event = {'kind' => kind, 'key' => key, 'old' => old, 'new' => new, 'url' => url, 'area' => area}
-            targets.each do |target_id|
+            @runtime.call('__csimStorageEventTargets', source || -1, made).each do |target_id|
               next unless target_id.zero? || @runtime.frame_realm_alive?(target_id)
               @runtime.realm_call(target_id, '__csim_deliverStorageEvents', event)
             end

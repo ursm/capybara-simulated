@@ -19,6 +19,9 @@ pub(crate) struct Lifecycle {
     // about:blank's Window a navigation to a document of its origin keeps, a `document.open()` — what "the end"'s tasks
     // name the document they are for by, a later one's none of theirs (`DocumentStates::next_generation`).
     generation: u32,
+    // …and the number it was given as it began to load, which a `document.open()` leaves: what tells whether the
+    // document was there as something was done (storage_areas.rs `storage_event_targets`).
+    began: u32,
     // Its DOMContentLoaded fired (HTML "the end" step 6, a task), its load fired at its window (step 9, a task once nothing
     // delays it), its page showing (step 9: true as `pageshow` fires, false as "unload a document" fires `pagehide`),
     // and its being completely loaded (HTML "completely finish loading": after `pageshow`).
@@ -43,6 +46,7 @@ impl Default for Lifecycle {
         Lifecycle {
             ready: READY_COMPLETE,
             generation: 0,
+            began: 0,
             content_loaded: false,
             load_fired: false,
             page_showing: false,
@@ -58,10 +62,13 @@ impl Lifecycle {
     pub(crate) fn generation(self) -> u32 {
         self.generation
     }
+    pub(crate) fn began(self) -> u32 {
+        self.began
+    }
     // A document begins to load into the Document object (HTML "create and initialize a Document object", the parse
     // that follows), numbered `generation`: loading, nothing of "the end" done for it.
-    fn begin(&mut self, generation: u32) {
-        *self = Lifecycle { ready: READY_LOADING, generation, ..Lifecycle::default() };
+    pub(crate) fn begin(&mut self, generation: u32) {
+        *self = Lifecycle { ready: READY_LOADING, generation, began: generation, ..Lifecycle::default() };
     }
     // HTML "update the current document readiness" to `ready`: whether that changed it — what fires `readystatechange`,
     // the bindings' to fire.
@@ -316,7 +323,7 @@ mod tests {
         lc.content_loaded = true;
         lc.load_fired = true;
         assert!(lc.open(2, true));
-        assert_eq!((lc.generation, lc.ready), (2, READY_LOADING));
+        assert_eq!((lc.generation, lc.began, lc.ready), (2, 1, READY_LOADING));
         assert!(!lc.content_loaded && !lc.load_fired && lc.opened && lc.mute_iframe_load);
         assert!(!lc.open(3, false));
         assert!(lc.mute_iframe_load);

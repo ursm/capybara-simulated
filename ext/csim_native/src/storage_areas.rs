@@ -82,6 +82,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "storageKey", key_op, context_id);
     register(scope, ns, "storageLength", length_op, context_id);
     register(scope, ns, "storageAreaKey", area_key_op, context_id);
+    register(scope, ns, "storageEventTargets", event_targets_op, context_id);
 }
 
 // The storage key of realm `realm`'s document (realm_location.rs `storage_key`), the realm whose global's area it is,
@@ -213,16 +214,18 @@ mod copy_tests {
 // The changes to an area its documents share made by another document — of another window (localStorage spans the
 // session), or of this one's isolate — each to fire as a `storage` event at the documents of that area there were as it
 // was made, the one that made it excepted (HTML "broadcast"), as this window's event loop next runs
-// (browser.rb `deliver_window_messages`). Written from whichever window changed it, the host's; read with no lock where
-// nothing waits (`pending?`).
+// (browser.rb `deliver_window_messages`, `storage_event_targets`). Written from whichever window changed it, the host's;
+// read with no lock where nothing waits (`pending?`).
 #[magnus::wrap(class = "Capybara::Simulated::Native::StorageEventInbox", free_immediately)]
 pub(crate) struct StorageEventInbox {
     events: Mutex<Vec<StorageEvent>>,
     count: std::sync::atomic::AtomicUsize,
 }
 // …one: its area's kind ('local', 'session'), the key changed (none for a `clear()`), its old and new values, the URL of
-// the document that changed it, its area's storage key (storage_areas.rs `storageAreaKey`), and the realms to fire at.
-type StorageEvent = (String, Option<String>, Option<String>, Option<String>, String, String, Vec<i32>);
+// the document that changed it, its area's storage key (storage_areas.rs `storageAreaKey`), the realm of the document
+// that made it (none for another window's), and the number of the last document begun as it was made
+// (document_state.rs `last_generation`): those of the window's documents that are no later are the ones there were.
+type StorageEvent = (String, Option<String>, Option<String>, Option<String>, String, String, Option<i32>, u32);
 impl StorageEventInbox {
     fn new() -> Self {
         StorageEventInbox { events: Default::default(), count: Default::default() }
@@ -230,14 +233,15 @@ impl StorageEventInbox {
     fn lock(&self) -> MutexGuard<'_, Vec<StorageEvent>> {
         self.events.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
-    // #push(kind, key, old, new, url, area, targets)
+    // #push(kind, key, old, new, url, area, source)
     #[allow(clippy::too_many_arguments)]
-    fn push(&self, kind: String, key: Option<String>, old: Option<String>, new: Option<String>, url: String, area: String, targets: Vec<i32>) {
+    fn push(&self, kind: String, key: Option<String>, old: Option<String>, new: Option<String>, url: String, area: String, source: Option<i32>) {
+        let made = crate::document_state::last_generation();
         let mut events = self.lock();
-        events.push((kind, key, old, new, url, area, targets));
+        events.push((kind, key, old, new, url, area, source, made));
         self.count.store(events.len(), std::sync::atomic::Ordering::Release);
     }
-    // #take -> every event, `[kind, key, old, new, url, area, targets]` each, in the order the changes were made.
+    // #take -> every event, `[kind, key, old, new, url, area, source, made]` each, in the order the changes were made.
     fn take(&self) -> Vec<StorageEvent> {
         if self.count.load(std::sync::atomic::Ordering::Acquire) == 0 {
             return Vec::new();
@@ -249,6 +253,38 @@ impl StorageEventInbox {
     fn is_pending(&self) -> bool {
         self.count.load(std::sync::atomic::Ordering::Acquire) > 0
     }
+}
+
+impl crate::dom::RealmArena {
+    // The realms of the documents a `storage` event of a change made as document number `made` was the last begun goes
+    // to (HTML "broadcast": each Document whose Storage of the area is not the one changed): the documents of the
+    // isolate's trees — the page's, and those of the windows `window.open` made in it — that were there then, a document
+    // begun since (a navigation's, the realm reused or not) none of them, but `source`'s, the one that made it. Which of
+    // them have the area is theirs to tell (storage.js `__csim_deliverStorageEvents`).
+    pub(crate) fn storage_event_targets(&self, source: Option<i32>, made: u32) -> Vec<i32> {
+        let mut realms: Vec<i32> = std::iter::once(0).chain(self.stepped_windows()).collect();
+        let tops = realms.clone();
+        for top in tops {
+            realms.extend(self.descendant_realms(top));
+        }
+        realms.sort_unstable();
+        realms.dedup();
+        realms.retain(|&r| {
+            Some(r) != source && self.realm_document(r).is_none_or(|doc| self.document_states.lifecycle(doc).began() <= made)
+        });
+        realms
+    }
+}
+
+// __dom.storageEventTargets(source, made) -> the realms a `storage` event goes to (`storage_event_targets`), `source`
+// -1 for another window's change.
+fn event_targets_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let source = args.get(0).int32_value(scope).filter(|&s| s >= 0);
+    let made = args.get(1).uint32_value(scope).unwrap_or(0);
+    let cid = realm_id(scope, &args);
+    let targets = crate::dom::realm(scope, cid).storage_event_targets(source, made);
+    let items: Vec<v8::Local<'_, v8::Value>> = targets.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
+    rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
 
 pub(crate) fn define(native: magnus::RModule, ruby: &magnus::Ruby) -> Result<(), magnus::Error> {
@@ -269,9 +305,40 @@ mod inbox_tests {
     fn an_inbox_hands_its_events_over_once() {
         let inbox = StorageEventInbox::new();
         assert!(!inbox.is_pending());
-        inbox.push("local".into(), Some("k".into()), None, Some("v".into()), "http://a.test/".into(), "a".into(), vec![0, 3]);
+        inbox.push("local".into(), Some("k".into()), None, Some("v".into()), "http://a.test/".into(), "a".into(), Some(3));
         assert!(inbox.is_pending());
         assert_eq!(inbox.take().len(), 1);
         assert!(!inbox.is_pending() && inbox.take().is_empty());
+    }
+
+    #[test]
+    fn an_event_goes_to_the_documents_there_were_as_the_change_was_made_but_its_own() {
+        use crate::dom::{NodeData, NodeKind, RealmArena};
+        let mut arena = RealmArena::default();
+        // (…the page's document (realm 0) with a frame (realm 1), and a window `window.open` made (realm 2))
+        let document = |arena: &mut RealmArena, realm: i32| {
+            arena.enter(realm);
+            let doc = arena.create(NodeData::of_kind(NodeKind::Document, Vec::new()), None);
+            arena.set_realm_document(realm, doc);
+            let generation = arena.document_states.next_generation();
+            arena.document_states.lifecycle_mut(doc).begin(generation);
+            doc
+        };
+        let page = document(&mut arena, 0);
+        let mut frame = NodeData::of_kind(NodeKind::Element, Vec::new());
+        frame.local_name = "iframe".into();
+        frame.ns = web_atoms::ns!(html);
+        let container = arena.create(frame, Some(page));
+        document(&mut arena, 1);
+        document(&mut arena, 2);
+        arena.enter(0);
+        arena.set_frame_realm(container, Some(1));
+        arena.set_stepped_window(2, true, Some(0), 2);
+        let made = crate::document_state::last_generation();
+        assert_eq!(arena.storage_event_targets(Some(1), made), vec![0, 2]);
+        assert_eq!(arena.storage_event_targets(None, made), vec![0, 1, 2]);
+        // (…the page navigated since, its realm reused: its next document was not there)
+        document(&mut arena, 0);
+        assert_eq!(arena.storage_event_targets(None, made), vec![1, 2]);
     }
 }
