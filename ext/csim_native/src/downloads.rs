@@ -113,11 +113,12 @@ fn plain_name(name: &str) -> Option<String> {
 }
 
 // The name a download of `url` is saved under: its `Content-Disposition`'s (`cd`, none for none), else the one its
-// `<a download>` suggests (`hint`), else the last segment of the URL's path — 'download' where none gives one.
+// `<a download>` suggests (`hint`), else the last segment of the URL's path — 'download' where none gives one (a URL of
+// an opaque path, a `data:` one's, has no segments: Chrome names its download `download` too).
 pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str) -> String {
     cd.and_then(disposition_filename)
         .or_else(|| plain_name(hint))
-        .or_else(|| ada_url::Url::parse(url, None).ok().and_then(|u| plain_name(u.pathname())))
+        .or_else(|| ada_url::Url::parse(url, None).ok().filter(|u| u.pathname().starts_with('/')).and_then(|u| plain_name(u.pathname())))
         .unwrap_or_else(|| "download".to_owned())
 }
 
@@ -163,5 +164,6 @@ mod tests {
         assert_eq!(filename(None, "http://a.test/r/report.csv", "mine.csv"), "mine.csv");
         assert_eq!(filename(Some(b"attachment; filename=d.txt"), "http://a.test/x", "mine.csv"), "d.txt");
         assert_eq!(filename(Some(b"attachment"), "http://a.test/", ""), "download");
+        assert_eq!(filename(None, "data:application/octet-stream,a/b", ""), "download");
     }
 }

@@ -652,7 +652,9 @@ module Capybara
         # `scheme://` test below would treat them as relative paths and prepend
         # the host root. `navigate` handles `about:blank` specially — pass it
         # through untouched (open_new_window opens an about:blank tab).
-        return s if s.match?(/\Aabout:/i)
+        # A `data:` URL the same: its own document, which the address bar navigates to (navigation_fetch.rs
+        # `data_navigation`).
+        return s if s.match?(/\A(?:about|data):/i)
         unless s =~ %r{\A[a-z]+://}i
           # Strip path/query/fragment off the current URL to get the origin
           # root. An opaque or host-less current URL (e.g. `about:blank` in a
@@ -950,13 +952,10 @@ module Capybara
         resolve_against_current(url, use_base: true)
       end
 
-      # Whether a document's navigation of a top-level browsing context to `url` is refused — one to a `data:` URL, whose
-      # document would run with no origin of its own: Chrome and Firefox refuse a link's, a form's, `location`'s, a
-      # refresh's, `open(url, '_self')`'s, and leave a new window one opens at about:blank (measured 2026-10-30, for an
-      # HTML, plain-text or SVG one; a browser intervention, no HTML rule). The driver's own `visit` is the user's, which
-      # none refuses.
-      def top_level_data_refused?(url) = DATA_URL.match?(url.to_s)
-      DATA_URL = /\Adata:/i
+      # Whether a document's navigation of a top-level browsing context to `url` is refused — one to a `data:` URL whose
+      # document it would render, not download (navigation_fetch.rs `data_navigation`, a browser intervention, no HTML
+      # rule). The driver's own `visit` is the user's, which none refuses.
+      def top_level_data_refused?(url) = Native.top_level_data_refused(url.to_s)
 
       def find_css(css, context_handle = nil)
         s = css.to_s
@@ -6752,6 +6751,13 @@ module Capybara
         # waited for already: `navigate_window_realm`) waits what it can (`await_sw_activation`).
         # (…the top-level site of the environment it navigates: the URL's own for a window's document, the frame's
         # container's top-level traversable's for a frame's)
+        # (…a `data:` URL's response its own, here only one that makes no document — frame_response.rs: saved as a download
+        # is below, no request made of it)
+        if url.to_s.match?(/\Adata:/i)
+          mime, bytes = Native.data_url(url.to_s)
+          from_document(download_realm.to_i) { save_downloaded_response(url, {'content-type' => mime}, [bytes], sandbox: sandbox) } if mime && download_realm
+          return {'no_document' => true}
+        end
         navigation_site = dest == 'document' ? ->(target) { Native.site(target).to_s } : ->(_) { blob_partition_site(container_realm.to_i) }
         if defer_ok && sw_registered? && sw_activating_controller_for(url, navigation_site.(url))
           Native.sw_defer_navigation(@sw_partition)
@@ -10291,8 +10297,6 @@ module Capybara
           # this a hash assignment reloaded the page, discarding all JS state.
           if pure_fragment_navigation?(url)
             update_current_hash(url)
-          elsif top_level_data_refused?(url)
-            nil
           elsif initiator
             realm, referrer = initiator
             navigate_top_from(realm, referrer, url, replace: replace, blob: blob, user_activated: activated, ongoing: ongoing&.to_i)
@@ -10423,11 +10427,26 @@ module Capybara
         # resolved as it began, a POST to no HTTP(S) URL — an error document, as the page's and a frame's are:
         # navigation_fetch.rs `start`)
         start  = Native.navigation_start(url.to_s, post ? 'POST' : 'GET')
+        # (…a `data:` URL's its own response: one that makes no document saved, the window left at the one it is at; one the
+        # user navigates to (`visit`) its document — and a reload or a traversal of the one that made — of a new opaque
+        # origin; a document's navigation to one refused, as a top-level browsing context refuses one — a malformed one an
+        # error document: navigation_fetch.rs `data_navigation`)
+        if start == 'data'
+          verdict, mime, bytes = Native.data_navigation(url.to_s, by_user || kind != 'location')
+          return if verdict == 'refused'
+          if verdict == 'download'
+            from_document(initiator) { save_downloaded_response(url, {'content-type' => mime}, [bytes]) }
+            return
+          end
+
+          body, ctype = document_payload(bytes), mime if verdict == 'document'
+          made[:doc_origin] = 'null'
+          start = 'fail' if verdict == 'fail'
+        end
         failed = body.nil? && %w[fail blob].include?(start)
-        # (…of a scheme it loads no document of here, none: one of a blob: URL's resolved as it began, above; one to a
-        # `data:` URL refused, as a top-level browsing context refuses a document's navigation to one)
+        # (…of a scheme it loads no document of here, none: one of a blob: URL's resolved as it began, above)
         unless body || failed || http_url?(url) || start == 'about_blank'
-          log_console('warn', "window-realm navigation to #{url} not modeled; ignoring") unless top_level_data_refused?(url)
+          log_console('warn', "window-realm navigation to #{url} not modeled; ignoring")
           return
         end
         # (…its navigation begun, its window's ongoing one: session_history.rs `begin_navigation` — or, its location's, the
@@ -11965,6 +11984,20 @@ module Capybara
 
             commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
             return boot_blob_document(url, blob[:bytes], blob[:type], flushed: true)
+          # A `data:` URL's response its own (Fetch "scheme fetch"): a download where it makes no document; else, the user's
+          # navigation (no initiator: the address bar, a traversal or a reload of an entry it made), its document of a new
+          # opaque origin; a document's refused before it got here (`top_level_data_refused?`) — and a malformed one a
+          # network error (navigation_fetch.rs `data_navigation`).
+          when 'data'
+            verdict, mime, bytes = Native.data_navigation(url.to_s, initiator.nil?)
+            return error_document.(url) if verdict == 'fail'
+            return download_in_place(url, {'content-type' => mime}, [bytes]) if verdict == 'download'
+            return navigation_made_no_document(url) if verdict == 'refused'
+
+            commits.(nil)
+            @current_url = url.to_s
+            record_response(200, {'content-type' => mime})
+            return boot_response_into_ctx(bytes, opaque_origin: true)
           # (…a POST to any URL but an HTTP(S) one a network error, its error document at the URL: Fetch "scheme fetch" —
           # a `blob:` URL's fetched by a GET alone)
           when 'fail'

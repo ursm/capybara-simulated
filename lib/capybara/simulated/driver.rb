@@ -802,7 +802,7 @@ module Capybara
       # blob URL entry as it is parsed: one the source revokes after still loads; none, a revoked one's, is a network error.
       # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
       private def navigate_window(browser, url, source:, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, blob: nil)
-        return if url.nil? || url.to_s.empty? || Browser::DATA_URL.match?(url.to_s)
+        return if url.nil? || url.to_s.empty? || source.top_level_data_refused?(url)
 
         blob ||= blob_bytes_for(url, source) if url.to_s.start_with?('blob:')
         initiator = source.navigation_initiator(initiator_realm.to_i)

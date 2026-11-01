@@ -162,8 +162,8 @@ pub(crate) fn is_json(essence: &str) -> bool {
 
 // What document a navigation response of the MIME type `essence` loads as (HTML "loading a document"): an XML one for an
 // XML MIME type; a text one — the text in a `<pre>`, "convert to a preformatted document" — for `text/css`, `text/plain`,
-// `text/vtt`, a JavaScript or a JSON MIME type; an HTML one for any other. (OPEN: a media document for an image, video or
-// audio type and a download for a type no document is made of are not modelled; such a response is HTML-parsed.)
+// `text/vtt`, a JavaScript or a JSON MIME type; an HTML one for any other a document is made of (`makes_document`).
+// (OPEN: a media document for an image, video or audio type is not modelled; such a response is HTML-parsed.)
 pub(crate) const DOCUMENT_HTML: u32 = 0;
 pub(crate) const DOCUMENT_XML: u32 = 1;
 pub(crate) const DOCUMENT_TEXT: u32 = 2;
@@ -175,6 +175,22 @@ pub(crate) fn document_kind(essence: &str) -> u32 {
     } else {
         DOCUMENT_HTML
     }
+}
+// Whether a navigation response whose `Content-Type` is `content_type` (None: it has none) makes a document — else it is
+// handed off as a download (HTML "loading a document": "otherwise", no document type this user agent supports, no PDF
+// viewer among them) — an HTML, XML, JavaScript or JSON MIME type, `text/css`, `text/plain`, `text/vtt`,
+// `multipart/x-mixed-replace`, an image, audio or video type (a media document); and one of no MIME type at all, which
+// the sniffing HTML's steps begin with makes HTML of. Chrome and Firefox download `application/octet-stream` and
+// `application/zip` alike (measured 2026-11-01); Chrome also downloads `text/csv`, an unknown `image/x-foo` and
+// `application/atom+xml`, and renders an unknown `text/*` and a PDF — departures of its own, the XML one from HTML's
+// explicit rule.
+pub(crate) fn makes_document(content_type: Option<&str>) -> bool {
+    let Some(essence) = content_type.and_then(extract).map(|m| m.essence) else { return true };
+    let (kind, _) = essence.split_once('/').unwrap_or_default();
+    essence == "text/html"
+        || document_kind(&essence) != DOCUMENT_HTML
+        || essence == "multipart/x-mixed-replace"
+        || matches!(kind, "image" | "audio" | "video")
 }
 // __dom.documentKind(essence) -> `document_kind`.
 fn document_kind_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -253,6 +269,18 @@ mod tests {
         }
         assert_eq!(document_kind("application/jsonx"), DOCUMENT_HTML);
         assert_eq!(document_kind(""), DOCUMENT_HTML);
+    }
+
+    #[test]
+    fn a_navigation_response_of_no_document_type_downloads() {
+        for t in ["text/html; charset=utf-8", "text/plain", "application/xhtml+xml", "image/png", "video/mp4", "application/json"] {
+            assert!(makes_document(Some(t)), "{t}");
+        }
+        assert!(makes_document(None));
+        assert!(makes_document(Some("garbage")));
+        for t in ["application/octet-stream", "application/zip", "text/csv", "application/pdf"] {
+            assert!(!makes_document(Some(t)), "{t}");
+        }
     }
 
     fn round_trip(input: &str) -> Option<String> {

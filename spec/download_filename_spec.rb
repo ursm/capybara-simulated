@@ -102,4 +102,22 @@ RSpec.describe 'a download' do
     s.click_link 'other'
     expect(Dir.children(@dir).sort).to eq(%w[report-a.csv report-b.csv])
   end
+
+  # (…a navigation's response of a MIME type no document is made of a download with no Content-Disposition too, the page
+  # staying at its document: HTML "loading a document" — Chrome and Firefox save `application/octet-stream` and
+  # `application/zip`; mime.rs `makes_document`)
+  it 'is a response of a type that makes no document' do
+    s = simulated_session(lambda {|env|
+      case env['PATH_INFO']
+      when '/bin/blob.bin' then [200, {'content-type' => 'application/octet-stream'}, ['bytes']]
+      when '/text.txt' then [200, {'content-type' => 'text/plain'}, ['text']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><title>page</title><a href="/bin/blob.bin">b</a><a href="/text.txt">t</a>']]
+      end
+    })
+    s.visit '/'
+    s.click_link 'b'
+    expect([s.title, Dir.children(@dir), File.read(File.join(@dir, 'blob.bin'))]).to eq(['page', ['blob.bin'], 'bytes'])
+    s.click_link 't'
+    expect(s).to have_text('text')
+  end
 end

@@ -188,9 +188,10 @@ impl ResponseFields {
         }
     }
 
-    // Whether the response downloads (downloads.rs `is_download`: its Content-Disposition).
+    // Whether the response downloads: its Content-Disposition says so (downloads.rs `is_download`), or its Content-Type is
+    // of no document (mime.rs `makes_document`).
     pub(crate) fn downloads(&self) -> bool {
-        self.content_disposition.as_deref().is_some_and(crate::downloads::is_download)
+        self.content_disposition.as_deref().is_some_and(crate::downloads::is_download) || !crate::mime::makes_document(self.content_type.as_deref())
     }
 
     // The document's opener policy (coop.rs `obtain`).

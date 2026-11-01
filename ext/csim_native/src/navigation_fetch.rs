@@ -187,6 +187,8 @@ pub(crate) fn start(url: &str, method: &str) -> &'static str {
         "about_blank"
     } else if method == "GET" && protocol == "blob:" {
         "blob"
+    } else if protocol == "data:" {
+        "data"
     } else if protocol == "about:" || (method != "GET" && !matches!(protocol, "http:" | "https:")) {
         "fail"
     } else {
@@ -195,6 +197,35 @@ pub(crate) fn start(url: &str, method: &str) -> &'static str {
 }
 pub(crate) fn start_for_ruby(url: String, method: String) -> &'static str {
     start(&url, &method.to_ascii_uppercase())
+}
+
+// What a navigation of a top-level traversable to the `data:` URL `url` comes to, Fetch's scheme fetch its response:
+// `fail` where it is no data: URL's (a network error); `download` where its MIME type makes no document
+// (mime.rs `makes_document`) — handed off, whoever navigates; else `document` where the user navigates it (`by_user`:
+// the address bar, the driver's `visit`), whose document is of a new opaque origin — and `refused` where a document
+// does. HTML has no such rule; Chrome and Firefox refuse a document's navigation of a top-level browsing context to a
+// `data:` URL it would render — a link's, a form's, `location`'s, a refresh's, `open(url, '_self')`'s; a new window it
+// opens left at about:blank — and let the user's and a download through (measured 2026-10-30 and 2026-11-01).
+pub(crate) fn data_navigation(url: &str, by_user: bool) -> (&'static str, Option<(String, Vec<u8>)>) {
+    let is_data = url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:"));
+    match is_data.then(|| crate::data_url::process(url)).flatten() {
+        None => ("fail", None),
+        Some(r) if !crate::mime::makes_document(Some(&r.0)) => ("download", Some(r)),
+        Some(r) if by_user => ("document", Some(r)),
+        Some(_) => ("refused", None),
+    }
+}
+// Native.data_navigation(url, by_user) -> [verdict, MIME type, body] (`data_navigation`; nil each but the verdict for one
+// of no response).
+pub(crate) fn data_navigation_for_ruby(ruby: &Ruby, url: String, by_user: bool) -> (&'static str, Option<String>, Option<magnus::RString>) {
+    let (verdict, response) = data_navigation(&url, by_user);
+    let (mime, body) = response.map_or((None, None), |(m, b)| (Some(m), Some(ruby.str_from_slice(&b))));
+    (verdict, mime, body)
+}
+// Native.top_level_data_refused(url) -> whether a document's navigation of a top-level traversable to `url` is refused —
+// one to a `data:` URL that is no download (`data_navigation`; a malformed one too).
+pub(crate) fn top_level_data_refused(url: String) -> bool {
+    url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) && data_navigation(&url, false).0 != "download"
 }
 
 // The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
@@ -489,6 +520,21 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_top_level_data_navigation_is_the_users_or_a_download() {
+        assert_eq!(start("data:,x", "GET"), "data");
+        assert_eq!(start("DATA:,x", "POST"), "data");
+        assert_eq!(data_navigation("data:text/html,<p>x", true).0, "document");
+        assert_eq!(data_navigation("data:text/html,<p>x", false).0, "refused");
+        let (verdict, response) = data_navigation("data:application/octet-stream;base64,YWJj", false);
+        assert_eq!((verdict, response), ("download", Some(("application/octet-stream".to_owned(), b"abc".to_vec()))));
+        assert_eq!(data_navigation("data:text/plain;base64,%", true).0, "fail");
+        assert!(top_level_data_refused("Data:,x".to_owned()));
+        assert!(top_level_data_refused("data:text/plain;base64,%".to_owned()));
+        assert!(!top_level_data_refused("data:application/zip,x".to_owned()));
+        assert!(!top_level_data_refused("http://a.test/".to_owned()));
+    }
 
     fn nav(method: &str, url: &str, initiator: &str) -> Nav {
         Nav {

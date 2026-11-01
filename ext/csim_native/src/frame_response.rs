@@ -103,15 +103,26 @@ fn frame_response<'s>(scope: &mut v8::PinScope<'s, '_>, host: v8::Local<'_, v8::
             r.url = url;
         }
         // (…a data: URL its own response, its MIME type `text/plain;charset=US-ASCII` where it names none — a malformed
-        // one a network error, the empty document — and a blob: URL the blob's bytes, kept as the document loaded last,
-        // which a reload of it revoked by then loads again: HTML keeps the blob alive for the document)
-        FrameSource::Data(url) => {
-            if let Some((mime, bytes)) = crate::data_url::process(&url) {
-                r.body = crate::dom::u8_array(scope, bytes);
-                r.content_type = mime;
+        // one a network error, the empty document; one of a type that makes no document (mime.rs `makes_document`) a
+        // download, which the host saves as it does a fetched one's, the frame left at the one it is at — and a blob: URL
+        // the blob's bytes, kept as the document loaded last, which a reload of it revoked by then loads again: HTML keeps
+        // the blob alive for the document)
+        FrameSource::Data(url) => match crate::data_url::process(&url) {
+            Some((mime, _)) if !crate::mime::makes_document(Some(&mime)) => {
+                r.url = url;
+                match navigate(scope, host, cid, container, reload, &mut r)? {
+                    FRAME_BUILD => {}
+                    kept_or_deferred => return Ok(code(scope, kept_or_deferred)),
+                }
             }
-            r.url = url;
-        }
+            parsed => {
+                if let Some((mime, bytes)) = parsed {
+                    r.body = crate::dom::u8_array(scope, bytes);
+                    r.content_type = mime;
+                }
+                r.url = url;
+            }
+        },
         FrameSource::Blob(url) => {
             let response = crate::subresource_obtain::scheme_response(scope, host, &url)?;
             r.error = response.is_none();
