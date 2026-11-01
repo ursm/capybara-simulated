@@ -234,6 +234,8 @@ module Capybara
           File.open("#{cache_path}.lock", File::CREAT | File::RDWR) do |lock|
             lock.flock(File::LOCK_EX)
             if (bytes = read_verified_snapshot(cache_path))
+              # (…in use: its mtime what the pruning of another key's measures it by)
+              File.utime(nil, nil, cache_path)
               return RustyRacer::Snapshot.load(bytes)
             end
             snap  = build_snapshot_uncached
@@ -291,15 +293,27 @@ module Capybara
       end
 
       # A multi-MB blob per bridge edit / V8 upgrade accrues forever
-      # otherwise; only the current key is ever loadable again, so drop
-      # the rest.
+      # otherwise. The directory is shared by every tree on the machine — a
+      # worktree with another bridge loads its own key concurrently — so only a
+      # STALE entry goes (unused for `SNAPSHOT_STALE_S`: a load touches it), and
+      # only under its lock, taken without waiting: one another process holds is
+      # one being built or loaded, and deleting the lock file under it would let
+      # a third build that key unserialized (different bytes, its ScriptCache
+      # entries rejected).
+      SNAPSHOT_STALE_S = 7 * 24 * 3600
       def self.prune_snapshot_cache(current)
         keep = File.basename(current)
         Dir.glob(File.join(File.dirname(current), '*.bin')).each do |f|
-          next if File.basename(f) == keep
-          FileUtils.rm_f([f, "#{f}.sha256", "#{f}.lock"])
+          next if File.basename(f) == keep || Time.now - File.mtime(f) < SNAPSHOT_STALE_S
+
+          File.open("#{f}.lock", File::CREAT | File::RDWR) do |lock|
+            next unless lock.flock(File::LOCK_EX | File::LOCK_NB)
+
+            FileUtils.rm_f([f, "#{f}.sha256", "#{f}.lock"])
+          end
+        rescue StandardError
+          next
         end
-      rescue StandardError
       end
 
       def initialize(browser)
