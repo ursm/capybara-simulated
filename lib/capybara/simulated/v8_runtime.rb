@@ -466,18 +466,29 @@ module Capybara
       # the step) is the authoritative find-cache-invalidation signal, since a
       # render-phase rAF / microtask-delivered MutationObserver can mutate the DOM
       # without firing a timer (fired == 0).
-      # (…a service worker's timer due within it the step stops at, and the worker runs it before the window goes on:
-      # Browser#worker_due_within, #run_workers_due — one virtual time for the two event loops, the window's)
+      # (…a worker's timer due within it a step of its own stopping at, the worker then running what is due before the
+      # window goes on: Browser#worker_due_within, #run_workers_due — one virtual time for the two event loops, the
+      # window's — `max_ms` reached all the same, its iteration budget shared, and the steps' answers folded: what fired,
+      # in all, whether any dirtied, the last's frame and settle gen; one that `yield_on_gen` ended on a change the last)
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
-        cut = @browser.worker_due_within(max_ms.to_i)
-        # `__runLoopStep` steps child iframe realms itself (timers.js
-        # `drainChildRealms`), folding their fired/dirtied into the result.
-        r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', (cut || max_ms).to_i, max_iter.to_i, !!yield_on_gen) } }
-        return { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
+        left = max_ms.to_i
+        out  = nil
+        loop do
+          cut = @browser.worker_due_within(left)
+          # `__runLoopStep` steps child iframe realms itself (timers.js
+          # `drainChildRealms`), folding their fired/dirtied into the result.
+          r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } }
+          r = { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
+          @clock = r['now'].to_f if r['now']
+          out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
+          break unless cut
 
-        @clock = r['now'].to_f
-        @browser.run_workers_due if cut
-        r
+          @browser.run_workers_due
+          left     -= cut
+          max_iter -= r['fired'].to_i
+          break if left <= 0 || max_iter <= 0 || (yield_on_gen && r['dirtied'])
+        end
+        out
       end
 
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from

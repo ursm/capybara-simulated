@@ -7164,11 +7164,3 @@ xhr/send-authentication-cors-setrequestheader-no-cred.htm:
 xhr/send-conditional-cors.htm:
 - 304 with appropriate CORS header
 - 304 without appropriate CORS header
-xhr/xmlhttprequest-timeout-worker-aborted.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-xhr/xmlhttprequest-timeout-worker-overridesexpires.html:
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
-- "[harness] TIMEOUT"
