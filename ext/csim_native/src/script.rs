@@ -497,6 +497,21 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "scriptFlags", script_flags_op, context_id);
     crate::dom::register(scope, ns, "setScriptFlags", set_script_flags_op, context_id);
     crate::dom::register(scope, ns, "prepareScript", prepare_script_op, context_id);
+    crate::dom::register(scope, ns, "runClassicScript", run_classic_script_op, context_id);
+}
+
+// __dom.runClassicScript(label, source) — HTML "run a classic script": `source` compiled as a Script of the calling realm,
+// named `label` (its URL, an inline one's `inline://…`: what its errors' stacks and its `import()`s' referrer name), and
+// run — ECMA-262 ScriptEvaluation, so its top-level declarations are the realm's global ones, a `let` / `const` /
+// `class` in the global lexical environment every later script shares, a redeclaration of one a SyntaxError
+// GlobalDeclarationInstantiation throws before any of it runs. What it throws — its SyntaxError, its own throw — is
+// left pending, thrown at the caller as the op returns.
+fn run_classic_script_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(source) = v8::Local::<v8::String>::try_from(args.get(1)) else { return };
+    let origin = v8::ScriptOrigin::new(scope, args.get(0), 0, 0, false, -1, None, false, false, false, None);
+    if let Some(script) = v8::Script::compile(scope, source, Some(&origin)) {
+        script.run(scope);
+    }
 }
 // Capybara::Simulated::Native.javascript_content(content_type) -> whether a response's `Content-Type` (Fetch "extract a
 // MIME type") is a JavaScript MIME type, for the host's worker and service worker scripts.

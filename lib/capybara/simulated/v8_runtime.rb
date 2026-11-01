@@ -1101,7 +1101,7 @@ module Capybara
       # eval it on a bare no-snapshot dev ctx where the realm boots empty. The
       # replayed `__csim_runScriptCached` / `__csim_evalEsmEntry` close over the MAIN
       # ctx they were first attached to, so a realm script routing through them
-      # (leading-lexical, ≥64KB, or `type=module`) would run against the main
+      # (≥64KB, or `type=module`) would run against the main
       # document — rebind realm-executing variants on top, then reseed per-realm JS.
       def seed_realm_bridge(realm, group = nil)
         has_bridge = realm.eval("typeof __csimLoadDocument === 'function'")
@@ -1913,8 +1913,8 @@ module Capybara
       # intentionally skips this attach.
       # V8's bytecode cache only pays off above a body-size threshold
       # — the rendezvous round-trip + Ruby-side SHA256 + compile +
-      # dispose runs ~150–300 µs, while `(0, eval)(body)` at V8
-      # globalThis for a tiny script is sub-microsecond. Above the
+      # dispose runs ~150–300 µs, while compiling a tiny script in the
+      # realm (`runClassicScript`) is a few µs. Above the
       # threshold, V8 parse + JIT cold-path is multiple ms — worth
       # the cache. Redmine's jQuery + Stimulus inline scripts
       # (median ~400 B) dominated the regression: pre-threshold,
@@ -1929,7 +1929,7 @@ module Capybara
       #
       # 64 KB keeps Discourse's main Ember chunk (140 KB+) on the
       # cache path while Stimulus / Trix / etc. shorts stay on the
-      # JS-only fast path. `CSIM_SCRIPT_CACHE_MIN_BYTES=0` forces
+      # in-engine path. `CSIM_SCRIPT_CACHE_MIN_BYTES=0` forces
       # the cache for everything (debug / cross-process bench).
       SCRIPT_CACHE_MIN_BYTES = (ENV['CSIM_SCRIPT_CACHE_MIN_BYTES'] || '65536').to_i
 
@@ -1937,8 +1937,8 @@ module Capybara
         version_tag = self.class.cached_data_version_tag
         debug = ENV['CSIM_SCRIPT_CACHE_DEBUG']
         # Big bodies → Ruby-side bytecode cache. The dispatcher below
-        # routes small bodies to a JS-only `(0, eval)` so they don't
-        # pay the rendezvous round-trip.
+        # runs small bodies in the engine (`runClassicScript`) so they
+        # don't pay the rendezvous round-trip.
         c.attach('__csim_runScriptCached', ->(label, body) {
           src = body.to_s
           # No-cd warm path, mirroring `native_module_for`: once this
@@ -1949,7 +1949,7 @@ module Capybara
           # The key is a heuristic, but a false positive only costs a
           # plain recompile of the true source — never wrong code.
           #
-          # No `safe_call`, as `__csim_runScriptEval` has none: a compile or
+          # No `safe_call`: a compile or
           # run error raises RustyRacer::ParseError / RuntimeError, which rusty
           # throws on at the call site as the value the script threw (its
           # SyntaxError, its Error, its `42`), so bridge.entry.js's
@@ -1986,59 +1986,6 @@ module Capybara
           end
           nil
         })
-        # Small bodies normally run JS-side via `(0, eval)(body)` — fast,
-        # no Ruby↔V8 boundary. But `(0, eval)` block-scopes a script's
-        # top-level `const`/`let`/`class` to the eval, so they vanish
-        # instead of landing in the realm's *shared* global lexical
-        # environment where a later `<script>` would see them. Real
-        # browsers (and our big-body `compile().run` path above) keep
-        # them. The shape that needs this is a leading lexical
-        # declaration: `<script>const CFG=…</script><script>…use CFG…` and
-        # every WPT helper pulled in via `// META: script=` that starts
-        # `const TABLE = […]` (sab.js's `createBuffer`, encodings.js's
-        # `encodings_table`, …). So route ONLY scripts whose first real
-        # statement is a top-level `const`/`let`/`class` through `ctx.eval`
-        # (a top-level V8 script → shared lexical env); everything else
-        # (IIFEs, `var`/`function` — which already leak to globalThis
-        # under `(0, eval)` — and plain calls) stays on the fast path. A
-        # later `(0, eval)` script can READ those bindings from the global
-        # lexical environment fine; only DEFINING them needed the
-        # real-script path. No bytecode cache here — the SHA + compile +
-        # dispose is the part that regressed tiny-script-heavy suites
-        # (Redmine 56→224 s); plain `ctx.eval` is rendezvous-cheap, and
-        # the leading-lexical gate keeps the boundary off the hot path for
-        # the ~95% of inline scripts that don't lead with a declaration.
-        # Limitation: a top-level `const` that is NOT the first statement
-        # (after other top-level code) won't be shared — rare, and the
-        # WPT helper corpus + the `<script>const CFG…` pattern both lead
-        # with the declaration.
-        # NOTE: do NOT wrap in `safe_call`. A JS throw from `c.eval`
-        # raises RustyRacer::RuntimeError, which rusty throws on at the call
-        # site as the value thrown — so bridge.entry.js's
-        # `try { __csim_runScript(…) } catch (e)` sees it and runs its
-        # normal path (console diagnostic, `_ok=false`, fire the script
-        # `error` event), exactly as the JS-side `(0, eval)` does.
-        # Swallowing here would turn a
-        # throwing leading-`const` inline script into a silent `load`.
-        c.attach('__csim_runScriptEval', ->(label, body) {
-          # A `<script>`'s completion value is nobody's answer, and reading it is
-          # not free: a leading-lexical inline script ending in a jQuery-ish
-          # expression (`const cfg=…; $(…)`) evaluates to a `ce.fn.init`
-          # (array-like, non-cloneable) that drags through the deep-copy filter,
-          # and a hostile getter in there would raise an error this call has no
-          # business raising. `eval_void` says so outright, replacing the trailing
-          # `;undefined` this used to append. Lexical declarations persist as a
-          # side effect of eval, independent of the completion value.
-          # (…named its label, as a module's referrer: an `import()` in it resolves against its script's base URL)
-          c.eval_void("#{body}\n//# sourceURL=#{label.to_s.tr("\n", ' ')}", filename: label.to_s)
-        })
-        # A script's text compiled and never run, named its label: the SyntaxError
-        # it throws where it does not compile carries where in that text it
-        # stopped, as the eval path's cannot (the dispatcher below).
-        c.attach('__csim_compileScript', ->(label, body) {
-          c.compile(body.to_s, filename: label.to_s).dispose
-          nil
-        })
         # A javascript: URL's source (url-parse.js `runJavascriptURL`), run as a top-level Script, as HTML runs it — its
         # declarations the global's wherever they sit — its completion value handed back only where it is a primitive:
         # a string replaces the document, and an object it ends with (`javascript:window.open(…)`'s Window) is never
@@ -2047,64 +1994,22 @@ module Capybara
         install_run_script_dispatcher(c)
       end
 
-      # The JS-side `__csim_runScript` dispatcher routes each inline-script body
-      # to the bytecode-cache path, the shared-lexical `ctx.eval` path, or the
-      # JS-only `(0, eval)` fast path. It snapshots the CURRENT
-      # `__csim_runScriptCached` / `__csim_runScriptEval` host fns, so it must
-      # run after the attaches it captures (`attach_run_script_with_cache`
-      # installs it last for exactly that reason).
+      # The JS-side `__csim_runScript` dispatcher: a body past the bytecode-cache threshold to the cache path above, any
+      # other run as a classic Script of the realm in the engine (script.rs `runClassicScript`: HTML "run a classic
+      # script" — its top-level declarations the global ones, its `let` / `const` / `class` in the global lexical
+      # environment the realm's scripts share, a redeclaration a SyntaxError before any of it runs; named its label, which
+      # its errors' stacks and its `import()`s' referrer report). It snapshots the CURRENT `__csim_runScriptCached` host fn
+      # and the realm's engine op, so it must run after the attach it captures (`attach_run_script_with_cache` installs it
+      # last for exactly that reason).
       def install_run_script_dispatcher(c)
         c.eval_void(<<~JS)
           (function () {
-            const cached    = globalThis.__csim_runScriptCached;
-            const runEval   = globalThis.__csim_runScriptEval;
-            const compile   = globalThis.__csim_compileScript;
-            const threshold = #{SCRIPT_CACHE_MIN_BYTES};
-            // (…the realm's own eval, taken as the realm is built: a page that replaced `window.eval` stops none of
-            // its later scripts, as Chrome compiles them without calling it)
-            const indirectEval = eval;
-            // Leading top-level lexical declaration, after optional BOM /
-            // whitespace / line+block comments / a "use strict" prologue.
-            const LEADS_LEXICAL = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*(?:["']use strict["'];?\\s*)?(?:export\\s+)?(?:const|let|class)[\\s{\\[]/;
-            // A top-level lexical declaration can also sit MID-file (WPT's
-            // cookie-helper.sub.js opens with an IIFE and declares `const
-            // wait_for_message` at line 129) — under `(0, eval)` it block-scopes
-            // and later <script>s see a ReferenceError. Detect it by a
-            // declaration at COLUMN 0 of any line: real top-level declarations
-            // in unminified files start unindented, function-body ones are
-            // indented. Residual known gap: a one-line `stmt; const CFG = …`
-            // (declaration mid-LINE) still takes the fast path and loses the
-            // binding — no observed page does this. A false positive (a template
-            // literal's line starting with `const `) merely routes through the
-            // always-correct ctx.eval path.
-            const MID_LEXICAL = /^(?:const|let|class)[\\s{\\[]/m;
-            // A "use strict" directive prologue. A classic <script> evaluates as a
-            // top-level Script, where top-level `var` / `function` declarations
-            // bind on the global object even in strict mode — but the JS-only
-            // `(0, eval)(body)` fast path runs them as an INDIRECT eval, and a
-            // strict indirect eval gets its OWN variable environment, so those
-            // declarations never reach globalThis (a later <script> can't see
-            // them). Route strict-prologue scripts through the real top-level
-            // `ctx.eval` path too, same as leading lexical declarations.
-            const LEADS_USE_STRICT = /^[\\s\\uFEFF]*(?:(?:\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/)\\s*)*["']use strict["']/;
-            // A dynamic `import(…)`, a comment or whitespace before its parenthesis (`import ('x')`, `import /*c*/ (`) as
-            // the language allows: the bridge's `MAY_IMPORT` too.
-            const MAY_IMPORT = /\\bimport\\s*[(/]/;
+            const cached     = globalThis.__csim_runScriptCached;
+            const runClassic = globalThis.__dom.runClassicScript;
+            const threshold  = #{SCRIPT_CACHE_MIN_BYTES};
             globalThis.__csim_runScript = function (label, body) {
               if (body.length >= threshold) return cached(label, body);
-              // (…and one that may `import()`: run as a script named its label, the referrer its import resolves through —
-              // the `(0, eval)` path's is the anonymous `<eval>` of every one of them)
-              if (LEADS_LEXICAL.test(body) || LEADS_USE_STRICT.test(body) || MID_LEXICAL.test(body) || MAY_IMPORT.test(body)) return runEval(label || 'csim-eval', body);
-              try {
-                indirectEval(body + '\\n//# sourceURL=' + (label || 'csim-eval'));
-              } catch (e) {
-                // (…its text that did not compile reported where it stopped (Chrome): the eval's SyntaxError names no
-                // script, as V8 never reached the `sourceURL` after it — compiled again on this, the error path alone,
-                // which throws the one that does; what the script threw as it ran compiles, and is rethrown untouched.
-                // Nothing of `e` is asked: an `instanceof` would run the page's `SyntaxError` or a thrown proxy's trap)
-                compile(label || 'csim-eval', body);
-                throw e;
-              }
+              runClassic(label || 'csim-eval', body);
             };
           })();
         JS
@@ -2196,12 +2101,6 @@ module Capybara
         # pending XHRs the moment the worker's queue empties. The settle
         # loop already polls `worker_pending?` for worker thread activity.
         c.attach('__setTimersActive', ->(_flag) { nil })
-        # `importScripts` runs a classic script at the worker's TOP-LEVEL script scope,
-        # so its top-level `const`/`let`/`class` (dispatcher.js's `const send`/`receive`)
-        # join the realm's shared global lexical environment where later code sees them.
-        # `(0, eval)` would block-scope them to the eval and they'd vanish. `c.eval` is
-        # the top-level-script path (same as the worker's own body eval).
-        c.attach('__csim_workerImportEval', ->(src) { c.eval_void(src.to_s) })
         # The worker's scope, of its KIND — 'dedicated', 'shared' or 'service' — and name (worker-globals.js).
         # (…cross-origin isolated as the context that made it is — a service worker by no document's headers: not)
         c.call('__csim_installWorkerScope', kind, name.to_s, isolated)

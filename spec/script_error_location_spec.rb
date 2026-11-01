@@ -55,7 +55,7 @@ RSpec.describe 'script error locations' do
     expect(big).to eq(['http://www.example.com/js/big.js', 3, 'Error', true])
     # (…a parse error at the place in its text that did not compile: the engine's message, not a stack frame)
     expect(syntax[0, 3]).to eq(['http://www.example.com/js/big-syntax.js', 3, 'SyntaxError'])
-    # …and one that opens with a lexical declaration, which runs by the realm's top-level eval
+    # …and one that opens with a lexical declaration, run as every small script is: a classic Script of the realm
     expect(lexical).to eq(['http://www.example.com/big', 10, 'TypeError', true])
   end
 
