@@ -6618,9 +6618,16 @@ module Capybara
       end
       # …and either way, every service worker of the session told: a `clients.get` of it each waits on settles
       # (workers.js `__csim_swClientSettled`) — to the client, or to none.
+      # (…and what was posted to it meanwhile delivered now, where it is a client — dropped with it where it was discarded)
       def sw_client_settled(id)
         @workers.each_value {|w| w[:inbox] << {kind: 'sw_client_settled', id: id.to_s} if w[:service] && w[:thread]&.alive? }
+        @reserved_client_messages&.delete(id.to_s)&.each {|e| sw_client_message_route(e) }
         nil
+      end
+      # A service worker's message to client `e[:client]`, to the realm the registry says it is — none for a gone one's.
+      private def sw_client_message_route(e)
+        browser, realm = (key = Native.sw_client_owner(@sw_partition, e[:client].to_s)) && sw_window_realm(key)
+        browser&.sw_client_message_told(realm, e[:data], e[:handle])
       end
 
       private def unregister_client(client_id)
@@ -6873,6 +6880,7 @@ module Capybara
           body:         body,
           content_type: content_type,
           dest:         dest,
+          frame_type:   dest == 'document' ? 'auxiliary' : 'nested',
           origin_url:   origin_url,
           is_reload:    is_reload,
           coop_realm:   coop_realm
@@ -6941,6 +6949,7 @@ module Capybara
         body:,
         content_type:,
         dest:,
+        frame_type:,
         origin_url:,
         is_reload: false,
         is_history: false,
@@ -6957,7 +6966,7 @@ module Capybara
           begun&.call(target)
           hop_body  = req_body.empty? ? nil : req_body
           rack_body = document = nil
-          Native.sw_reserve_client(@sw_partition, rid, worker_site, target, url_origin(target)) if worker_site
+          Native.sw_reserve_client(@sw_partition, rid, worker_site, target, url_origin(target), frame_type) if worker_site
           if worker_site &&
              (sw = sw_host.service_worker_navigation_fetch(
                target,
@@ -7521,9 +7530,14 @@ module Capybara
         # (matching a real browser — a message to a gone client is discarded, not misrouted to top).
         # (…an id naming nothing we know dropped: a real browser discards a message to a gone client, and delivering it
         # to a main realm would MISROUTE it)
+        # (…one to a reserved client — a navigation's, its document not committed, which a deadlocked worker's `get` resolved
+        # to early: workers.js `__csim_swBreakSelfWait` — held until it is a client: `sw_client_settled`)
         sw_msgs.each do |e|
-          browser, realm = (key = Native.sw_client_owner(@sw_partition, e[:client].to_s)) && sw_window_realm(key)
-          browser&.sw_client_message_told(realm, e[:data], e[:handle])
+          if Native.sw_client_reserved(@sw_partition, e[:client].to_s)
+            (@reserved_client_messages ||= Hash.new {|h, k| h[k] = [] })[e[:client].to_s] << e
+            next
+          end
+          sw_client_message_route(e)
         end
         # A controlled fetch's respondWith result → resolve the pending client fetch in the
         # realm that issued it (fetch ids are per-realm, so realm_id disambiguates collisions).
@@ -11326,6 +11340,7 @@ module Capybara
           body:         body,
           content_type: content_type,
           dest:         'iframe',
+          frame_type:   'nested',
           origin_url:   origin_url,
           is_reload:    is_reload,
           is_history:   is_history,
@@ -12044,6 +12059,7 @@ module Capybara
             body:         req_body,
             content_type: content_type,
             dest:         'document',
+            frame_type:   'top-level',
             origin_url:   origin || initiator,
             is_reload:    is_reload,
             is_history:   from_history && !is_reload,

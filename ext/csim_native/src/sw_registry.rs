@@ -443,13 +443,13 @@ pub(crate) fn note_client_for_ruby(
 }
 // A navigation's reserved client (Service Workers "Handle Fetch": the request's reserved client, an environment whose
 // execution ready flag is unset) noted as its request reaches a service worker: a record of its id, its URL, its
-// top-level site and its origin, not execution ready — controlled by none, using no registration — where it is none
+// top-level site, its origin and its navigable's frame type, not execution ready — controlled by none, using no registration — where it is none
 // already.
-pub(crate) fn reserve_client_for_ruby(partition: u64, id: String, site: String, url: String, origin: Option<String>) {
+pub(crate) fn reserve_client_for_ruby(partition: u64, id: String, site: String, url: String, origin: Option<String>, frame_type: String) {
     let mut reg = lock();
     let clients = &mut reg.partition(partition).clients;
     if clients.iter().all(|c| c.id != id) {
-        let (kind, frame_type) = ("window".to_owned(), String::new());
+        let kind = "window".to_owned();
         clients.push(Client { id, ready: false, owner: 0, site, url, kind, frame_type, origin, controller: None });
     }
 }
@@ -477,6 +477,10 @@ pub(crate) fn forget_client_for_ruby(partition: u64, id: String) -> bool {
     let before = p.clients.len();
     p.clients.retain(|c| c.id != id);
     p.clients.len() != before
+}
+// Whether `id` is a navigation's reserved client, not execution ready yet.
+pub(crate) fn client_reserved_for_ruby(partition: u64, id: String) -> bool {
+    lock().existing(partition).is_some_and(|p| p.clients.iter().any(|c| c.id == id && !c.ready))
 }
 // The realm the client `id` is, by its session number (`realm_key`), nil for none.
 pub(crate) fn client_owner_for_ruby(partition: u64, id: String) -> Option<i64> {
@@ -1557,7 +1561,7 @@ mod tests {
     fn a_reserved_client_is_no_client_until_its_document_reports_itself() {
         let p = partition_new_for_ruby();
         let origin = || Some("https://a.test".to_owned());
-        reserve_client_for_ruby(p, "r".into(), String::new(), "https://a.test/next".into(), origin());
+        reserve_client_for_ruby(p, "r".into(), String::new(), "https://a.test/next".into(), origin(), "top-level".into());
         // (…none of matchAll's, nor anything's to route to, but a record `get` waits on)
         assert!(clients_for_ruby(p).is_empty());
         assert_eq!(client_owner_for_ruby(p, "r".into()), None);
@@ -1568,7 +1572,7 @@ mod tests {
         assert_eq!(client_owner_for_ruby(p, "r".into()), Some(3));
         // (…a ready one is never discarded as a reserved one; an unused reservation is)
         assert!(!discard_reserved_client_for_ruby(p, "r".into()));
-        reserve_client_for_ruby(p, "s".into(), String::new(), "https://a.test/dl".into(), origin());
+        reserve_client_for_ruby(p, "s".into(), String::new(), "https://a.test/dl".into(), origin(), "top-level".into());
         assert!(discard_reserved_client_for_ruby(p, "s".into()));
         assert!(p_client(p, "s").is_none());
         clear_for_ruby(p);
