@@ -74,12 +74,40 @@ use crate::dom::{NodeId, NodeKind, RealmArena};
 
 
 // A realm's style lock: every block the engine parses — a sheet, a `style` attribute, a hint — is wrapped in it and
-// read under it, so there is ONE for the realm's life (the arena holds it), whatever becomes of the engine.
-pub(crate) struct StyleLock(pub(crate) SharedRwLock);
+// read under it, so there is ONE for the realm's life (the arena holds it), whatever becomes of the engine. The
+// user-agent sheets parsed under it go with it: ONE pair for every engine of the arena's documents, whose user-agent
+// cascade data stylo then builds once and shares (its `UA_CASCADE_DATA_CACHE` knows a sheet by its identity) — not a
+// parse and a build per frame's document.
+pub(crate) struct StyleLock(pub(crate) SharedRwLock, std::cell::OnceCell<UaSheets>);
+
+// …that pair: the user-agent sheet, and its quirks-mode half.
+#[derive(Clone)]
+struct UaSheets {
+    sheet: DocumentStyleSheet,
+    quirks: DocumentStyleSheet,
+}
 
 impl Default for StyleLock {
     fn default() -> Self {
-        StyleLock(SharedRwLock::new())
+        StyleLock(SharedRwLock::new(), std::cell::OnceCell::new())
+    }
+}
+
+impl StyleLock {
+    fn ua_sheets(&self) -> UaSheets {
+        self.1
+            .get_or_init(|| {
+                let parse = |css: &str| {
+                    let media = Arc::new(self.0.wrap(MediaList::empty()));
+                    let url = crate::cssom_decl::url_data("about:blank");
+                    let sheet = crate::sheets::parse_sheet(
+                        &self.0, css, url, Origin::UserAgent, media, AllowImportRules::No, None, QuirksMode::NoQuirks,
+                    );
+                    DocumentStyleSheet(Arc::new(sheet))
+                };
+                UaSheets { sheet: parse(UA_SHEET), quirks: parse(UA_QUIRKS_SHEET) }
+            })
+            .clone()
     }
 }
 
@@ -211,8 +239,10 @@ pub(crate) struct StyleEngine {
     has_relative: bool,
     // The arena's `state_epoch` when the element states were last compared.
     scanned_epoch: u64,
-    // The user-agent sheet's quirks-mode half, while the document is in quirks mode.
-    quirks_sheet: Option<DocumentStyleSheet>,
+    // The user-agent sheet's quirks-mode half (`StyleLock::ua_sheets`), and whether the stylist has it: while the
+    // document is in quirks mode.
+    quirks_sheet: DocumentStyleSheet,
+    quirks_sheet_in: bool,
     // Every presentational-hint block made, by its text: elements with equal hints share one block (the style-sharing
     // cache compares blocks by identity).
     hint_blocks: RefCell<std::collections::HashMap<HintKey, Arc<Locked<PropertyDeclarationBlock>>>>,
@@ -547,6 +577,7 @@ pub(crate) fn media_matches(engine: Option<&StyleEngine>, arena: &RealmArena, sc
 impl StyleEngine {
     fn new(arena: &RealmArena, quirks: QuirksMode, html_document: bool, screen: Screen, url: UrlExtraData) -> StyleEngine {
         enable_properties();
+        let ua = arena.style_lock.ua_sheets();
         let mut engine = StyleEngine {
             faces: arena.faces.clone(),
             lock: arena.style_lock.0.clone(),
@@ -568,7 +599,8 @@ impl StyleEngine {
             shadow_styles: Default::default(),
             has_relative: false,
             scanned_epoch: u64::MAX,
-            quirks_sheet: None,
+            quirks_sheet: ua.quirks,
+            quirks_sheet_in: false,
             hint_blocks: Default::default(),
             verify: std::env::var_os("CSIM_STYLE_VERIFY").is_some_and(|v| v != "0"),
             verify_failures: Vec::new(),
@@ -578,8 +610,7 @@ impl StyleEngine {
             web_animations: waapi::Animations::default(),
             animation_tasks: RefCell::new(Vec::new()),
         };
-        let ua = engine.parse_ua(UA_SHEET);
-        engine.stylist.append_stylesheet(ua, &engine.lock.read());
+        engine.stylist.append_stylesheet(ua.sheet, &engine.lock.read());
         engine.set_quirks(quirks);
         engine
     }
@@ -640,18 +671,17 @@ impl StyleEngine {
     // The user-agent sheet's quirks-mode half goes in or out with the mode.
     fn set_quirks(&mut self, quirks: QuirksMode) {
         self.stylist.set_quirks_mode(quirks);
-        let guard = self.lock.read();
-        match (quirks == QuirksMode::Quirks, self.quirks_sheet.take()) {
-            (true, Some(sheet)) => self.quirks_sheet = Some(sheet),
-            (true, None) => {
-                drop(guard);
-                let sheet = self.parse_ua(UA_QUIRKS_SHEET);
-                self.stylist.append_stylesheet(sheet.clone(), &self.lock.read());
-                self.quirks_sheet = Some(sheet);
-            }
-            (false, Some(sheet)) => self.stylist.remove_stylesheet(sheet, &guard),
-            (false, None) => {}
+        let on = quirks == QuirksMode::Quirks;
+        if on == self.quirks_sheet_in {
+            return;
         }
+        let guard = self.lock.read();
+        if on {
+            self.stylist.append_stylesheet(self.quirks_sheet.clone(), &guard);
+        } else {
+            self.stylist.remove_stylesheet(self.quirks_sheet.clone(), &guard);
+        }
+        self.quirks_sheet_in = on;
     }
 
     // The realm's nodes were freed for a new page: nothing the engine held of them means anything now.
@@ -666,15 +696,6 @@ impl StyleEngine {
         self.restyle_all = true;
         self.rules_changed = true;
         self.scanned_epoch = u64::MAX;
-    }
-
-    // A user-agent sheet: `css` at the document's URL.
-    fn parse_ua(&self, css: &str) -> DocumentStyleSheet {
-        let media = Arc::new(self.lock.wrap(MediaList::empty()));
-        let sheet = crate::sheets::parse_sheet(
-            &self.lock, css, self.url.clone(), Origin::UserAgent, media, AllowImportRules::No, None, self.quirks,
-        );
-        DocumentStyleSheet(Arc::new(sheet))
     }
 
     // The block of `hints` for the hint level, or None when none of them is a declaration of its property. Each is
