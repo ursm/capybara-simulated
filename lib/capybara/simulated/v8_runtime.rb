@@ -454,8 +454,9 @@ module Capybara
       # Where nested realm `realm_id` sits in the navigable tree as it was made, the engine's (navigables.rs
       # `realm_tree`): [the realm whose document its container was in — 0 the page's, or none: a window's — its depth,
       # the navigable it was the active document of (0 for none), whether its document was that navigable's first, the
-      # number of the top-level traversable whose session history its navigable's entries are in (0 for none)].
-      def frame_realm_tree(realm_id) = realm_direct_call(0, '__csimRealmTree', realm_id.to_i) || [0, 0, 0, false, 0]
+      # number of the top-level traversable whose session history its navigable's entries are in (0 for none), the realm
+      # of the top-level document it was made under — a window's `window.open` made in this isolate, or the page's, 0].
+      def frame_realm_tree(realm_id) = realm_direct_call(0, '__csimRealmTree', realm_id.to_i) || [0, 0, 0, false, 0, 0]
       # …the realm that OWNS its container, which a form/navigation that reaches a frame via `contentWindow` (so it never
       # entered `within_frame` and has no `@frame_stack` entry) rebuilds + rebinds it through.
       def frame_realm_parent(realm_id)
@@ -525,14 +526,14 @@ module Capybara
       # page's browsing context, whichever document it shows next (HTML).
       def window_realm_trees
         windows = window_realm_meta.keys.select {|id| frame_realms.key?(id) }
-        windows.flat_map {|id| [id, *realm_descendants(id)] }
+        windows.flat_map {|id| [id, *realms_made_under(id)] }
       end
-      # …and the page's own document's: its realm and its frames' (`realm_descendants` of 0) — what HTML "destroy a
+      # …and the page's own document's: its realm and its frames' (`realms_made_under` 0) — what HTML "destroy a
       # document" destroys of a closed window whose isolate hosts the windows it made (Browser#destroy_page).
-      def page_realm_tree = [0, *realm_descendants(0)]
-      private def realm_descendants(id)
-        Array(realm_direct_call(0, '__csimRealmsMadeIn', id.to_i)).flat_map {|child| [child, *realm_descendants(child)] }
-      end
+      def page_realm_tree = [0, *realms_made_under(0)]
+      # The realms made in realm `id`'s document's frames, and in theirs, … — each after those made in its own, the order
+      # they are disposed in (navigables.rs `realms_made_under`).
+      private def realms_made_under(id) = Array(realm_direct_call(0, '__csimRealmsMadeUnder', id.to_i))
       # The frame realms the page disposed (`dispose_frame_realm`), its page leave to drop.
       def discarded_realm_ids = (@discarded_realm_ids ||= [])
       # …and those of the page's frames its navigation disposed under kept windows: their arenas kept while any window
@@ -570,7 +571,7 @@ module Capybara
       # Dispose a frame realm and every descendant frame realm (transitively), deepest first so a
       # parent's child realms (the engine's) are consistent as each level is torn down.
       def dispose_frame_realm_tree(id, keep_proxies: false)
-        realm_direct_call(0, '__csimRealmsMadeIn', id.to_i)&.each {|child| dispose_frame_realm_tree(child) }
+        realms_made_under(id).each {|realm| dispose_frame_realm(realm) }
         dispose_frame_realm(id, keep_proxies: keep_proxies)
       end
 
@@ -1160,17 +1161,11 @@ module Capybara
         window_realm_meta.dig(top_level_realm(realm), :group) || page_group
       end
       # The realm of the top-level document realm `realm`'s is in: a window's `window.open` made in this isolate, or the
-      # page's, 0.
+      # page's, 0 (`frame_realm_tree`).
       def top_level_realm(realm)
-        realm = realm.to_i
-        return 0 if window_realm_meta.empty?
+        return 0 if realm.to_i.zero? || window_realm_meta.empty?
 
-        (MAX_FRAME_DEPTH + 2).times do
-          return realm if realm.zero? || window_realm_meta.key?(realm)
-
-          realm = frame_realm_parent(realm)
-        end
-        0
+        frame_realm_tree(realm)[5]
       end
 
       def create_frame_realm(

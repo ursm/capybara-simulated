@@ -6515,11 +6515,10 @@ module Capybara
         return sw_navigate_reply(handle, nav_id, '', '', 'mixed content is not allowed') if mixed_content_navigation?(from, url)
 
         # Identify the browsing CONTEXT before navigating — a frame navigation rebuilds its realm,
-        # so the realm id is not stable across it, but the iframe element that owns it is.
-        parent    = realm_id.zero? ? nil : @runtime.frame_realm_parent(realm_id)
-        container = realm_id.zero? ? nil : frame_container_handle(realm_id, parent)
+        # so the realm id is not stable across it, but its navigable is (navigables.rs).
+        nav = realm_id.zero? ? 0 : @runtime.frame_realm_navigable(realm_id)
         navigate_client_realm(realm_id, url)
-        landed_realm = realm_id.zero? ? 0 : (realm_for_container(parent, container) || realm_id)
+        landed_realm = realm_id.zero? ? 0 : ((navigable_realm(nav) unless nav.zero?) || realm_id)
         landed       = client_realm_url(landed_realm)
         # A cross-origin result is reported as "no client": the spec resolves navigate() with null
         # rather than handing back a client this worker has no business seeing.
@@ -6541,19 +6540,6 @@ module Capybara
         w = @workers[handle.to_i] or return nil
         w[:inbox] << {kind: 'client_navigate_result', nav_id: nav_id.to_i, url: url.to_s, client: client_id.to_s, error: error.to_s}
         nil
-      end
-
-      # The realm currently backing a browsing context, named by the iframe element that owns it.
-      # The element outlives every realm rebuild a navigation causes, so it — not the realm id —
-      # is what identifies the context across one.
-      private def realm_for_container(parent, container)
-        return nil if container.nil? || container.zero?
-
-        @runtime.frame_realm_ids.find do |rid|
-          @runtime.frame_realm_alive?(rid) && frame_container_handle(rid, parent) == container
-        rescue StandardError
-          false
-        end
       end
 
       private def client_realm_url(realm_id)

@@ -772,12 +772,32 @@ impl RealmArena {
         realms
     }
     // …and those made in realm `realm`'s document's containers (`parents`), whatever became of their containers since —
-    // none disposed already (`discarded`), which a frame's navigation away from it left.
-    pub(crate) fn realms_made_in(&self, realm: i32) -> Vec<i32> {
+    // none disposed already (`discarded`), which a frame's navigation away from it left — and in theirs, …: each after
+    // those made in its own, the order they are disposed in.
+    pub(crate) fn realms_made_under(&self, realm: i32) -> Vec<i32> {
         let nav = &self.navigables;
-        let mut realms: Vec<i32> = nav.parents.iter().filter(|&(r, &p)| p == realm && !nav.discarded.contains(r)).map(|(&r, _)| r).collect();
-        realms.sort_unstable();
-        realms
+        let mut made: HashMap<i32, Vec<i32>> = HashMap::new();
+        for (&r, &p) in &nav.parents {
+            if !nav.discarded.contains(&r) {
+                made.entry(p).or_default().push(r);
+            }
+        }
+        // (…each document's realms taken in the order they were made, their own before them: a walk that takes the
+        // last made first, reversed)
+        let mut found = Vec::new();
+        let mut stack = vec![(realm, 0)];
+        while let Some((at, depth)) = stack.pop() {
+            if at != realm {
+                found.push(at);
+            }
+            if depth < MAX_NESTING {
+                let mut children = made.remove(&at).unwrap_or_default();
+                children.sort_unstable();
+                stack.extend(children.into_iter().map(|r| (r, depth + 1)));
+            }
+        }
+        found.reverse();
+        found
     }
     // The focus moved into realm `realm`'s document — an element of it, or its viewport: each ancestor's focused area its
     // child navigable's container on the way (HTML "focusing steps"), and the top-level traversable its window is system
@@ -1306,7 +1326,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "focusChain", focus_chain, context_id);
     crate::dom::register(scope, ns, "hasFocus", has_focus, context_id);
     crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
-    crate::dom::register(scope, ns, "realmsMadeIn", realms_made_in, context_id);
+    crate::dom::register(scope, ns, "realmsMadeUnder", realms_made_under, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
@@ -1428,12 +1448,14 @@ fn realm_tree(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let arena = crate::dom::realm(scope, cid);
     let (parent, depth, navigable, first) = arena.realm_tree(realm);
     let traversable = crate::session_history::traversable_id_of(arena, realm);
+    let top = arena.top_level_realm(realm);
     let items = [
         v8::Integer::new(scope, parent).into(),
         v8::Integer::new_from_unsigned(scope, depth).into(),
         v8::Integer::new_from_unsigned(scope, navigable).into(),
         v8::Boolean::new(scope, first).into(),
         v8::Number::new(scope, traversable as f64).into(),
+        v8::Integer::new(scope, top).into(),
     ];
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -1452,17 +1474,17 @@ fn has_focus(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let doc = nid_arg(scope, &args, 0);
     rv.set_bool(doc.is_some_and(|doc| crate::dom::dom(scope).arena.has_focus(doc)));
 }
-// __dom.navigableRealms(id) / __dom.realmsMadeIn(realm) -> realm ids (`Navigables::navigable_realms` / `realms_made_in`).
+// __dom.navigableRealms(id) / __dom.realmsMadeUnder(realm) -> realm ids (`navigable_realms` / `realms_made_under`).
 fn navigable_realms(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let id = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
     let realms = crate::dom::realm(scope, cid).navigable_realms(id);
     rv.set(realm_array(scope, &realms));
 }
-fn realms_made_in(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+fn realms_made_under(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let realm = args.get(0).int32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let realms = crate::dom::realm(scope, cid).realms_made_in(realm);
+    let realms = crate::dom::realm(scope, cid).realms_made_under(realm);
     rv.set(realm_array(scope, &realms));
 }
 fn realm_array<'s>(scope: &mut v8::PinScope<'s, '_>, realms: &[i32]) -> v8::Local<'s, v8::Value> {
