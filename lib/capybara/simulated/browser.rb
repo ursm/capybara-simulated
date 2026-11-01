@@ -6780,8 +6780,6 @@ module Capybara
         # `null` (`initiating_url`, `initiating_document`) — its referrer source the Referer's alone)
         origin_url = (source_realm && initiating_url(source_realm)) || initiator
         initiating = source_realm ? initiating_document(source_realm) : {}
-        req_body   = body.to_s.b
-        req_ct     = content_type
         # The chain's hops (navigation_fetch.rs): each one's request, its Referer narrowed by the one before, its site
         # latched, its origin tainted by a redirect — and its cookies cross-site where the hop's URL is to its initiator, or
         # to the document the frame is in or one of ITS ancestors: RFC 6265bis "site for cookies" — the realm building it,
@@ -6789,7 +6787,7 @@ module Capybara
         fetch = Native::NavigationFetch.new({
           method:                        method.to_s,
           url:                           url.to_s,
-          body_empty:                    req_body.empty?,
+          body_empty:                    body.to_s.empty?,
           referrer:                      initiator,
           referrer_policy:               referrer_policy.to_s,
           initiator:                     origin_url,
@@ -6804,102 +6802,145 @@ module Capybara
         # entry's URL to each URL a redirect goes on to, the error document committed at that one; Chrome and Firefox,
         # measured 2026-11-01, traverse back to the last URL they requested)
         failed = -> { {'error' => true, 'url' => fetch.target, 'coop_switch' => fetch.coop_switch?} }
-        # The navigation's reserved client id (`event.resultingClientId`): every hop of the
-        # chain carries the SAME id — re-minted when a hop crosses origins (a reserved client
-        # is origin-bound) — and the committed document's realm adopts the final one.
-        rid = mint_resulting_client_id
+        # A service worker only controls a client whose EVERY ancestor is a secure
+        # context: an httpS frame anywhere under an http document loads from the
+        # network (secure-context.https). Gated on the target being https — a scope
+        # prefix-matches its client URL, so this is exactly "an https REGISTRATION
+        # never controls an insecure context" — because the driver's model treats a
+        # plain-http world (the app suites at http://www.example.com, where
+        # isSecureContext is hard-true) as secure by fiat. The JS caller computes
+        # the ancestor chain (it IS the chain — the building realm is the parent).
+        hop = run_navigation_fetch(
+          fetch,
+          body:           body,
+          content_type:   content_type,
+          dest:           dest,
+          origin_url:     origin_url,
+          is_reload:      is_reload,
+          user_activated: user_activated,
+          coop_realm:     coop_realm,
+          sw_site:        navigation_site,
+          sw_allowed:     ->(target) { secure_ancestors || !target.start_with?('https://') }
+        )
+        target = fetch.target
+        case hop.command
+        when 'fail'
+          return failed.()
+        # (…none made where a redirect hands it off, nor of a 204 / 205: the frame stays at the document it is at)
+        when 'hand_off', 'no_content'
+          return {'no_document' => true}
+        # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
+        # frame builder's, whose container's document `container_realm` is, alone — a named-frame form's navigation
+        # still makes a document of it)
+        # (…a window's navigation's alike, `download_realm` the document that navigated it)
+        when 'download'
+          if download_realm
+            from_document(download_realm.to_i) { save_downloaded_response(target, hop.headers, hop.rack_body || [hop.document.to_s], sandbox: sandbox) }
+            return {'no_document' => true}
+          end
+        end
+        out = response_hash(hop.status, hop.headers, hop.document || read_rack_body(hop.rack_body), target, fetch.redirected?) or return
+        # The final reserved client id — the JS frame builder hands it to the new realm
+        # (create_frame_realm tells the realm its client id + records the adoption).
+        out['resulting_client_id'] = hop.client_id
+        # (…and the method its last request was made with: a POST's a GET where a redirect made it one, a 307 / 308's a POST
+        # still — the resource its entry keeps)
+        out['method'] = fetch.request_method
+        # (…the Referer its request carried, a service worker's as the network's would have: the referrer of the document
+        # it makes)
+        sent = fetch.referrer
+        out['referrer'] = sent if sent
+        out['coop_switch'] = fetch.coop_switch?
+        out
+      end
+
+      # What a navigation's last hop made of it (`run_navigation_fetch`): navigation_fetch.rs `response`'s command
+      # ('fail', 'hand_off', 'no_content', 'download' or 'document'), the response — its status, headers and body, a Rack
+      # one unread (`rack_body`) or a service worker's bytes (`document`) — the reserved client id it carried, and the
+      # referrer source and policy of the request it was made by.
+      NavigationHop = Struct.new(:command, :status, :headers, :rack_body, :document, :client_id, :referrer_source, :referrer_policy)
+
+      # A navigation's fetch (navigation_fetch.rs), hop by hop: each hop to the service worker that controls it, where one
+      # may (`sw_allowed` of its URL; the registration matched in the top-level site `sw_site` of it gives — the site of
+      # the environment it navigates), else to the network; each response judged by the engine (`response`) — a redirect
+      # followed, the request's body gone where it makes a GET (301 / 302 of a POST, 303 of a non-GET/HEAD: Fetch
+      # "HTTP-redirect fetch") — and its reserved client id (`event.resultingClientId`) one per chain, re-minted where a
+      # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits — none where
+      # `client_ids` is false. `hop` is called with each hop's URL as it begins, `redirected` as a redirect is followed.
+      # Returns the last hop's `NavigationHop`; a network error — of no response, or a service worker's — 'fail'.
+      private def run_navigation_fetch(
+        fetch,
+        body:,
+        content_type:,
+        dest:,
+        origin_url:,
+        user_activated:,
+        sw_site:,
+        sw_allowed:,
+        is_reload: false,
+        is_history: false,
+        coop_realm: nil,
+        client_ids: true,
+        hop: nil,
+        redirected: nil
+      )
+        req_body = body.to_s.b
+        rid      = (mint_resulting_client_id if client_ids)
         loop do
-          meth, target, _, ref_source, ref_policy, site_seed, site, origin_null, cookie_cross, cookies = fetch.begin_hop
-          resp_body = nil
-          # A service worker only controls a client whose EVERY ancestor is a secure
-          # context: an httpS frame anywhere under an http document loads from the
-          # network (secure-context.https). Gated on the target being https — a scope
-          # prefix-matches its client URL, so this is exactly "an https REGISTRATION
-          # never controls an insecure context" — because the driver's model treats a
-          # plain-http world (the app suites at http://www.example.com, where
-          # isSecureContext is hard-true) as secure by fiat. The JS caller computes
-          # the ancestor chain (it IS the chain — the building realm is the parent).
-          if (secure_ancestors || !target.start_with?('https://')) &&
-             sw_registered? &&
+          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross, cookies = fetch.begin_hop
+          hop&.call(target)
+          hop_body  = req_body.empty? ? nil : req_body
+          rack_body = document = nil
+          if sw_registered? &&
+             sw_allowed.(target) &&
              (sw = sw_host.service_worker_navigation_fetch(
                target,
-               site:                  navigation_site.(target),
+               site:                  sw_site.(target),
                method:                meth,
-               body:                  req_body,
-               content_type:          req_ct,
+               body:                  hop_body,
+               content_type:          content_type,
                is_reload:             is_reload,
+               is_history:            is_history,
                dest:                  dest,
                referrer_source:       ref_source,
                origin_url:            origin_url,
                referrer_policy:       ref_policy,
-               site_seed:             site_seed,
-               origin_null:           origin_null,
+               site_seed:             seed,
+               origin_null:           tainted,
                resulting_client_id:   rid,
                cookie_cross_site:     cookie_cross,
                navigation_cross_site: fetch.cross_site?,
                cookie_context:        cookies
              ))
-            return failed.() if sw['networkError']
+            return NavigationHop.new('fail') if sw['networkError']
 
-            status  = (sw['status'] || 200).to_i
-            headers = sw['headers'] || {}
-            body    = Base64.decode64(sw['body_b64'].to_s)
+            status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
           else
             response = dispatch_navigation_request(
               target,
-              method:            meth,
-              referrer_source:   ref_source,
-              origin_url:        origin_url,
-              referrer_policy:   ref_policy,
-              site:              site,
-              origin_null:       origin_null,
-              body:              req_body.empty? ? nil : req_body,
-              content_type:      req_ct,
-              dest:              dest,
-              cookie_context:    cookies,
-              user_activated:    user_activated
-            ) or return failed.()
-            status, headers, resp_body = response
-            body = nil   # read only for the terminal hop, below
+              method:          meth,
+              referrer_source: ref_source,
+              origin_url:      origin_url,
+              referrer_policy: ref_policy,
+              site:            site,
+              origin_null:     tainted,
+              body:            hop_body,
+              content_type:    content_type,
+              dest:            dest,
+              cookie_context:  cookies,
+              user_activated:  user_activated
+            ) or return NavigationHop.new('fail')
+            status, headers, rack_body = response
           end
           # (…what the response makes of it — a top-level traversable's, each response's opener policy enforced as it comes,
           # a redirect's too: navigation_fetch.rs `response`)
           command, to_get, new_client = fetch.response(status, headers) { coop_facts(coop_realm) }
-          close_rack_body(resp_body) unless command == 'document' || command == 'download'
-          case command
-          when 'fail'
-            return failed.()
-          when 'redirect'
-            req_body, req_ct = ''.b, nil if to_get
-            rid = mint_resulting_client_id if new_client
-            next
-          # (…none made where a redirect hands it off, nor of a 204 / 205: the frame stays at the document it is at)
-          when 'hand_off', 'no_content'
-            return {'no_document' => true}
-          # (…nor of a download, handed off — saved — the frame staying at the document it is at: HTML "navigate"; the
-          # frame builder's, whose container's document `container_realm` is, alone — a named-frame form's navigation
-          # still makes a document of it)
-          # (…a window's navigation's alike, `download_realm` the document that navigated it)
-          when 'download'
-            if download_realm
-              from_document(download_realm.to_i) { save_downloaded_response(target, headers, resp_body || [body.to_s], sandbox: sandbox) }
-              return {'no_document' => true}
-            end
-          end
-          body ||= read_rack_body(resp_body)
-          out = response_hash(status, headers, body, target, fetch.redirected?)
-          # The final reserved client id — the JS frame builder hands it to the new realm
-          # (create_frame_realm tells the realm its client id + records the adoption).
-          out['resulting_client_id'] = rid if out
-          # (…and the method its last request was made with: a POST's a GET where a redirect made it one, a 307 / 308's a POST
-          # still — the resource its entry keeps)
-          out['method'] = fetch.request_method if out
-          # (…the Referer its request carried, a service worker's as the network's would have: the referrer of the document
-          # it makes)
-          sent = fetch.referrer
-          out['referrer'] = sent if out && sent
-          out['coop_switch'] = fetch.coop_switch? if out
-          return out
+          close_rack_body(rack_body) unless command == 'document' || command == 'download'
+          return NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy) unless command == 'redirect'
+
+          redirected&.call
+          req_body, content_type = ''.b, nil if to_get
+          rid = mint_resulting_client_id if rid && new_client
         end
       end
 
@@ -11168,82 +11209,45 @@ module Capybara
           ancestors:                     @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i),
           client_origin:                 (document_origin(realm_id) if traversal)
         })
-        rid = mint_resulting_client_id
-        loop do
-          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross, cookies = fetch.begin_hop
-          resp_body = nil
-          if (!target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id)) &&
-             sw_registered? &&
-             (sw = sw_host.service_worker_navigation_fetch(
-               target,
-               site:                  blob_partition_site(realm_id),
-               method:                meth,
-               body:                  req_body.empty? ? nil : req_body,
-               content_type:          content_type,
-               is_reload:             is_reload,
-               is_history:            is_history,
-               referrer_source:       ref_source,
-               origin_url:            origin_url,
-               referrer_policy:       ref_policy,
-               site_seed:             seed,
-               origin_null:           tainted,
-               cookie_cross_site:     cookie_cross,
-               navigation_cross_site: fetch.cross_site?,
-               cookie_context:        cookies,
-               resulting_client_id:   rid
-             ))
-            return commit_frame_error_document(realm_id, target, entry: entry) if sw['networkError']
-
-            status, headers, document = sw['status'].to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
-          else
-            response = dispatch_navigation_request(
-              target,
-              method:            meth,
-              referrer_source:   ref_source,
-              origin_url:        origin_url,
-              referrer_policy:   ref_policy,
-              site:              site,
-              origin_null:       tainted,
-              body:              req_body.empty? ? nil : req_body,
-              content_type:      content_type,
-              cookie_context:    cookies,
-              user_activated:    user_activated
-            ) or return commit_frame_error_document(realm_id, target, entry: entry)
-            status, headers, resp_body = response
-          end
-          # (…what the response makes of it: navigation_fetch.rs `response`)
-          command, to_get, new_client = fetch.response(status, headers)
-          close_rack_body(resp_body) unless command == 'document' || command == 'download'
-          case command
-          when 'fail'
-            return commit_frame_error_document(realm_id, target, entry: entry)
-          when 'hand_off', 'no_content'
-            return frame_navigation_made_no_document(realm_id)
-          when 'redirect'
-            # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
+        hop = run_navigation_fetch(
+          fetch,
+          body:           body,
+          content_type:   content_type,
+          dest:           'iframe',
+          origin_url:     origin_url,
+          is_reload:      is_reload,
+          is_history:     is_history,
+          user_activated: user_activated,
+          sw_site:        ->(_) { blob_partition_site(realm_id) },
+          sw_allowed:     ->(target) { !target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id) },
+          # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
+          redirected:     lambda {
             history, id = frame_entry(realm_id)
             history&.set_url(id, fetch.target)
-            req_body, content_type = ''.b, nil if to_get
-            rid = mint_resulting_client_id if new_client
-            next
-          when 'download'
-            return save_downloaded_response(target, headers, resp_body || [document.to_s], realm: realm_id)
-          end
-
-          # (…its entry's document state the request's — its referrer before its policy applied and that policy, a POST's
-          # body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts: HTML's
-          # document state; the document's referrer beside them)
-          history, id = frame_entry(realm_id)
-          history&.update(id, {referrer: fetch.referrer.to_s, request_referrer: ref_source.to_s, referrer_policy: ref_policy.to_s})
-          tag_frame_entry_post(realm_id, req_body, content_type, origin_null ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
-          document ||= read_rack_body(resp_body)
-          # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
-          # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
-          ctype, csp, referrer_policy, refresh = Native.document_params(headers)
-          response = {client_id: rid, csp: csp, referrer: fetch.referrer, referrer_policy: referrer_policy, refresh: refresh}
-          response.update(commit) unless fetch.redirected?
-          return commit_frame_document(realm_id, entry, target, document, ctype || 'text/html', **response)
+          }
+        )
+        target = fetch.target
+        case hop.command
+        when 'fail'
+          return commit_frame_error_document(realm_id, target, entry: entry)
+        when 'hand_off', 'no_content'
+          return frame_navigation_made_no_document(realm_id)
+        when 'download'
+          return save_downloaded_response(target, hop.headers, hop.rack_body || [hop.document.to_s], realm: realm_id)
         end
+
+        # (…its entry's document state the request's — its referrer before its policy applied and that policy, a POST's
+        # body and initiator origin — which a traversal to it refers by and a reload or a traversal re-posts: HTML's
+        # document state; the document's referrer beside them)
+        history, id = frame_entry(realm_id)
+        history&.update(id, {referrer: fetch.referrer.to_s, request_referrer: hop.referrer_source.to_s, referrer_policy: hop.referrer_policy.to_s})
+        tag_frame_entry_post(realm_id, req_body, content_type, origin_null ? 'null' : url_origin(origin_url)) if fetch.request_method == 'POST'
+        # (…and what the caller's document state gives it — a traversal's form state and history state — none where a
+        # redirect made the request anew: HTML "create navigation params by fetching", the entry's state null)
+        ctype, csp, document_policy, refresh = Native.document_params(hop.headers)
+        response = {client_id: hop.client_id, csp: csp, referrer: fetch.referrer, referrer_policy: document_policy, refresh: refresh}
+        response.update(commit) unless fetch.redirected?
+        commit_frame_document(realm_id, entry, target, hop.document || read_rack_body(hop.rack_body), ctype || 'text/html', **response)
       end
       # Tag the frame's current history entry as reached by a POST (with its body), so a later
       # reload / history traversal re-POSTS it — once a POST's response makes the document (a 307 /
@@ -11966,89 +11970,57 @@ module Capybara
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
-          loop do
-            meth, target, _, ref_source, ref_policy, seed, site, tainted, _, cookies = fetch.begin_hop
-            @current_referer = fetch.referrer.to_s
-            # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
-            # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it as
-            # the navigation that made the entry had it)
-            if !from_history && (id = @session_history.active(0))
-              @session_history.update(id, {cross_site: fetch.cross_site?})
-            end
-            hop_body = req_body.to_s.empty? ? nil : req_body
-            resp_body = nil
-            await_sw_activation(target, Native.site(target).to_s) if sw_registered?
-            if sw_registered? &&
-               (sw = sw_host.service_worker_navigation_fetch(
-                 target,
-                 site:                  Native.site(target).to_s,
-                 method:                meth,
-                 body:                  hop_body,
-                 content_type:          content_type,
-                 is_reload:             is_reload,
-                 is_history:            from_history && !is_reload,
-                 dest:                  'document',
-                 referrer_source:       ref_source,
-                 origin_url:            origin || initiator,
-                 referrer_policy:       ref_policy,
-                 site_seed:             seed,
-                 origin_null:           tainted,
-                 navigation_cross_site: fetch.cross_site?,
-                 cookie_context:        cookies
-               ))
-              return error_document.(target) if sw['networkError']
-
-              status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
-            else
-              response = dispatch_navigation_request(
-                target,
-                method:          meth,
-                referrer_source: ref_source,
-                origin_url:      origin || initiator,
-                referrer_policy: ref_policy,
-                site:            site,
-                origin_null:     tainted,
-                body:            hop_body,
-                content_type:    content_type,
-                dest:            'document',
-                cookie_context:  cookies,
-                user_activated:  user_activated
-              ) or return error_document.(target)
-              status, headers, resp_body = response
-            end
-            # (…what the response makes of it — each response's opener policy enforced as it comes, a redirect's too:
-            # navigation_fetch.rs `response`)
-            command, to_get = fetch.response(status, headers) { coop_facts(0) }
-            close_rack_body(resp_body) unless command == 'document' || command == 'download'
-            case command
-            when 'fail'
-              return error_document.(target)
-            when 'hand_off'
-              return navigation_made_no_document(target)
-            when 'redirect'
-              redirect_history_entry(fetch.target, get: fetch.request_method == 'GET')
-              req_body, content_type = nil, nil if to_get
-              next
-            when 'no_content'
-              return navigation_made_no_content(target)
-            # A response that downloads makes no document: a window that has one stays at it, its URL its document's
-            # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
-            # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
-            # which within_window assertions read.
-            when 'download'
-              return download_in_place(target, headers, resp_body || [document])
-            end
-
-            @current_url = target
-            record_response(status, headers)
-            commits.(url_origin(target))
-            # Full-reload navigation rebuilds the JS Context from the warm
-            # snapshot. Per-visit fresh VM avoids partial-reset drift
-            # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
-            # `$(document).on(...)` delegates) — snapshot warmup keeps the
-            # rebuild itself cheap; app-bundle re-eval dominates.
-            return boot_response_into_ctx(document || read_rack_body(resp_body), coop_switch: fetch.coop_switch?)
+          hop = run_navigation_fetch(
+            fetch,
+            body:           req_body,
+            content_type:   content_type,
+            dest:           'document',
+            origin_url:     origin || initiator,
+            is_reload:      is_reload,
+            is_history:     from_history && !is_reload,
+            user_activated: user_activated,
+            coop_realm:     0,
+            client_ids:     false,
+            sw_site:        ->(target) { Native.site(target).to_s },
+            sw_allowed:     ->(_) { true },
+            hop:            lambda {|target|
+              @current_referer = fetch.referrer.to_s
+              # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
+              # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it
+              # as the navigation that made the entry had it)
+              if !from_history && (id = @session_history.active(0))
+                @session_history.update(id, {cross_site: fetch.cross_site?})
+              end
+              # (…a hop into the scope of a worker still activating waiting for it, each hop's: Handle Fetch)
+              await_sw_activation(target, Native.site(target).to_s) if sw_registered?
+            },
+            redirected:     -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
+          )
+          target = fetch.target
+          case hop.command
+          when 'fail'
+            return error_document.(target)
+          when 'hand_off'
+            return navigation_made_no_document(target)
+          when 'no_content'
+            return navigation_made_no_content(target)
+          # A response that downloads makes no document: a window that has one stays at it, its URL its document's
+          # (Chrome: `location.href = '/dl'` on /a reports /a, and a reload after reloads /a). One that has none yet — an
+          # aux window opened on a binary asset (a PDF / image `target=_blank` opens) — reports the URL it was opened on,
+          # which within_window assertions read.
+          when 'download'
+            return download_in_place(target, hop.headers, hop.rack_body || [hop.document])
           end
+
+          @current_url = target
+          record_response(hop.status, hop.headers)
+          commits.(url_origin(target))
+          # Full-reload navigation rebuilds the JS Context from the warm
+          # snapshot. Per-visit fresh VM avoids partial-reset drift
+          # (jQuery `.ready`, rails-ujs `_rails_loaded`, accumulated
+          # `$(document).on(...)` delegates) — snapshot warmup keeps the
+          # rebuild itself cheap; app-bundle re-eval dominates.
+          boot_response_into_ctx(hop.document || read_rack_body(hop.rack_body), coop_switch: fetch.coop_switch?)
         ensure
           @navigating = prior_navigating
           # No document committed (a download, a raise mid-fetch) → the page that
