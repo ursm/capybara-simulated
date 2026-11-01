@@ -471,10 +471,11 @@ module Capybara
       # window's — `max_ms` reached all the same, its iteration budget shared, and the steps' answers folded: what fired,
       # in all, whether any dirtied, the last's frame and settle gen; one that `yield_on_gen` ended on a change the last)
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
-        left = max_ms.to_i
-        out  = nil
+        left    = max_ms.to_i
+        out     = nil
+        waited  = 0.0
         loop do
-          cut = @browser.worker_due_within(left)
+          cut = @browser.worker_due_within(left, waited)
           # `__runLoopStep` steps child iframe realms itself (timers.js
           # `drainChildRealms`), folding their fired/dirtied into the result.
           r = @browser.running_event_loop { walks_guarded { ctx.call('__runLoopStep', (cut || left), max_iter.to_i, !!yield_on_gen) } }
@@ -483,7 +484,9 @@ module Capybara
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
           break unless cut
 
+          t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           @browser.run_workers_due
+          waited   += Process.clock_gettime(Process::CLOCK_MONOTONIC) - t
           left     -= cut
           max_iter -= r['fired'].to_i
           break if left <= 0 || max_iter <= 0 || (yield_on_gen && r['dirtied'])
