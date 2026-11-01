@@ -25,6 +25,8 @@ RSpec.describe 'a response with two Location fields' do
       when '/frozen'
         # (…an app's constant header list, its Array value frozen: read, never changed)
         [302, FROZEN_LOCATION_PAIRS, ['<!DOCTYPE html><body>stayed']]
+      when '/pairscase'
+        [302, [%w[Content-Type text/html], %w[Location /a], %w[location /b]], ['<!DOCTYPE html><body>stayed']]
       when '/pairs2'
         [302, [%w[Content-Type text/html], %w[Location /a], %w[Location /b]], ['<!DOCTYPE html><body>stayed']]
       when '/a', '/b' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body>went #{env['PATH_INFO']}"]]
@@ -60,6 +62,14 @@ RSpec.describe 'a response with two Location fields' do
     session.visit '/pairs2'
     expect(session).to have_no_text('went')
     expect(session.current_url).to end_with('/pairs2')
+  end
+
+  # (…a name's spellings one name, header names comparing ASCII case-insensitively: `Location` and `location` two fields)
+  it 'is two where pairs name it twice in two spellings' do
+    session.visit '/'
+    session.visit '/pairscase'
+    expect(session).to have_no_text('went')
+    expect(session.current_url).to end_with('/pairscase')
   end
 
   it 'reads a frozen header list without changing it' do

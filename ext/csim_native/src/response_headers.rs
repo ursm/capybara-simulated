@@ -88,18 +88,21 @@ pub(crate) fn header_map(ruby: &Ruby, headers: Value) -> Result<RHash, Error> {
     if let Some(hash) = RHash::from_value(headers) {
         return Ok(hash);
     }
-    let mut names: Vec<(Value, Vec<Value>)> = Vec::new();
+    // (…a name's fields grouped by the name ASCII-lowercased, as header names compare (Fetch "header list"), under the
+    // first spelling it came in — every lookup of the host's is ASCII case-insensitive)
+    let mut names: Vec<(Vec<u8>, Value, Vec<Value>)> = Vec::new();
     for pair in headers.funcall::<_, _, RArray>("to_a", ())? {
         let pair = RArray::try_convert(pair)?;
         let (k, v): (Value, Value) = (pair.entry(0)?, pair.entry(1)?);
         let fields: Vec<Value> = RArray::from_value(v).map_or_else(|| vec![v], |list| list.into_iter().collect());
-        match names.iter_mut().find(|(name, _)| name.eql(k).unwrap_or(false)) {
-            Some((_, seen)) => seen.extend(fields),
-            None => names.push((k, fields)),
+        let key = ruby_bytes(k.funcall("to_s", ())?).to_ascii_lowercase();
+        match names.iter_mut().find(|(name, ..)| *name == key) {
+            Some((.., seen)) => seen.extend(fields),
+            None => names.push((key, k, fields)),
         }
     }
     let hash = ruby.hash_new();
-    for (k, fields) in names {
+    for (_, k, fields) in names {
         match fields.as_slice() {
             [one] => hash.aset(k, *one)?,
             _ => hash.aset(k, ruby.ary_from_iter(fields))?,
