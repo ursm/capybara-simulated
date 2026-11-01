@@ -1,6 +1,7 @@
-// A Headers object's header list (Fetch §5.2): the values of each name combined — but `set-cookie`'s, which stay one per
-// header — the name each header was first given (the casing it goes on the wire in), in the order the names were
-// appended, and its guard, which decides what a script may write to it. A Headers object holds a handle on V8's C++
+// A Headers object's header list (Fetch §5.2): its headers, each a name and a value, in the order they were appended — a
+// name appended again a header of its own, which "get" combines with the others of its name and "sort and combine"
+// combines too but for `set-cookie`'s — each by the name the first header of its name was given (the casing it goes on
+// the wire in), and its guard, which decides what a script may write to it. A Headers object holds a handle on V8's C++
 // heap (`__dom.HeadersBase`, as a canvas state's does: canvas_state.rs) that owns the list; the bindings convert the
 // arguments, throw what a refused write is, and keep the sorted pairs an iteration reads until the list next changes.
 
@@ -32,7 +33,7 @@ pub(crate) const BAD_VALUE: u32 = 2;
 pub(crate) const IMMUTABLE: u32 = 3;
 
 struct Header {
-    // Its name lowercased, the name it was first given, and its values combined.
+    // Its name lowercased, the name it goes by, and its value.
     key: Vec<u8>,
     name: Vec<u8>,
     value: Vec<u8>,
@@ -41,7 +42,6 @@ struct Header {
 #[derive(Default)]
 pub(crate) struct HeaderList {
     headers: Vec<Header>,
-    set_cookie: Vec<Vec<u8>>,
     guard: u32,
 }
 
@@ -61,6 +61,10 @@ impl HeaderList {
     fn find(&self, key: &[u8]) -> Option<usize> {
         self.headers.iter().position(|h| h.key == key)
     }
+    // The values of the headers named `key` (lowercased), in the order appended.
+    fn values<'a>(&'a self, key: &'a [u8]) -> impl Iterator<Item = &'a [u8]> + 'a {
+        self.headers.iter().filter(move |h| h.key == key).map(|h| &h.value[..])
+    }
     // Whether the guard forbids writing `key` as `value` — `combined`, the value it would have once appended to, for the
     // no-CORS guard, which judges what the header would hold (Fetch "append" step 3).
     fn forbids(&self, key: &[u8], value: &[u8], combined: &[u8]) -> bool {
@@ -71,34 +75,34 @@ impl HeaderList {
             _ => false,
         }
     }
-    // Headers' append(name, value) (Fetch "append"): the value combined with the name's — a `set-cookie` one a header of
-    // its own — where the guard allows; the name it was first given kept.
+    // Fetch "append" a header to a header list: one of its own, at the end, by the name the first of its name was given
+    // where it has one.
+    fn push(&mut self, key: Vec<u8>, name: &[u8], value: &[u8]) {
+        let name = self.find(&key).map_or_else(|| name.to_vec(), |i| self.headers[i].name.clone());
+        self.headers.push(Header { key, name, value: value.to_vec() });
+    }
+    // Headers' append(name, value) (Fetch "append" to a Headers): a header of its own, where the guard allows — judged,
+    // under the no-CORS guard, by the value the name's would combine to.
     pub(crate) fn append(&mut self, name: &[u8], value: &[u8]) -> u32 {
         let Some((key, value)) = checked(name, value) else { return refused(name) };
         if self.guard == GUARD_IMMUTABLE {
             return IMMUTABLE;
         }
-        if key == SET_COOKIE {
-            if !self.forbids(&key, value, value) {
-                self.set_cookie.push(value.to_vec());
+        let combined = match self.get(&key) {
+            Some(mut v) => {
+                v.extend_from_slice(b", ");
+                v.extend_from_slice(value);
+                v
             }
-            return WRITTEN;
-        }
-        let at = self.find(&key);
-        let combined = match at {
-            Some(i) => [&self.headers[i].value[..], b", ", value].concat(),
             None => value.to_vec(),
         };
-        if self.forbids(&key, value, &combined) {
-            return WRITTEN;
-        }
-        match at {
-            Some(i) => self.headers[i].value = combined,
-            None => self.headers.push(Header { key, name: name.to_vec(), value: combined }),
+        if !self.forbids(&key, value, &combined) {
+            self.push(key, name, value);
         }
         WRITTEN
     }
-    // …set(name, value): the name's values replaced by `value`, where the guard allows, its place and first name kept.
+    // …set(name, value), where the guard allows (Fetch "set"): the first header of its name given `value`, the others of
+    // its name removed — or, where it has none, a header appended.
     pub(crate) fn set(&mut self, name: &[u8], value: &[u8]) -> u32 {
         let Some((key, value)) = checked(name, value) else { return refused(name) };
         if self.guard == GUARD_IMMUTABLE {
@@ -107,12 +111,16 @@ impl HeaderList {
         if self.forbids(&key, value, value) {
             return WRITTEN;
         }
-        if key == SET_COOKIE {
-            self.set_cookie = vec![value.to_vec()];
-        } else if let Some(i) = self.find(&key) {
-            self.headers[i].value = value.to_vec();
-        } else {
-            self.headers.push(Header { key, name: name.to_vec(), value: value.to_vec() });
+        match self.find(&key) {
+            Some(first) => {
+                self.headers[first].value = value.to_vec();
+                let mut at = 0;
+                self.headers.retain(|h| {
+                    at += 1;
+                    at - 1 <= first || h.key != key
+                });
+            }
+            None => self.push(key, name, value),
         }
         WRITTEN
     }
@@ -134,49 +142,48 @@ impl HeaderList {
             }
             _ => false,
         };
-        if refused {
-            return WRITTEN;
-        }
-        if key == SET_COOKIE {
-            self.set_cookie.clear();
-        } else if let Some(i) = self.find(&key) {
-            self.headers.remove(i);
+        if !refused {
+            self.headers.retain(|h| h.key != key);
         }
         WRITTEN
     }
-    // "Get" a name (lowercased): its values combined, None where it has none.
+    // "Get" a name (lowercased): the values of its headers combined with ", ", in order — None where it has none.
     pub(crate) fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        if key == SET_COOKIE {
-            return (!self.set_cookie.is_empty()).then(|| self.set_cookie.join(&b", "[..]));
+        let mut values = self.values(key);
+        let mut combined = values.next()?.to_vec();
+        for v in values {
+            combined.extend_from_slice(b", ");
+            combined.extend_from_slice(v);
         }
-        self.find(key).map(|i| self.headers[i].value.clone())
+        Some(combined)
     }
-    // "Sort and combine": the list sorted by name, each `set-cookie` value a pair of its own in the order appended.
-    pub(crate) fn sorted(&self) -> Vec<(&[u8], &[u8])> {
-        let mut pairs: Vec<(&[u8], &[u8])> = self.headers.iter().map(|h| (&h.key[..], &h.value[..])).collect();
-        pairs.extend(self.set_cookie.iter().map(|c| (SET_COOKIE, &c[..])));
-        pairs.sort_by(|a, b| a.0.cmp(b.0));
+    // "Sort and combine": the names lowercased and sorted, each one's values combined — but `set-cookie`'s, each value a
+    // pair of its own, in the order appended.
+    pub(crate) fn sorted(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        let mut keys: Vec<&[u8]> = self.headers.iter().map(|h| &h.key[..]).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        let mut pairs = Vec::with_capacity(keys.len());
+        for key in keys {
+            if key == SET_COOKIE {
+                pairs.extend(self.values(key).map(|v| (key.to_vec(), v.to_vec())));
+            } else if let Some(v) = self.get(key) {
+                pairs.push((key.to_vec(), v));
+            }
+        }
         pairs
     }
-    // The list as it goes on the wire: in the order the names were appended, each by the name it was first given, then
-    // the `set-cookie` ones.
+    // The list as it goes on the wire: each header a field of its own, in the order appended, by the name it goes by.
     fn wire(&self) -> Vec<(&[u8], &[u8])> {
-        let mut pairs: Vec<(&[u8], &[u8])> = self.headers.iter().map(|h| (&h.name[..], &h.value[..])).collect();
-        pairs.extend(self.set_cookie.iter().map(|c| (SET_COOKIE, &c[..])));
-        pairs
+        self.headers.iter().map(|h| (&h.name[..], &h.value[..])).collect()
     }
     // A copy of `from`'s list into this one — "filled" through this one's guard where `refill` (a non-empty RequestInit
     // empties a Request's headers and fills them again with the copy). Its values are valid already, so they go as they
-    // are: normalized again, a combined value's empty last part would go ("x, " → "x,").
+    // are.
     fn copy_from(&mut self, from: &HeaderList, refill: bool) {
         for h in &from.headers {
             if !refill || !self.forbids(&h.key, &h.value, &h.value) {
-                self.headers.push(Header { key: h.key.clone(), name: h.name.clone(), value: h.value.clone() });
-            }
-        }
-        for c in &from.set_cookie {
-            if !refill || !self.forbids(SET_COOKIE, c, c) {
-                self.set_cookie.push(c.clone());
+                self.push(h.key.clone(), &h.name, &h.value);
             }
         }
     }
@@ -189,22 +196,15 @@ impl HeaderList {
             }
         }
     }
-    // A response's list from the network's (name, value) pairs: the values VERBATIM — the HTTP stack stripped each field
-    // before it combined duplicates with ", ", and normalizing the combined string again would cut one whose last part
-    // is empty (two empty fields combine to ", ").
+    // A response's list from the network's (name, value) pairs, each a header of its own, its value VERBATIM — the HTTP
+    // stack stripped each field before it combined a name's with ", ", and normalizing the combined string again would
+    // cut one whose last part is empty (two empty fields combine to ", ").
     // `filtered` a basic filtered response's (Fetch §2.2.6): its forbidden response-header names — the cookies — left out.
     fn from_network(&mut self, pairs: &[(Vec<u8>, Vec<u8>)], filtered: bool) {
         for (name, value) in pairs {
             let key = name.to_ascii_lowercase();
-            if filtered && forbidden_response_header(&key) {
-                continue;
-            }
-            if key == SET_COOKIE {
-                self.set_cookie.push(value.clone());
-            } else if let Some(i) = self.find(&key) {
-                self.headers[i].value = value.clone();
-            } else {
-                self.headers.push(Header { key, name: name.clone(), value: value.clone() });
+            if !(filtered && forbidden_response_header(&key)) {
+                self.push(key, name, value);
             }
         }
     }
@@ -313,8 +313,8 @@ fn string<'s>(scope: &mut v8::PinScope<'s, '_>, bytes: &[u8]) -> v8::Local<'s, v
     let units: Vec<u16> = bytes.iter().map(|&b| u16::from(b)).collect();
     crate::dom::utf16_value(scope, &units)
 }
-fn flat<'s>(scope: &mut v8::PinScope<'s, '_>, pairs: &[(&[u8], &[u8])]) -> v8::Local<'s, v8::Value> {
-    let items: Vec<v8::Local<v8::Value>> = pairs.iter().flat_map(|&(n, v)| [n, v]).map(|b| string(scope, b)).collect();
+fn flat<'s, B: AsRef<[u8]>>(scope: &mut v8::PinScope<'s, '_>, pairs: &[(B, B)]) -> v8::Local<'s, v8::Value> {
+    let items: Vec<v8::Local<v8::Value>> = pairs.iter().flat_map(|(n, v)| [n, v]).map(|b| string(scope, b.as_ref())).collect();
     v8::Array::new_with_elements(scope, &items).into()
 }
 
@@ -423,7 +423,7 @@ fn has_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
 // __dom.headersSetCookies(list) -> its `set-cookie` values, each its own (getSetCookie()).
 fn set_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let Some(l) = list(scope, args.get(0)) else { return };
-    let cookies = l.borrow().set_cookie.clone();
+    let cookies: Vec<Vec<u8>> = l.borrow().values(SET_COOKIE).map(<[u8]>::to_vec).collect();
     let items: Vec<v8::Local<v8::Value>> = cookies.iter().map(|c| string(scope, c)).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -485,8 +485,8 @@ fn for_xhr_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let Some(l) = list(scope, args.get(0)) else { return };
     let l = l.borrow();
     let mut pairs = l.sorted();
-    pairs.sort_by_key(|&(n, _)| n.to_ascii_uppercase());
-    let text: Vec<u8> = pairs.iter().flat_map(|&(n, v)| [n, b": ", v, b"\r\n"].concat()).collect();
+    pairs.sort_by_key(|(n, _)| n.to_ascii_uppercase());
+    let text: Vec<u8> = pairs.iter().flat_map(|(n, v)| [&n[..], b": ", &v[..], b"\r\n"].concat()).collect();
     rv.set(string(scope, &text));
 }
 #[cfg(test)]
@@ -533,6 +533,23 @@ mod tests {
         assert_eq!(l.wire()[0].0, b"X-B");
         assert_eq!(l.append(b"bad name", b"x"), BAD_NAME);
         assert_eq!(l.append(b"x", b"a\nb"), BAD_VALUE);
+    }
+
+    #[test]
+    fn keeps_each_header_a_field_of_its_own() {
+        let mut l = HeaderList::default();
+        l.append(b"Location", b"/a");
+        l.append(b"x", b"1");
+        l.append(b"location", b"/b");
+        assert_eq!(l.wire(), [(&b"Location"[..], &b"/a"[..]), (b"x", b"1"), (b"Location", b"/b")]);
+        assert_eq!(l.get(b"location").as_deref(), Some(&b"/a, /b"[..]));
+        l.set(b"LOCATION", b"/c");
+        assert_eq!(l.wire(), [(&b"Location"[..], &b"/c"[..]), (b"x", b"1")]);
+        l.delete(b"Location");
+        assert_eq!(l.wire(), [(&b"x"[..], &b"1"[..])]);
+        let mut n = HeaderList::default();
+        n.from_network(&[(b"Location".to_vec(), b"/a".to_vec()), (b"location".to_vec(), b"/b".to_vec())], true);
+        assert_eq!(n.wire(), [(&b"Location"[..], &b"/a"[..]), (b"Location", b"/b")]);
     }
 
     #[test]

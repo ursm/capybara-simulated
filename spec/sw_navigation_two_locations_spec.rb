@@ -8,9 +8,8 @@ require_relative 'support/every_host_local'
 
 # A navigation a service worker answers with a redirect follows it by the rule the network's redirects are followed by
 # (response_headers.rs `redirect_locations`): two different Location fields are a network error (Fetch "extract header
-# list values" step 2) — an opaque-redirect's the worker passed on from its own `redirect: 'manual'` fetch.
-# (…not yet one a Response the worker makes with two `location` entries: headers.rs `HeaderList` keeps a name's values
-# combined, one field, so the header list the wire carries has them as one)
+# list values" step 2) — an opaque-redirect's the worker passed on from its own `redirect: 'manual'` fetch, and a
+# Response the worker makes with two `location` entries (headers.rs `HeaderList`: each header a field of its own).
 # (…service Workers are modeled only in a universal-server context)
 RSpec.describe 'a navigation a service worker answers with two Location fields', :every_host_local do
   include PollUntil
@@ -23,6 +22,7 @@ RSpec.describe 'a navigation a service worker answers with two Location fields',
         if (u.pathname === '/scope/manual') e.respondWith(fetch('/two', {redirect: 'manual'}));
         else if (u.pathname === '/scope/bytes') e.respondWith(fetch('/twobytes', {redirect: 'manual'}));
         else if (u.pathname === '/scope/one') e.respondWith(new Response(null, {status: 302, headers: [['location', '/a']]}));
+        else if (u.pathname === '/scope/made') e.respondWith(new Response(null, {status: 302, headers: [['location', '/a'], ['Location', '/b']]}));
       });
     JS
     lambda {|env|
@@ -67,6 +67,12 @@ RSpec.describe 'a navigation a service worker answers with two Location fields',
     session = simulated_session(app)
     session.visit '/'
     expect(frame_text(session, '/scope/bytes')).to eq('')
+  end
+
+  it 'fails the navigation where the worker makes a Response with two' do
+    session = simulated_session(app)
+    session.visit '/'
+    expect(frame_text(session, '/scope/made')).to eq('')
   end
 
   it 'follows one' do
