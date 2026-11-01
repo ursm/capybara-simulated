@@ -6445,10 +6445,7 @@ service-workers/service-worker/about-blank-replacement.https.html:
 service-workers/service-worker/add-routes.https.html:
 - addRoutes() will not be executed outside of installing
 service-workers/service-worker/claim-worker-fetch.https.html:
-- "[harness] TIMEOUT"
 - fetch() in blob URL Worker should be intercepted after the client is claimed.
-- fetch() in nested Worker created from a blob URL Worker should be intercepted after
-  the client is claimed.
 - fetch() in nested blob URL Worker created from a Worker should be intercepted after
   the client is claimed.
 - fetch() in nested blob URL Worker created from a blob URL Worker should be intercepted
@@ -6514,7 +6511,6 @@ service-workers/service-worker/immutable-prototype-serviceworker.https.html:
 - worker prototype chain should be immutable
 service-workers/service-worker/local-url-inherit-controller.https.html:
 - Data URL worker should not inherit service worker controller.
-- Data URL worker should not intercept fetch().
 - Same-origin blob URL iframe should inherit service worker controller.
 - Same-origin blob URL iframe should intercept fetch().
 - Same-origin blob URL sharedworker should inherit service worker controller.
@@ -6545,13 +6541,6 @@ service-workers/service-worker/navigation-timing.https.html:
 - Service worker controlled navigation timing
 - Service worker controlled navigation timing network fallback
 - Service worker controlled navigation timing redirect
-service-workers/service-worker/nested-blob-url-workers.https.html:
-- Nested blob URL worker created from a worker should be intercepted by a service
-  worker.
-- Nested blob URL workers should be intercepted by a service worker.
-- Nested worker created from a blob URL worker should be intercepted by a service
-  worker.
-- "[harness] TIMEOUT"
 service-workers/service-worker/next-hop-protocol.https.html:
 - nextHopProtocol reports H1 correctly when routed via a service worker.
 - nextHopProtocol reports H2 correctly when routed via a service worker.
@@ -7022,12 +7011,6 @@ web-locks/non-secure-context.any.js:
 - "[dedicatedworker] API presence in non-secure contexts"
 web-locks/query-ordering.https.html:
 - Requests appear in state in order made.
-webmessaging/message-channels/worker-post-after-close.any.js:
-- "[dedicatedworker] MessageChannel/MessagePort should not work after a worker self.close()"
-- "[dedicatedworker] [harness] TIMEOUT"
-webmessaging/message-channels/worker.any.js:
-- "[dedicatedworker] MessageChannel/MessagePort created and used after a worker self.close()"
-- "[dedicatedworker] [harness] TIMEOUT"
 webmessaging/multi-globals/broadcastchannel-current.sub.html:
 - The current page being cross-origin must prevent the BroadcastChannel message from
   being seen
@@ -7053,9 +7036,6 @@ websockets/Create-invalid-urls.any.js:
 - '[dedicatedworker] new WebSocket("http://www.example.com/#") should throw a "SyntaxError"
   DOMException'
 - new WebSocket("http://www.example.com/#") should throw a "SyntaxError" DOMException
-websockets/Create-on-worker-shutdown.any.js:
-- "[dedicatedworker] WebSocket created after a worker self.close()"
-- "[dedicatedworker] [harness] TIMEOUT"
 websockets/back-forward-cache-with-closed-websocket-connection.window.js:
 - back-forward-cache-with-closed-websocket-connection
 websockets/back-forward-cache-with-open-websocket-connection-and-close-it-in-pagehide.window.js:

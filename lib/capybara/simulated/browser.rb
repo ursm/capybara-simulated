@@ -5029,13 +5029,6 @@ module Capybara
         # Clear any Resource Timing fact a preceding spawn left, so an early `worker_fail` below (which
         # still returns a handle the JS registers) can't hand its constructor a stale entry.
         Thread.current[:csim_worker_rt] = nil
-        # A NESTED blob:/data: worker script would need the MAIN VM's blob registry from a
-        # non-owning thread (the documented SEGV hazard) — fail it cleanly (onerror), the
-        # same observable as before nested workers existed. Marshalling the blob read to
-        # the main thread is the follow-up that lifts this.
-        if parent_worker && url.to_s.match?(/\A(blob|data):/i)
-          return worker_fail(handle, 'Nested workers with blob:/data: scripts are not supported')
-        end
         target = parent_worker ? url.to_s : resolve_against_current(url.to_s)
         # A worker script from a blob: URL in a DIFFERENT storage partition than this
         # context can't be created (cross-partition-worker-creation): the worker would
@@ -5043,7 +5036,7 @@ module Capybara
         # Worker/SharedWorker fires `onerror`, and spawn no thread. The handle is still
         # >0 so the JS registers the worker and the queued __error reaches it.
         if target.start_with?('blob:') && @driver.respond_to?(:cross_partition_blob?) && @driver.cross_partition_blob?(target, self, realm_id.to_i)
-          return worker_fail(handle, 'Worker creation from a cross-partition blob URL is blocked')
+          return worker_fail(handle, 'Worker creation from a cross-partition blob URL is blocked', parent_worker)
         end
         inbox  = Thread::Queue.new
         outbox = @worker_outbox
@@ -5098,7 +5091,7 @@ module Capybara
         end
         # A blob: worker script that didn't resolve (revoked / unavailable) fails the
         # same way — fire onerror rather than spawn a worker that runs nothing.
-        return worker_fail(handle, 'Worker script could not be loaded') if target.start_with?('blob:') && body.to_s.empty?
+        return worker_fail(handle, 'Worker script could not be loaded', parent_worker) if target.start_with?('blob:') && body.to_s.empty?
         # Pending until the worker's initial script has run (see `WorkerHost::BOOTING`).
         @worker_host.owe(WorkerHost::BOOTING, 1)
         # Register the worker's record BEFORE its thread exists: the sw_hooks fire from the
@@ -5198,9 +5191,10 @@ module Capybara
       # Fail a worker that can't be created (blocked / unloadable script): queue an
       # error event so the JS Worker/SharedWorker fires `onerror`, spawn no thread,
       # and return the (still >0) handle so the JS registers the worker and the error
-      # reaches it.
-      private def worker_fail(handle, message)
-        @worker_outbox << {handle: handle, kind: '__error', message: message}
+      # reaches it — in its parent worker's isolate for a nested one, which no record
+      # of the worker's own names (deliver_worker_messages).
+      private def worker_fail(handle, message, parent_worker = nil)
+        @worker_outbox << {handle: handle, kind: '__error', message: message, parent_worker: parent_worker}
         handle
       end
 
@@ -6482,16 +6476,18 @@ module Capybara
       # worker from the (out-of-scope, uncontrolled) top-level page and still expects a plain
       # `matchAll({type: 'worker'})` to return it.
       #
-      # A blob: / data: script URL is OPAQUE — a UUID no scope could ever cover — so such a worker
-      # takes its creator's controller instead (clients-matchall-blob-url-worker: controlled when
-      # an in-scope frame creates it, uncontrolled when an out-of-scope page does). That has to be
+      # A blob: script URL is OPAQUE — a UUID no scope could ever cover — so such a worker takes
+      # its creator's controller instead (clients-matchall-blob-url-worker: controlled when an
+      # in-scope frame creates it, uncontrolled when an out-of-scope page does). That has to be
       # the creating realm's LIVE controller, handed over at `new Worker(…)` time: control usually
       # arrives after load via `clients.claim()`, so a controller snapshotted when the realm was
-      # BUILT is stale by then, and would report such a worker uncontrolled.
+      # BUILT is stale by then, and would report such a worker uncontrolled. A data: worker is of
+      # an opaque origin of its own, which no service worker controls (local-url-inherit-controller;
+      # Chrome 156 and Firefox 159 alike, measured 2026-11-02).
       private def worker_controller_handle(url, shared, creator_controller, site)
         return sw_client_controller_for(url, site)&.first if http_url?(url)
         # A SHARED worker has no single creating context to inherit from.
-        return nil if shared
+        return nil if shared || !url.to_s.start_with?('blob:')
 
         h = creator_controller.to_i
         h.zero? || !sw_live?(h) ? nil : h
@@ -7659,8 +7655,9 @@ module Capybara
         # A NESTED worker's messages (its Worker object lives in the PARENT worker's
         # isolate, not any realm) route through the parent's inbox; the rest go to the
         # main realm, which fans out to frame realms.
-        nested, direct = msgs.partition {|e| @workers.dig(e[:handle].to_i, :parent_worker) }
-        nested.group_by {|e| @workers.dig(e[:handle].to_i, :parent_worker) }.each do |pw, evs|
+        parent = ->(e) { e[:parent_worker] || @workers.dig(e[:handle].to_i, :parent_worker) }
+        nested, direct = msgs.partition(&parent)
+        nested.group_by(&parent).each do |pw, evs|
           @workers.dig(pw, :inbox)&.push({kind: 'nested_worker_msgs', events: evs})
         end
         # Each worker→parent message fires from its OWN task, its checkpoint before the next (HTML: the message event is
@@ -9866,6 +9863,10 @@ module Capybara
       # the worker's `error`) — its destination `dest`, 'worker' or 'sharedworker'.
       private def fetch_worker_script(url, client_url, opaque: false, dest: 'worker')
         u = url.to_s
+        # (…a NESTED worker's on its parent's thread, from the window's registry alone: the window's isolate is another
+        # thread's — where the worker that made the URL entered its bytes, `__csimFillBlobMarkers` those of the page's
+        # its parent may resolve)
+        return worker_blob(u, client_url)&.first if u.start_with?('blob:') && Thread.current[:csim_worker_record]
         if u.start_with?('blob:')
           # Resolve via the Driver's partition store so a SAME-partition blob created
           # in ANOTHER window/isolate (the cross-partition-worker-creation test creates
