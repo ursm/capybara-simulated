@@ -766,7 +766,7 @@ RSpec.describe 'a window made in its opener\'s isolate' do
       expect(session.evaluate_script('[w.document.title, got]')).to eq(['got:ping:main', [['pong', false, true]]])
     end
 
-    # (…a network error an error document at its URL, of a new opaque origin — as the page's is (Browser#response_outcome)
+    # (…a network error an error document at its URL, of a new opaque origin — as the page's is (Browser#commit_error_document)
     # — not the document it was at; a 204 none, the window staying there)
     it 'commits an error document for a network error, as the page does, and none for a 204' do
       session.execute_script("window.w = window.open('/second')")

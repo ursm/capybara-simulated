@@ -644,11 +644,11 @@ module Capybara
       end
 
       # A window `window.open` made in `host`'s isolate whose navigation response, at `url`, needs a browsing context group
-      # switch (Browser#enforce_coop): the browsing context it was discarded — its document unloaded, the opener's
-      # WindowProxy of it `closed`, its own `opener` none — and the window a new browsing context of a group of its own, a
-      # Browser of its own: its handle the same, its name and its sandboxing kept, the document it makes the response's
-      # (`response` its status and headers, `body`, `made` the request's Referer and policy). HTML "obtain a browsing
-      # context to use for a navigation response".
+      # switch (navigation_fetch.rs `CoopEnforcement`): the browsing context it was discarded — its document unloaded, the
+      # opener's WindowProxy of it `closed`, its own `opener` none — and the window a new browsing context of a group of its
+      # own, a Browser of its own: its handle the same, its name and its sandboxing kept, the document it makes the
+      # response's (`response` its status and headers, `body`, `made` the request's Referer and policy). HTML "obtain a
+      # browsing context to use for a navigation response".
       def move_window_to_new_group(host, realm, url, response, body, made)
         entry = @aux_windows.find {|w| w[:window].is_a?(RealmWindow) && w[:window].host.equal?(host) && w[:window].realm == realm } or return
         aux = build_window_browser

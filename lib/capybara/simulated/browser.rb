@@ -6867,7 +6867,8 @@ module Capybara
       # followed, the request's body gone where it makes a GET (301 / 302 of a POST, 303 of a non-GET/HEAD: Fetch
       # "HTTP-redirect fetch") — and its reserved client id (`event.resultingClientId`) one per chain, re-minted where a
       # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits — none where
-      # `client_ids` is false. `hop` is called with each hop's URL as it begins, `redirected` as a redirect is followed.
+      # `client_ids` is false. `ready` is called with each hop's URL before its request is made (its cookies read), `hop`
+      # with it as the hop begins, `redirected` as a redirect is followed.
       # Returns the last hop's `NavigationHop`; a network error — of no response, or a service worker's — 'fail'.
       private def run_navigation_fetch(
         fetch,
@@ -6881,12 +6882,14 @@ module Capybara
         is_history: false,
         coop_realm: nil,
         client_ids: true,
+        ready: nil,
         hop: nil,
         redirected: nil
       )
         req_body = body.to_s.b
         rid      = (mint_resulting_client_id if client_ids)
         loop do
+          ready&.call(fetch.target)
           meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies = fetch.begin_hop(cookie_now)
           hop&.call(target)
           hop_body  = req_body.empty? ? nil : req_body
@@ -11970,7 +11973,7 @@ module Capybara
             client_ids:   false,
             sw_site:      ->(target) { Native.site(target).to_s },
             sw_allowed:   ->(_) { true },
-            hop:          lambda {|target|
+            hop:          lambda {|_|
               @current_referer = fetch.referrer.to_s
               # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
               # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it
@@ -11978,9 +11981,10 @@ module Capybara
               if !from_history && (id = @session_history.active(0))
                 @session_history.update(id, {cross_site: fetch.cross_site?})
               end
-              # (…a hop into the scope of a worker still activating waiting for it, each hop's: Handle Fetch)
-              await_sw_activation(target, Native.site(target).to_s) if sw_registered?
             },
+            # (…a hop into the scope of a worker still activating waiting for it, each hop's, before its request is made:
+            # Handle Fetch)
+            ready:        ->(target) { await_sw_activation(target, Native.site(target).to_s) if sw_registered? },
             redirected:   -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
           )
           target = fetch.target
@@ -12125,7 +12129,7 @@ module Capybara
       # The page's document committed, of opener policy `coop` — the one place every commit goes through (a response's, an
       # about:blank's, a blob's, an error document's: `boot_response_into_ctx`) — where its browsing context group is left
       # for a new one where needed: its navigation's enforcement result's switch, the one its responses made (`due`,
-      # `enforce_coop`), or, of a document no response enforced made, its own policy against the document it replaces.
+      # navigation_fetch.rs `CoopEnforcement`), or, of a document no response enforced made, its own policy against the document it replaces.
       # (…`opaque` its origin a new opaque one: an error document's)
       private def commit_coop(coop, opaque, due)
         if due.nil? && !(coop == 'unsafe-none' && @page_coop.to_s.match?(/\A(unsafe-none)?\z/))
@@ -12611,6 +12615,8 @@ module Capybara
           env['CONTENT_LENGTH'] = body.to_s.bytesize.to_s
         end
         apply_user_agent_env(env)
+        # (…its Cookie the jar's alone, none where the jar gives none — a test's sticky one too)
+        env.delete('HTTP_COOKIE')
         headers.each {|k, v| env[k] = v }
         extra_headers&.each {|k, v| env[k] = v }
         response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil

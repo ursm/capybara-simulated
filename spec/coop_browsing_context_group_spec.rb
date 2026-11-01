@@ -149,7 +149,7 @@ RSpec.describe "a navigation response's cross-origin opener policy", :every_host
     JS
     session.has_css?('#none', wait: 0.3)
     expect(session.windows.size).to eq(2)
-    # (…an error document at its URL, of a new opaque origin, as a page's network error makes: Browser#response_outcome)
+    # (…an error document at its URL, of a new opaque origin, as a page's network error makes: Browser#commit_error_document)
     session.within_window(session.windows.last) { expect(session.evaluate_script('[location.href, document.title, origin]')).to eq(['http://b.test/coi', '', 'null']) }
   end
 

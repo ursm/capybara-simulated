@@ -15,6 +15,11 @@ RSpec.describe 'a response with two Location fields' do
       when '/two'
         locations = "/a\n/b"
         [302, {'content-type' => 'text/html', 'location' => locations}, ['<!DOCTYPE html><body>stayed']]
+      when '/nl'
+        location = "/a\n"
+        [302, {'content-type' => 'text/html', 'location' => location}, ['<!DOCTYPE html><body>stayed']]
+      when '/pairs'
+        [302, [%w[Content-Type text/html], %w[Location /b]], ['<!DOCTYPE html><body>stayed']]
       when '/a', '/b' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body>went #{env['PATH_INFO']}"]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>page']]
       end
@@ -28,6 +33,18 @@ RSpec.describe 'a response with two Location fields' do
       fetch('/two').then((r) => done('resolved ' + r.url), (e) => done(e.name));
     JS
     expect(got).to eq('TypeError')
+  end
+
+  # (…a Rack 2 String's newline-joined fields read as Ruby splits them, the empty one it ends in none of them)
+  it 'is one field where the String ends in a newline' do
+    session.visit '/nl'
+    expect(session).to have_text('went /a')
+  end
+
+  # (…a Rack 2 app's headers an Array of pairs, as its SPEC allows: anything whose `each` gives them)
+  it 'is read off headers given as pairs' do
+    session.visit '/pairs'
+    expect(session).to have_text('went /b')
   end
 
   it 'fails a navigation to it' do

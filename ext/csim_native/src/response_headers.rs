@@ -31,6 +31,16 @@ fn latin1(bytes: &[u8]) -> String {
     bytes.iter().map(|&b| char::from(b)).collect()
 }
 
+// A Rack 2 value's fields: its String split at newlines as Ruby's `String#split` splits it — the empty fields it ends in
+// dropped.
+fn lines(bytes: &[u8]) -> Vec<Vec<u8>> {
+    let mut out: Vec<Vec<u8>> = bytes.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect();
+    while out.last().is_some_and(Vec::is_empty) {
+        out.pop();
+    }
+    out
+}
+
 // …and Location's fields as a navigation reads them: Rack 3's Array of them, or Rack 2's one String of them joined by
 // newlines — an empty one a field all the same — each as it came, distinct.
 fn location_fields(value: Value) -> Result<Vec<Vec<u8>>, Error> {
@@ -51,7 +61,7 @@ fn location_fields(value: Value) -> Result<Vec<Vec<u8>>, Error> {
             if bytes.is_empty() {
                 add(bytes);
             } else {
-                bytes.split(|&b| b == b'\n').for_each(|f| add(f.to_vec()));
+                lines(&bytes).into_iter().for_each(add);
             }
         }
     }
@@ -67,19 +77,31 @@ fn set_cookie_lines(value: Value) -> Result<Vec<Vec<u8>>, Error> {
         Some(list) => list.into_iter().map(|line| line.funcall::<_, _, RString>("to_s", ()).map(ruby_bytes)).collect::<Result<_, _>>()?,
         None => {
             let bytes = ruby_bytes(value.funcall::<_, _, RString>("to_s", ())?);
-            if bytes.is_empty() {
-                Vec::new()
-            } else {
-                bytes.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect()
-            }
+            lines(&bytes)
         }
     })
 }
 
 impl ResponseFields {
-    pub(crate) fn read(headers: Option<RHash>) -> Result<Self, Error> {
+    // (…`headers` a Hash, or anything else whose `each` gives [name, value] pairs: a Rack 2 app's Array of them)
+    pub(crate) fn read(headers: Option<Value>) -> Result<Self, Error> {
         let mut out = ResponseFields::default();
         let Some(headers) = headers else { return Ok(out) };
+        let headers = match RHash::from_value(headers) {
+            Some(hash) => hash,
+            None => {
+                let hash = RHash::new();
+                for pair in headers.funcall::<_, _, RArray>("to_a", ())? {
+                    let pair = RArray::try_convert(pair)?;
+                    let (k, v): (Value, Value) = (pair.entry(0)?, pair.entry(1)?);
+                    // (…the first of a name kept, as a lookup of it finds the first)
+                    if hash.get(k).is_none() {
+                        hash.aset(k, v)?;
+                    }
+                }
+                hash
+            }
+        };
         let (mut location, mut policy, mut disposition, mut coop, mut coep, mut content_type, mut refresh, mut cookie) = (false, false, false, false, false, false, false, false);
         let mut csp: Vec<String> = Vec::new();
         headers.foreach(|k: Value, v: Value| {
@@ -110,10 +132,12 @@ impl ResponseFields {
             } else if is("refresh") && !refresh {
                 refresh = true;
                 if !v.is_nil() {
-                    out.refresh = Some(match RArray::from_value(v) {
-                        Some(list) => list.into_iter().map(|f| f.funcall::<_, _, RString>("to_s", ()).map(|s| latin1(&ruby_bytes(s)))).collect::<Result<Vec<_>, _>>()?.join(", "),
-                        None => latin1(&ruby_bytes(v.funcall("to_s", ())?)),
-                    });
+                    let bytes = match RArray::from_value(v) {
+                        Some(list) => list.into_iter().map(|f| f.funcall::<_, _, RString>("to_s", ()).map(ruby_bytes)).collect::<Result<Vec<_>, _>>()?.join(&b", "[..]),
+                        None => ruby_bytes(v.funcall("to_s", ())?),
+                    };
+                    // (…as the app gave it, a UTF-8 one's text: a URL in it is parsed as the document's)
+                    out.refresh = Some(String::from_utf8(bytes).unwrap_or_else(|e| latin1(e.as_bytes())));
                 }
             } else if is("set-cookie") && !cookie {
                 cookie = true;
@@ -160,7 +184,7 @@ impl ResponseFields {
 // Document object": its MIME type and charset, its policy container's CSP list and referrer policy, its declarative
 // refresh; and "obtain an opener policy") — nil each it has none of (a content type none where it is empty), the opener
 // policy by its name (coop.rs).
-pub(crate) fn document_params(ruby: &Ruby, headers: Option<RHash>) -> Result<RArray, Error> {
+pub(crate) fn document_params(ruby: &Ruby, headers: Option<Value>) -> Result<RArray, Error> {
     let fields = ResponseFields::read(headers)?;
     let out = ruby.ary_new_capa(5);
     out.push(fields.content_type.clone().filter(|t| !t.is_empty()))?;

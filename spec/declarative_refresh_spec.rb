@@ -23,10 +23,17 @@ RSpec.describe 'a declarative refresh' do
       when '/shadow' then html.('<title>shadow</title><div id=h></div><script>h.attachShadow({mode: "open"}).innerHTML = \'<meta http-equiv=refresh content="0; url=/landed">\'</script>')
       when '/base' then html.(seen['/base'] > 2 ? '<title>base</title>' : '<title>base</title><base href="/other/"><meta http-equiv=refresh content="0">')
       when '/both' then html.('<title>both</title><meta http-equiv=refresh content="0; url=/landed?from=meta">', {'refresh' => '0;url=/landed?from=header'})
+      when '/utf8' then html.('<title>utf8</title>', {'refresh' => '0;url=/landed?from=café'})
       when '/landed' then html.("<title>landed #{env['QUERY_STRING']}</title>")
       else html.('')
       end
     })
+  end
+
+  # (…a header the app gave as UTF-8 text read as that text, as it always was here — not isomorphic-decoded)
+  it 'reads a Refresh header given as UTF-8 text as that text' do
+    session.visit '/utf8'
+    expect(poll_until { session.title.start_with?('landed') && session.title }).to eq('landed from=caf%C3%A9')
   end
 
   it 'navigates to the first one, its entry replaced' do

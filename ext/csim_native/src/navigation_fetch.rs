@@ -330,7 +330,7 @@ impl NavigationFetch {
     // A top-level traversable's opener policy is enforced on each, a redirect's too (`enforce_coop`); the block gives the
     // facts of the document the navigation leaves, `[origin, initial about:blank, popup sandboxing flags]`, where they
     // are needed — asked once.
-    fn response(ruby: &Ruby, rb_self: &Self, status: u32, headers: Option<RHash>, now: Option<f64>) -> Result<RArray, Error> {
+    fn response(ruby: &Ruby, rb_self: &Self, status: u32, headers: Option<Value>, now: Option<f64>) -> Result<RArray, Error> {
         let fields = ResponseFields::read(headers)?;
         if let Some(now) = now.filter(|_| rb_self.jar != 0) {
             let st = rb_self.st.borrow();

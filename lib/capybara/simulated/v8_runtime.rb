@@ -1177,8 +1177,8 @@ module Capybara
         realm
       end
       # The page's browsing context group and whether it is cross-origin isolated: what a window `window.open` made in
-      # this isolate is opened in (`window_group`), its page's group left by a navigation since (Browser#enforce_coop)
-      # keeping it.
+      # this isolate is opened in (`window_group`), its page's group left by a navigation since (navigation_fetch.rs
+      # `CoopEnforcement`) keeping it.
       def page_group = [@browser.browsing_context_group, @cross_origin_isolated == true]
       # …and that of the top-level document realm `realm`'s is in: a window's its own, the page's otherwise — that of a
       # realm the tree does not know among them, which no window's group is kept for.
