@@ -349,6 +349,7 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     native.define_module_function("origin_header", magnus::function!(referrer::origin_header_for_ruby, 4))?;
     native.define_module_function("fetch_site", magnus::function!(referrer::fetch_site_for_ruby, 3))?;
     native.define_module_function("referrer_policy_header", magnus::function!(url_ops::policy_of_header_for_ruby, 1))?;
+    native.define_module_function("about_blank_url", magnus::function!(url_ops::about_blank_url_for_ruby, 1))?;
     // Whether a response downloads, and the name it is saved under (downloads.rs).
     native.define_module_function("download_filename", magnus::function!(downloads::filename_for_ruby, 3))?;
     native.define_module_function("link_noreferrer", magnus::function!(token_list::noreferrer_for_ruby, 1))?;

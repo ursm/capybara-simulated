@@ -303,8 +303,7 @@ fn src_nested(arena: &mut crate::dom::RealmArena, container: NodeId) -> bool {
         return false;
     }
     let Some(url) = arena.parse_document_url(doc, &src) else { return false };
-    let about_blank = url.protocol() == "about:" && url.pathname() == "blank";
-    !about_blank && arena.ancestor_document_at(realm, url.href())
+    !crate::url_ops::matches_about_blank(&url) && arena.ancestor_document_at(realm, url.href())
 }
 // …as the frame's attributes are processed, which is what its `src` stays refused by until they are again, or a
 // navigation of it begins (`SRC_REFUSED`): a build of it made later, on a read, loads none of it — though the ancestors'
@@ -1323,9 +1322,7 @@ impl RealmArena {
         }
         let root = self.root_of(container);
         let Some(doc) = doc.or_else(|| self.get(root).is_some_and(|n| n.kind == crate::dom::NodeKind::Document).then_some(root)) else { return false };
-        self.parse_document_url(doc, &src).is_none_or(|url| {
-            url.protocol() == "about:" && url.pathname() == "blank" && url.username().is_empty() && url.password().is_empty() && url.host().is_empty()
-        })
+        self.parse_document_url(doc, &src).is_none_or(|url| crate::url_ops::matches_about_blank(&url))
     }
 }
 

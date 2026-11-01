@@ -33,6 +33,15 @@ RSpec.describe 'a navigation to about:blank' do
     expect(session.evaluate_script('[location.href, origin]')).to eq(%w[about:blank null])
   end
 
+  # (…a URL "matches about:blank" by its path compared as it is (URL Standard): `about:BLANK` is another about: URL, which
+  # Fetch's "scheme fetch" answers with a network error — an error document at it, of a new opaque origin)
+  it 'is not one to about:BLANK, which fails' do
+    session.visit '/?policy=origin'
+    session.execute_script("location.href = 'about:BLANK'")
+    session.evaluate_script('1')
+    expect(session.evaluate_script('[location.href, origin]')).to eq(%w[about:BLANK null])
+  end
+
   it "is of its initiator's origin and base URL, referred under its policy" do
     expect(blank_from('no-referrer')).to eq(['about:blank', 'http://www.example.com', 'http://www.example.com/sub/', ''])
     expect(blank_from('origin')).to eq(['about:blank', 'http://www.example.com', 'http://www.example.com/sub/', 'http://www.example.com/'])

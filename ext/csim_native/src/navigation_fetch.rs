@@ -119,6 +119,11 @@ pub(crate) struct NavigationFetch {
     user_activated: bool,
     has_origin: bool,
     jar: u64,
+    // Whether a service worker may answer its hops: none where no registration could (the session has none), else
+    // whether its navigable may be controlled at an HTTPS URL — a client is controlled only where every ancestor is a
+    // secure context (secure-context.https) — and the top-level site its registration is matched in, a frame's its
+    // container's top-level traversable's (none: each hop's own URL's, a top-level navigable's).
+    sw: Option<(bool, Option<String>)>,
     st: RefCell<Nav>,
     // A top-level traversable's navigation's opener policy enforcement, none for a frame's.
     coop: RefCell<Option<CoopEnforcement>>,
@@ -186,7 +191,8 @@ impl NavigationFetch {
     // are judged by — nil none, each nil for one not known), `dest` (its destination: `document` a top-level navigable's,
     // whose request may retrieve a Lax cookie by a safe method and whose response may set a SameSite one; `iframe` a
     // frame's), `user_activated` (whether its source snapshot had transient activation), `jar` (the session's cookie jar,
-    // nil none),
+    // nil none), `sw` (nil where no service worker can answer it — no registration — else [whether its navigable may be
+    // controlled at an HTTPS URL, the top-level site a registration is matched in: nil each hop's URL's]),
     // `reloaded_cross_site` (a reload through a user interface element's: whether the request the document it reloads was
     // reached by was cross-site, `#cross_site?` that one's — nil for any other navigation), `client_origin` (a traversal's
     // or a user's reload's, of no initiator: its request's client's origin serialized — its navigable's active
@@ -219,6 +225,7 @@ impl NavigationFetch {
             user_activated: get("user_activated")?.to_bool(),
             has_origin,
             jar: Option::<u64>::try_convert(get("jar")?)?.unwrap_or(0),
+            sw: Option::<(bool, Option<String>)>::try_convert(get("sw")?)?,
             coop: RefCell::new(coop),
             st: RefCell::new(Nav {
                 chain: RequestChain {
@@ -249,11 +256,12 @@ impl NavigationFetch {
     }
 
     // #begin_hop(now) -> [method, URL, network headers, referrer source, referrer policy, site seed, origin tainted, frame
-    // cross-site, cookie context]: the hop to make — through a service worker that controls it (its request of the site
-    // seed so far, of whether the documents above the navigable are cross-site to it, and of whether its cookies are
-    // cross-site: `#cross_site?`) or the network, whose request carries `network headers` (`request_headers`: its Rack
-    // env's `HTTP_*` pairs, its cookies from the jar at `now`). (…never a 22nd: `redirect` fails the 21st's redirect as
-    // it is reached)
+    // cross-site, cookie context, worker site]: the hop to make — through a service worker that controls it, where one may
+    // (`worker site` the top-level site its registration is matched in, nil where none may: `sw_site`; its request of the
+    // site seed so far, of whether the documents above the navigable are cross-site to it, and of whether its cookies
+    // are cross-site: `#cross_site?`) or the network, whose request carries `network headers` (`request_headers`: its
+    // Rack env's `HTTP_*` pairs, its cookies from the jar at `now`). (…never a 22nd: `redirect` fails the 21st's redirect
+    // as it is reached)
     fn begin_hop(ruby: &Ruby, rb_self: &Self, now: f64) -> RArray {
         let mut st = rb_self.st.borrow_mut();
         st.chain.dispatch();
@@ -275,7 +283,20 @@ impl NavigationFetch {
             (st.chain.effective_origin.as_deref() == Some("null")).into_value_with(ruby),
             frame_cross.into_value_with(ruby),
             cookies.into_value_with(ruby),
+            rb_self.sw_site(&st.chain.target).into_value_with(ruby),
         ])
+    }
+
+    // The top-level site a service worker registration that may answer a hop to `target` is matched in — none where no
+    // worker may: no registration, or an HTTPS URL its navigable may not be controlled at (an insecure ancestor). (…an
+    // http one is let through whatever the ancestors: a scope prefix-matches its client URL, so an https registration
+    // never controls it, and the driver's plain-http world — the app suites' http://www.example.com — is secure by fiat)
+    fn sw_site(&self, target: &str) -> Option<String> {
+        let (secure, site) = self.sw.as_ref()?;
+        if !*secure && target.get(..8).is_some_and(|s| s.eq_ignore_ascii_case("https://")) {
+            return None;
+        }
+        Some(site.clone().unwrap_or_else(|| crate::realm_location::site(target).unwrap_or_default()))
     }
 
     // The headers a hop's network request carries of the navigation (its Rack env keys): its Fetch metadata (Fetch
@@ -394,6 +415,26 @@ impl NavigationFetch {
         }
     }
 
+    // #start -> what the navigation's URL makes of it before any request (HTML "navigate", Fetch "scheme fetch"): 'about_blank'
+    // — a URL that matches about:blank (url_ops.rs `matches_about_blank`), a document made of none, whatever its method —
+    // 'blob' — a GET of a `blob:` URL, its blob's document — 'fail' — a network error: any other `about:` URL (`about:BLANK`
+    // too: Fetch "scheme fetch" answers about:blank alone), any request but a GET to a URL no HTTP(S) one (a `blob:` URL is
+    // fetched by a GET alone) — or 'fetch', its hops to make (`begin_hop`).
+    fn start(&self) -> &'static str {
+        let st = self.st.borrow();
+        let url = ada_url::Url::parse(&st.chain.target, None).ok();
+        let protocol = url.as_ref().map_or("", |u| u.protocol());
+        if url.as_ref().is_some_and(crate::url_ops::matches_about_blank) {
+            "about_blank"
+        } else if st.chain.method == "GET" && protocol == "blob:" {
+            "blob"
+        } else if protocol == "about:" || (st.chain.method != "GET" && !matches!(protocol, "http:" | "https:")) {
+            "fail"
+        } else {
+            "fetch"
+        }
+    }
+
     // #coop_switch? -> whether the navigation's responses need a browsing context group switch (`enforce_coop`).
     fn coop_switch(&self) -> bool {
         self.coop.borrow().as_ref().is_some_and(|c| c.switch)
@@ -425,6 +466,7 @@ pub(crate) fn define(native: RModule, ruby: &Ruby) -> Result<(), Error> {
     class.define_method("begin_hop", method!(NavigationFetch::begin_hop, 1))?;
     class.define_method("response", method!(NavigationFetch::response, 3))?;
     class.define_method("coop_switch?", method!(NavigationFetch::coop_switch, 0))?;
+    class.define_method("start", method!(NavigationFetch::start, 0))?;
     class.define_method("target", method!(NavigationFetch::target, 0))?;
     class.define_method("request_method", method!(NavigationFetch::request_method, 0))?;
     class.define_method("redirected?", method!(NavigationFetch::redirected, 0))?;
@@ -472,6 +514,7 @@ mod tests {
             user_activated: true,
             has_origin,
             jar: 0,
+            sw: None,
             st: RefCell::new(st),
             coop: RefCell::new(None),
         };
@@ -505,6 +548,28 @@ mod tests {
         let headers = users.request_headers(&users.st.borrow(), 0.0);
         assert_eq!(header(&headers, "HTTP_ORIGIN"), None);
         assert_eq!(header(&headers, "HTTP_SEC_FETCH_SITE").as_deref(), Some("none"));
+    }
+
+    #[test]
+    fn a_worker_may_answer_a_hop_where_one_is_registered_and_the_navigable_may_be_controlled() {
+        let fetch = |sw: Option<(bool, Option<String>)>| NavigationFetch {
+            origin: "null".to_owned(),
+            dest: "iframe".to_owned(),
+            user_activated: false,
+            has_origin: false,
+            jar: 0,
+            sw,
+            st: RefCell::new(nav("GET", "http://a.test/", "")),
+            coop: RefCell::new(None),
+        };
+        assert_eq!(fetch(None).sw_site("http://a.test/x"), None);
+        // (…a top-level navigable's matched in each hop URL's site; a frame's in its top-level site)
+        assert_eq!(fetch(Some((true, None))).sw_site("https://www.a.test/x").as_deref(), Some("https://a.test"));
+        assert_eq!(fetch(Some((true, Some("http://top.test".into())))).sw_site("http://a.test/x").as_deref(), Some("http://top.test"));
+        // (…an https hop under an insecure ancestor none; an http one all the same)
+        let insecure = fetch(Some((false, Some("http://top.test".into()))));
+        assert_eq!(insecure.sw_site("HTTPS://a.test/x"), None);
+        assert_eq!(insecure.sw_site("http://a.test/x").as_deref(), Some("http://top.test"));
     }
 
     #[test]

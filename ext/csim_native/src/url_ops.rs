@@ -280,6 +280,16 @@ impl crate::dom::RealmArena {
 pub(crate) fn policy_of_header(header: &str) -> Option<&'static str> {
     header.split(',').rev().find_map(|token| POLICIES.iter().find(|&&p| !p.is_empty() && p == token.trim_matches([' ', '\t'])).copied())
 }
+// Whether a URL "matches about:blank" (URL Standard): its scheme `about`, its path the single string `blank` — compared
+// as it is, not ASCII case-insensitively (`about:BLANK` matches not) — its username and password empty, its host null;
+// its query and fragment whatever they are.
+pub(crate) fn matches_about_blank(url: &ada_url::Url) -> bool {
+    url.protocol() == "about:" && url.pathname() == "blank" && url.username().is_empty() && url.password().is_empty() && url.host().is_empty()
+}
+// Native.about_blank_url(url) -> whether `url` (a URL string, parsed) matches about:blank.
+pub(crate) fn about_blank_url_for_ruby(url: String) -> bool {
+    ada_url::Url::parse(&url, None).is_ok_and(|u| matches_about_blank(&u))
+}
 pub(crate) fn policy_of_header_for_ruby(header: String) -> Option<&'static str> {
     policy_of_header(&header)
 }

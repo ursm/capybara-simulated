@@ -553,7 +553,7 @@ module Capybara
         # another window's choosing has none of)
         had = source.nil? || (!activation_realm.nil? && source.consume_user_activation(activation_realm))
         activated = user_activated.nil? ? had : user_activated
-        about_blank = url.to_s.empty? || url.to_s.match?(Browser::ABOUT_BLANK)
+        about_blank = url.to_s.empty? || Native.about_blank_url(url.to_s)
         # A window of its opener's browsing context group: a realm of the opener's isolate, its documents that isolate's —
         # its initial about:blank made with it (HTML "create a new auxiliary browsing context"), and the navigation it was
         # opened for, if any, its own: planned as a task of its event loop where a script asked for it (`planned`, the
@@ -631,7 +631,7 @@ module Capybara
         return unless realm
 
         window = add_realm_window(host, realm)
-        if url.empty? || url.match?(Browser::ABOUT_BLANK)
+        if url.empty? || Native.about_blank_url(url)
           host.initial_document_at(realm, url)
         # (…a `javascript:` URL's run as the window's own task, a hyperlink's or a form's too: location.js `__csimNavigateFrom`)
         elsif planned || url.match?(/\Ajavascript:/i)

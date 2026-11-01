@@ -78,9 +78,6 @@ module Capybara
       # `postMessage` / `window.open` so the Driver can route to the target.
       attr_accessor :window_handle
 
-      # An about:blank URL: its own document whatever its query or fragment (HTML "matches about:blank").
-      ABOUT_BLANK = %r{\Aabout:blank(?:[?#]|\z)}i
-
       # Sticky window after timers finish: keep polling? true so a
       # setTimeout firing mid-loop doesn't drop Capybara's synchronize
       # before its own default_max_wait_time kicks in. Counted in poll
@@ -6798,20 +6795,17 @@ module Capybara
           dest:                          dest.to_s,
           user_activated:                user_activated,
           jar:                           @cookie_jar,
-          coop:                          (document_coop(coop_realm) if coop_realm)
+          coop:                          (document_coop(coop_realm) if coop_realm),
+          # (…a service worker may answer its hops where one is registered — an https one's only where every ancestor is a
+          # secure context, as the JS caller computes the chain (it IS the chain: the building realm is the parent) — its
+          # registration matched in the top-level site of the environment it navigates: the URL's own for a window's
+          # document, the frame's container's top-level traversable's for a frame's)
+          sw:                            ([secure_ancestors, (navigation_site.(url) unless dest == 'document')] if sw_registered?)
         })
         # (…a network error's the URL it was at — its last hop's: HTML "create navigation params by fetching" sets the
         # entry's URL to each URL a redirect goes on to, the error document committed at that one; Chrome and Firefox,
         # measured 2026-11-01, traverse back to the last URL they requested)
         failed = -> { {'error' => true, 'url' => fetch.target, 'coop_switch' => fetch.coop_switch?} }
-        # A service worker only controls a client whose EVERY ancestor is a secure
-        # context: an httpS frame anywhere under an http document loads from the
-        # network (secure-context.https). Gated on the target being https — a scope
-        # prefix-matches its client URL, so this is exactly "an https REGISTRATION
-        # never controls an insecure context" — because the driver's model treats a
-        # plain-http world (the app suites at http://www.example.com, where
-        # isSecureContext is hard-true) as secure by fiat. The JS caller computes
-        # the ancestor chain (it IS the chain — the building realm is the parent).
         hop = run_navigation_fetch(
           fetch,
           body:         body,
@@ -6819,9 +6813,7 @@ module Capybara
           dest:         dest,
           origin_url:   origin_url,
           is_reload:    is_reload,
-          coop_realm:   coop_realm,
-          sw_site:      navigation_site,
-          sw_allowed:   ->(target) { secure_ancestors || !target.start_with?('https://') }
+          coop_realm:   coop_realm
         )
         target = fetch.target
         case hop.command
@@ -6863,9 +6855,9 @@ module Capybara
       # referrer source and policy of the request it was made by.
       NavigationHop = Struct.new(:command, :status, :headers, :rack_body, :document, :client_id, :referrer_source, :referrer_policy)
 
-      # A navigation's fetch (navigation_fetch.rs), hop by hop: each hop to the service worker that controls it, where one
-      # may (`sw_allowed` of its URL; the registration matched in the top-level site `sw_site` of it gives — the site of
-      # the environment it navigates), else to the network; each response judged by the engine (`response`) — a redirect
+      # A navigation's fetch (navigation_fetch.rs), hop by hop: each hop to the service worker that controls it, where the
+      # engine says one may (`begin_hop`'s worker site: the top-level site its registration is matched in), else to the
+      # network; each response judged by the engine (`response`) — a redirect
       # followed, the request's body gone where it makes a GET (301 / 302 of a POST, 303 of a non-GET/HEAD: Fetch
       # "HTTP-redirect fetch") — and its reserved client id (`event.resultingClientId`) one per chain, re-minted where a
       # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits — none where
@@ -6878,8 +6870,6 @@ module Capybara
         content_type:,
         dest:,
         origin_url:,
-        sw_site:,
-        sw_allowed:,
         is_reload: false,
         is_history: false,
         coop_realm: nil,
@@ -6892,15 +6882,14 @@ module Capybara
         rid      = (mint_resulting_client_id if client_ids)
         loop do
           ready&.call(fetch.target)
-          meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies = fetch.begin_hop(cookie_now)
+          meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies, worker_site = fetch.begin_hop(cookie_now)
           hop&.call(target)
           hop_body  = req_body.empty? ? nil : req_body
           rack_body = document = nil
-          if sw_registered? &&
-             sw_allowed.(target) &&
+          if worker_site &&
              (sw = sw_host.service_worker_navigation_fetch(
                target,
-               site:                  sw_site.(target),
+               site:                  worker_site,
                method:                meth,
                body:                  hop_body,
                content_type:          content_type,
@@ -10420,7 +10409,7 @@ module Capybara
         end
         # (…of a scheme it loads no document of here, none: one of a blob: URL's resolved as it began, above; one to a
         # `data:` URL refused, as a top-level browsing context refuses a document's navigation to one)
-        unless body || http_url?(url) || url.match?(ABOUT_BLANK)
+        unless body || http_url?(url) || about_blank_url?(url)
           log_console('warn', "window-realm navigation to #{url} not modeled; ignoring") unless top_level_data_refused?(url)
           return
         end
@@ -10721,7 +10710,7 @@ module Capybara
         save_frame_history(nav, history)
         # (…the first in place of the frame's initial about:blank, which no traversal goes back to: HTML "navigate" — a
         # navigable whose active document is its initial about:blank replaces it)
-        initial = frame_entry(realm_id).nil? && @runtime.first_frame_realm?(realm_id) && frame_realm_url(realm_id).to_s.match?(ABOUT_BLANK)
+        initial = frame_entry(realm_id).nil? && @runtime.first_frame_realm?(realm_id) && about_blank_url?(frame_realm_url(realm_id))
         frame_entry(realm_id, create: true)
         leave_frame_entry(realm_id) unless initial
         data = post ? {body: post[:body].to_s, content_type: post[:content_type], origin: post[:origin]}.compact : {}
@@ -10875,7 +10864,7 @@ module Capybara
         return if url.empty?
         # (…about:blank's made as a navigation to it is: an entered frame's in its scope, another's where its realm's
         # document holds the frame)
-        if url.match?(ABOUT_BLANK)
+        if about_blank_url?(url)
           entered = @frame_stack.find {|e| e[:realm_id] == realm_id }
           return reload_current_frame_realm('about:blank', '', 'text/html', entry: entered) if entered
 
@@ -11205,7 +11194,10 @@ module Capybara
           client_origin:                 (document_origin(realm_id) if traversal),
           dest:                          'iframe',
           user_activated:                user_activated,
-          jar:                           @cookie_jar
+          jar:                           @cookie_jar,
+          # (…a service worker may answer its hops where one is registered — an https one's only where the frame may be
+          # controlled: `sw_may_control_frame_navigation?` — matched in the frame's top-level site)
+          sw:                            ([sw_may_control_frame_navigation?(realm_id), blob_partition_site(realm_id)] if sw_registered?)
         })
         hop = run_navigation_fetch(
           fetch,
@@ -11215,8 +11207,6 @@ module Capybara
           origin_url:   origin_url,
           is_reload:    is_reload,
           is_history:   is_history,
-          sw_site:      ->(_) { blob_partition_site(realm_id) },
-          sw_allowed:   ->(target) { !target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id) },
           # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
           redirected:   lambda {
             history, id = frame_entry(realm_id)
@@ -11647,7 +11637,7 @@ module Capybara
         if !is_reload && !is_history && !url.to_s.match?(/\Adata:/i)
           record ? record_frame_nav(entry[:realm_id], url) : replace_frame_entry(entry[:realm_id], url)
         end
-        return reload_current_frame_realm('about:blank', '', 'text/html', entry: entry) if url.to_s.match?(ABOUT_BLANK)
+        return reload_current_frame_realm('about:blank', '', 'text/html', entry: entry) if about_blank_url?(url)
         # A `blob:` URL, which no server answers: the blob the container has its navigation load (`__csimTakeFrameNavBlob`:
         # the one it began with, a reload's the one the document was loaded of, else the one it names now in this window's
         # registry — no other window's partition) — none a failed load at the URL. (A redirect to one is followed to none:
@@ -11885,6 +11875,8 @@ module Capybara
           dest:                          'document',
           user_activated:                user_activated,
           jar:                           @cookie_jar,
+          # (…a service worker may answer each hop where one is registered, matched in the hop URL's own site)
+          sw:                            ([true, nil] if sw_registered?),
           reloaded_cross_site:           reloaded_cross_site,
           client_origin:                 (document_origin(0) if traversed),
           traversed_initiator:           (@session_history.entry(@session_history.active(0))[:origin] if traversed),
@@ -11911,9 +11903,11 @@ module Capybara
           # (…the session history as it stands, which a download it ends in restores — a re-post's too, whose entry a
           # redirect rewrites: `redirect_history_entry`)
           save_navigation_history unless from_history
+          # (…what its URL makes of it before any request: navigation_fetch.rs `start`)
+          start = fetch.start
           # (…none for about:blank in a window of no entry yet — its initial about:blank, which a navigation to about:blank
           # leaves the initial one, the next navigation replacing it: HTML "navigate", historyHandling "replace")
-          unless from_history || (url.to_s.match?(ABOUT_BLANK) && !@session_history.active(0))
+          unless from_history || (start == 'about_blank' && !@session_history.active(0))
             leave_page_entry
             # (…the request as it was sent — a POST's body and origin, its referrer and referrer policy — what a reload or
             # a traversal refers by again, a POST's re-posts: HTML's document state)
@@ -11922,12 +11916,11 @@ module Capybara
             entry.update(body: body, content_type: content_type) if body
             record_history(entry, replace: replace)
           end
-          # `about:blank` names an empty, network-less document — there's
-          # nothing to fetch; route straight to an empty document, its history
-          # entry the one above (HTML "navigate": about:blank's navigation params
-          # made with no fetch). (Narrow to about:blank specifically —
-          # about:srcdoc carries its own markup.)
-          if url.to_s.match?(ABOUT_BLANK)
+          case start
+          # A URL that matches about:blank names an empty, network-less document — there's nothing to fetch; route straight
+          # to an empty document, its history entry the one above (HTML "navigate": about:blank's navigation params made
+          # with no fetch). (Narrow to about:blank specifically — about:srcdoc carries its own markup.)
+          when 'about_blank'
             # (…its origin its initiator's, an opaque one for none: a visit's — HTML "determine the origin", Chrome
             # measured — and its base URL that document's: the page's own where the page navigates itself, else the
             # initiator's URL (its base URL not known here — a gap); its referrer the request's, under the initiator's
@@ -11943,21 +11936,21 @@ module Capybara
             @current_url = url.to_s
             record_response(200, {'content-type' => 'text/html'})
             return boot_response_into_ctx('')
-          end
-          # A `blob:` URL, which no server answers: its blob's document — wherever the window that made it is (its
+          # A `blob:` URL's GET, which no server answers: its blob's document — wherever the window that made it is (its
           # partition's) — or, one no store resolves, a failed load at the URL (`fail_blob_document`); its history entry
           # the one above, which a traversal or a reload replays here. (A redirect to one is followed to none:
           # navigation_fetch.rs `redirect`.)
-          if !body && url.to_s.match?(/\Ablob:/i)
+          when 'blob'
             blob ||= blob_snapshot(url)
             return error_document.(url) unless blob
 
             commits.(url_origin(url.to_s.sub(/\Ablob:/i, '')))
             return boot_blob_document(url, blob[:bytes], blob[:type], flushed: true)
-          end
           # (…a POST to any URL but an HTTP(S) one a network error, its error document at the URL: Fetch "scheme fetch" —
           # a `blob:` URL's fetched by a GET alone)
-          return error_document.(url) if body && !http_url?(url)
+          when 'fail'
+            return error_document.(url)
+          end
 
           # (…a POST's Content-Type the urlencoded default where the form gave none, on the wire and in the SW's
           # `event.request.headers` alike)
@@ -11972,8 +11965,6 @@ module Capybara
             is_history:   from_history && !is_reload,
             coop_realm:   0,
             client_ids:   false,
-            sw_site:      ->(target) { Native.site(target).to_s },
-            sw_allowed:   ->(_) { true },
             hop:          lambda {|_|
               @current_referer = fetch.referrer.to_s
               # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
@@ -12134,7 +12125,7 @@ module Capybara
       # (…`opaque` its origin a new opaque one: an error document's)
       private def commit_coop(coop, opaque, due)
         if due.nil? && !(coop == 'unsafe-none' && @page_coop.to_s.match?(/\A(unsafe-none)?\z/))
-          origin = opaque ? 'null' : (@current_url.to_s.match?(ABOUT_BLANK) ? @creator&.fetch(:origin) : url_origin(@current_url)).to_s
+          origin = opaque ? 'null' : (about_blank_url?(@current_url) ? @creator&.fetch(:origin) : url_origin(@current_url)).to_s
           initial = @runtime.realm_call(0, '__csimInitialAboutBlank') == true
           due = Native.coop_switch(initial, document_origin(0).to_s, @page_coop || 'unsafe-none', origin, coop)
         end
@@ -12199,7 +12190,7 @@ module Capybara
         # `allow="cross-origin-isolated"` permission (it shares the top-level document's here), nor a service worker's own
         # COEP (it is never isolated here). (…an about:blank document's its creator's — the document that navigated to it,
         # or a pop-up's opener: it takes its creator's policy container, the policies with it)
-        about_blank = @current_url.to_s.match?(ABOUT_BLANK)
+        about_blank = about_blank_url?(@current_url)
         @runtime.cross_origin_isolated = opener_policy == 'same-origin-plus-COEP' unless about_blank
         # (…and its opener policy, what a navigation of the page after is judged by — the page's browsing context group left
         # for a new one where it needs: `commit_coop`)
@@ -12265,7 +12256,7 @@ module Capybara
         # `leaving_document_origin`)
         creator = @creator
         @creator = nil unless initial
-        if creator && @current_url.to_s.match?(ABOUT_BLANK)
+        if creator && about_blank_url?(@current_url)
           opts['creatorOrigin'] = creator[:origin]
           opts['aboutBase']     = creator[:base]
           opts['referrer']      = creator[:url] unless creator[:url].empty?
@@ -12696,6 +12687,9 @@ module Capybara
       end
       # Whether `url` is an HTTP(S) URL — one a fetch goes over the network for, and the only kind a redirect is followed to.
       def http_url?(url) = url.to_s.match?(%r{\Ahttps?://}i)
+      # Whether `url` matches about:blank (URL Standard): its scheme `about`, its path `blank` exactly — `about:BLANK` is
+      # another URL — whatever its query and fragment (url_ops.rs `matches_about_blank`).
+      def about_blank_url?(url) = Native.about_blank_url(url.to_s)
       # Cross-host hop (e.g. Discourse's `discourse_connect` flow
       # redirecting to a real WEBrick on `localhost:9100`) must cross
       # the wire — Rails' router doesn't have routes for the external
