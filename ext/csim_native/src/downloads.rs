@@ -114,22 +114,34 @@ fn plain_name(name: &str) -> Option<String> {
 
 // The name a download of `url` is saved under: its `Content-Disposition`'s (`cd`, none for none), else the one its
 // `<a download>` suggests (`hint`), else one of its URL's: the last segment of its path. A URL of an opaque path has no
-// segments: a `blob:` one is named by its UUID, the last segment of the URL it wraps, a `data:` one `download`. One of
-// its URL's with no extension gets the one its MIME type (`mime`, its response's Content-Type, None none) has, as Chrome
-// names them (`download.zip`, `<uuid>.pdf`, `/upper` of `text/plain` `upper.txt`; measured 2026-11-01).
+// segments: a `blob:` one is named by its UUID, the last segment of the URL it wraps, a `data:` one `download`. Each
+// with its leading and trailing dots trimmed, `download` where that leaves none; and one not the Content-Disposition's
+// with no extension then gets the one its MIME type (`mime`, its response's Content-Type, None none) has — as Chrome
+// names them, the naming UA-defined (HTML "download the hyperlink"): `download.zip`, `<uuid>.pdf`, `/upper` of
+// `text/plain` `upper.txt`, `<a download=mine>` of it `mine.txt`, `download=.hidden` `hidden.txt`, `download=...`
+// `download.txt`, `download=v1.2` kept, a Content-Disposition's `d` kept and its `e.` `e` (Chrome 156, measured
+// 2026-11-01).
 pub(crate) fn filename(cd: Option<&[u8]>, url: &str, hint: &str, mime: Option<&str>) -> String {
-    let given = cd.and_then(disposition_filename).or_else(|| plain_name(hint));
-    given.unwrap_or_else(|| {
-        let segment = match ada_url::Url::parse(url, None) {
-            Ok(u) if u.pathname().starts_with('/') => plain_name(u.pathname()),
-            _ => url.get(..5).filter(|s| s.eq_ignore_ascii_case("blob:")).and_then(|_| ada_url::Url::parse(&url[5..], None).ok()).and_then(|u| plain_name(u.pathname())),
-        };
-        let stem = segment.unwrap_or_else(|| "download".to_owned());
-        match mime.and_then(crate::mime::extract).and_then(|m| extension(&m.essence)) {
-            Some(ext) if !stem.contains('.') => format!("{stem}.{ext}"),
-            _ => stem,
-        }
-    })
+    if let Some(name) = cd.and_then(disposition_filename) {
+        return trimmed(name);
+    }
+    let segment = || match ada_url::Url::parse(url, None) {
+        Ok(u) if u.pathname().starts_with('/') => plain_name(u.pathname()),
+        _ => url.get(..5).filter(|s| s.eq_ignore_ascii_case("blob:")).and_then(|_| ada_url::Url::parse(&url[5..], None).ok()).and_then(|u| plain_name(u.pathname())),
+    };
+    let name = trimmed(plain_name(hint).or_else(segment).unwrap_or_default());
+    match mime.and_then(crate::mime::extract).and_then(|m| extension(&m.essence)) {
+        Some(ext) if !name.contains('.') => format!("{name}.{ext}"),
+        _ => name,
+    }
+}
+// …`name` with its leading and trailing dots trimmed, `download` where that leaves none.
+fn trimmed(name: String) -> String {
+    match name.trim_matches('.') {
+        "" => "download".to_owned(),
+        t if t.len() == name.len() => name,
+        t => t.to_owned(),
+    }
 }
 // The extension a file of MIME type `essence` is given.
 fn extension(essence: &str) -> Option<&'static str> {
@@ -200,6 +212,13 @@ mod tests {
         assert_eq!(filename(None, "blob:http://a.test/5e1d-0a", "", Some("application/octet-stream")), "5e1d-0a");
         assert_eq!(filename(None, "http://a.test/upper", "", Some("text/plain; charset=utf-8")), "upper.txt");
         assert_eq!(filename(None, "http://a.test/r.csv", "", Some("text/plain")), "r.csv");
-        assert_eq!(filename(None, "http://a.test/upper", "mine", Some("text/plain")), "mine");
+        assert_eq!(filename(None, "http://a.test/upper", "mine", Some("text/plain")), "mine.txt");
+        assert_eq!(filename(None, "http://a.test/upper", "v1.2", Some("text/plain")), "v1.2");
+        assert_eq!(filename(None, "http://a.test/upper", "name.", Some("application/octet-stream")), "name");
+        assert_eq!(filename(None, "http://a.test/upper", ".hidden", Some("text/plain")), "hidden.txt");
+        assert_eq!(filename(None, "http://a.test/upper", "...", Some("text/plain")), "download.txt");
+        assert_eq!(filename(None, "http://a.test/x.", "", Some("text/plain")), "x.txt");
+        assert_eq!(filename(Some(b"attachment; filename=d"), "http://a.test/x", "mine", Some("text/plain")), "d");
+        assert_eq!(filename(Some(b"attachment; filename=\"e.\""), "http://a.test/x", "", Some("text/plain")), "e");
     }
 }

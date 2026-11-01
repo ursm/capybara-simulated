@@ -61,6 +61,26 @@ RSpec.describe 'a download' do
     expect(Dir.children(@dir).sort).to eq(%w[badé.txt café.txt escape.txt mine.txt named.txt plain.txt rep.csv été.csv].sort)
   end
 
+  # (…its `download` value with no extension given its type's, its leading and trailing dots trimmed — `download` where
+  # that leaves none — a Content-Disposition's name only trimmed: the naming is the UA's, Chrome 156's measured 2026-11-01)
+  it "gives an extensionless download value its type's extension, and a Content-Disposition's name none" do
+    app = lambda {|env|
+      next [200, {'content-type' => 'text/plain', 'content-disposition' => 'attachment; filename="d."'}, ['x']] if env['PATH_INFO'] == '/cd'
+      next [200, {'content-type' => 'application/octet-stream'}, ['x']] if env['PATH_INFO'] == '/bin'
+      next [200, {'content-type' => 'text/plain'}, ['x']] if env['PATH_INFO'].start_with?('/plain/')
+      [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset=utf-8><body><a href="/plain/1" download="mine">m</a>' \
+                                               '<a href="/plain/2" download=".hidden">h</a><a href="/plain/3" download="...">t</a>' \
+                                               '<a href="/plain/4" download="v1.2">v</a><a href="/bin" download="raw.">r</a>' \
+                                               '<a href="/cd" download="named">c</a>']]
+    }
+    s = simulated_session(app)
+    %w[m h t v r c].each do |link|
+      s.visit '/'
+      s.click_link link
+    end
+    expect(Dir.children(@dir).sort).to eq(%w[d download.txt hidden.txt mine.txt raw v1.2])
+  end
+
   # A navigation whose response downloads makes no document, so the window stays at the one it has: its URL, and its
   # session history, whose reload reloads that document (Chrome, measured: /a, /dl, then /a again) — for a form's POST
   # as for a GET.
