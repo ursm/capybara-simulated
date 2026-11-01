@@ -86,6 +86,9 @@ pub(crate) const COMMIT_PENDING: u32 = 1 << 2;
 // `takeSwDeferredFrames` hands it to runs — and (the engine's own bit) handed to one already.
 pub(crate) const DEFERRED_SW: u32 = 1 << 3;
 const DEFERRED_LISTED: u32 = 1 << 16;
+// Its realm being built now: a read of its window the build makes is answered with none, not
+// a build again — set and cleared by the build alone (unload_walks.rs `frameBuildBegin` / `frameBuildEnd`).
+pub(crate) const BUILDING: u32 = 1 << 4;
 // The navigation is a reload (frame-nav.js `FN_RELOAD_NAV`).
 const RELOAD_NAV: u32 = 1 << 5;
 // Its post-insertion step ran: its navigable exists (frame-nav.js `FN_CONTEXT_READY`).

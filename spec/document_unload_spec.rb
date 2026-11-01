@@ -406,6 +406,30 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
     expect(beacons.sort).to eq(%w[a c1 c2])
   end
 
+  # …nor does an event-loop step: a timer navigating a frame whose teardown handler runs away, terminated by the call
+  # timeout, leaves no unload counter of that frame raised — its next navigation goes ahead.
+  %w[beforeunload unload].each do |event|
+    it "lets a frame navigate again after a loop step terminated in its #{event} handler" do
+      stub_const('Capybara::Simulated::V8Runtime::CALL_TIMEOUT_MS', 1000)
+      pages = {
+        '/top' => '<iframe src="/f"></iframe>',
+        '/f'   => "<script>addEventListener('#{event}', () => { if (!top.halt) for (;;) {} })</script>"
+      }
+      app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{pages[env['PATH_INFO']] || env['PATH_INFO']}"]] }
+      s = simulated_session(app)
+      s.visit '/top'
+      poll_until { s.evaluate_script("!!(frames[0] && frames[0].location.pathname === '/f' && frames[0].document.readyState === 'complete')") }
+      s.execute_script("window.f = document.querySelector('iframe'); setTimeout(() => { f.srcdoc = '<p>x</p>' }, 20)")
+      expect {
+        3.times { s.evaluate_script('1') }
+      }.to raise_error(RustyRacer::ScriptTerminatedError)
+      s.execute_script("top.halt = true; f.removeAttribute('srcdoc'); f.src = '/h'")
+      poll_until { (s.evaluate_script('frames[0].location.pathname') rescue nil) == '/h' }
+
+      expect(s.evaluate_script('frames[0].location.pathname')).to eq('/h')
+    end
+  end
+
   it 'ends a walk a failed call left open' do
     app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{env['PATH_INFO']}"]] }
     s = simulated_session(app)

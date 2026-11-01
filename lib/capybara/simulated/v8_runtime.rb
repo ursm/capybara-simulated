@@ -325,8 +325,8 @@ module Capybara
         @compiled_script_keys = {}
       end
 
-      def eval(code)         = ctx.eval(code.to_s)
-      def eval_void(code)    = ctx.eval_void(code.to_s)
+      def eval(code)         = walks_guarded { ctx.eval(code.to_s) }
+      def eval_void(code)    = walks_guarded { ctx.eval_void(code.to_s) }
       def call(name, *args)
         result = outermost { ctx.call(name, *args) }
         ScriptCache.warm_pending!
@@ -337,30 +337,40 @@ module Capybara
       # returned (`retire_realm`).
       # (…the drain none after a request that raised — no page microtask runs behind a call that failed — and none of its
       # own able to replace the request's result or exception: a terminated runaway, a host fn raising, logged)
-      # (…and, the outermost one raising, the walks over a document's tree it left open ended — a termination runs no
-      # `finally` of the bindings', whose unload counters would otherwise stay raised, every navigation of those documents
-      # ignored from then on: those it began, numbered after the last as it was made — not one a script below it began,
-      # which entered V8 some other way (a loop step, a document's load) and is under way still: unload_walks.rs
-      # `end_walks_since`)
-      private def outermost
+      # (…its walks over a document's tree guarded: `walks_guarded`)
+      private def outermost(&)
         @call_depth = (depth = @call_depth.to_i) + 1
-        walk_mark = Native.last_walk if depth.zero?
-        result = yield
+        result = depth.zero? ? walks_guarded(top: true, &) : yield
         @call_depth = depth
         dispose_retired_realms(drain: true) if depth.zero? && @retired_realms
         result
       ensure
         if @call_depth != depth
           @call_depth = depth
-          if depth.zero?
-            end_walks_since(walk_mark) if walk_mark
-            dispose_retired_realms(drain: false) if @retired_realms
-          end
+          dispose_retired_realms(drain: false) if depth.zero? && @retired_realms
         end
       end
-      private def end_walks_since(mark)
-        ended = @ctx&.call('__csimEndWalksSince', mark).to_i
-        @browser.log_console('warn', "#{ended} unload walk(s) left open by a failed call ended") if ended.positive?
+      # An entry of the host's into V8 none of its requests is under (`outermost`'s, an event-loop step, a document's
+      # load, an eval): the walks over a document's tree and the frame builds it left open as it raised ended — a
+      # termination runs no `finally` of the bindings', whose unload counters would otherwise stay raised, every
+      # navigation of those documents ignored from then on, and whose build marks set, the frame never built again. Only
+      # those it began, numbered after the last as it was entered: not one under way below it, which another entry began
+      # (unload_walks.rs `end_left_open_since`).
+      # (`top`: none is, the caller's own depth count aside)
+      private def walks_guarded(top: @call_depth.to_i.zero?)
+        return yield unless top
+
+        mark = Native.last_mark
+        done = false
+        result = yield
+        done = true
+        result
+      ensure
+        end_left_open_since(mark) if mark && !done
+      end
+      private def end_left_open_since(mark)
+        ended = @ctx&.call('__csimEndLeftOpenSince', mark).to_i
+        @browser.log_console('warn', "#{ended} unload walk(s) / frame build(s) left open by a failed entry ended") if ended.positive?
       rescue StandardError
         nil
       end
@@ -429,7 +439,7 @@ module Capybara
         # loops themselves (timers.js `drainChildRealms`), so this one call covers
         # child frames too — no separate Ruby-side fan-out (which would
         # double-advance their clocks and fire intervals twice).
-        max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i)
+        walks_guarded { max_ms.nil? ? ctx.call('__drainTimers') : ctx.call('__drainTimers', max_ms.to_i) }
       end
 
       # One event-loop step (task → microtask-checkpoint → render). Returns the
@@ -440,7 +450,7 @@ module Capybara
       def run_loop_step(max_ms, max_iter = 10_000, yield_on_gen: false)
         # `__runLoopStep` steps child iframe realms itself (timers.js
         # `drainChildRealms`), folding their fired/dirtied into the result.
-        r = ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen)
+        r = walks_guarded { ctx.call('__runLoopStep', max_ms.to_i, max_iter.to_i, !!yield_on_gen) }
         return { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
 
         @clock = r['now'].to_f
@@ -1407,7 +1417,7 @@ module Capybara
         # window's (`create_window_realm`).
         retarget_window_proxies(retarget_from, realm.id) if retarget_from >= 0
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
-        realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
+        walks_guarded { realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh) }
         # This document, loaded, refreshes the service-worker client record it made as it began loading
         # (bridge.entry.js __csimLoadDocument) — an UNCONTROLLED context is still a client of its origin
         # and must show up in `matchAll({includeUncontrolled: true})`.
@@ -1424,7 +1434,7 @@ module Capybara
         unless js_url_source.nil? || realm.call('__csimScriptsSandboxed')
           begin
             result = realm.call('__csimEvaluateJavascriptSource', js_url_source.to_s)
-            realm.call('__csimLoadDocument', result, 'text/html') if result.is_a?(String)
+            walks_guarded { realm.call('__csimLoadDocument', result, 'text/html') } if result.is_a?(String)
           rescue StandardError => e
             @browser.log_console('warn', "javascript: URL frame threw: #{e.message}")
           end
@@ -1488,7 +1498,7 @@ module Capybara
         # (…its window's session history told of it, before its scripts read its `history`)
         realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer, *entry[2])
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
-        realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
+        walks_guarded { realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh) }
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
       end
@@ -1591,7 +1601,7 @@ module Capybara
         window_realms_changed
         retarget_window_proxies(retarget_from, realm.id) if retarget_from
         if initial
-          realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh)
+          walks_guarded { realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh) }
           # As in create_frame_realm: an auxiliary window is a client of its origin too.
           realm.call('__csim_swReportClient') rescue nil
           # (…a new window's initial about:blank completely loaded as it is made, firing no load: bridge.entry.js

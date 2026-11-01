@@ -11,24 +11,35 @@
 //   are destroyed (the host disposes their realms, `dispose_order`); one a handler took out of the tree since skipped —
 //   and, its unloading begun (its children taken), destroyed with the rest: its removal left it to the walk, its counter
 //   raised. Which of its child navigables goes first HTML leaves open ("in what order?"): tree order, the prompt's.
-// A walk lives no longer than the host's call into the isolate it began in: one a termination left open (no `finally`
-// of the bindings' ran) is ended as the call returns (`end_walks_since`), its counters lowered — those begun since the
-// call did (`MADE`, which the host reads as it makes the call: `last_walk`), not one a script the host did not enter
-// through that call began, still under way below it.
+// A walk lives no longer than the host's entry into the isolate it began in — and so does a frame's build, whose mark
+// keeps a read of the frame's window it makes from building it again (frame_navigation.rs `BUILDING`): one a
+// termination left open (no `finally` of the bindings' ran) is ended as the entry returns (`end_left_open_since`), a
+// walk's counters lowered, a build's mark cleared — those begun since the entry was made (`MADE`, which the host reads
+// as it enters: `last_mark`), not one a script below it began, which another entry made and is under way still.
 
 use std::collections::HashMap;
 
-use crate::dom::{realm_id, RealmArena};
+use crate::dom::{nid_arg, realm_id, NodeId, RealmArena};
 
 #[derive(Default)]
 pub(crate) struct Walks {
     open: HashMap<u32, Walk>,
+    // …and the frames being built, each container with its build's number.
+    builds: HashMap<NodeId, u32>,
 }
 
-// The number of the last walk begun — one count across the process, which the host reads without entering an isolate.
+// The number of the last walk or build begun — one count across the process, which the host reads without entering an
+// isolate.
 static MADE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-pub(crate) fn last_walk() -> u32 {
+pub(crate) fn last_mark() -> u32 {
     MADE.load(std::sync::atomic::Ordering::Acquire)
+}
+fn next_mark() -> u32 {
+    MADE.fetch_add(1, std::sync::atomic::Ordering::AcqRel).wrapping_add(1)
+}
+// Whether `id` was begun after `mark`.
+fn begun_after(id: u32, mark: u32) -> bool {
+    id.wrapping_sub(mark) as i32 > 0
 }
 
 struct Walk {
@@ -58,7 +69,7 @@ impl RealmArena {
             Kind::Prompt { .. } => self.inclusive_descendant_realms(root).into_iter().rev().map(|r| (r, false, 0)).collect(),
             Kind::Unload => vec![(root, false, 0)],
         };
-        let id = MADE.fetch_add(1, std::sync::atomic::Ordering::AcqRel).wrapping_add(1);
+        let id = next_mark();
         self.navigables.walks.open.insert(id, Walk { root, kind, pending, reached: Vec::new(), raised: Vec::new(), removed: Vec::new() });
         id
     }
@@ -150,20 +161,51 @@ impl RealmArena {
         }
         walk.removed
     }
-    // Every walk begun after walk number `mark` still open ended — none should be: the call into the isolate the host
+    // Every walk and build begun after number `mark` still open ended — none should be: the host's entry into the isolate
     // made as `mark` was the last, which has returned, left them (a termination). Returns how many.
-    pub(crate) fn end_walks_since(&mut self, mark: u32) -> usize {
-        let ids: Vec<u32> = self.navigables.walks.open.keys().copied().filter(|&id| id.wrapping_sub(mark) as i32 > 0).collect();
+    pub(crate) fn end_left_open_since(&mut self, mark: u32) -> usize {
+        let ids: Vec<u32> = self.navigables.walks.open.keys().copied().filter(|&id| begun_after(id, mark)).collect();
         for &id in &ids {
             self.end_walk(id);
         }
-        ids.len()
+        let builds: Vec<NodeId> = self.navigables.walks.builds.iter().filter(|&(_, &id)| begun_after(id, mark)).map(|(&c, _)| c).collect();
+        for &container in &builds {
+            self.end_frame_build(container);
+        }
+        ids.len() + builds.len()
     }
+    // `container`'s frame begins to be built — false where it is being built already (a read of its window the build
+    // makes, which the build answers with none).
+    pub(crate) fn begin_frame_build(&mut self, container: NodeId) -> bool {
+        if self.frame_nav_has(container, crate::frame_navigation::BUILDING) {
+            return false;
+        }
+        self.set_frame_nav(container, crate::frame_navigation::BUILDING, true);
+        self.navigables.walks.builds.insert(container, next_mark());
+        true
+    }
+    pub(crate) fn end_frame_build(&mut self, container: NodeId) {
+        self.navigables.walks.builds.remove(&container);
+        self.set_frame_nav(container, crate::frame_navigation::BUILDING, false);
+    }
+}
+
+// __dom.frameBuildBegin(containerNid) -> whether the frame's build begins (`begin_frame_build`).
+fn frame_build_begin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return rv.set_bool(false) };
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).begin_frame_build(container));
+}
+// __dom.frameBuildEnd(containerNid) — the frame's build done (`end_frame_build`).
+fn frame_build_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(container) = nid_arg(scope, &args, 0) else { return };
+    let cid = realm_id(scope, &args);
+    crate::dom::realm(scope, cid).end_frame_build(container);
 }
 
 pub(crate) fn define(native: magnus::RModule) -> Result<(), magnus::Error> {
     use magnus::Module;
-    native.define_module_function("last_walk", magnus::function!(last_walk, 0))?;
+    native.define_module_function("last_mark", magnus::function!(last_mark, 0))?;
     Ok(())
 }
 
@@ -173,7 +215,9 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "walkNext", walk_next, context_id);
     crate::dom::register(scope, ns, "walkDisposeOrder", walk_dispose_order, context_id);
     crate::dom::register(scope, ns, "walkEnd", walk_end, context_id);
-    crate::dom::register(scope, ns, "endWalksSince", end_walks_since, context_id);
+    crate::dom::register(scope, ns, "endLeftOpenSince", end_left_open_since, context_id);
+    crate::dom::register(scope, ns, "frameBuildBegin", frame_build_begin, context_id);
+    crate::dom::register(scope, ns, "frameBuildEnd", frame_build_end, context_id);
 }
 
 // __dom.promptWalk(realm, traversal) -> the walk asking realm `realm`'s document and its descendants' whether they may
@@ -213,12 +257,12 @@ fn walk_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     let items: Vec<v8::Local<'_, v8::Value>> = removed.iter().map(|&r| v8::Integer::new(scope, r).into()).collect();
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
-// __dom.endWalksSince(mark) -> how many walks begun after walk number `mark` were left open, each ended
-// (`end_walks_since`).
-fn end_walks_since(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.endLeftOpenSince(mark) -> how many walks and builds begun after number `mark` were left open, each ended
+// (`end_left_open_since`).
+fn end_left_open_since(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let mark = args.get(0).uint32_value(scope).unwrap_or(0);
     let cid = realm_id(scope, &args);
-    let ended = crate::dom::realm(scope, cid).end_walks_since(mark);
+    let ended = crate::dom::realm(scope, cid).end_left_open_since(mark);
     rv.set_uint32(u32::try_from(ended).unwrap_or(u32::MAX));
 }
 
@@ -363,12 +407,21 @@ mod tests {
         let (mut arena, _) = page();
         let running = arena.begin_walk(0, Kind::Unload);
         assert_eq!(arena.walk_next(running), Some(3));
-        let mark = last_walk();
+        let mark = last_mark();
         let unload = arena.begin_walk(2, Kind::Unload);
         assert_eq!(arena.walk_next(unload), Some(3));
         let prompt = arena.begin_walk(1, Kind::Prompt { asking: None, traversal: false });
         assert_eq!(arena.walk_next(prompt), Some(1));
-        assert_eq!(arena.end_walks_since(mark), 2);
+        assert_eq!(arena.end_left_open_since(mark), 2);
+        // (…and a frame's build mark the same way: one an earlier entry's build set stands)
+        let (mut builds, [a, b, _]) = page();
+        assert!(builds.begin_frame_build(a));
+        let mark = last_mark();
+        assert!(builds.begin_frame_build(b) && !builds.begin_frame_build(b));
+        assert_eq!(builds.end_left_open_since(mark), 1);
+        assert!(builds.begin_frame_build(b) && !builds.begin_frame_build(a));
+        builds.end_frame_build(a);
+        assert!(builds.begin_frame_build(a));
         assert!(arena.unloading(0) && arena.unloading(2) && arena.unloading(3) && !arena.unloading(1));
         assert_eq!(arena.walk_next(running), Some(2));
         arena.end_walk(running);
