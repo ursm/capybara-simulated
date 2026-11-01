@@ -14,6 +14,18 @@ RSpec.describe 'Headers' do
     s
   }
 
+  # (…a no-CORS Request's refill appends each header of its source's list, the guard judging it with those of its name
+  # appended before it, as Fetch "append" does: of two 100-byte `accept-language` fields one is kept, Chrome's figure)
+  it 'refills a no-CORS request judging each header with those before it' do
+    got = session.evaluate_script(<<~JS)
+      (() => {
+        const r = new Request('/x', {headers: [['accept-language', 'a'.repeat(100)], ['accept-language', 'b'.repeat(100)]]});
+        return new Request(r, {mode: 'no-cors'}).headers.get('accept-language');
+      })()
+    JS
+    expect(got).to eq('a' * 100)
+  end
+
   it "throws Chrome's errors" do
     got = session.evaluate_script(<<~JS)
       (() => {

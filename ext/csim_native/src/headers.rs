@@ -65,12 +65,21 @@ impl HeaderList {
     fn values<'a>(&'a self, key: &'a [u8]) -> impl Iterator<Item = &'a [u8]> + 'a {
         self.headers.iter().filter(move |h| h.key == key).map(|h| &h.value[..])
     }
-    // Whether the guard forbids writing `key` as `value` — `combined`, the value it would have once appended to, for the
-    // no-CORS guard, which judges what the header would hold (Fetch "append" step 3).
-    fn forbids(&self, key: &[u8], value: &[u8], combined: &[u8]) -> bool {
+    // Whether the guard forbids writing `key` as `value` — appended (`appends`) or set. The no-CORS guard judges what the
+    // header would hold: an appended value combined with the name's values before it (Fetch "append" step 3), a set one
+    // as it is ("set" step 2).
+    fn forbids(&self, key: &[u8], value: &[u8], appends: bool) -> bool {
         match self.guard {
             GUARD_REQUEST => forbidden_request_header(key, value),
-            GUARD_REQUEST_NO_CORS => !no_cors_safelisted_request_header(key, combined),
+            GUARD_REQUEST_NO_CORS if appends => match self.get(key) {
+                Some(mut combined) => {
+                    combined.extend_from_slice(b", ");
+                    combined.extend_from_slice(value);
+                    !no_cors_safelisted_request_header(key, &combined)
+                }
+                None => !no_cors_safelisted_request_header(key, value),
+            },
+            GUARD_REQUEST_NO_CORS => !no_cors_safelisted_request_header(key, value),
             GUARD_RESPONSE => forbidden_response_header(key),
             _ => false,
         }
@@ -88,15 +97,7 @@ impl HeaderList {
         if self.guard == GUARD_IMMUTABLE {
             return IMMUTABLE;
         }
-        let combined = match self.get(&key) {
-            Some(mut v) => {
-                v.extend_from_slice(b", ");
-                v.extend_from_slice(value);
-                v
-            }
-            None => value.to_vec(),
-        };
-        if !self.forbids(&key, value, &combined) {
+        if !self.forbids(&key, value, true) {
             self.push(key, name, value);
         }
         WRITTEN
@@ -108,7 +109,7 @@ impl HeaderList {
         if self.guard == GUARD_IMMUTABLE {
             return IMMUTABLE;
         }
-        if self.forbids(&key, value, value) {
+        if self.forbids(&key, value, false) {
             return WRITTEN;
         }
         match self.find(&key) {
@@ -178,11 +179,11 @@ impl HeaderList {
         self.headers.iter().map(|h| (&h.name[..], &h.value[..])).collect()
     }
     // A copy of `from`'s list into this one — "filled" through this one's guard where `refill` (a non-empty RequestInit
-    // empties a Request's headers and fills them again with the copy). Its values are valid already, so they go as they
-    // are.
+    // empties a Request's headers and fills them again with the copy: each header appended, the no-CORS guard judging it
+    // with those of its name appended before it). Its values are valid already, so they go as they are.
     fn copy_from(&mut self, from: &HeaderList, refill: bool) {
         for h in &from.headers {
-            if !refill || !self.forbids(&h.key, &h.value, &h.value) {
+            if !refill || !self.forbids(&h.key, &h.value, true) {
                 self.push(h.key.clone(), &h.name, &h.value);
             }
         }
@@ -418,7 +419,7 @@ fn has_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
         return;
     }
     let Some(l) = list(scope, args.get(0)) else { return rv.set_bool(false) };
-    rv.set_bool(l.borrow().get(&name.to_ascii_lowercase()).is_some());
+    rv.set_bool(l.borrow().find(&name.to_ascii_lowercase()).is_some());
 }
 // __dom.headersSetCookies(list) -> its `set-cookie` values, each its own (getSetCookie()).
 fn set_cookies_op(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
@@ -562,6 +563,13 @@ mod tests {
         l.append(b"accept", &[b'a'; 100]);
         l.append(b"accept", &[b'b'; 100]);
         assert_eq!(l.get(b"accept").map(|v| v.len()), Some(100));
+        // (…a refill judging each header with those of its name before it, as an append does)
+        let mut from = HeaderList::default();
+        from.append(b"accept-language", &[b'a'; 100]);
+        from.append(b"accept-language", &[b'b'; 100]);
+        let mut to = HeaderList { guard: GUARD_REQUEST_NO_CORS, ..HeaderList::default() };
+        to.copy_from(&from, true);
+        assert_eq!(to.get(b"accept-language").map(|v| v.len()), Some(100));
         let mut l = HeaderList { guard: GUARD_IMMUTABLE, ..HeaderList::default() };
         assert_eq!(l.set(b"a", b"b"), IMMUTABLE);
     }
