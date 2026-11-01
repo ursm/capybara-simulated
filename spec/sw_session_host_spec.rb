@@ -47,7 +47,7 @@ RSpec.describe "the session's service workers", :every_host_local, :https do
       when '/reg'
         html.(<<~HTML)
           <title>reg</title><a id=talk href=/talk target=_blank>talk</a><a id=nav href=/sw/x target=_blank>nav</a>
-          <a id=slow href=/wait?/slow target=_blank>slow</a><a id=slow-net href=/wait?/slow-net target=_blank>slow-net</a>
+          <a id=register href=/register target=_blank>register</a><a id=slow href=/wait?/slow target=_blank>slow</a><a id=slow-net href=/wait?/slow-net target=_blank>slow-net</a>
           <script>
             window.heard = [];
             navigator.serviceWorker.onmessage = (e) => heard.push(e.data);
@@ -79,6 +79,8 @@ RSpec.describe "the session's service workers", :every_host_local, :https do
         HTML
       when '/wait'
         html.("<script>fetch(location.search.slice(1)).then((r) => r.text()).then((t) => document.body.insertAdjacentHTML('beforeend', `<p id=done>${t}</p>`))</script>")
+      when '/register'
+        html.("<script>navigator.serviceWorker.register('/sw.js', {scope: '/r/'}).then(() => document.body.insertAdjacentHTML('beforeend', '<p id=registered>r</p>'))</script>")
       when '/server-slow'
         sleep 0.6
         [200, {'content-type' => 'text/plain'}, ['SERVER']]
@@ -110,6 +112,14 @@ RSpec.describe "the session's service workers", :every_host_local, :https do
       session.find("##{link}").click
       session.within_window(session.windows.last) { expect(session).to have_css('#done', text: text, wait: 5) }
     end
+  end
+
+  # (…and what the host's job tells it: its register() settles as the host's event loop runs the job)
+  it "has a noopener window's wait see its register() settle" do
+    session.visit 'https://a.test/reg'
+    expect(session).to have_title('ready')
+    session.find('#register').click
+    session.within_window(session.windows.last) { expect(session).to have_css('#registered', wait: 5) }
   end
 
   it "navigates a noopener window's client as the worker asks, the window stepped as the worker's page waits" do

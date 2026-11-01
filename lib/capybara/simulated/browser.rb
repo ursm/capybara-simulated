@@ -565,6 +565,11 @@ module Capybara
       # own runs yet that could keep it, so only a hang reaches this; a loaded machine's slow boot is waited out, the round
       # trip's budget counted from when its script begins to run (`record[:running_since]`, `worker_deadline`).
       WORKER_BOOT_GUARD        = 10.0
+      # …and how long a request awaited in place (`sw_direct_reply`: a sync XHR, a worker's main script or import, a
+      # document's script) waits for its service worker's answer: the request is the worker's once asked — it may have
+      # fetched it already, or done what a POST does — so no network fall-through follows; only a hang reaches this, the
+      # request then a network error.
+      WORKER_ANSWER_GUARD      = 10.0
       # Max wall time an event-loop step holds the virtual clock for a reply its JavaScript cannot see — a fetch's from a
       # service worker, a message's ack, a socket's echoed close (`@clock_holds`) — spent once across the steps.
       CLOCK_HOLD_BUDGET        = 1.0
@@ -5164,7 +5169,7 @@ module Capybara
         # …and the registry's worker, its script URL and TYPE what every realm's ServiceWorker of it reflects (an
         # update()/re-register from any realm parse-checks and respawns as its newest worker's type).
         Native.sw_worker_new(@sw_partition, handle, site.to_s, target, worker_type(script_type)) if service
-        @workers[handle] = record
+        workers_store(handle, record)
         thread = Thread.new do
           Thread.current.report_on_exception = false
           run_worker(
@@ -5213,6 +5218,16 @@ module Capybara
         handle
       end
 
+      # The window's workers by handle are written copy-on-write, under the lock: a nested worker is made, and terminated,
+      # on its parent's thread while the window's iterates them — which a write in place raises in, as the hash is
+      # iterated — and a reader keeps the registry it read.
+      private def workers_store(handle, record) = @worker_init_lock.synchronize { @workers = @workers.merge(handle => record) }
+      private def workers_drop(handle)
+        @worker_init_lock.synchronize do
+          @workers[handle].tap {|w| @workers = @workers.except(handle) if w }
+        end
+      end
+
       # A worker's type, as its options give it: 'classic' where they give none.
       private def worker_type(script_type) = script_type.to_s.empty? ? 'classic' : script_type.to_s
 
@@ -5236,8 +5251,11 @@ module Capybara
         # replies can hand back exactly what it holds. A LISTEN-ONLY worker never answers at all,
         # so without the per-worker tally its share is only released by the reset that fires when
         # the LAST worker goes — which never happens while a service worker is registered.
-        @worker_host.owe(WorkerHost::POSTED, 1)
-        w[:in_flight] = w[:in_flight].to_i + 1
+        # (…a shared worker's every message a connection, which it answers through the port, never a reply of its own)
+        unless w[:shared_key]
+          @worker_host.owe(WorkerHost::POSTED, 1)
+          w[:in_flight] = w[:in_flight].to_i + 1
+        end
         w[:inbox] << data.to_s
       end
 
@@ -5533,8 +5551,10 @@ module Capybara
       rescue JSON::ParserError
         nil
       end
-      # …its reply as the wire carries it, JSON.
-      private def sw_direct_reply(sw_handle, req_json, realm)
+      # …its reply as the wire carries it, JSON — a network error's where none came (WORKER_ANSWER_GUARD). (…`follower` the
+      # window whose thread waits, whose clock follows the awaited worker's: `window_follows_awaited_worker`)
+      NETWORK_ERROR_REPLY = '{"networkError":true}'
+      private def sw_direct_reply(sw_handle, req_json, realm, follower: self)
         w = @workers[sw_handle.to_i] or return nil
         fid   = @worker_host.await_direct
         epoch = @worker_host.owe(WorkerHost::FETCH, 1)
@@ -5542,7 +5562,7 @@ module Capybara
         # (…asked by another worker, whose wait the window's event loop goes on beside: the asked one due now, to take it at
         # the window's time — set once it is in the inbox, so the tick that clears it comes behind it: `worker_due_at`)
         w[:asked] = true unless Thread.current == @main_thread
-        await_worker_reply(fid, w)
+        await_worker_reply(fid, w, budget: WORKER_ANSWER_GUARD, follower:) || NETWORK_ERROR_REPLY
       ensure
         if fid
           @worker_host.forget_reply(fid)
@@ -5560,7 +5580,10 @@ module Capybara
       # with it, in the lockstep: nothing of the window's touched from that thread, whose isolate is not the page's; the
       # waiting worker, blocked, its timers unable to run, no worker the window's steps wait on (`lockstep_worker?`, its
       # `:blocked`), nor one the window's settle parks for: `worker_awaits_worker?`)
-      private def await_worker_reply(fetch_id, worker = nil)
+      # (…`budget` the wall seconds it waits; `follower` the window whose clock follows, with nothing delivered meanwhile —
+      # a direct reply's caller is a script still running, a sync XHR's `send()`, which no task may run inside: what the
+      # worker posted waits for that window's next step — or, none, this one, delivering at once: a navigation's)
+      private def await_worker_reply(fetch_id, worker = nil, budget: WORKER_ROUND_TRIP_BUDGET, follower: nil)
         waiting = Thread.current[:csim_worker_record] unless Thread.current == @main_thread
         if waiting
           waiting[:blocked]  = waiting[:blocked].to_i + 1
@@ -5568,7 +5591,7 @@ module Capybara
           waiting[:awaiting] = fetch_id
         end
         worker[:awaited] = worker[:awaited].to_i + 1 if worker && !waiting
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + budget
         while (left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).positive? && @worker_host.awaiting?(fetch_id)
           reply = @worker_host.await_reply(fetch_id, [left, WORKER_POLL_INTERVAL].min) and return reply
         end
@@ -5580,18 +5603,29 @@ module Capybara
         end
         if worker && !waiting
           worker[:awaited] -= 1
-          window_follows_awaited_worker(worker)
+          window_follows_awaited_worker(worker, follower)
         end
       end
       # …the time the awaited worker moved on while the window waited — a service worker's `respondWith` timer — passed
       # for the window too: its clock moved to the worker's, no task of its run; and what the worker posted meanwhile
       # delivered at once, each a task queued at that time — before the page's timers due after it, after those due
       # before it, which are overdue now and run first: in the order of their times (`worker_due_within`).
-      private def window_follows_awaited_worker(worker)
-        return unless worker[:awaited].zero? && worker[:now] && worker[:now] > @runtime.clock
+      # (…`follower` a window inside running script: its clock alone moved)
+      private def window_follows_awaited_worker(worker, follower = nil)
+        return unless worker[:awaited].zero? && worker[:now]
 
-        @runtime.realm_direct_call(0, '__csimClockAtLeast', worker[:now])
-        deliver_worker_messages
+        if follower
+          follower.clock_at_least(worker[:now])
+        elsif clock_at_least(worker[:now])
+          deliver_worker_messages
+        end
+      end
+      # …this window's clock moved to `at` where it stands before it, no task of its run: whether it moved.
+      def clock_at_least(at)
+        return false unless at > @runtime.clock
+
+        @runtime.realm_direct_call(0, '__csimClockAtLeast', at)
+        true
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Counted as a fetch
@@ -5639,11 +5673,12 @@ module Capybara
       # its caller waits on. Its wire JSON, or nil for the network — a worker gone, or one still activating, which the
       # caller cannot wait for in place: the window's thread would be holding the activation its `activate` waitUntil may
       # need (the script-subresource path's rule, sw_script_subresource_fetch).
-      def service_worker_sync_fetch(handle, req_json, realm_id)
-        return sw_host.service_worker_sync_fetch(handle, req_json, sw_realm_key(realm_id)) unless sw_host?
-        return nil unless @workers[handle.to_i] && sw_live?(handle) && Native.sw_worker_activated(@sw_partition, handle.to_i)
+      def service_worker_sync_fetch(handle, req_json, realm_id) = sw_host.sw_dispatch_sync_fetch(handle, req_json, sw_realm_key(realm_id), self)
+      # …the host's dispatch of it, `follower` the window whose script waits.
+      def sw_dispatch_sync_fetch(handle, req_json, realm_key, follower)
+        return nil if !@workers[handle.to_i] || sw_redundant?(handle) || !sw_live?(handle) || !Native.sw_worker_activated(@sw_partition, handle.to_i)
 
-        sw_direct_reply(handle, sw_fetch_request(req_json.to_s), realm_id.to_i)
+        sw_direct_reply(handle, sw_fetch_request(req_json.to_s), realm_key.to_i, follower:)
       end
 
       # A controlled client cancelled a streaming respondWith body (`response.body.cancel()` or an
@@ -6117,10 +6152,12 @@ module Capybara
         # (…what is due already — a timer the window moved past since the worker last ran, a request waiting, a worker an
         # answer let go on — run first, at the window's time now: what it runs may leave another due now, a request one
         # worker makes of another, a round of each at most WORKER_DUE_NOW_ROUNDS)
+        # (…the rounds one wait, their deadlines from its start)
+        start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         WORKER_DUE_NOW_ROUNDS.times do
           break unless worker_resuming? || ((due_at = worker_next_timer_at) && due_at <= @runtime.clock)
 
-          run_workers_due
+          run_workers_due(start)
         end
         at = worker_next_timer_at or return nil
         due = [(at - @runtime.clock).ceil, FRAME_STEP_MS].max
@@ -6135,7 +6172,8 @@ module Capybara
       # of before it is sent.
       # What it returns is the real time the wait took of workers RUNNING their scripts — the step's round-trip budget
       # (`worker_due_within`'s `waited`) — a booting worker's none of it.
-      def run_workers_due
+      # (…`start` when the wait began: a pass of several runs one wait — `worker_due_within`)
+      def run_workers_due(start = Process.clock_gettime(Process::CLOCK_MONOTONIC))
         now = @runtime.clock
         due = @workers.each_value.select {|w| (at = worker_due_at(w)) && at <= now }
         return 0.0 if due.empty? && !worker_resuming?
@@ -6146,15 +6184,15 @@ module Capybara
           w[:asked] = false
           w[:inbox] << {kind: 'tick', to: now}
         end
-        start   = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        booting = @workers.values.reject {|w| w[:running_since] }
+        began   = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        booting = due.reject {|w| w[:running_since] }
         due.each {|w| w[:lagging] = !tick_answered?(w, start) }
         await_resumed_workers(start)
         deliver_worker_messages
         finished = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        # (…from when the last of those booting as it began ran its script — none where one still has not)
-        running = booting.empty? ? start : booting.map {|w| w[:running_since] || finished }.max
-        finished - [running, start].max
+        # (…from when the last of those due booting as it began ran its script — none of it where one still has not)
+        running = booting.empty? ? began : booting.map {|w| w[:running_since] || finished }.max
+        finished - [running, began].max
       end
       # …and a worker the ticks' work let go on — one waiting in place on a service worker's answer the tick gave
       # (`await_worker_reply`: a main script, a sync XHR), its `:resuming` — waited for too (`worker_deadline` of `start`),
@@ -6162,7 +6200,7 @@ module Capybara
       # came, not as late as the window has gone on by when its thread gets to it.
       private def await_resumed_workers(start)
         @workers.values.each do |w|
-          while w[:resuming] && w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_deadline(w, start)
+          while w[:resuming] && !w[:lagging] && w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_deadline(w, start)
             sleep WORKER_RESUME_POLL
           end
         end
@@ -6177,7 +6215,7 @@ module Capybara
       WORKER_RESUME_POLL = 0.001
       WORKER_DUE_NOW_ROUNDS = 4
       # …whether one is (`await_resumed_workers`).
-      private def worker_resuming? = !@workers.empty? && @workers.each_value.any? {|w| w[:resuming] && w[:thread]&.alive? }
+      private def worker_resuming? = !@workers.empty? && @workers.each_value.any? {|w| w[:resuming] && !w[:lagging] && w[:thread]&.alive? }
       # …whether worker `w` answered its tick, sent at `start`, in time (`worker_deadline`) — or, blocked meanwhile on another
       # worker's answer (`await_worker_reply`: a main script, a sync XHR a service worker answers, which the window's steps
       # let it make), is waited for no more and counts as answered: it is not lagging, it waits on the window.
@@ -6313,6 +6351,8 @@ module Capybara
       # Service-worker registration state is per-realm (each has its own registration objects), so
       # anything that changes it has to reach all of them (`sw_broadcast`).
       def broadcast_to_realms(fn, *args)
+        # (…from whichever window's step tells it: `realm_told`)
+        invalidate_find_cache
         @runtime.call(fn, *args) rescue nil
         @runtime.frame_realm_ids.each do |rid|
           @runtime.realm_call(rid, fn, *args) if @runtime.frame_realm_alive?(rid)
@@ -6604,7 +6644,7 @@ module Capybara
           # The reap must still happen, and happen HERE: it releases the reply-pending counters the
           # worker still holds and resets them once the last worker is gone, without which
           # `polling?` stays true for the rest of the session.
-          @workers.delete(handle)
+          workers_drop(handle)
           detach_worker(handle, w)
           # …and stop the JS half, which `detach_worker`'s inbox message cannot: a worker inside a
           # call reads no messages. This does NOT block — a mutex and one `terminate` — so it does
@@ -7415,7 +7455,7 @@ module Capybara
       end
 
       def worker_terminate(handle)
-        w = @workers.delete(handle.to_i)
+        w = workers_drop(handle.to_i)
         return unless w
         # A parent worker takes its NESTED workers with it (their Worker objects lived in
         # its isolate — no one can reach them once it's gone).
@@ -8903,7 +8943,7 @@ module Capybara
           end
           warn "[capybara-simulated] worker thread still running at the session boundary (#{t.inspect})" unless joined
         end
-        @workers.clear
+        @worker_init_lock.synchronize { @workers = {} }
         @worker_outbox.clear
         @worker_outbox_head = nil
         @held_controller_changes.clear
@@ -8990,8 +9030,7 @@ module Capybara
       # origin (blob_rules.rs `usable`): [bytes, type], or nil.
       private def worker_blob(url, worker_url)
         origin = ->(u) { url_origin(u.to_s.delete_prefix('blob:')) }
-        theirs = origin.(url)
-        return nil unless theirs.nil? || theirs == origin.(worker_url)
+        return nil unless origin.(url) == origin.(worker_url)
 
         maker, site = Native.blob_registry_partition(@blob_window, url)
         return nil unless maker && site == blob_partition_site

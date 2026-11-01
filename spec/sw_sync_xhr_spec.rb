@@ -27,6 +27,10 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
         }
         if (tag === 'redirect') return e.respondWith(Response.redirect('/data.txt?tag=after', 302));
         if (tag === 'net') return;
+        if (tag === 'slow') {
+          setTimeout(() => self.clients.get(e.clientId).then((c) => c.postMessage('from-sw')), 100);
+          return e.respondWith(new Promise((res) => setTimeout(() => res(new Response('sw-slow')), Number(new URL(e.request.url).searchParams.get('ms')))));
+        }
         e.respondWith(new Response(`sw:${tag}:${e.request.mode}:${e.clientId ? 'client' : 'none'}`));
       });
     JS
@@ -88,6 +92,25 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
       })
     JS
     expect(got).to eq(['sw:sync:cors:client', 'sw:after:cors:client (redirected)', 'network', 'NetworkError'])
+  end
+
+  # Synchronous for the script that sent it, not a turn of the event loop: the page's microtasks, and a message the worker
+  # posted while it answered, run after the script that called send() — and the answer is waited for however long the
+  # worker takes, the request never made again on the network behind it.
+  it "runs nothing of the page's inside send(), and waits out a slow answer" do
+    session = controlled_session
+    session.execute_script(<<~JS)
+      window.log = [];
+      navigator.serviceWorker.onmessage = (e) => log.push(`message ${e.data}`);
+      Promise.resolve().then(() => log.push('microtask'));
+      for (const ms of [300, 1500]) {
+        const x = new XMLHttpRequest();
+        x.open('GET', `/data.txt?tag=slow&ms=${ms}`, false);
+        x.send();
+        log.push(x.responseText);
+      }
+    JS
+    expect(poll_until { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(['sw-slow', 'sw-slow', 'microtask', 'message from-sw', 'message from-sw'])
   end
 
   it 'is answered by the service worker from a dedicated worker, as its other requests are' do
