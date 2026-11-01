@@ -952,7 +952,7 @@ impl RealmArena {
             return Chosen::None;
         }
         let own = self.live_container(current).and_then(|c| self.get(c).map(|n| (n.realm, c)));
-        if let Some(found) = self.find_in(current, own, name) {
+        if let Some(found) = self.find_in(current, own, name, &|_| true) {
             return found;
         }
         let mut top = current;
@@ -960,7 +960,7 @@ impl RealmArena {
             top = parent;
         }
         if top != current {
-            match self.find_in(top, None, name) {
+            match self.find_in(top, None, name, &|_| true) {
                 None => {}
                 Some(Chosen::TopLevel(_)) if self.top_navigation_allowed(current) => return Chosen::TopLevel(top),
                 Some(found) if !self.sandboxed(current, crate::sandbox::NAVIGATION) => return found,
@@ -974,6 +974,8 @@ impl RealmArena {
         // in a pop-up it opened does too, the pop-up's own document of another origin as well: WPT
         // targeting-cross-origin-nested-browsing-contexts.html)
         let sandboxed = self.sandboxed(current, crate::sandbox::NAVIGATION);
+        // (…each navigable of a window judged by itself, as the search goes on past one it is not familiar with to the next
+        // of the name — a frame by its own document, not its window's)
         // (…none closing: its `close()` takes it out of every lookup by name at once, its discard a task later)
         // (…and none of another browsing context group: HTML's search is of the group's set — a pop-up whose opener's page
         // left the group for another, a cross-origin opener policy's switch, is no window that page's names find, nor it
@@ -983,12 +985,17 @@ impl RealmArena {
             .chain(self.navigables.windows.iter().copied())
             .filter(|&w| w != top && !self.is_dropped(w) && !self.navigables.closed.contains(&self.window_key(w)) && group(w) == group(top));
         let reachable = |w: i32| !sandboxed || self.opener_now(self.window_key(w)) == Some(current);
+        let familiar = |found: &Chosen| match *found {
+            Chosen::TopLevel(window) => self.familiar_with(current, window, 0),
+            Chosen::Frame(Some(frame), _) => self.familiar_with(current, frame, 0),
+            Chosen::Frame(None, (parent, _)) => self.familiar_with_frame_of(current, parent),
+            _ => false,
+        };
         for window in windows.filter(|&w| reachable(w)) {
-            match self.find_in(window, None, name) {
-                Some(Chosen::TopLevel(_)) if self.familiar_with(current, window, 0) => return Chosen::Window(window),
-                Some(found @ Chosen::Frame(Some(frame), _)) if self.familiar_with(current, frame, 0) => return found,
-                Some(found @ Chosen::Frame(None, (parent, _))) if self.familiar_with_frame_of(current, parent) => return found,
-                _ => continue,
+            match self.find_in(window, None, name, &familiar) {
+                Some(Chosen::TopLevel(_)) => return Chosen::Window(window),
+                Some(found) => return found,
+                None => continue,
             }
         }
         Chosen::None
@@ -1204,16 +1211,21 @@ impl RealmArena {
             Choice::New => OpenRoute::New(target.to_vec()),
         }
     }
-    // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants.
-    fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16]) -> Option<Chosen> {
-        if *self.window_name(realm) == *name {
-            return Some(container.map_or(Chosen::TopLevel(realm), |c| Chosen::Frame(Some(realm), c)));
+    // …among `realm`'s navigable (`container`'s, or a top-level one) and its descendants, in tree order: the first of the
+    // name that `accept` takes.
+    fn find_in(&self, realm: i32, container: Option<(i32, NodeId)>, name: &[u16], accept: &dyn Fn(&Chosen) -> bool) -> Option<Chosen> {
+        let own = container.map_or(Chosen::TopLevel(realm), |c| Chosen::Frame(Some(realm), c));
+        if *self.window_name(realm) == *name && accept(&own) {
+            return Some(own);
         }
         let doc = *self.navigables.documents.get(&realm)?;
         for frame in self.leaving_elements(doc, true) {
             let found = match self.frame_realm(frame) {
-                Some(r) => self.find_in(r, Some((realm, frame)), name),
-                None => self.get(frame).is_some_and(|n| self.target_name_is(frame, n, name)).then_some(Chosen::Frame(None, (realm, frame))),
+                Some(r) => self.find_in(r, Some((realm, frame)), name, accept),
+                None => {
+                    let unbuilt = Chosen::Frame(None, (realm, frame));
+                    (self.get(frame).is_some_and(|n| self.target_name_is(frame, n, name)) && accept(&unbuilt)).then_some(unbuilt)
+                }
             };
             if found.is_some() {
                 return found;
@@ -2029,6 +2041,26 @@ mod tests {
         arena.location.set_document_origin(Some("http://b.test".to_owned()));
         arena.navigables.windows.push(3);
         assert_eq!(route(&arena, 3, "pop", true), LinkRoute::Plan(units("pop")));
+        // (…each navigable of another window judged by its own document: in a window of another origin (realm 4) no one
+        // opened, a frame "x" of its origin (realm 5) the page is not familiar with, and one after it of the page's origin
+        // (realm 6) that it is — the search going on past the first to the second, HTML "find a navigable by target name")
+        let other = document(&mut arena, 4);
+        let x5 = element(&mut arena, other, "iframe", &[("name", "x")]);
+        let x6 = element(&mut arena, other, "iframe", &[("name", "x")]);
+        document(&mut arena, 5);
+        document(&mut arena, 6);
+        arena.set_frame_realm(x5, Some(5));
+        arena.set_frame_realm(x6, Some(6));
+        for (r, origin) in [(4, "http://c.test"), (5, "http://c.test"), (6, "http://a.test")] {
+            arena.enter(r);
+            arena.location.set_document_origin(Some(origin.to_owned()));
+        }
+        arena.navigables.windows.push(4);
+        assert_eq!(choose(&arena, 0, "x"), Choice::Frame(x6));
+        // (…and none where neither is a navigable it is familiar with)
+        arena.enter(6);
+        arena.location.set_document_origin(Some("http://c.test".to_owned()));
+        assert_eq!(choose(&arena, 0, "x"), Choice::New);
         // (…a location navigation: a javascript: URL ignored across origins, one its sandbox does not allow refused)
         assert_eq!(arena.navigation_verdict(0, 2, "JavaScript:void 0", false), "navigate");
         assert_eq!(arena.navigation_verdict(3, 2, "javascript:void 0", false), "ignored");
