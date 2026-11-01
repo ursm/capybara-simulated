@@ -2029,19 +2029,30 @@ impl StyleEngine {
     // `animation-name` — which places an animation the engine no longer has (a completed transition nothing holds).
     pub(crate) fn take_animation_events(&mut self, arena: &RealmArena) -> Vec<AnimationEvent> {
         let mut css = self.web_animations.take_css_events();
+        // (…the CSS animations and transitions a cancel event was generated for, each with the owning element it was of:
+        // sorted as owned by it still, before those of it not cancelled — css-animations-2 §2.2, "for the purpose of
+        // sorting events", which a released one would otherwise sort after as an animation of no class)
+        let mut cancelled: Vec<(waapi::AnimationId, waapi::Target, bool)> = Vec::new();
+        for e in css.iter().filter(|e| e.kind.ends_with("cancel")) {
+            if !cancelled.iter().any(|(id, ..)| *id == e.animation) {
+                cancelled.push((e.animation, e.owner.clone(), e.transition));
+            }
+        }
         if css.len() > 1 {
             let mut paths = std::collections::HashMap::new();
             for e in &css {
                 paths.entry(e.owner.node).or_insert_with(|| tree_path(arena, e.owner.node));
             }
+            let live = |e: &crate::css::CssEvent| !cancelled.iter().any(|(id, ..)| *id == e.animation);
             // (Stable: one animation's events keep the order it queued them in.)
             let key = |e: &crate::css::CssEvent| to_microseconds(e.scheduled / 1000.0);
             css.sort_by(|a, b| {
                 key(a).total_cmp(&key(b)).then_with(|| {
-                    (!a.transition, &paths[&a.owner.node], waapi::pseudo_rank(&a.owner.pseudo), a.order, &a.name).cmp(&(
+                    (!a.transition, &paths[&a.owner.node], waapi::pseudo_rank(&a.owner.pseudo), live(a), a.order, &a.name).cmp(&(
                         !b.transition,
                         &paths[&b.owner.node],
                         waapi::pseudo_rank(&b.owner.pseudo),
+                        live(b),
                         b.order,
                         &b.name,
                     ))
@@ -2078,7 +2089,18 @@ impl StyleEngine {
             let mut ids: Vec<waapi::AnimationId> = events.iter().map(|e| e.animation).collect();
             ids.sort_unstable();
             ids.dedup();
-            let rank: std::collections::HashMap<waapi::AnimationId, usize> = self.in_composite_order(arena, ids).into_iter().enumerate().map(|(i, id)| (id, i)).collect();
+            let mut ordered = self.in_composite_order(arena, ids);
+            let model = &self.web_animations;
+            for (id, owner, transition) in &cancelled {
+                let Some(at) = ordered.iter().position(|x| x == id) else { continue };
+                ordered.remove(at);
+                let owned_by = |x: &waapi::AnimationId| {
+                    model.animations[x].css.as_ref().is_some_and(|css| css.owner.as_ref() == Some(owner) && css.transition().is_some() == *transition)
+                };
+                let before = ordered.iter().position(|x| !cancelled.iter().any(|(c, ..)| c == x) && owned_by(x)).unwrap_or(at.min(ordered.len()));
+                ordered.insert(before, *id);
+            }
+            let rank: std::collections::HashMap<waapi::AnimationId, usize> = ordered.into_iter().enumerate().map(|(i, id)| (id, i)).collect();
             let keys: Vec<_> = events.iter().map(|e| (e.scheduled, e.animation, e.class, e.node.is_none())).collect();
             let mut slots: Vec<Option<AnimationEvent>> = events.into_iter().map(Some).collect();
             events = crate::animation_ops::event_order(&keys, &rank).into_iter().filter_map(|i| slots[i].take()).collect();

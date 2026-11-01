@@ -132,6 +132,19 @@ RSpec.describe 'CSS animation and transition events' do
                               'animationiteration:grow:0.28:a:true'])
   end
 
+  # Replacing a running animation by another at the same position: the replaced one's cancel and the new one's start are
+  # due at once, and sorted by composite order — the cancelled one sorted as owned by the element its cancel event is of,
+  # before the animations it owns not cancelled (css-animations-2 §2.2, "for the purpose of sorting events"), where its
+  # release had made it an animation of no class, sorted after them (WPT css-animations event-dispatch.tentative).
+  it 'fires the cancel of a replaced animation before the start of the one replacing it' do
+    s = page('<style>@keyframes other { from { flex-grow: 1 } to { flex-grow: 2 } }</style><div id="a"></div>')
+    watch(s)
+    s.execute_script("document.getElementById('a').style.animation = 'grow 100s'")
+    drain(s, 2)
+    s.execute_script("window.log = []; document.getElementById('a').style.animation = 'other 100s'")
+    expect(drain(s, 3).map {|e| e.split(':').first(2).join(':') }).to eq(%w[animationcancel:grow animationstart:other])
+  end
+
   # A NEGATIVE delay starts the animation part way through, and the first event says how far
   # (Chrome: `grow 300ms linear -100ms` reports `animationstart` at 0.1, not 0).
   it 'reports what a negative delay skipped' do
