@@ -7117,7 +7117,7 @@ module Capybara
         )
         fetch_id = @worker_host.await_navigation
         reply    = begin
-          w[:inbox] << {kind: 'fetch', req:, fetch_id:, reserved: resulting_client_id}
+          w[:inbox] << {kind: 'fetch', req:, fetch_id:}
           await_worker_reply(fetch_id)
         ensure
           @worker_host.forget_reply(fetch_id)
@@ -9394,10 +9394,6 @@ module Capybara
               dispatched = false
               begin
                 rt.call('__csim_swDispatchFetch', msg[:req], msg[:fetch_id], msg[:realm_id])
-                # (…a navigation's left unanswered as its dispatch ended while a `clients.get` of its own reserved client
-                # waits — a wait on the response it withholds — answered from the network at once: workers.js
-                # `__csim_swBreakSelfWait`)
-                rt.call('__csim_swBreakSelfWait', msg[:reserved]) if msg[:reserved]
                 dispatched = true
               ensure
                 sw_deliver_fetch_response(handle, msg[:fetch_id].to_i, WorkerHost::FALLTHROUGH, outbox, msg[:realm_id].to_i) unless dispatched
@@ -9473,6 +9469,10 @@ module Capybara
             # nils its own pending state when the engine completes, so this is a single
             # host call per tick only while a service worker's lifecycle is still open.
             sw_check_phase&.call
+            # (…a service worker that can do nothing more — no message waiting, no timer, nothing in flight — while a
+            # navigation's fetch event it holds waits on a `clients.get` of that navigation's own reserved client: a
+            # deadlock, answered from the network: workers.js `__csim_swBreakSelfWait`)
+            rt.call('__csim_swBreakSelfWait') if service && inbox.empty?
             if busy_held
               @worker_host.release(WorkerHost::BUSY, 1)
               busy_held = false
