@@ -1352,6 +1352,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     crate::dom::register(scope, ns, "navigableRealms", navigable_realms, context_id);
     crate::dom::register(scope, ns, "realmsMadeUnder", realms_made_under, context_id);
     crate::dom::register(scope, ns, "frameContainer", frame_container, context_id);
+    crate::dom::register(scope, ns, "nested", nested, context_id);
     crate::dom::register(scope, ns, "discardNavigable", discard_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigable", parked_navigable, context_id);
     crate::dom::register(scope, ns, "parkedNavigableRealm", parked_navigable_realm, context_id);
@@ -1454,6 +1455,14 @@ fn frame_container(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let cid = realm_id(scope, &args);
     let container = crate::dom::realm(scope, cid).frame_container(cid, realm);
     rv.set(crate::dom::node_value(scope, container));
+}
+
+// __dom.nested() -> whether this realm's document is a child navigable's — a frame's — rather than a top-level
+// traversable's (the page's, a window's): by the tree as it was when the realm became its container's navigable's
+// (`top_level_realm`), so a frame removed since is one still.
+fn nested(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    rv.set_bool(crate::dom::realm(scope, cid).top_level_realm(cid) != cid);
 }
 
 // __dom.realmNavigable(realm) -> which navigable the realm's document is the active document of (`realm_navigable`).
