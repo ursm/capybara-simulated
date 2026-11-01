@@ -8,7 +8,9 @@
 //   not dispose a realm whose script was on the stack, handles.js `discardBrowsingContext`), `end_walk`;
 // - "unload a document and its descendants": each document unloaded after the documents of its child navigables — those
 //   it has as its own unloading begins — its unload counter raised from then until the walk ends, after the documents
-//   are destroyed (the host disposes their realms, `dispose_order`); one a handler took out of the tree since skipped.
+//   are destroyed (the host disposes their realms, `dispose_order`); one a handler took out of the tree since skipped —
+//   and, its unloading begun (its children taken), destroyed with the rest: its removal left it to the walk, its counter
+//   raised. Which of its child navigables goes first HTML leaves open ("in what order?"): tree order, the prompt's.
 // A walk lives no longer than the host's call into the isolate it began in: one a termination left open (no `finally`
 // of the bindings' ran) is ended as the call returns (`end_open_walks`), its counters lowered.
 
@@ -25,13 +27,15 @@ pub(crate) struct Walks {
 struct Walk {
     root: i32,
     kind: Kind,
-    // The documents still to go, by realm, the last next — an unload's each whether its children were taken yet.
-    pending: Vec<(i32, bool)>,
+    // The documents still to go, by realm, the last next — an unload's each whether its children were taken yet, and how
+    // deep under the root it is (a walk goes no deeper than any page can nest: navigables.rs `MAX_NESTING`).
+    pending: Vec<(i32, bool, usize)>,
     // …those the walk reached, in the order it did, and those whose unload counter it raised (not one raised already:
     // a document a walk under way is unloading, which a frame removed by its handler walks again).
     reached: Vec<i32>,
     raised: Vec<i32>,
-    // …and, a prompt's, the documents its handlers took out of the tree as they were asked: to destroy.
+    // …and, a prompt's, the documents its handlers took out of the tree as they were asked: to destroy; an unload's, those
+    // whose navigable a handler destroyed after it took their children, which it destroys with the rest.
     removed: Vec<i32>,
 }
 
@@ -44,8 +48,8 @@ enum Kind {
 impl RealmArena {
     fn begin_walk(&mut self, root: i32, kind: Kind) -> u32 {
         let pending = match kind {
-            Kind::Prompt { .. } => self.inclusive_descendant_realms(root).into_iter().rev().map(|r| (r, false)).collect(),
-            Kind::Unload => vec![(root, false)],
+            Kind::Prompt { .. } => self.inclusive_descendant_realms(root).into_iter().rev().map(|r| (r, false, 0)).collect(),
+            Kind::Unload => vec![(root, false, 0)],
         };
         let walks = &mut self.navigables.walks;
         walks.made = walks.made.wrapping_add(1);
@@ -60,7 +64,7 @@ impl RealmArena {
                 if let Some(done) = asking.take() {
                     self.done_asking(done, walk.root, &mut walk.removed);
                 }
-                let next = std::iter::from_fn(|| walk.pending.pop()).map(|(r, _)| r).find(|&r| self.realm_under(r, walk.root));
+                let next = std::iter::from_fn(|| walk.pending.pop()).map(|(r, ..)| r).find(|&r| self.realm_under(r, walk.root));
                 if let Some(realm) = next.filter(|&r| !self.unloading(r)) {
                     self.navigables.prompting.insert(realm, traversal);
                     *asking = Some(realm);
@@ -74,9 +78,15 @@ impl RealmArena {
         next
     }
     fn next_to_unload(&mut self, walk: &mut Walk) -> Option<i32> {
-        while let Some(&(realm, taken)) = walk.pending.last() {
+        while let Some(&(realm, taken, depth)) = walk.pending.last() {
             if !self.realm_under(realm, walk.root) {
                 walk.pending.pop();
+                // (…its navigable destroyed by a handler of a document it holds, its own removal skipping it as one being
+                // unloaded (handles.js `discardBrowsingContext`) — not one an atomic move took elsewhere, still a
+                // navigable's, nor one disposed already)
+                if taken && self.navigable_destroyed(realm) && self.navigables.fully_active(realm) {
+                    walk.removed.push(realm);
+                }
             } else if taken {
                 walk.pending.pop();
                 return Some(realm);
@@ -85,18 +95,23 @@ impl RealmArena {
                 if self.navigables.unloading.insert(realm) {
                     walk.raised.push(realm);
                 }
-                walk.pending.extend(self.child_realms_in_tree_order(realm).into_iter().rev().map(|r| (r, false)));
+                if depth < crate::navigables::MAX_NESTING {
+                    let children = self.child_realms_in_tree_order(realm);
+                    walk.pending.extend(children.into_iter().rev().map(|r| (r, false, depth + 1)));
+                }
             }
         }
         None
     }
     // The realms whose documents go with walk `id`'s, in the order they are destroyed: those of the tree under its root
     // as it is now, each after its descendants', then those it unloaded that a handler took out of it since, the last
-    // reached first — its root's among them only where `with_root`.
+    // reached first, and those it began to unload whose navigables a handler destroyed — its root's among them only where
+    // `with_root`.
     pub(crate) fn walk_dispose_order(&self, id: u32, with_root: bool) -> Vec<i32> {
         let Some(walk) = self.navigables.walks.open.get(&id) else { return Vec::new() };
         let mut order = self.inclusive_descendant_realms_children_first(walk.root);
-        for &realm in walk.reached.iter().rev() {
+        let removed = if matches!(walk.kind, Kind::Unload) { &walk.removed[..] } else { &[] };
+        for &realm in walk.reached.iter().rev().chain(removed) {
             if !order.contains(&realm) {
                 order.push(realm);
             }
@@ -111,7 +126,7 @@ impl RealmArena {
     // left to.
     fn done_asking(&mut self, realm: i32, root: i32, removed: &mut Vec<i32>) {
         self.navigables.prompting.remove(&realm);
-        if realm != root && !self.realm_under(realm, root) && self.navigables.fully_active(realm) {
+        if realm != root && self.navigable_destroyed(realm) && self.navigables.fully_active(realm) {
             removed.push(realm);
         }
     }
@@ -292,6 +307,19 @@ mod tests {
         // (…`b`'s removing `b`, the last asked, as the walk ends)
         arena.discard_navigable(b);
         assert_eq!(arena.end_walk(id), vec![3, 1]);
+    }
+
+    #[test]
+    fn an_unload_destroys_a_document_whose_navigable_a_handler_destroyed_after_its_children_were_taken() {
+        let (mut arena, [a, ..]) = page();
+        let id = arena.begin_walk(0, Kind::Unload);
+        assert_eq!(arena.walk_next(id), Some(3));
+        // (…`c`'s handler removing `a`, whose unloading had begun: none of its own fires, but it goes with the page's)
+        arena.discard_navigable(a);
+        assert_eq!(walk(&mut arena, id), vec![1, 0]);
+        assert_eq!(arena.walk_dispose_order(id, true), vec![1, 0, 3, 2]);
+        arena.end_walk(id);
+        assert!((0..4).all(|r| !arena.unloading(r)));
     }
 
     #[test]

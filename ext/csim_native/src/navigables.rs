@@ -13,7 +13,7 @@ use crate::dom::{nid_arg, realm_id, utf16_arg, NodeId, RealmArena};
 
 // How deep a walk of the navigable tree goes at most: past any nesting a page can build (the host caps it at 16,
 // v8_runtime.rb `MAX_FRAME_DEPTH`), so a corrupt chain ends rather than spins.
-const MAX_NESTING: usize = 64;
+pub(crate) const MAX_NESTING: usize = 64;
 
 struct Child {
     // The realm the navigable's active document is in — none while it has none yet (an `about:blank` frame no script
@@ -553,6 +553,12 @@ impl RealmArena {
             at = parent;
         }
         false
+    }
+    // Whether realm `realm`'s document was a child navigable's active document whose navigable is destroyed now — its
+    // container left its document (`discard_navigable`) — not one a navigation replaced, nor a top-level one's.
+    pub(crate) fn navigable_destroyed(&self, realm: i32) -> bool {
+        let nav = &self.navigables;
+        nav.containers.get(&realm).is_some_and(|c| !nav.children.contains_key(c))
     }
     // …and those of its ancestor navigables: its container's document's, up.
     pub(crate) fn ancestor_realms(&self, realm: i32) -> Vec<i32> {

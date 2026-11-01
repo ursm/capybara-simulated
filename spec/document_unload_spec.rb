@@ -267,7 +267,8 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
   # in shadow-including tree order (HTML "checking if unloading is canceled", "descendant navigables") — whichever frame's
   # document was made first, and unloaded each after its frames' (HTML "unload a document and its descendants"). Both
   # explicit, both departed from by Chrome 156 and Firefox 159 (measured 2026-11-01): they ask `b` (made first) before
-  # `a`, and unload the page first (Chrome: top a c b; Firefox: top b a c).
+  # `a`, and unload the page first (Chrome: top a c b; Firefox: top b a c). Which of a document's frames unloads first
+  # HTML leaves open ("in what order?") and the two disagree: `a` before `b` is our choice, tree order as the prompt's.
   it 'asks the frames in tree order and unloads each after its own frames' do
     log = <<~JS
       const log = (s) => localStorage.setItem('log', (localStorage.getItem('log') || '') + s + ' ');
@@ -351,6 +352,27 @@ RSpec.describe 'unloading the page as a navigation replaces it' do
 
   # A walk a call left open — its `finally` never run, as a termination skips it — is ended as the call returns: the
   # document it was asking navigates again.
+  # A frame whose unloading has begun — its own frames' unloaded first — and whose container a handler of one of those
+  # removes is destroyed with the rest of the tree: its removal leaves it to the unload under way, which skips its own
+  # teardown events (its document destroyed, not unloaded) but not its destruction.
+  it 'destroys a frame whose container a handler of its own frame removed as the tree unloads' do
+    pages = {
+      '/top'   => '<iframe src="/r"></iframe>',
+      '/r'     => '<iframe src="/a"></iframe>',
+      '/a'     => '<iframe src="/c"></iframe>',
+      '/c'     => "<script>addEventListener('unload', () => parent.frameElement.remove())</script>"
+    }
+    app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{pages[env['PATH_INFO']] || env['PATH_INFO']}"]] }
+    s = simulated_session(app)
+    s.visit '/top'
+    poll_until { s.evaluate_script("!!(frames[0] && frames[0].frames[0] && frames[0].frames[0].frames[0] && frames[0].frames[0].frames[0].document.readyState === 'complete')") }
+    s.execute_script('window.held = frames[0].frames[0]')
+    s.execute_script("document.querySelector('iframe').src = '/x'")
+    poll_until { s.evaluate_script('frames[0].location.pathname') == '/x' }
+
+    expect(s.evaluate_script('window.held.closed')).to be(true)
+  end
+
   it 'ends a walk a failed call left open' do
     app = ->(env) { [200, {'content-type' => 'text/html'}, ["<!doctype html><meta charset=utf-8><body>#{env['PATH_INFO']}"]] }
     s = simulated_session(app)
