@@ -212,7 +212,7 @@ pub(crate) fn document_params(ruby: &Ruby, headers: Option<Value>) -> Result<RAr
 pub(crate) fn location_fields_for_ruby(ruby: &Ruby, headers: Option<Value>) -> Result<RArray, Error> {
     let out = ruby.ary_new();
     for field in ResponseFields::read(headers)?.locations {
-        out.push(ruby.str_from_slice(&field))?;
+        out.push(field_text(ruby, &field))?;
     }
     Ok(out)
 }
@@ -223,7 +223,12 @@ pub(crate) fn redirect_locations_for_ruby(ruby: &Ruby, status: u32, headers: Opt
     let Some(locations) = fields.redirect_locations(status) else { return Ok(None) };
     let out = ruby.ary_new();
     for field in locations {
-        out.push(ruby.str_from_slice(field))?;
+        out.push(field_text(ruby, field))?;
     }
     Ok(Some(out))
+}
+// (…a field as the host's Strings have it: a UTF-8 one where its bytes are UTF-8 — a binary String crosses into V8 as
+// bytes, not text — else a byte string)
+fn field_text(ruby: &Ruby, field: &[u8]) -> RString {
+    std::str::from_utf8(field).map_or_else(|_| ruby.str_from_slice(field), |s| ruby.str_new(s))
 }
