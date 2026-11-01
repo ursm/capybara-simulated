@@ -755,8 +755,9 @@ module Capybara
       # fresh one (synchronously, on this thread).
       # (…`keep_windows`: a navigation of the page, which the windows it opened outlive — not the session's reset;
       # `client_id` the reserved client id of the navigation whose document the realm is for: `init_page_realm`)
-      def rebuild_ctx(keep_windows: true, client_id: nil)
+      def rebuild_ctx(keep_windows: true, client_id: nil, document: true)
         @page_client_id = client_id
+        @page_document  = document
         # (…a new page's clock starting where its realm's does, not where the last page's left it)
         @clock = nil
         # Produce any queued bytecode-cache blobs while every queued target
@@ -845,7 +846,7 @@ module Capybara
       # (…the session's next page in a realm no document has made cross-origin isolated)
       def reset_page
         @cross_origin_isolated = false
-        rebuild_ctx(keep_windows: false)
+        rebuild_ctx(keep_windows: false, document: false)
       end
 
       # Memory-pressure threshold (MB) above which `rebuild_ctx` forces a full
@@ -986,14 +987,15 @@ module Capybara
       # client the one its navigation reserved (`rebuild_ctx`'s `client_id`), else one of its own (the session's first
       # document, a reset's, an about:blank, blob: or error document), adopted before its scripts run; the last one's let
       # go of as it unloaded (Browser#sw_unload_document_clients).
-      # (…at about:blank until a document of a navigation's says otherwise: the session's page before any visit, and after
-      # a reset, is the about:blank document a browsing context is made with — its URL as `ABOUT_BLANK_RESPONSE` its
-      # response)
+      # (…and, where no document of the host's loads into it — the session's page before any visit, a reset's, `document`
+      # false — the initial about:blank a browsing context is made with: HTML "create a new browsing context and
+      # document", URL about:blank, mode "quirks", as its response is `ABOUT_BLANK_RESPONSE`)
       def init_page_realm(c)
         init_realm(c)
-        c.call('__csimUpdateLocation', 'about:blank')
+        c.eval_void("globalThis.__csimUpdateLocation('about:blank'); globalThis.document._compatMode = 'quirks';") unless @page_document
         adopt_client_id(c, @page_client_id || @browser.mint_resulting_client_id, realm_id: 0)
         @page_client_id = nil
+        @page_document  = false
       end
 
       # A window realm's own state (`__csimInitRealm()`: its document, the Worker constructors) and the user agent a test
