@@ -21,6 +21,7 @@ RSpec.describe 'a navigation a service worker answers with two Location fields',
       self.addEventListener('fetch', e => {
         const u = new URL(e.request.url);
         if (u.pathname === '/scope/manual') e.respondWith(fetch('/two', {redirect: 'manual'}));
+        else if (u.pathname === '/scope/bytes') e.respondWith(fetch('/twobytes', {redirect: 'manual'}));
         else if (u.pathname === '/scope/one') e.respondWith(new Response(null, {status: 302, headers: [['location', '/a']]}));
       });
     JS
@@ -29,6 +30,9 @@ RSpec.describe 'a navigation a service worker answers with two Location fields',
       when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [worker]]
       when '/two'
         locations = "/a\n/b"
+        [302, {'content-type' => 'text/html', 'location' => locations}, ['<!DOCTYPE html><body>stayed']]
+      when '/twobytes'
+        locations = "/a\n/\xE9".b
         [302, {'content-type' => 'text/html', 'location' => locations}, ['<!DOCTYPE html><body>stayed']]
       when '/a', '/b' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body>went #{env['PATH_INFO']}"]]
       else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><body>main']]
@@ -56,6 +60,13 @@ RSpec.describe 'a navigation a service worker answers with two Location fields',
     session = simulated_session(app)
     session.visit '/'
     expect(frame_text(session, '/scope/manual')).to eq('')
+  end
+
+  # (…its fields no UTF-8 text crossing the worker's wire as text all the same: isomorphic-decoded)
+  it 'fails the navigation where they are bytes no UTF-8' do
+    session = simulated_session(app)
+    session.visit '/'
+    expect(frame_text(session, '/scope/bytes')).to eq('')
   end
 
   it 'follows one' do

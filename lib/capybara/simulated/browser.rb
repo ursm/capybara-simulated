@@ -2301,7 +2301,8 @@ module Capybara
       end
       def record_response(status, headers)
         @last_response_status  = status
-        @last_response_headers = headers.to_h
+        # (…a header list given as pairs a map of them, a repeated name's fields all kept: response_headers.rs `header_map`)
+        @last_response_headers = header_map(headers)
       end
       # The browsing context group this window is of — a new one, named by the window (`initialize`): a window a Browser
       # hosts is of a group of its own, its pop-ups with their opener realms of its isolate — which keys its agent clusters
@@ -10181,10 +10182,11 @@ module Capybara
         # (…and its Location fields as they came, which a worker's script fetch judges as Fetch does: the engine's)
         o_r['redirect_locations'] = Native.location_fields(resp_headers)
         # (…the target a navigation consuming it follows, by the rule its own redirects are followed by (response_headers.rs
-        # `redirect_locations`): its one Location resolved, its several as they came — a network error as it is followed —
+        # `redirect_locations`): its one Location resolved — its bytes percent-encoded as the URL parser does — its several
+        # as script reads them, isomorphic-decoded text (they cross the worker's wire) — a network error as it is followed —
         # or, none to follow, its own body to commit)
         if (locations = Native.redirect_locations(status.to_i, resp_headers))
-          o_r['redirect_loc'] = locations.one? ? resolve_against(locations.first, target) : locations
+          o_r['redirect_loc'] = locations.one? ? resolve_against(locations.first, target) : locations.map { header_text(_1) }
         else
           o_r['redirect_ct']       = header_text(header_field(resp_headers, 'content-type'))
           o_r['opaque_render'] = body_str.to_s.b unless body_str.to_s.empty?
@@ -10417,9 +10419,14 @@ module Capybara
           body  = document_payload(blob[:bytes])
           ctype = blob[:type].to_s.empty? ? 'text/html' : blob[:type]
         end
+        # (…of a URL a navigation fails on before any request — another about: one than about:blank, a blob: one no store
+        # resolved as it began, a POST to no HTTP(S) URL — an error document, as the page's and a frame's are:
+        # navigation_fetch.rs `start`)
+        start  = Native.navigation_start(url.to_s, post ? 'POST' : 'GET')
+        failed = body.nil? && %w[fail blob].include?(start)
         # (…of a scheme it loads no document of here, none: one of a blob: URL's resolved as it began, above; one to a
         # `data:` URL refused, as a top-level browsing context refuses a document's navigation to one)
-        unless body || http_url?(url) || about_blank_url?(url)
+        unless body || failed || http_url?(url) || start == 'about_blank'
           log_console('warn', "window-realm navigation to #{url} not modeled; ignoring") unless top_level_data_refused?(url)
           return
         end
@@ -10444,10 +10451,12 @@ module Capybara
         # sent its referrer, its reserved client its own. (…a traversal's referred as its entry's was, by no document)
         # (…the initiator's document gone since it began it — a frame's form that navigated the frame itself after — by
         # the URL and the policy it referred by as it began it: `source`, `policy`)
-        if body.nil? && http_url?(url)
+        if body.nil? && (http_url?(url) || failed)
           by   = kind == 'traverse' || by_user ? {} : {initiator_realm: initiator, link_policy: policy, referrer_policy: policy}
           by.merge!(method: 'POST', body: post[0], content_type: post[1]) if post
-          resp = frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop_realm: realm_id, **by)
+          resp = unless failed
+            frame_navigation_fetch(url, referred || source, dest: 'document', download_realm: initiator, user_activated: activated, coop_realm: realm_id, **by)
+          end
           return if resp && resp['no_document']
 
           # (…a network error an error document at the URL it failed at, of a new opaque origin, as the page's is:
@@ -12925,8 +12934,11 @@ module Capybara
       # `, ` — the WHATWG "combine" separator getAllResponseHeaders exposes, matching
       # both real browsers and the harness's combine_headers.
       def stringify(headers)
-        headers.each_with_object({}) {|(k, v), out| out[k.to_s] = header_text(v) }
+        header_map(headers).each_with_object({}) {|(k, v), out| out[k.to_s] = header_text(v) }
       end
+      # A response's headers as a map: a Hash as it is, a header list given as pairs — a Rack 2 app's, a service worker's —
+      # one of them, a repeated name's fields all kept (response_headers.rs `header_map`).
+      def header_map(headers) = headers.is_a?(Hash) ? headers : (Native.header_map(headers) || {})
 
       # A response's header `name`, by its name ASCII case-insensitively — a Rack 2 app may spell it any way — or nil.
       def header_field(headers, name)

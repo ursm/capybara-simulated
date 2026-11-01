@@ -178,6 +178,25 @@ fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
     out
 }
 
+// `NavigationFetch#start`'s answer for a navigation to `url` by `method`. Native.navigation_start(url, method) -> it, for
+// a navigation the host makes no NavigationFetch of before it knows (a window's of no HTTP(S) URL).
+pub(crate) fn start(url: &str, method: &str) -> &'static str {
+    let url = ada_url::Url::parse(url, None).ok();
+    let protocol = url.as_ref().map_or("", |u| u.protocol());
+    if url.as_ref().is_some_and(crate::url_ops::matches_about_blank) {
+        "about_blank"
+    } else if method == "GET" && protocol == "blob:" {
+        "blob"
+    } else if protocol == "about:" || (method != "GET" && !matches!(protocol, "http:" | "https:")) {
+        "fail"
+    } else {
+        "fetch"
+    }
+}
+pub(crate) fn start_for_ruby(url: String, method: String) -> &'static str {
+    start(&url, &method.to_ascii_uppercase())
+}
+
 // The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
 const FETCH_SCHEMES: [&str; 6] = ["about:", "blob:", "data:", "file:", "http:", "https:"];
 
@@ -424,17 +443,7 @@ impl NavigationFetch {
     // fetched by a GET alone) — or 'fetch', its hops to make (`begin_hop`).
     fn start(&self) -> &'static str {
         let st = self.st.borrow();
-        let url = ada_url::Url::parse(&st.chain.target, None).ok();
-        let protocol = url.as_ref().map_or("", |u| u.protocol());
-        if url.as_ref().is_some_and(crate::url_ops::matches_about_blank) {
-            "about_blank"
-        } else if st.chain.method == "GET" && protocol == "blob:" {
-            "blob"
-        } else if protocol == "about:" || (st.chain.method != "GET" && !matches!(protocol, "http:" | "https:")) {
-            "fail"
-        } else {
-            "fetch"
-        }
+        start(&st.chain.target, &st.chain.method)
     }
 
     // #coop_switch? -> whether the navigation's responses need a browsing context group switch (`enforce_coop`).

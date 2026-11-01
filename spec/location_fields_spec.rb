@@ -8,6 +8,8 @@ require_relative 'support/session_teardown'
 # whose ABNF allows a single one, given more than once, is failure; "HTTP-redirect fetch": a location URL that is
 # failure is a network error), a fetch's and a navigation's alike: the navigation commits an error document at the
 # redirect's URL rather than the redirect's own body.
+FROZEN_LOCATION_PAIRS = [['Location', ['/a'].freeze], ['Location', '/a'], ['Content-Type', 'text/html']].freeze
+
 RSpec.describe 'a response with two Location fields' do
   let(:session) {
     simulated_session(lambda {|env|
@@ -20,6 +22,9 @@ RSpec.describe 'a response with two Location fields' do
         [302, {'content-type' => 'text/html', 'location' => location}, ['<!DOCTYPE html><body>stayed']]
       when '/pairs'
         [302, [%w[Content-Type text/html], %w[Location /b]], ['<!DOCTYPE html><body>stayed']]
+      when '/frozen'
+        # (…an app's constant header list, its Array value frozen: read, never changed)
+        [302, FROZEN_LOCATION_PAIRS, ['<!DOCTYPE html><body>stayed']]
       when '/pairs2'
         [302, [%w[Content-Type text/html], %w[Location /a], %w[Location /b]], ['<!DOCTYPE html><body>stayed']]
       when '/a', '/b' then [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><body>went #{env['PATH_INFO']}"]]
@@ -56,6 +61,12 @@ RSpec.describe 'a response with two Location fields' do
     expect(session).to have_no_text('went')
     expect(session.current_url).to end_with('/pairs2')
   end
+
+  it 'reads a frozen header list without changing it' do
+    session.visit '/frozen'
+    expect(session).to have_text('went /a')
+  end
+
 
   it 'fails a navigation to it' do
     session.visit '/'

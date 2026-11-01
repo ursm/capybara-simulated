@@ -80,38 +80,45 @@ fn set_cookie_lines(value: Value) -> Result<Vec<Vec<u8>>, Error> {
     })
 }
 
+// A header map of `headers`: a Hash as it is, else — anything whose `to_a` gives [name, value] pairs: a Rack 2 app's
+// Array of them, a service worker's response's header list — a new Hash of them, a name given more than once a new Array
+// of all its fields, as Rack 3 gives them (a value that is an Array of fields itself spread into it, never changed): so a
+// header list's two Location, Set-Cookie or Content-Security-Policy fields stay two, end to end.
+pub(crate) fn header_map(ruby: &Ruby, headers: Value) -> Result<RHash, Error> {
+    if let Some(hash) = RHash::from_value(headers) {
+        return Ok(hash);
+    }
+    let mut names: Vec<(Value, Vec<Value>)> = Vec::new();
+    for pair in headers.funcall::<_, _, RArray>("to_a", ())? {
+        let pair = RArray::try_convert(pair)?;
+        let (k, v): (Value, Value) = (pair.entry(0)?, pair.entry(1)?);
+        let fields: Vec<Value> = RArray::from_value(v).map_or_else(|| vec![v], |list| list.into_iter().collect());
+        match names.iter_mut().find(|(name, _)| name.eql(k).unwrap_or(false)) {
+            Some((_, seen)) => seen.extend(fields),
+            None => names.push((k, fields)),
+        }
+    }
+    let hash = ruby.hash_new();
+    for (k, fields) in names {
+        match fields.as_slice() {
+            [one] => hash.aset(k, *one)?,
+            _ => hash.aset(k, ruby.ary_from_iter(fields))?,
+        }
+    }
+    Ok(hash)
+}
+// Native.header_map(headers) -> `header_map`'s, nil for nil.
+pub(crate) fn header_map_for_ruby(ruby: &Ruby, headers: Option<Value>) -> Result<Option<RHash>, Error> {
+    headers.map(|h| header_map(ruby, h)).transpose()
+}
+
 impl ResponseFields {
     // (…`headers` a Hash, or anything else whose `to_a` gives [name, value] pairs: a Rack 2 app's Array of them, a
     // service worker's response's header list)
     pub(crate) fn read(headers: Option<Value>) -> Result<Self, Error> {
         let mut out = ResponseFields::default();
         let Some(headers) = headers else { return Ok(out) };
-        let headers = match RHash::from_value(headers) {
-            Some(hash) => hash,
-            None => {
-                let ruby = Ruby::get_with(headers);
-                let hash = ruby.hash_new();
-                for pair in headers.funcall::<_, _, RArray>("to_a", ())? {
-                    let pair = RArray::try_convert(pair)?;
-                    let (k, v): (Value, Value) = (pair.entry(0)?, pair.entry(1)?);
-                    // (…a header list's: a name given more than once an Array of its values, as Rack 3 gives them — a
-                    // service worker's Response with two Location fields keeps two)
-                    match hash.get(k) {
-                        None => hash.aset(k, v)?,
-                        Some(seen) => match RArray::from_value(seen) {
-                            Some(list) => list.push(v)?,
-                            None => {
-                            let list = ruby.ary_new();
-                            list.push(seen)?;
-                            list.push(v)?;
-                            hash.aset(k, list)?;
-                        }
-                        },
-                    }
-                }
-                hash
-            }
-        };
+        let headers = header_map(&Ruby::get_with(headers), headers)?;
         let (mut location, mut policy, mut disposition, mut coop, mut coep, mut content_type, mut refresh, mut cookie) = (false, false, false, false, false, false, false, false);
         let mut csp: Vec<String> = Vec::new();
         headers.foreach(|k: Value, v: Value| {
@@ -226,7 +233,8 @@ pub(crate) fn redirect_locations_for_ruby(ruby: &Ruby, status: u32, headers: Opt
     Ok(Some(out))
 }
 // (…a field as the host's Strings have it: a UTF-8 one where its bytes are UTF-8 — a binary String crosses into V8 as
-// bytes, not text — else a byte string)
+// bytes, not text — else its bytes as they came, a binary String, which the URL parser percent-encodes byte by byte as a
+// redirect is followed (Chrome: `/x\xFF` → `/x%FF`); a host that hands such a field to script decodes it first)
 fn field_text(ruby: &Ruby, field: &[u8]) -> RString {
     std::str::from_utf8(field).map_or_else(|_| ruby.str_from_slice(field), |s| ruby.str_new(s))
 }

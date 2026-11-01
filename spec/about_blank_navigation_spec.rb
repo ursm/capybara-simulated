@@ -42,6 +42,20 @@ RSpec.describe 'a navigation to about:blank' do
     expect(session.evaluate_script('[location.href, origin]')).to eq(%w[about:BLANK null])
   end
 
+  # (…a window's alike, its location set or `open()` made on one: not left at its initial about:blank)
+  it 'is not one of a window to about:BLANK or another about: URL, which fails' do
+    session.visit '/?policy=origin'
+    %w[about:BLANK about:foo].each do |url|
+      session.execute_script("window.w1 = open('about:blank')")
+      session.execute_script("w1.location.href = #{url.to_json}")
+      window = session.window_opened_by { session.execute_script("window.w2 = open(#{url.to_json})") }
+      session.within_window(session.windows[-2]) { expect(session.evaluate_script('[location.href, origin]')).to eq([url, 'null']) }
+      session.within_window(window) { expect(session.evaluate_script('[location.href, origin]')).to eq([url, 'null']) }
+      session.windows[1..].each(&:close)
+      session.switch_to_window(session.windows.first)
+    end
+  end
+
   it "is of its initiator's origin and base URL, referred under its policy" do
     expect(blank_from('no-referrer')).to eq(['about:blank', 'http://www.example.com', 'http://www.example.com/sub/', ''])
     expect(blank_from('origin')).to eq(['about:blank', 'http://www.example.com', 'http://www.example.com/sub/', 'http://www.example.com/'])
