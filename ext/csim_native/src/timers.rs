@@ -102,7 +102,9 @@ impl Ord for Due {
 
 // A task's turn among those due at once — HTML leaves the choice among task sources to the event loop, so this is how it
 // chooses: in the order scheduled (`IN_TURN`) — every timer, most tasks — or ahead of them (`AHEAD`): "the end"'s
-// DOMContentLoaded, which Chrome 156 and Firefox 159 both fire before a zero timer the parse queued; or behind them
+// DOMContentLoaded, which Chrome 156 and Firefox 159 both fire before a zero timer the parse queued where the parse ends
+// at once (where it waits on a slow external script, Chrome runs the timer and a message first: `t0, msg, dcl`); or
+// behind them
 // (`BEHIND`): a Window's posted message task source — a message a page posted itself as it parsed is delivered after the
 // load that nothing delayed, in Chrome 156 and Firefox 159 alike (before it where its images delay it; and Chrome a
 // message before a later timer, Firefox after: measured 2026-11-01). (A MessagePort's messages are its own port message
@@ -187,19 +189,21 @@ impl Timers {
 impl RealmArena {
     // Realm `cid`'s timers — the one entered, or one parked — none for a realm it has no state of.
     // The mark of realm `cid`'s tasks queued on its event loop now: the timers and platform tasks scheduled so far, and its
-    // clock (`queued_count`).
+    // clock (`queued_by`).
     pub(crate) fn task_mark(&mut self, cid: i32) -> (u64, f64) {
         let clock = self.realm_state(cid).map_or(0.0, |s| s.clock);
         (self.timers_of(cid).map_or(0, |t| t.seq), clock)
     }
-    // …and how many of them are still to run: scheduled by the mark and due by its clock — the occurrences queued then, a
-    // repeating timer's later ones (scheduled again, past the mark) none. What a reload's history step runs before it
-    // unloads the document (HTML "apply the history step" step 12 queues its unloading as a global task on the
-    // document's window, after those queued before it — a `javascript:` URL's).
-    pub(crate) fn queued_count(&mut self, cid: i32, (mark, clock): (u64, f64)) -> u32 {
-        self.timers_of(cid).map_or(0, |t| {
-            t.order.iter().take_while(|&&(Due(due), ..)| due <= clock).filter(|&&(_, _, seq, _)| seq <= mark).count() as u32
-        })
+    // …and whether some of them are still to run: scheduled by the mark and due by its clock — the occurrences queued
+    // then, a repeating timer's later ones (scheduled again, past the mark) none: the mark's number, which the host runs
+    // the tasks of the realm's event loop until none is left of (`__csimRunQueued`, `timersQueuedBy`) — those a task
+    // queued later runs among in their turn, an `AHEAD` one first. What a reload's history step runs before it unloads
+    // the document (HTML "apply the history step" step 12 queues its unloading as a global task on the document's
+    // window, after those queued before it — a `javascript:` URL's).
+    pub(crate) fn queued_by(&mut self, cid: i32, (mark, clock): (u64, f64)) -> Option<u64> {
+        let t = self.timers_of(cid)?;
+        let left = t.order.iter().take_while(|&&(Due(due), ..)| due <= clock).any(|&(_, _, seq, _)| seq <= mark);
+        left.then_some(mark)
     }
     fn timers_of(&mut self, cid: i32) -> Option<&mut Timers> {
         if cid == self.cur() {
@@ -249,6 +253,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerNext", timer_next, context_id);
     register(scope, ns, "realmPending", realm_pending, context_id);
     register(scope, ns, "timerNextDue", timer_next_due, context_id);
+    register(scope, ns, "timersQueuedBy", timers_queued_by, context_id);
     register(scope, ns, "nextTimerDelay", next_timer_delay, context_id);
     register(scope, ns, "timerStep", timer_step, context_id);
     register(scope, ns, "timerTaskEnd", timer_task_end, context_id);
@@ -593,6 +598,16 @@ fn next_timer_delay(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallback
         }
     }
     rv.set_double(if min == f64::INFINITY { -1.0 } else { min.max(0.0) });
+}
+
+// __dom.timersQueuedBy(mark) -> whether a task of the calling realm's scheduled by `mark` (`task_mark`'s number) is due
+// now, still to run.
+fn timers_queued_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let mark = args.get(0).number_value(scope).unwrap_or(0.0) as u64;
+    let cid = realm_id(scope, &args);
+    let arena = &mut dom(scope).arena;
+    let clock = arena.enter(cid).clock;
+    rv.set_bool(arena.queued_by(cid, (mark, clock)).is_some());
 }
 
 // __dom.timerNextDue() -> when the calling realm's next timer falls due, or undefined for none.

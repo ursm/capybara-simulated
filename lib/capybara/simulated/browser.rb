@@ -10541,15 +10541,15 @@ module Capybara
       end
       # A reload's history step unloads the document by a task HTML "apply the history step" queues (step 12) on its event
       # loop after those queued on it by then — a `javascript:` URL's begun in the same task among them, before the reload or
-      # after it: those run first, in the realm `realm` whose document it reloads, as many as were queued — `queued`, which
-      # the take of the reload answered instead of it (navigation_plan.rs `reload_queued`) — none of a repeating timer's later
-      # ones. (…a navigation one of them begins outruns the reload, whose history step is taken only after: the traversal
-      # queue runs in parallel with the document's tasks — Chrome and Firefox navigate, not reload)
-      private def run_queued_before_reload(realm, queued)
-        @runtime.realm_call(realm, '__csimRunQueued', queued.to_i)
+      # after it: those run first, in the realm `realm` whose document it reloads, until none queued by the mark the take
+      # of the reload answered instead of it is left (`mark`: navigation_plan.rs `reload_queued`) — none of a repeating
+      # timer's later ones. (…a navigation one of them begins outruns the reload, whose history step is taken only after:
+      # the traversal queue runs in parallel with the document's tasks — Chrome and Firefox navigate, not reload)
+      private def run_queued_before_reload(realm, mark)
+        @runtime.realm_call(realm, '__csimRunQueued', mark.to_i)
       end
       # The reloads of frames planned for the host (frame_navigation.rs `planFrameReload`), taken as the task ends — the
-      # tasks queued on each frame's event loop before it run first, `[realm, count]` in its place (`run_queued_before_reload`).
+      # tasks queued on each frame's event loop before it run first, `[realm, mark]` in its place (`run_queued_before_reload`).
       def consume_pending_frame_reload
         reloads = @runtime.call('__csimTakeFrameNavigations', 'reload')
         waiting, reloads = reloads.partition {|r| r.is_a?(Array) }
@@ -12415,8 +12415,10 @@ module Capybara
       # The document's DOMContentLoaded and `load` are among those tasks — "the end" queued them (bridge.entry.js
       # `__csimTaskOfTheEnd`) — the load in queue order with the page's own: a `setTimeout(0)` its parse or its
       # DOMContentLoaded handlers queued runs before it, one its load handlers queue after. (HTML leaves the order of
-      # two task sources to the UA: Chrome 156 runs a DCL handler's `setTimeout(0)` after the load, Firefox a frame's
-      # before it, both a parse-time one before it — measured 2026-11-01.)
+      # two task sources to the UA, and the engines differ by the page's shape, measured 2026-11-01: on a page whose
+      # parse ends at once, Chrome 156 fires DOMContentLoaded and the load before a parse-time `setTimeout(0)`, Firefox
+      # 159 the timer before the load; on one whose parse waits for a slow external script, Chrome runs the timer before
+      # DOMContentLoaded. The order here is Firefox's.)
       def flush_page_init
         return unless @timers_active
 

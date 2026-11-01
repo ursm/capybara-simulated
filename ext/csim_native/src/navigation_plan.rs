@@ -97,7 +97,7 @@ pub(crate) struct Reload {
     activated: bool,
     blob: Option<v8::Global<v8::Value>>,
     // …and the mark of the document's tasks queued by the time the task that planned it ended — as the host first came
-    // to take it (timers.rs `task_mark`): those its history step unloads the document after (`queued_count`, which the
+    // to take it (timers.rs `task_mark`): those its history step unloads the document after (`queued_by`, which the
     // host runs first). The traversal queue runs in parallel with the document's tasks: one of them that navigates begins
     // a navigation before the reload's history step is taken, which that navigation supersedes (`planLocation`) —
     // Chrome 156 and Firefox 159 measured: `setTimeout(() => location.href = x, 0); location.reload()` goes to `x`,
@@ -608,12 +608,11 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
             own = Own::default();
         }
         // (…a reload's left planned while a task queued on the window's event loop before it is still to run — which the
-        // host runs first: `[realm, "queued", count]` in its place — as the page's is: `take_reload`)
+        // host runs first: `[realm, "queued", mark]` in its place — as the page's is: `take_reload`)
         if own.location.is_none() && own.reload.is_some() {
             let arena = realm(scope, w);
             arena.navigation_plan.own = own;
-            let queued = reload_queued(arena, w);
-            if queued > 0 {
+            if let Some(queued) = reload_queued(arena, w) {
                 waiting.push((w, queued));
                 continue;
             }
@@ -639,7 +638,7 @@ fn take_window_navigations(scope: &mut v8::PinScope<'_, '_>, _args: v8::Function
         items.push(v8::Array::new_with_elements(scope, &item).into());
     }
     for (w, queued) in waiting {
-        let item = [v8::Integer::new(scope, w).into(), v8::String::new(scope, "queued").unwrap().into(), v8::Integer::new_from_unsigned(scope, queued).into()];
+        let item = [v8::Integer::new(scope, w).into(), v8::String::new(scope, "queued").unwrap().into(), v8::Number::new(scope, queued as f64).into()];
         items.push(v8::Array::new_with_elements(scope, &item).into());
     }
     for (_, w, own) in taken {
@@ -678,22 +677,22 @@ fn text_or_null<'s>(scope: &mut v8::PinScope<'s, '_>, text: Option<String>) -> v
 }
 // __dom.takeReload() -> whether the document had transient activation as the reload planned began, which it plans no
 // more — undefined for none.
-// How many tasks queued on realm `cid`'s document's event loop the reload its plan holds waits on: those queued by the
-// time the host first comes to take it, its mark taken then (`Reload::mark`) — 0 for none, or no reload.
-fn reload_queued(arena: &mut crate::dom::RealmArena, cid: i32) -> u32 {
+// The mark of the tasks queued on realm `cid`'s document's event loop the reload its plan holds waits on, where some are
+// still to run: those queued by the time the host first comes to take it, its mark taken then (`Reload::mark`) — none
+// for none, or no reload.
+fn reload_queued(arena: &mut crate::dom::RealmArena, cid: i32) -> Option<u64> {
     let now = arena.task_mark(cid);
-    let Some(reload) = arena.navigation_plan.own.reload.as_mut() else { return 0 };
+    let reload = arena.navigation_plan.own.reload.as_mut()?;
     let mark = *reload.mark.get_or_insert(now);
-    arena.queued_count(cid, mark)
+    arena.queued_by(cid, mark)
 }
-// (…`[count]` instead while tasks queued on its document's event loop before it are still to run: `reload_queued`, which
+// (…`[mark]` instead while tasks queued on its document's event loop before it are still to run: `reload_queued`, which
 // the host runs first)
 fn take_reload(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let queued = reload_queued(realm(scope, cid), cid);
-    if queued > 0 {
-        let count = v8::Integer::new_from_unsigned(scope, queued).into();
-        return rv.set(v8::Array::new_with_elements(scope, &[count]).into());
+    if let Some(queued) = reload_queued(realm(scope, cid), cid) {
+        let mark = v8::Number::new(scope, queued as f64).into();
+        return rv.set(v8::Array::new_with_elements(scope, &[mark]).into());
     }
     if let Some(reload) = plan(scope, &args).own.reload.take() {
         rv.set_bool(reload.activated);

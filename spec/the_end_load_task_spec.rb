@@ -17,8 +17,9 @@ RSpec.describe 'the load "the end" queues' do
     })
   end
 
-  # Chrome 156, and Firefox 159 in a frame: a `setTimeout(0)` queued as the page parses runs before its load, a load
-  # handler's after it (measured 2026-11-01).
+  # Firefox 159: a `setTimeout(0)` queued as the page parses runs before its load, a load handler's after it. (Chrome 156
+  # fires the load first on a page whose parse ends at once — `dcl, load, msg, t0` — and runs the timer first where the
+  # parse waits on a slow script: HTML leaves the order to the event loop. Measured 2026-11-01.)
   it 'runs after the tasks the parse queued, and before those its handlers queue' do
     s = session_for('/' => <<~HTML)
       <!DOCTYPE html><meta charset="utf-8"><script>
@@ -198,6 +199,45 @@ RSpec.describe 'the load "the end" queues' do
       s.document.synchronize(3) { raise Capybara::ExpectationNotMet if s.evaluate_script('log.length') < 2 }
       expect(s.evaluate_script('log')).to eq(order)
     end
+  end
+
+  # A written document's "the end" (`document.close()`) makes it interactive at once and queues its DOMContentLoaded as a
+  # task (HTML "the end" step 6): `close()` returns before it fires — the spec's explicit step, where Firefox 159 fires
+  # it before `close()` returns and Chrome 156 inside it (measured 2026-11-01).
+  it "fires a written document's DOMContentLoaded as a task after close() returns" do
+    s = session_for('/' => '<!DOCTYPE html><meta charset="utf-8"><body>p')
+    s.visit '/'
+    s.execute_script(<<~JS)
+      window.log = [];
+      window.w = open('', '_blank');
+      w.document.open();
+      w.document.write('<script>document.addEventListener("readystatechange", () => opener.log.push("rsc " + document.readyState)); document.addEventListener("DOMContentLoaded", () => opener.log.push("dcl")); addEventListener("load", () => opener.log.push("load"));<\\/script>');
+      w.document.close();
+      log.push('closed ' + w.document.readyState);
+    JS
+    s.document.synchronize(3) { raise Capybara::ExpectationNotMet unless s.evaluate_script('log.includes("load")') }
+    expect(s.evaluate_script('log')).to eq(['rsc interactive', 'closed interactive', 'dcl', 'rsc complete', 'load'])
+  end
+
+  # A reload planned as the page parses unloads it by a task queued after those queued by then (HTML "apply the history
+  # step" step 12): both zero timers the parse queued run first — the DOMContentLoaded task "the end" queued after them,
+  # which takes its turn ahead of them, among them and no stand-in for one (timers.rs `queued_by`).
+  it 'runs every task a parse queued before a reload it planned unloads the page' do
+    s = session_for('/' => <<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><body><script>
+        if (sessionStorage.n) {
+          document.write('<p id="out">' + [sessionStorage.t, sessionStorage.dcl].join() + '</p>');
+        } else {
+          sessionStorage.n = 1;
+          setTimeout(() => { sessionStorage.t = (sessionStorage.t || '') + 'a'; }, 0);
+          setTimeout(() => { sessionStorage.t = (sessionStorage.t || '') + 'b'; }, 0);
+          document.addEventListener('DOMContentLoaded', () => { sessionStorage.dcl = 'dcl'; });
+          location.reload();
+        }
+      </script>
+    HTML
+    s.visit '/'
+    expect(s).to have_css('#out', text: 'ab,dcl')
   end
 
   # …once, before its load, for a frame's document too — whose build fires its load as it ends, before any task of its

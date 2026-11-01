@@ -709,15 +709,14 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
     let arena = &mut crate::dom::dom(scope).arena;
     let wanted = |h: &HostNavigation| matches!(h, HostNavigation::Reload { .. }) == reloads;
     let mut taken: Vec<(u64, i32, HostNavigation)> = Vec::new();
-    let mut waiting: Vec<(i32, u32)> = Vec::new();
+    let mut waiting: Vec<(i32, u64)> = Vec::new();
     let containers: Vec<NodeId> = arena.frame_navigations.0.iter().filter(|(_, n)| n.host.as_ref().is_some_and(|(_, h)| wanted(h))).map(|(&c, _)| c).collect();
     for c in containers {
         let realm = arena.frame_realm(c);
         // (…a reload left planned while a task queued on the frame's document's event loop before it is still to run,
-        // which the host runs first: `[realm, count]` in its place)
+        // which the host runs first: `[realm, mark]` in its place)
         if let Some(r) = realm {
-            let queued = frame_reload_queued(arena, c, r);
-            if queued > 0 {
+            if let Some(queued) = frame_reload_queued(arena, c, r) {
                 waiting.push((r, queued));
                 continue;
             }
@@ -762,7 +761,7 @@ fn take_frame_navigations(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCa
         items.push(item);
     }
     for (r, queued) in waiting {
-        items.push(v8::Array::new_with_elements(scope, &[v8::Integer::new(scope, r).into(), v8::Integer::new_from_unsigned(scope, queued).into()]).into());
+        items.push(v8::Array::new_with_elements(scope, &[v8::Integer::new(scope, r).into(), v8::Number::new(scope, queued as f64).into()]).into());
     }
     rv.set(v8::Array::new_with_elements(scope, &items).into());
 }
@@ -779,16 +778,16 @@ fn cancel_frame_navigation(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionC
     }
 }
 
-// How many tasks queued on frame realm `realm`'s event loop the reload its container `c` plans waits on: those queued by
-// the time the host first came to take it, its mark taken then (navigation_plan.rs `Reload::mark`) — 0 for none, or no
-// reload.
-fn frame_reload_queued(arena: &mut crate::dom::RealmArena, c: NodeId, realm: i32) -> u32 {
+// The mark of the tasks queued on frame realm `realm`'s event loop the reload its container `c` plans waits on, where some
+// are still to run: those queued by the time the host first came to take it, its mark taken then (navigation_plan.rs
+// `Reload::mark`) — none for none, or no reload.
+fn frame_reload_queued(arena: &mut crate::dom::RealmArena, c: NodeId, realm: i32) -> Option<u64> {
     let now = arena.task_mark(realm);
     let mark = arena.frame_navigations.0.get_mut(&c).and_then(|n| match &mut n.host {
         Some((_, HostNavigation::Reload { mark })) => Some(*mark.get_or_insert(now)),
         _ => None,
     });
-    mark.map_or(0, |m| arena.queued_count(realm, m))
+    mark.and_then(|m| arena.queued_by(realm, m))
 }
 // __dom.cancelFrameLocation(containerNid) — the navigation the host plans to make of the container's navigable let go, a
 // `javascript:` URL's begun in it the ongoing one now (url-parse.js `runJavascriptURL`) — but not the form submission it
