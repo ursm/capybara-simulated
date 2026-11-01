@@ -125,7 +125,11 @@ RSpec.describe 'CSS animation and transition events' do
   # The update that starts the animation commits its start time and sends nothing; the next one, a
   # step later, finds it gone from idle to active — css-animations-2 §4.2's table owes `animationstart`
   # alone for that change, whatever boundaries it crossed meanwhile (at a browser's 16ms frame it
-  # crosses none) — so the first `animationiteration` is the step after that's.
+  # crosses none) — so the first `animationiteration` is the step after that's. (KNOWN GAP: csim takes no rendering
+  # opportunity while a CSS animation runs with no animation frame callback queued — it renders at the animation's next
+  # end, its clock jumping 34 → 112 ms here, where Chrome 156 and Firefox 159 render each frame and fire iteration 0.04
+  # at 47 ms. An active animation owing a frame as a queued rAF does — timers.rs `next_frame_delay` — would make every
+  # running spinner render 60 times a virtual second: a perf question, on the backlog.)
   it 'fires one animationiteration per frame, not per boundary' do
     s = page('<div id="a"></div>')
     watch(s)
