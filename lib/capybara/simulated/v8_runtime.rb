@@ -1434,6 +1434,7 @@ module Capybara
         # (bridge.entry.js __csimLoadDocument) — an UNCONTROLLED context is still a client of its origin
         # and must show up in `matchAll({includeUncontrolled: true})`.
         realm.call('__csim_swReportClient') rescue nil
+        @browser.sw_document_loaded(realm.id)
         # A `javascript:` URL frame: the initial empty document is now loaded and
         # parent/top are wired, so evaluate the URL's script in the realm (global
         # scope). Per HTML, only a STRING result navigates the frame to a new
@@ -1520,6 +1521,7 @@ module Capybara
         walks_guarded { realm.call('__csimLoadDocument', body.to_s, content_type.to_s, refresh) }
         # As in create_frame_realm: an auxiliary window is a client of its origin too.
         realm.call('__csim_swReportClient') rescue nil
+        @browser.sw_document_loaded(realm.id)
       end
 
       # Navigate window realm `id` from its initial about:blank to a document of that one's origin: loaded into the same

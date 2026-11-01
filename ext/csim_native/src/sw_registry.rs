@@ -175,9 +175,12 @@ struct Outcome {
 
 // A service worker client (Service Workers §2.3): a window, frame or worker of the session — its id, URL, type
 // ("window", "worker", "sharedworker"), frame type, origin (its document's, which an about:blank one inherits; none for
-// one the host could not tell) and the worker controlling it.
+// one the host could not tell) and the worker controlling it — and whether it is execution ready: a navigation's reserved
+// client is a record before its document is (`reserve_client_for_ruby`), none of `matchAll`'s, which `Clients.get`
+// waits on until its document commits — the client then — or the navigation makes none (`forget_client_for_ruby`).
 pub(crate) struct Client {
     id: String,
+    ready: bool,
     // (…the realm it is, by its number in the session — its window's and that window's realm's, a worker client's the
     // negative of its handle: `realm_key`)
     owner: i64,
@@ -414,6 +417,7 @@ pub(crate) fn set_worker_state_for_ruby(partition: u64, handle: u32, state: Stri
 }
 // ── The clients ──
 // A client noted: its record, made — or, one with its id, refreshed in its place (a client keeps its creation order).
+// Whether that made a navigation's reserved client execution ready: what `Clients.get` of it waits for.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn note_client_for_ruby(
     partition: u64,
@@ -425,13 +429,28 @@ pub(crate) fn note_client_for_ruby(
     frame_type: String,
     origin: Option<String>,
     controller: Option<u32>,
-) {
+) -> bool {
     let mut reg = lock();
     let clients = &mut reg.partition(partition).clients;
-    let client = Client { id, owner, site, url, kind, frame_type, origin, controller };
+    let client = Client { id, ready: true, owner, site, url, kind, frame_type, origin, controller };
     match clients.iter_mut().find(|c| c.id == client.id) {
-        Some(c) => *c = client,
-        None => clients.push(client),
+        Some(c) => !std::mem::replace(c, client).ready,
+        None => {
+            clients.push(client);
+            false
+        }
+    }
+}
+// A navigation's reserved client (Service Workers "Handle Fetch": the request's reserved client, an environment whose
+// execution ready flag is unset) noted as its request reaches a service worker: a record of its id, its URL, its
+// top-level site and its origin, not execution ready — controlled by none, using no registration — where it is none
+// already.
+pub(crate) fn reserve_client_for_ruby(partition: u64, id: String, site: String, url: String, origin: Option<String>) {
+    let mut reg = lock();
+    let clients = &mut reg.partition(partition).clients;
+    if clients.iter().all(|c| c.id != id) {
+        let (kind, frame_type) = ("window".to_owned(), String::new());
+        clients.push(Client { id, ready: false, owner: 0, site, url, kind, frame_type, origin, controller: None });
     }
 }
 // …its controller set (a claim, a controller its worker adopted), where it is a client: whether it is.
@@ -440,6 +459,16 @@ pub(crate) fn set_client_controller_for_ruby(partition: u64, id: String, control
     let Some(c) = reg.existing(partition).and_then(|p| p.clients.iter_mut().find(|c| c.id == id)) else { return false };
     c.controller = controller;
     true
+}
+// …a navigation's reserved client discarded, the navigation having committed no document of it (a download, a 204, a
+// failure, a redirect to another origin's): whether there was one, not execution ready — what `Clients.get` of it waits
+// for, resolving to none.
+pub(crate) fn discard_reserved_client_for_ruby(partition: u64, id: String) -> bool {
+    let mut reg = lock();
+    let Some(p) = reg.existing(partition) else { return false };
+    let before = p.clients.len();
+    p.clients.retain(|c| c.ready || c.id != id);
+    p.clients.len() != before
 }
 // …and gone (its context discarded): whether it was a client.
 pub(crate) fn forget_client_for_ruby(partition: u64, id: String) -> bool {
@@ -451,7 +480,7 @@ pub(crate) fn forget_client_for_ruby(partition: u64, id: String) -> bool {
 }
 // The realm the client `id` is, by its session number (`realm_key`), nil for none.
 pub(crate) fn client_owner_for_ruby(partition: u64, id: String) -> Option<i64> {
-    lock().existing(partition)?.clients.iter().find(|c| c.id == id).map(|c| c.owner)
+    lock().existing(partition)?.clients.iter().find(|c| c.id == id && c.ready).map(|c| c.owner)
 }
 // A window gone: its clients forgotten, its focus and the navigations asked of it with them — whether it had a client.
 pub(crate) fn forget_window_for_ruby(partition: u64, window: u32) -> bool {
@@ -460,7 +489,7 @@ pub(crate) fn forget_window_for_ruby(partition: u64, window: u32) -> bool {
     p.focus.remove(&window);
     p.client_navs.remove(&window);
     let before = p.clients.len();
-    p.clients.retain(|c| realm_owner_for_ruby(c.owner).0 != window);
+    p.clients.retain(|c| !c.ready || realm_owner_for_ruby(c.owner).0 != window);
     p.clients.len() != before
 }
 // A `WindowClient.navigate()` of worker `handle` for client `id`, queued for the window whose client it is: that
@@ -468,7 +497,7 @@ pub(crate) fn forget_window_for_ruby(partition: u64, window: u32) -> bool {
 pub(crate) fn queue_client_nav_for_ruby(partition: u64, handle: u32, id: String, url: String, nav: i64) -> Option<u32> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
-    let window = realm_owner_for_ruby(p.clients.iter().find(|c| c.id == id)?.owner).0;
+    let window = realm_owner_for_ruby(p.clients.iter().find(|c| c.id == id && c.ready)?.owner).0;
     p.client_navs.entry(window).or_default().push((handle, id, url, nav));
     Some(window)
 }
@@ -485,7 +514,7 @@ pub(crate) fn take_client_navs_for_ruby(partition: u64, window: u32) -> Vec<(u32
 // The client `id`'s `[url, controller]`, nil for none.
 pub(crate) fn client_entry_for_ruby(partition: u64, id: String) -> Option<(String, Option<u32>)> {
     let mut reg = lock();
-    let c = reg.existing(partition)?.clients.iter().find(|c| c.id == id)?;
+    let c = reg.existing(partition)?.clients.iter().find(|c| c.id == id && c.ready)?;
     Some((c.url.clone(), c.controller))
 }
 // Every client, `[id, url, controller, top-level site]` each, in creation order — and what counts as focused, set: the
@@ -494,7 +523,7 @@ pub(crate) fn client_entry_for_ruby(partition: u64, id: String) -> Option<(Strin
 pub(crate) fn clients_for_ruby(partition: u64) -> Vec<(String, String, Option<u32>, String)> {
     let mut reg = lock();
     let Some(p) = reg.existing(partition) else { return Vec::new() };
-    p.clients.iter().map(|c| (c.id.clone(), c.url.clone(), c.controller, c.site.clone())).collect()
+    p.clients.iter().filter(|c| c.ready).map(|c| (c.id.clone(), c.url.clone(), c.controller, c.site.clone())).collect()
 }
 pub(crate) fn set_focus_for_ruby(partition: u64, window: u32, chain: Vec<i64>) {
     lock().partition(partition).focus.insert(window, chain);
@@ -503,15 +532,17 @@ pub(crate) fn set_active_window_for_ruby(partition: u64, window: u32) {
     lock().partition(partition).active_window = window;
 }
 // The client `id` as the service worker `handle` of `origin` sees it — `[id, url, type, frame type, controlled by it,
-// focused]` — nil where it is none, or of another storage key: Clients are of the service worker's (Query Service Worker
-// Client Objects filters on its origin and its top-level site; one whose origin is unknown is none of its).
+// focused, execution ready]` — nil where it is none, or of another storage key: Clients are of the service worker's
+// (Query Service Worker Client Objects filters on its origin and its top-level site; one whose origin is unknown is none
+// of its). One not execution ready yet is what `Clients.get` waits on.
 #[allow(clippy::type_complexity)]
-pub(crate) fn client_for_ruby(partition: u64, handle: u32, origin: String, id: String) -> Option<(String, String, String, String, bool, bool)> {
+pub(crate) fn client_for_ruby(partition: u64, handle: u32, origin: String, id: String) -> Option<(String, String, String, String, bool, bool, bool)> {
     let mut reg = lock();
     let p = reg.existing(partition)?;
     let site = p.worker_site(handle)?;
     let c = p.clients.iter().find(|c| c.id == id && c.site == site && c.origin.as_deref() == Some(origin.as_str()))?;
-    Some(client_seen(p, c, handle))
+    let (id, url, kind, frame_type, controlled, focused) = client_seen(p, c, handle);
+    Some((id, url, kind, frame_type, controlled, focused, c.ready))
 }
 // …and Clients.matchAll(): every such client of the worker's origin — of `kind` ("all" for every one), controlled by it
 // unless `include_uncontrolled` — the focused ones first, then the rest, each in creation order.
@@ -527,7 +558,8 @@ pub(crate) fn match_clients_for_ruby(
     let Some(p) = reg.existing(partition) else { return Vec::new() };
     let Some(site) = p.worker_site(handle) else { return Vec::new() };
     let matched = p.clients.iter().filter(|c| {
-        c.site == site
+        c.ready
+            && c.site == site
             && c.origin.as_deref() == Some(origin.as_str())
             && (include_uncontrolled || c.controller == Some(handle))
             && (kind == "all" || c.kind == kind)
@@ -918,7 +950,7 @@ impl Partition {
 // flake), its URL and the scope do not. (Try Clear's "using" is the controller alone: `clearable`.)
 fn controls_clients(p: &Partition, handle: u32) -> bool {
     let serving = p.registrations.iter().find(|r| r.mapped && r.serving == Some(handle));
-    p.clients.iter().any(|c| {
+    p.clients.iter().filter(|c| c.ready).any(|c| {
         c.controller == Some(handle)
             || serving.is_some_and(|r| c.site == r.site && scope_match(p, &c.site, &c.url, false).is_some_and(|(_, m)| m == r.scope))
     })
@@ -1519,6 +1551,30 @@ mod tests {
         assert_eq!(versions_for_ruby(p, id), (None, None, Some(2)));
         assert_eq!(queued_steps_for_ruby(p), [2]);
         clear_for_ruby(p);
+    }
+
+    #[test]
+    fn a_reserved_client_is_no_client_until_its_document_reports_itself() {
+        let p = partition_new_for_ruby();
+        let origin = || Some("https://a.test".to_owned());
+        reserve_client_for_ruby(p, "r".into(), String::new(), "https://a.test/next".into(), origin());
+        // (…none of matchAll's, nor anything's to route to, but a record `get` waits on)
+        assert!(clients_for_ruby(p).is_empty());
+        assert_eq!(client_owner_for_ruby(p, "r".into()), None);
+        assert_eq!(p_client(p, "r"), Some(false));
+        // (…its document's report makes it execution ready — and says so — another's report says nothing)
+        assert!(note_client_for_ruby(p, "r".into(), 3, String::new(), "https://a.test/next".into(), "window".into(), "top-level".into(), origin(), None));
+        assert!(!note_client_for_ruby(p, "r".into(), 3, String::new(), "https://a.test/next".into(), "window".into(), "top-level".into(), origin(), None));
+        assert_eq!(client_owner_for_ruby(p, "r".into()), Some(3));
+        // (…a ready one is never discarded as a reserved one; an unused reservation is)
+        assert!(!discard_reserved_client_for_ruby(p, "r".into()));
+        reserve_client_for_ruby(p, "s".into(), String::new(), "https://a.test/dl".into(), origin());
+        assert!(discard_reserved_client_for_ruby(p, "s".into()));
+        assert!(p_client(p, "s").is_none());
+        clear_for_ruby(p);
+    }
+    fn p_client(p: u64, id: &str) -> Option<bool> {
+        lock().existing(p)?.clients.iter().find(|c| c.id == id).map(|c| c.ready)
     }
 
     #[test]

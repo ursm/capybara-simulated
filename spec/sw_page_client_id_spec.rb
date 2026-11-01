@@ -17,11 +17,20 @@ RSpec.describe "the page's service-worker client", :every_host_local do
   let(:worker) {
     <<~JS
       self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
-      const resulting = {};
+      const resulting = {}, got = {};
       self.addEventListener('fetch', e => {
-        if (e.request.mode === 'navigate') resulting[new URL(e.request.url).pathname] = e.resultingClientId;
+        if (e.request.mode !== 'navigate') return;
+        const path = new URL(e.request.url).pathname;
+        resulting[path] = e.resultingClientId;
+        // (…the reserved client, which `get` waits on until the document commits, or the navigation makes none)
+        e.waitUntil(self.clients.get(e.resultingClientId).then(c => { got[path] = c ? c.url : null; }));
       });
       self.addEventListener('message', e => {
+        // (…the id its own global holds a lock by)
+        if (e.data.lock) {
+          e.waitUntil(navigator.locks.request('sw', () => navigator.locks.query()).then(q => e.source.postMessage({held: q.held.map(l => l.clientId)})));
+          return;
+        }
         e.waitUntil((async () => {
           const old = e.data.old;
           const gone = old ? await self.clients.get(old) : null;
@@ -31,7 +40,7 @@ RSpec.describe "the page's service-worker client", :every_host_local do
           }
           const all = await self.clients.matchAll({includeUncontrolled: true});
           e.source.postMessage({
-            id: e.source.id, resulting, ids: all.map(c => c.id), oldFound: gone !== undefined && gone !== null
+            id: e.source.id, resulting, got, ids: all.map(c => c.id), oldFound: gone !== undefined && gone !== null
           });
         })());
       });
@@ -43,6 +52,7 @@ RSpec.describe "the page's service-worker client", :every_host_local do
       run lambda {|env|
         case Rack::Request.new(env).path_info
         when '/sw.js' then [200, {'content-type' => 'text/javascript'}, [sw]]
+        when '/none' then [204, {}, []]
         else [200, {'content-type' => 'text/html'}, ['<!doctype html><meta charset=utf-8><body>page']]
         end
       }
@@ -87,5 +97,41 @@ RSpec.describe "the page's service-worker client", :every_host_local do
     expect(third['id']).not_to eq(second['id'])
     expect(third['ids']).not_to include(second['id'])
     expect(third['resulting']['/b']).to eq(third['id'])
+  end
+
+  # (…`clients.get(event.resultingClientId)` in the navigation's fetch handler waits for the document — Service Workers
+  # §4.4.1: until the client is execution ready, or discarded — none for a navigation that makes no document)
+  it "is what clients.get of the navigation's resultingClientId resolves to, once its document commits" do
+    session = simulated_session(app)
+    session.visit '/a'
+    session.execute_script("navigator.serviceWorker.register('/sw.js').then(r => navigator.serviceWorker.ready)")
+    poll_until { session.evaluate_script('navigator.serviceWorker.controller !== null') }
+    session.visit '/b'
+    poll_until { session.evaluate_script('navigator.serviceWorker.controller !== null') }
+    expect(poll_until { ask(session)['got']['/b'] }).to eq('http://www.example.com/b')
+
+    session.execute_script("location.href = '/none'")
+    report = poll_until { r = ask(session); r['got'].key?('/none') && r }
+    expect([report['got']['/none'], session.current_path]).to eq([nil, '/b'])
+    expect(report['ids']).to eq([report['id']])
+  end
+
+  # (…and a service worker's global an environment of its own, its id its own — not the page's, nor the realm-numbered
+  # key of the window, which names the page's realm)
+  it "is not a service worker's own id" do
+    session = simulated_session(app)
+    session.visit '/a'
+    session.execute_script("navigator.serviceWorker.register('/sw.js')")
+    poll_until { session.evaluate_script('navigator.serviceWorker.controller !== null') }
+    page = ask(session)['id']
+    session.execute_script(<<~JS)
+      globalThis.__held = null;
+      navigator.serviceWorker.onmessage = e => { if (e.data.held) globalThis.__held = e.data.held; };
+      navigator.serviceWorker.ready.then(r => r.active.postMessage({lock: true}));
+    JS
+    held = poll_until { session.evaluate_script('globalThis.__held') }
+    expect(held.size).to eq(1)
+    expect(held.first).not_to eq(page)
+    expect(held.first).not_to match(/\Aclient-\d+\z/)
   end
 end

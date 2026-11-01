@@ -6449,7 +6449,9 @@ module Capybara
         if ctrl.nil? && prev_ctrl && prev_url == url.to_s && sw_live?(prev_ctrl)
           ctrl = prev_ctrl
         end
-        Native.sw_note_client(@sw_partition, client_id.to_s, sw_realm_key(realm), site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
+        settled = Native.sw_note_client(@sw_partition, client_id.to_s, sw_realm_key(realm), site.to_s, url.to_s, type.to_s, frame_type.to_s, origin&.to_s, ctrl)
+        # (…a navigation's reserved client execution ready now, its document committed: what `clients.get` of it waits on)
+        sw_host.sw_client_settled(client_id) if settled
         # (…and, a window's, its window's focus chain as it stands: a new realm may be on it)
         focus_changed if type.to_s == 'window'
         nil
@@ -6562,6 +6564,21 @@ module Capybara
         nil
       end
 
+      # A document loaded, its client reported: the reserved client its navigation made of it let go of where the report
+      # made it none — a document of an opaque origin (a CSP-sandboxed one) is no client — `clients.get` of it then none.
+      def sw_document_loaded(realm_id) = discard_reserved_client(sw_client_id(realm_id))
+      # A navigation's reserved client let go of, its navigation having made no document of it — none where its document
+      # adopted it (`run_navigation_fetch`).
+      private def discard_reserved_client(id)
+        sw_host.sw_client_settled(id) if Native.sw_discard_reserved_client(@sw_partition, id)
+      end
+      # …and either way, every service worker of the session told: a `clients.get` of it each waits on settles
+      # (workers.js `__csim_swClientSettled`) — to the client, or to none.
+      def sw_client_settled(id)
+        @workers.each_value {|w| w[:inbox] << {kind: 'sw_client_settled', id: id.to_s} if w[:service] && w[:thread]&.alive? }
+        nil
+      end
+
       private def unregister_client(client_id)
         sw_host.sw_clients_unloaded if Native.sw_forget_client(@sw_partition, client_id.to_s)
         nil
@@ -6600,8 +6617,8 @@ module Capybara
         nil
       end
 
-      # A worker's service-worker Client id. Distinct from the realm ids below so the
-      # client-message router can tell a worker client from a browsing context.
+      # A worker's environment id — a dedicated or shared worker's Client id, a service worker's own. Distinct
+      # from the realm ids below so the client-message router can tell a worker client from a browsing context.
       def sw_worker_client_id(handle) = "client-#{@client_space}worker-#{handle.to_i}"
 
       # A realm's service-worker Client id — its document's environment id (HTML: each document a new environment, the
@@ -6868,8 +6885,11 @@ module Capybara
       # network; each response judged by the engine (`response`) — a redirect
       # followed, the request's body gone where it makes a GET (301 / 302 of a POST, 303 of a non-GET/HEAD: Fetch
       # "HTTP-redirect fetch") — and its reserved client id (`event.resultingClientId`) one per chain, re-minted where a
-      # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits.
-      # `ready` is called with each hop's URL before its request is made (its cookies read), `begun`
+      # hop crosses origins (a reserved client is origin-bound), adopted by the document it commits — a record of the
+      # session's clients, not execution ready yet, from the moment a hop's request reaches a service worker
+      # (sw_registry.rs `reserve_client_for_ruby`), which `clients.get(event.resultingClientId)` waits on: the client once
+      # that document reports itself, let go of where the navigation commits none (a download, a 204, a failure) or a
+      # redirect hop leaves it for another origin's. `ready` is called with each hop's URL before its request is made (its cookies read), `begun`
       # with it as the hop begins, `redirected` as a redirect is followed.
       # Returns the last hop's `NavigationHop`; a network error — of no response, or a service worker's — 'fail'.
       private def run_navigation_fetch(
@@ -6887,12 +6907,13 @@ module Capybara
       )
         req_body = body.to_s.b
         rid      = mint_resulting_client_id
-        loop do
+        hop = loop do
           ready&.call(fetch.target)
           meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies, worker_site = fetch.begin_hop(cookie_now)
           begun&.call(target)
           hop_body  = req_body.empty? ? nil : req_body
           rack_body = document = nil
+          Native.sw_reserve_client(@sw_partition, rid, worker_site, target, url_origin(target)) if worker_site
           if worker_site &&
              (sw = sw_host.service_worker_navigation_fetch(
                target,
@@ -6914,7 +6935,7 @@ module Capybara
                cookie_context:        cookies,
                network_headers:       network_headers
              ))
-            return NavigationHop.new('fail') if sw['networkError']
+            break NavigationHop.new('fail') if sw['networkError']
 
             # (…its header list where the wire carries one — a redirect's, whose Location fields the combined headers would
             # make one: response-wire.js `header_list`)
@@ -6927,7 +6948,7 @@ module Capybara
               body:           hop_body,
               content_type:   content_type,
               cookie_context: (cookies if worker_site)
-            ) or return NavigationHop.new('fail')
+            ) or break NavigationHop.new('fail')
             status, headers, rack_body = response
           end
           # (…what the response makes of it — a top-level traversable's, each response's opener policy enforced as it comes,
@@ -6943,12 +6964,17 @@ module Capybara
             command, type = Native.navigation_load(supplied, document.byteslice(0, 1445))
           end
           close_rack_body(rack_body) unless command == 'document' || command == 'download'
-          return NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy, type) unless command == 'redirect'
+          break NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy, type) unless command == 'redirect'
 
           redirected&.call
           req_body, content_type = ''.b, nil if to_get
-          rid = mint_resulting_client_id if new_client
+          next unless new_client
+
+          discard_reserved_client(rid)
+          rid = mint_resulting_client_id
         end
+        discard_reserved_client(rid) unless %w[document inline].include?(hop.command)
+        hop
       end
 
       # Whether a service worker may control a navigation of realm `realm_id`'s own navigable — the engine's
@@ -9018,8 +9044,10 @@ module Capybara
         # note_client) instead of falling back to a realm-numbered key. (Subresource interception FROM a
         # worker isolate would also want this id, but no controller is ever installed into a
         # worker isolate today — that's the controlled-worker follow-up, not this line.)
-        # A SERVICE worker is not a client.
-        rt.eval_void("globalThis.__dom.realmIdentify('clientId', #{JSON.generate(sw_worker_client_id(handle))});") unless service
+        # A SERVICE worker is no client of another, but its global is an environment of its own all the
+        # same, its id its own (what its lock requests are held by: web_locks.rs) — never the realm-numbered
+        # key of the window space, which would name the page's realm 0 (`sw_client_realm`).
+        rt.eval_void("globalThis.__dom.realmIdentify('clientId', #{JSON.generate(sw_worker_client_id(handle))});")
         # A MODULE worker ({type: 'module'}): the flag drives the classic-only surface
         # (importScripts throws a TypeError); its script evaluates as a real module graph
         # below (eval_module_graph).
@@ -9343,6 +9371,11 @@ module Capybara
               # (`unregister().then(() => port.postMessage(...))`), and nothing else drains
               # this isolate's microtasks until the next timer-bearing tick.
               rt.call('__csim_swUnregisterResult', msg[:ok])
+              rt.drain_microtasks
+            elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_settled'
+              # A reserved client execution ready, or discarded: the `clients.get` of it this worker waits on settled
+              # (js/src/workers.js), its continuation drained as an unregister result's is.
+              rt.call('__csim_swClientSettled', msg[:id])
               rt.drain_microtasks
             elsif msg.is_a?(Hash) && msg[:kind] == 'sw_client_message'
               # A service worker → THIS worker, which is one of its clients: `client.postMessage`
@@ -12280,6 +12313,7 @@ module Capybara
         # The document, loaded, refreshes its service-worker client record (its URL may have moved since it reported
         # itself as it began loading), as a frame's does (V8Runtime).
         @runtime.call('__csim_swReportClient')
+        sw_document_loaded(0)
         # (…a new window's initial about:blank completely loaded as it is made, which no parse made and whose `load` never
         # fires: `open_initial_document`)
         if initial
