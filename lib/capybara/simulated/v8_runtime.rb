@@ -488,9 +488,7 @@ module Capybara
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
           break unless cut
 
-          t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          @browser.run_workers_due
-          waited   += Process.clock_gettime(Process::CLOCK_MONOTONIC) - t
+          waited   += @browser.run_workers_due
           left     -= cut
           max_iter -= r['fired'].to_i
           break if left <= 0 || max_iter <= 0 || (yield_on_gen && r['dirtied'])

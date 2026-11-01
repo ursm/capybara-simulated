@@ -135,4 +135,31 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', :every_host_
     session.click_button 'b'
     expect(poll_until { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[t50 m100 t200 w t500])
   end
+
+  # (…and its sync XHR, which the service worker answers off a 300 ms timer of its own: a request one worker waits on in
+  # place is taken by the other at the time it was made, the window going no further meanwhile — so the timer starts
+  # then, however late the service worker's thread gets to it on a loaded machine (Browser#worker_due_at, `:asked`))
+  it "hears a worker whose sync XHR a service worker answers late at its time" do
+    sw = "self.addEventListener('install', () => self.skipWaiting()); self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));" \
+         "self.addEventListener('fetch', e => { const path = new URL(e.request.url).pathname;" \
+         "if (path === '/w.js') { setTimeout(() => self.clients.matchAll().then(cs => cs.forEach(c => c.postMessage('m100'))), 100);" \
+         "e.respondWith(new Response(\"const x = new XMLHttpRequest(); x.open('GET', '/x', false); x.send(); postMessage('w:' + x.responseText)\", {headers: {'content-type': 'text/javascript'}})); }" \
+         "if (path === '/x') e.respondWith(new Promise(r => setTimeout(() => r(new Response('sw')), 300))); });"
+    page = <<~HTML
+      <!doctype html><meta charset=utf-8>
+      <script>globalThis.log = []; const at = (l) => log.push(`${l}@${Math.round(__virtualNow() - t0)}`); navigator.serviceWorker.onmessage = (e) => at(e.data);</script>
+      <button onclick="globalThis.t0 = __virtualNow(); [50, 200, 500, 900].forEach((t) => setTimeout(() => at('t' + t), t)); new Worker('/w.js').onmessage = (e) => at(e.data)">b</button>
+    HTML
+    session = simulated_session(lambda {|env|
+      next [200, {'content-type' => 'text/javascript'}, [sw]] if env['PATH_INFO'] == '/sw.js'
+
+      [200, {'content-type' => 'text/html'}, [page]]
+    })
+    session.visit '/a'
+    session.execute_script("navigator.serviceWorker.register('/sw.js')")
+    poll_until { session.evaluate_script('navigator.serviceWorker.controller !== null') }
+    session.visit '/a'
+    session.click_button 'b'
+    expect(poll_until { l = session.evaluate_script('log'); l.size == 6 && l }).to eq(%w[t50@50 m100@112 t200@200 w:sw@304 t500@500 t900@900])
+  end
 end

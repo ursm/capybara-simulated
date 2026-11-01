@@ -561,6 +561,10 @@ module Capybara
       # inbound message / fetch (releasing the GVL so it runs). Bounded so a genuinely stuck worker
       # can't hang settle — the outer poll loop re-drives across calls.
       WORKER_ROUND_TRIP_BUDGET = 1.0
+      # …and how long a worker still BOOTING — its isolate built, its main script fetched — is waited for: no code of its
+      # own runs yet that could keep it, so only a hang reaches this; a loaded machine's slow boot is waited out, the round
+      # trip's budget counted from when its script begins to run (`record[:running_since]`, `worker_deadline`).
+      WORKER_BOOT_GUARD        = 10.0
       # Max wall time an event-loop step holds the virtual clock for a reply its JavaScript cannot see — a fetch's from a
       # service worker, a message's ack, a socket's echoed close (`@clock_holds`) — spent once across the steps.
       CLOCK_HOLD_BUDGET        = 1.0
@@ -5511,6 +5515,9 @@ module Capybara
         fid   = @worker_host.await_direct
         epoch = @worker_host.owe(WorkerHost::FETCH, 1)
         w[:inbox] << {kind: 'fetch', req: req_json, fetch_id: fid, realm_id: realm}
+        # (…asked by another worker, whose wait the window's event loop goes on beside: the asked one due now, to take it at
+        # the window's time — set once it is in the inbox, so the tick that clears it comes behind it: `worker_due_at`)
+        w[:asked] = true unless Thread.current == @main_thread
         await_worker_reply(fid, w)
       ensure
         if fid
@@ -6083,12 +6090,15 @@ module Capybara
       def worker_due_within(max_ms, waited = 0.0)
         return nil if @workers.empty? || max_ms <= 0 || waited >= WORKER_ROUND_TRIP_BUDGET
 
-        at = worker_next_timer_at or return nil
-        # (…one due already — the window moved past it since the worker last ran — run first, at the window's time now)
-        if at <= @runtime.clock
+        # (…what is due already — a timer the window moved past since the worker last ran, a request waiting, a worker an
+        # answer let go on — run first, at the window's time now: what it runs may leave another due now, a request one
+        # worker makes of another, a round of each at most WORKER_DUE_NOW_ROUNDS)
+        WORKER_DUE_NOW_ROUNDS.times do
+          break unless worker_resuming? || ((due_at = worker_next_timer_at) && due_at <= @runtime.clock)
+
           run_workers_due
-          at = worker_next_timer_at or return nil
         end
+        at = worker_next_timer_at or return nil
         due = [(at - @runtime.clock).ceil, FRAME_STEP_MS].max
         due < max_ms ? due : nil
       end
@@ -6099,42 +6109,60 @@ module Capybara
       # the window's clock as it polls — the one way a worker loses the lockstep — until it answers a tick again
       # (`lockstep_worker?`). An answer that comes after the window stopped waiting is no answer to the next tick: let go
       # of before it is sent.
+      # What it returns is the real time the wait took of workers RUNNING their scripts — the step's round-trip budget
+      # (`worker_due_within`'s `waited`) — a booting worker's none of it.
       def run_workers_due
         now = @runtime.clock
-        due = @workers.each_value.select {|w| lockstep_worker?(w) && w[:next_timer_at] <= now }
-        return if due.empty?
+        due = @workers.each_value.select {|w| (at = worker_due_at(w)) && at <= now }
+        return 0.0 if due.empty? && !worker_resuming?
 
         due.each do |w|
           w[:ticked].clear
+          # (…behind what it was asked, which the tick's answer then covers)
+          w[:asked] = false
           w[:inbox] << {kind: 'tick', to: now}
         end
-        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
-        due.each {|w| w[:lagging] = !tick_answered?(w, deadline) }
-        await_resumed_workers(deadline)
+        start   = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        booting = @workers.values.reject {|w| w[:running_since] }
+        due.each {|w| w[:lagging] = !tick_answered?(w, start) }
+        await_resumed_workers(start)
         deliver_worker_messages
-        nil
+        finished = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        # (…from when the last of those booting as it began ran its script — none where one still has not)
+        running = booting.empty? ? start : booting.map {|w| w[:running_since] || finished }.max
+        finished - [running, start].max
       end
       # …and a worker the ticks' work let go on — one waiting in place on a service worker's answer the tick gave
-      # (`await_worker_reply`: a main script, a sync XHR), its `:resuming` — waited for too, up to `deadline`, until it
-      # waits again, on its inbox or on another answer: what it does with the answer it does at the time the answer came,
-      # not as late as the window has gone on by when its thread gets to it.
-      private def await_resumed_workers(deadline)
+      # (`await_worker_reply`: a main script, a sync XHR), its `:resuming` — waited for too (`worker_deadline` of `start`),
+      # until it waits again, on its inbox or on another answer: what it does with the answer it does at the time the answer
+      # came, not as late as the window has gone on by when its thread gets to it.
+      private def await_resumed_workers(start)
         @workers.values.each do |w|
-          while w[:resuming] && w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          while w[:resuming] && w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < worker_deadline(w, start)
             sleep WORKER_RESUME_POLL
           end
         end
       end
+      # …the wall time worker `w`, waited for since `start`, is waited for until: one running its script a round trip's
+      # budget from `start` — or from when it began to run, where that came later; one still booting WORKER_BOOT_GUARD from
+      # `start`.
+      private def worker_deadline(w, start)
+        since = w[:running_since]
+        since ? [start, since].max + WORKER_ROUND_TRIP_BUDGET : start + WORKER_BOOT_GUARD
+      end
       WORKER_RESUME_POLL = 0.001
-      # …whether worker `w` answered its tick by `deadline` — or, blocked meanwhile on another worker's answer
-      # (`await_worker_reply`: a main script, a sync XHR a service worker answers, which the window's steps let it make), is
-      # waited for no more and counts as answered: it is not lagging, it waits on the window.
-      private def tick_answered?(w, deadline)
+      WORKER_DUE_NOW_ROUNDS = 4
+      # …whether one is (`await_resumed_workers`).
+      private def worker_resuming? = !@workers.empty? && @workers.each_value.any? {|w| w[:resuming] && w[:thread]&.alive? }
+      # …whether worker `w` answered its tick, sent at `start`, in time (`worker_deadline`) — or, blocked meanwhile on another
+      # worker's answer (`await_worker_reply`: a main script, a sync XHR a service worker answers, which the window's steps
+      # let it make), is waited for no more and counts as answered: it is not lagging, it waits on the window.
+      private def tick_answered?(w, start)
         loop do
           return false unless w[:thread]&.alive?
           return true if w[:blocked].to_i.positive?
 
-          left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          left = worker_deadline(w, start) - Process.clock_gettime(Process::CLOCK_MONOTONIC)
           return false unless left.positive?
           return true if pop_with_timeout(w[:ticked], [left, WORKER_BLOCK_POLL].min)
         end
@@ -6145,14 +6173,24 @@ module Capybara
       private def worker_awaits_worker? = !@workers.empty? && @workers.values.any? {|w| w[:blocked].to_i.positive? }
       # …a live worker in the lockstep: not one left lagging — but one whose answer came in since, back in it.
       private def lockstep_worker?(w)
-        return false unless w[:thread]&.alive? && w[:next_timer_at] && w[:blocked].to_i.zero?
+        return false unless w[:thread]&.alive? && w[:blocked].to_i.zero?
 
         w[:lagging] = false if w[:lagging] && !w[:ticked].empty?
         !w[:lagging]
       end
-      # …the soonest time, on the window's clock, a live worker of this window's in lockstep has a timer set for (nil for
-      # none).
-      private def worker_next_timer_at = @workers.each_value.filter_map {|w| w[:next_timer_at] if lockstep_worker?(w) }.min
+      # …the time, on the window's clock, a live worker of this window's in lockstep is due at (nil for none): its next
+      # timer's — or now, where another worker asked it something it waits on in place (`:asked`, `sw_direct_reply`: a
+      # main script, a sync XHR) that no tick of the window's has followed yet: taken and dispatched at the time it was
+      # asked, the window gone no further meanwhile, so a timer its answer waits on starts from then — not from however
+      # far the window had gone by the time the worker's thread got to it, which a loaded machine's scheduler decides.
+      private def worker_due_at(w)
+        return nil unless lockstep_worker?(w)
+        return @runtime.clock if w[:asked]
+
+        w[:next_timer_at]
+      end
+      # …the soonest of them (nil for none).
+      private def worker_next_timer_at = @workers.each_value.filter_map {|w| worker_due_at(w) }.min
 
       # The navigations deferred on an activating worker, made again — each as a navigation intent of this window's, as
       # it next takes its tasks (`consume_sw_deferred_navigations`), where it is still its navigable's ongoing navigation
@@ -9369,6 +9407,8 @@ module Capybara
             sw_note_worker_client(handle, url, shared, controller)
           end
         end
+        # Booted: its script runs from here, what a window's wait on it is counted against (`worker_deadline`).
+        record[:running_since] = Process.clock_gettime(Process::CLOCK_MONOTONIC) if record
         if service
           # A SERVICE worker's registration is GATED on its script actually evaluating
           # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
