@@ -67,7 +67,9 @@ RSpec.describe 'a window made in its opener\'s isolate' do
     session.within_window(popup) do
       expect(session).to have_css('#in', text: 'IN')
       expect(session).to have_no_css('#main')
-      expect(session.current_url).to eq('about:blank')
+      # (…its URL its opener's, whose script wrote it: HTML "document open steps" give an opened document the URL of the
+      # entry document — WPT url-entry-document-sync-call)
+      expect(session.current_url).to eq('http://www.example.com/')
       expect(session.title).to eq('blank')
       expect(session.html).to include('id="in"')
     end

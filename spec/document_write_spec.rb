@@ -153,9 +153,11 @@ RSpec.describe 'document.write during parsing' do
     expect(got).to eq([1, 3, 'x', true, 'BackCompat'])
   end
 
-  # …but an iframe srcdoc document — its URL `about:srcdoc`, which `open` keeps — stays no-quirks with no doctype written,
-  # whichever realm opens it (Chrome: `CSS1Compat` both ways; the spec's "iframe srcdoc document").
-  it 'keeps an iframe srcdoc document no-quirks through document.open' do
+  # …and an iframe srcdoc document — a Document whose URL matches `about:srcdoc` — opened by its parent's script is one no
+  # more: "document open steps" give it the URL of the entry document, the parent's, so what is written with no doctype
+  # makes it quirks (Firefox 159, measured 2026-11-01: `BackCompat` at the parent's URL; Chrome 156 changes the URL too
+  # but keeps `CSS1Compat`).
+  it 'gives an iframe srcdoc document opened by its parent the parent’s URL, and quirks' do
     s = session_for('<iframe id=f srcdoc="<!DOCTYPE html><p>a"></iframe>')
     got = s.evaluate_script(<<~JS)
       (() => {
@@ -167,7 +169,7 @@ RSpec.describe 'document.write during parsing' do
         return [d.compatMode, d.URL, inner];
       })()
     JS
-    expect(got).to eq(['CSS1Compat', 'about:srcdoc', 'CSS1Compat'])
+    expect(got).to eq(['BackCompat', 'http://www.example.com/', 'BackCompat'])
   end
 
   # A declarative shadow root's script that writes once the input has run out: no insertion point is left to write at,
