@@ -1421,38 +1421,13 @@ module Capybara
                 "element click intercepted: #{action['target']} is not clickable at point " \
                 "(#{action['x']}, #{action['y']}); other element would receive the click: #{action['other']}"
         when 'navigate'
-          url = action['url'].to_s
           # What the page planned is the page's navigation or a new window's — a frame's own link navigates within it,
           # its realm routing it as it is followed (dom-nodes.js `anchorActivateNavigate`, navigables.rs `linkRoute`).
           # A link whose target chose a new top-level navigable as it was followed (navigation_plan.rs `planNavigation`)
           # opens in a new browsing context (its own Browser/VM); the primary stays put (per HTML spec — original window
           # is unaffected), with the opener the link's noopener leaves it (`action['opener']`), as the scripted click /
           # dispatchEvent activation paths do.
-          if action['opensWindow'] && @driver.respond_to?(:open_aux_window)
-            open_hyperlink_window(
-              resolve_against_current(url, use_base: true),
-              name:           action['name'],
-              opener:         action['opener'],
-              link_policy:    action['referrerPolicy'],
-              blob:           action['blob'],
-              user_activated: action['userActivated'] == true
-            )
-          # (…a link to a fragment of its document none: its realm navigated it in place as it was followed, before it planned
-          # any — dom-nodes.js `fragmentNavigate`)
-          else
-            # Drain any work the click handler queued before the VM gets
-            # rebuilt — analytics libraries (Ahoy / segment / GA) queue
-            # the event into a setTimeout-driven flush and rely on the
-            # browser firing it before navigation tears their context
-            # down. Without this drain the tracking POST is lost on
-            # every internal link click.
-            tick_real_time
-            # Link clicks honour `<base href>` (HTML spec); `visit`
-            # does not — that's address-bar navigation. (…a `blob:` one's blob the one it was clicked with, a revoke by
-            # a handler of the click no matter)
-            navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(action['blob']), policy: action['referrerPolicy'],
-                                                                                 user_activated: action['userActivated'] == true)
-          end
+          follow_pending_hyperlink(action)
         when 'submit'
           # Drain any work the click handler queued before the form
           # submission. Mastodon's logout flow: submit-button click
@@ -2147,12 +2122,16 @@ module Capybara
         )
       end
 
+      # …followed: its URL the one the engine parsed as it was planned, against its document's base URL then
+      # (dom-nodes.js `anchorActivateNavigate`) — a new window opened for it, else the page navigated, by the page's
+      # document, with the blob a `blob:` one was clicked with (a revoke by a handler of the click no matter), the work
+      # the click's handlers queued drained first (`tick_real_time`: an analytics flush timer's POST).
       def follow_pending_hyperlink(pending)
         url = pending['url'].to_s
         if pending['opensWindow'] && @driver.respond_to?(:open_aux_window)
           # (…`opener` the link's noopener's answer; open_aux_window forces noopener anyway for a cross-partition blob)
           open_hyperlink_window(
-            resolve_against_current(url, use_base: true),
+            url,
             name:           pending['name'],
             opener:         pending['opener'],
             link_policy:    pending['referrerPolicy'],
@@ -2161,8 +2140,7 @@ module Capybara
           )
         else
           tick_real_time
-          navigate_top_from_page(resolve_against_current(url, use_base: true), blob: host_blob(pending['blob']), policy: pending['referrerPolicy'],
-                                                                               user_activated: pending['userActivated'] == true)
+          navigate_top_from_page(url, blob: host_blob(pending['blob']), policy: pending['referrerPolicy'], user_activated: pending['userActivated'] == true)
         end
       end
 
@@ -11362,9 +11340,8 @@ module Capybara
       def consume_pending_aux_window
         pending = @runtime.call('__csimTakePendingAuxWindow')
         return unless pending.is_a?(Hash) && pending['url'] && @driver.respond_to?(:open_aux_window)
-        url = in_top_context { resolve_against_current(pending['url'].to_s, use_base: true) }
         open_hyperlink_window(
-          url,
+          pending['url'].to_s,
           name:           pending['name'],
           opener:         pending['opener'],
           link_policy:    pending['referrerPolicy'],
