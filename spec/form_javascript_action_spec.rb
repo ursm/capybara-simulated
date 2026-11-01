@@ -42,11 +42,19 @@ RSpec.describe 'a form submitted to a javascript: or a data: URL' do
     expect(poll_until { session.evaluate_script('frames[0].document.title') == 'in frame' && session.title }).to eq('start')
   end
 
-  it 'opens no window for either, requesting nothing' do
+  it 'opens no window for a javascript: one' do
     session.visit '/'
     session.click_button 'pop js'
-    session.click_button 'pop data'
     expect([session.title, session.windows.size, hits]).to eq(['start', 1, ['GET /']])
+  end
+
+  # (…a new window for a data: one, whose navigation to it the window refuses — left at its initial about:blank, as
+  # Chrome 156 leaves a `target=_blank` form's, a link's and `open()`'s, measured 2026-11-01: navigation_fetch.rs `start`)
+  it 'opens a window at about:blank for a data: one, requesting nothing' do
+    session.visit '/'
+    popup = session.window_opened_by { session.click_button 'pop data' }
+    session.within_window(popup) { expect(session.current_url).to eq('about:blank') }
+    expect([session.title, hits]).to eq(['start', ['GET /']])
   end
 
   it 'navigates the page to no data: URL' do

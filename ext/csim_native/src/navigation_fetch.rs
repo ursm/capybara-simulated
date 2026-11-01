@@ -178,54 +178,51 @@ fn command(ruby: &Ruby, name: &str, payload: &[Value]) -> RArray {
     out
 }
 
-// `NavigationFetch#start`'s answer for a navigation to `url` by `method`. Native.navigation_start(url, method) -> it, for
-// a navigation the host makes no NavigationFetch of before it knows (a window's of no HTTP(S) URL).
-pub(crate) fn start(url: &str, method: &str) -> &'static str {
-    let url = ada_url::Url::parse(url, None).ok();
-    let protocol = url.as_ref().map_or("", |u| u.protocol());
-    if url.as_ref().is_some_and(crate::url_ops::matches_about_blank) {
+// `NavigationFetch#start`'s answer for a navigation to `url` by `method` — and, `refuses_data`, a document's navigation
+// of a top-level traversable, `refused` for a `data:` URL it would render, or none at all (`data_navigation`), before
+// anything of the navigation begins. Native.navigation_start(url, method, refuses_data) -> it, for a navigation the host
+// asks before it makes its NavigationFetch (a top-level traversable's: its document is asked whether it may be unloaded
+// only for one that goes on).
+pub(crate) fn start(url: &str, method: &str, refuses_data: bool) -> &'static str {
+    let parsed = ada_url::Url::parse(url, None).ok();
+    let protocol = parsed.as_ref().map_or("", |u| u.protocol());
+    if parsed.as_ref().is_some_and(crate::url_ops::matches_about_blank) {
         "about_blank"
     } else if method == "GET" && protocol == "blob:" {
         "blob"
     } else if protocol == "data:" {
-        "data"
+        if refuses_data && data_navigation(url).0 != "download" { "refused" } else { "data" }
     } else if protocol == "about:" || (method != "GET" && !matches!(protocol, "http:" | "https:")) {
         "fail"
     } else {
         "fetch"
     }
 }
-pub(crate) fn start_for_ruby(url: String, method: String) -> &'static str {
-    start(&url, &method.to_ascii_uppercase())
+pub(crate) fn start_for_ruby(url: String, method: String, refuses_data: bool) -> &'static str {
+    start(&url, &method.to_ascii_uppercase(), refuses_data)
 }
 
-// What a navigation of a top-level traversable to the `data:` URL `url` comes to, Fetch's scheme fetch its response:
-// `fail` where it is no data: URL's (a network error); `download` where its MIME type makes no document
-// (mime.rs `makes_document`) — handed off, whoever navigates; else `document` where the user navigates it (`by_user`:
-// the address bar, the driver's `visit`), whose document is of a new opaque origin — and `refused` where a document
-// does. HTML has no such rule; Chrome and Firefox refuse a document's navigation of a top-level browsing context to a
-// `data:` URL it would render — a link's, a form's, `location`'s, a refresh's, `open(url, '_self')`'s; a new window it
-// opens left at about:blank — and let the user's and a download through (measured 2026-10-30 and 2026-11-01).
-pub(crate) fn data_navigation(url: &str, by_user: bool) -> (&'static str, Option<(String, Vec<u8>)>) {
+// What a navigation to the `data:` URL `url` comes to, Fetch's scheme fetch its response: `fail` where it is no data:
+// URL's (a network error); `download` where its MIME type makes no document (mime.rs `makes_document`) — handed off,
+// whoever navigates; else `document`, of a new opaque origin. A document's navigation of a top-level traversable to one
+// that is no download is refused before it begins (`start`, `refuses_data`): HTML has no such rule; Chrome and Firefox
+// refuse a link's, a form's, `location`'s, a refresh's, `open(url, '_self')`'s, leave a new window one opens at
+// about:blank, and let the user's — the address bar, the driver's `visit` — and a download through (measured
+// 2026-10-30 and 2026-11-01).
+pub(crate) fn data_navigation(url: &str) -> (&'static str, Option<(String, Vec<u8>)>) {
     let is_data = url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:"));
     match is_data.then(|| crate::data_url::process(url)).flatten() {
         None => ("fail", None),
         Some(r) if !crate::mime::makes_document(Some(&r.0)) => ("download", Some(r)),
-        Some(r) if by_user => ("document", Some(r)),
-        Some(_) => ("refused", None),
+        Some(r) => ("document", Some(r)),
     }
 }
-// Native.data_navigation(url, by_user) -> [verdict, MIME type, body] (`data_navigation`; nil each but the verdict for one
-// of no response).
-pub(crate) fn data_navigation_for_ruby(ruby: &Ruby, url: String, by_user: bool) -> (&'static str, Option<String>, Option<magnus::RString>) {
-    let (verdict, response) = data_navigation(&url, by_user);
+// Native.data_navigation(url) -> [verdict, MIME type, body] (`data_navigation`; nil each but the verdict for one of no
+// response).
+pub(crate) fn data_navigation_for_ruby(ruby: &Ruby, url: String) -> (&'static str, Option<String>, Option<magnus::RString>) {
+    let (verdict, response) = data_navigation(&url);
     let (mime, body) = response.map_or((None, None), |(m, b)| (Some(m), Some(ruby.str_from_slice(&b))));
     (verdict, mime, body)
-}
-// Native.top_level_data_refused(url) -> whether a document's navigation of a top-level traversable to `url` is refused —
-// one to a `data:` URL that is no download (`data_navigation`; a malformed one too).
-pub(crate) fn top_level_data_refused(url: String) -> bool {
-    url.get(..5).is_some_and(|s| s.eq_ignore_ascii_case("data:")) && data_navigation(&url, false).0 != "download"
 }
 
 // The schemes a fetch goes to (Fetch "fetch scheme"): a navigation redirected to any other is handed off.
@@ -471,10 +468,11 @@ impl NavigationFetch {
     // — a URL that matches about:blank (url_ops.rs `matches_about_blank`), a document made of none, whatever its method —
     // 'blob' — a GET of a `blob:` URL, its blob's document — 'fail' — a network error: any other `about:` URL (`about:BLANK`
     // too: Fetch "scheme fetch" answers about:blank alone), any request but a GET to a URL no HTTP(S) one (a `blob:` URL is
-    // fetched by a GET alone) — or 'fetch', its hops to make (`begin_hop`).
+    // fetched by a GET alone) — 'data' — a `data:` URL, its own response (`data_navigation`; one a document refuses refused
+    // before: `start`) — or 'fetch', its hops to make (`begin_hop`).
     fn start(&self) -> &'static str {
         let st = self.st.borrow();
-        start(&st.chain.target, &st.chain.method)
+        start(&st.chain.target, &st.chain.method, false)
     }
 
     // #coop_switch? -> whether the navigation's responses need a browsing context group switch (`enforce_coop`).
@@ -523,17 +521,16 @@ mod tests {
 
     #[test]
     fn a_top_level_data_navigation_is_the_users_or_a_download() {
-        assert_eq!(start("data:,x", "GET"), "data");
-        assert_eq!(start("DATA:,x", "POST"), "data");
-        assert_eq!(data_navigation("data:text/html,<p>x", true).0, "document");
-        assert_eq!(data_navigation("data:text/html,<p>x", false).0, "refused");
-        let (verdict, response) = data_navigation("data:application/octet-stream;base64,YWJj", false);
+        assert_eq!(start("data:,x", "GET", false), "data");
+        assert_eq!(start("DATA:,x", "POST", false), "data");
+        assert_eq!(start("Data:,x", "GET", true), "refused");
+        assert_eq!(start("data:text/plain;base64,%", "GET", true), "refused");
+        assert_eq!(start("data:application/zip,x", "GET", true), "data");
+        assert_eq!(start("http://a.test/", "GET", true), "fetch");
+        assert_eq!(data_navigation("data:text/html,<p>x").0, "document");
+        let (verdict, response) = data_navigation("data:application/octet-stream;base64,YWJj");
         assert_eq!((verdict, response), ("download", Some(("application/octet-stream".to_owned(), b"abc".to_vec()))));
-        assert_eq!(data_navigation("data:text/plain;base64,%", true).0, "fail");
-        assert!(top_level_data_refused("Data:,x".to_owned()));
-        assert!(top_level_data_refused("data:text/plain;base64,%".to_owned()));
-        assert!(!top_level_data_refused("data:application/zip,x".to_owned()));
-        assert!(!top_level_data_refused("http://a.test/".to_owned()));
+        assert_eq!(data_navigation("data:text/plain;base64,%").0, "fail");
     }
 
     fn nav(method: &str, url: &str, initiator: &str) -> Nav {

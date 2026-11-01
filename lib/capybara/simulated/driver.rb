@@ -534,9 +534,6 @@ module Capybara
       def open_aux_window(url = nil, name: nil, source: nil, blob_snapshot: nil, post: nil, opener: false, referrer: nil, referrer_policy: nil, creator: nil, activation_realm: nil,
                           user_activated: nil, by_script: true, planned: false)
         name = name.to_s
-        # (…a document's to a `data:` URL, which a top-level browsing context refuses one's navigation to — a new window
-        # opened at about:blank: Browser#top_level_data_refused?)
-        url = 'about:blank' if source&.top_level_data_refused?(url)
         # (…the policy the opening hyperlink sets, else its document's)
         referrer_policy = source&.main_document_referrer_policy if referrer_policy.to_s.empty?
         # A blob: URL opened from a different storage partition is forced noopener
@@ -682,9 +679,6 @@ module Capybara
       # its about:blank takes, and `referrer` / `referrer_policy` its navigation's, the calling document's)
       def open_window_from_js(opener_browser, url, name, opener_realm_id = 0, about_base = nil, noopener: false, referrer: nil, referrer_policy: nil)
         resolved = url.to_s.empty? ? nil : opener_browser.resolve_document_url(url)
-        # (…none to a `data:` URL, which a top-level browsing context refuses a document's navigation to: the window
-        # opened at about:blank, as at an empty URL)
-        resolved = nil if opener_browser.top_level_data_refused?(resolved)
         # Opening a blob: URL whose storage partition differs from the opener's
         # top-level site is forced NOOPENER (cross-partition-navigation): the new
         # auxiliary window is its own top-level context in the blob's partition, so the
@@ -802,7 +796,7 @@ module Capybara
       # blob URL entry as it is parsed: one the source revokes after still loads; none, a revoked one's, is a network error.
       # (…`blob` the one a snapshot taken before already holds: a link's, as it was clicked)
       private def navigate_window(browser, url, source:, initiator_realm: 0, referrer: nil, referrer_policy: nil, user_activated: false, blob: nil)
-        return if url.nil? || url.to_s.empty? || source.top_level_data_refused?(url)
+        return if url.nil? || url.to_s.empty?
 
         blob ||= blob_bytes_for(url, source) if url.to_s.start_with?('blob:')
         initiator = source.navigation_initiator(initiator_realm.to_i)
