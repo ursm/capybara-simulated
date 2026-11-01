@@ -1507,6 +1507,13 @@ module Capybara
           # `seedWindowDocument`)
           realm.eval_void("__dom.seedWindowDocument(#{JSON.generate(url.to_s)}, #{JSON.generate(csp)});")
         end
+        # (…a CONTROLLED client where a registration's scope covers its URL, matched in its own top-level site — Service
+        # Workers "Handle Fetch": the reserved client's active service worker, which the document's client takes — wired
+        # before its scripts run, as a frame's is (`create_frame_realm`), which registers it as a client; none for one of
+        # an opaque origin)
+        if doc_origin.to_s != 'null' && (ctrl = @browser.sw_client_controller_for(url.to_s, Native.site(url.to_s)))
+          realm.call('__csim_swSetControllerDirect', *ctrl)
+        end
         # (…its window's session history told of it, before its scripts read its `history`)
         realm.call('__csimCommitWindowEntry', url.to_s, entry[0], entry[1], referrer, *entry[2])
         # (…its response's `Refresh` header its declarative refresh: HTML "create and initialize a Document object")
@@ -1523,6 +1530,10 @@ module Capybara
       # renewed (dom-nodes.js `__csimRenewDocument`) and parsed again — a gap: HTML makes a new one (CLAUDE.md).
       def reuse_window_realm(id, url, body, content_type, entry:, **made)
         realm = frame_realms[id] or return nil
+        # (…the initial about:blank a service-worker client no more — its document replaced, its controller none, as a
+        # document's unload makes it: Handle Service Worker Client Unload — the new document a client of its own)
+        realm.call('__csim_swClientDiscarded')
+        @browser.sw_unregister_client(id)
         realm.call('__csimRenewDocument')
         load_window_document(realm, url, body, content_type, entry: entry, **made.except(:viewport))
         id
