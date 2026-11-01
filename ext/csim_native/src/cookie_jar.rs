@@ -410,6 +410,24 @@ impl Jar {
     }
 }
 
+// ── For the engine's fetches (navigation_fetch.rs) ──
+// The cookie-string a request to `url` in `context` at `now` takes, as bytes (empty for none) — of jar `jar`.
+pub(crate) fn retrieve(jar: u64, url: &str, context: u32, now: f64) -> Vec<u8> {
+    let found = lock().jars.get_mut(&jar).map_or_else(String::new, |j| j.retrieve(url, context, now));
+    found.chars().map(|c| u8::try_from(u32::from(c)).unwrap_or(b'?')).collect()
+}
+// …and a response's set-cookie-strings `lines` (each as bytes) for `url`, stored in `context` at `now`.
+pub(crate) fn store_lines(jar: u64, url: &str, lines: &[Vec<u8>], context: u32, now: f64) {
+    if lines.is_empty() {
+        return;
+    }
+    if let Some(j) = lock().jars.get_mut(&jar) {
+        for line in lines {
+            j.store(url, &line.iter().map(|&b| char::from(b)).collect::<String>(), context, now);
+        }
+    }
+}
+
 // ── For the host ──
 // (…a set-cookie-string and a cookie-string cross as bytes, whatever their encoding: each byte the character it is, so
 // what the server sent is what goes back, a UTF-8 one's bytes included; a URL as its text)

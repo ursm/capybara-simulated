@@ -21,6 +21,9 @@ pub(crate) struct ResponseFields {
     pub(crate) content_type: Option<String>,
     // The Refresh header's fields joined by ", ", as Fetch's "get a header" combines them — each as it came.
     pub(crate) refresh: Option<String>,
+    // The first Set-Cookie header's set-cookie-strings as they came: Rack 3's Array of them, Rack 2's one String of them
+    // joined by newlines — none for an empty one.
+    pub(crate) set_cookie: Vec<Vec<u8>>,
 }
 
 // A header value as script reads it: its fields combined (http_cache.rs `combine`), each byte the code point it is.
@@ -55,11 +58,29 @@ fn location_fields(value: Value) -> Result<Vec<Vec<u8>>, Error> {
     Ok(out)
 }
 
+// …and Set-Cookie's, each set-cookie-string as it came.
+fn set_cookie_lines(value: Value) -> Result<Vec<Vec<u8>>, Error> {
+    if value.is_nil() {
+        return Ok(Vec::new());
+    }
+    Ok(match RArray::from_value(value) {
+        Some(list) => list.into_iter().map(|line| line.funcall::<_, _, RString>("to_s", ()).map(ruby_bytes)).collect::<Result<_, _>>()?,
+        None => {
+            let bytes = ruby_bytes(value.funcall::<_, _, RString>("to_s", ())?);
+            if bytes.is_empty() {
+                Vec::new()
+            } else {
+                bytes.split(|&b| b == b'\n').map(<[u8]>::to_vec).collect()
+            }
+        }
+    })
+}
+
 impl ResponseFields {
     pub(crate) fn read(headers: Option<RHash>) -> Result<Self, Error> {
         let mut out = ResponseFields::default();
         let Some(headers) = headers else { return Ok(out) };
-        let (mut location, mut policy, mut disposition, mut coop, mut coep, mut content_type, mut refresh) = (false, false, false, false, false, false, false);
+        let (mut location, mut policy, mut disposition, mut coop, mut coep, mut content_type, mut refresh, mut cookie) = (false, false, false, false, false, false, false, false);
         let mut csp: Vec<String> = Vec::new();
         headers.foreach(|k: Value, v: Value| {
             let name = ruby_bytes(k.funcall("to_s", ())?);
@@ -94,6 +115,9 @@ impl ResponseFields {
                         None => latin1(&ruby_bytes(v.funcall("to_s", ())?)),
                     });
                 }
+            } else if is("set-cookie") && !cookie {
+                cookie = true;
+                out.set_cookie = set_cookie_lines(v)?;
             } else if is("content-security-policy") {
                 if let Some(value) = text(v)? {
                     csp.push(value);

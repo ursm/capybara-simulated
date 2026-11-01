@@ -6794,8 +6794,10 @@ module Capybara
           origin_null:                   initiating.fetch(:origin_null, false),
           initiator_cross_site_ancestor: initiating.fetch(:initiator_cross_site_ancestor, false),
           ancestors:                     container_realm && @runtime.realm_direct_call(0, '__csimAncestorDocuments', container_realm.to_i, true),
-          # (…a window's navigation, by the same machinery, a top-level navigable's)
-          top_level:                     dest.to_s == 'document',
+          # (…a window's navigation, by the same machinery, a top-level navigable's: destination `document`)
+          dest:                          dest.to_s,
+          user_activated:                user_activated,
+          jar:                           @cookie_jar,
           coop:                          (document_coop(coop_realm) if coop_realm)
         })
         # (…a network error's the URL it was at — its last hop's: HTML "create navigation params by fetching" sets the
@@ -6812,15 +6814,14 @@ module Capybara
         # the ancestor chain (it IS the chain — the building realm is the parent).
         hop = run_navigation_fetch(
           fetch,
-          body:           body,
-          content_type:   content_type,
-          dest:           dest,
-          origin_url:     origin_url,
-          is_reload:      is_reload,
-          user_activated: user_activated,
-          coop_realm:     coop_realm,
-          sw_site:        navigation_site,
-          sw_allowed:     ->(target) { secure_ancestors || !target.start_with?('https://') }
+          body:         body,
+          content_type: content_type,
+          dest:         dest,
+          origin_url:   origin_url,
+          is_reload:    is_reload,
+          coop_realm:   coop_realm,
+          sw_site:      navigation_site,
+          sw_allowed:   ->(target) { secure_ancestors || !target.start_with?('https://') }
         )
         target = fetch.target
         case hop.command
@@ -6874,7 +6875,6 @@ module Capybara
         content_type:,
         dest:,
         origin_url:,
-        user_activated:,
         sw_site:,
         sw_allowed:,
         is_reload: false,
@@ -6887,7 +6887,7 @@ module Capybara
         req_body = body.to_s.b
         rid      = (mint_resulting_client_id if client_ids)
         loop do
-          meth, target, _, ref_source, ref_policy, seed, site, tainted, cookie_cross, cookies = fetch.begin_hop
+          meth, target, network_headers, ref_source, ref_policy, seed, tainted, cookie_cross, cookies = fetch.begin_hop(cookie_now)
           hop&.call(target)
           hop_body  = req_body.empty? ? nil : req_body
           rack_body = document = nil
@@ -6910,31 +6910,19 @@ module Capybara
                resulting_client_id:   rid,
                cookie_cross_site:     cookie_cross,
                navigation_cross_site: fetch.cross_site?,
-               cookie_context:        cookies
+               cookie_context:        cookies,
+               network_headers:       network_headers
              ))
             return NavigationHop.new('fail') if sw['networkError']
 
             status, headers, document = (sw['status'] || 200).to_i, sw['headers'] || {}, Base64.decode64(sw['body_b64'].to_s)
           else
-            response = dispatch_navigation_request(
-              target,
-              method:          meth,
-              referrer_source: ref_source,
-              origin_url:      origin_url,
-              referrer_policy: ref_policy,
-              site:            site,
-              origin_null:     tainted,
-              body:            hop_body,
-              content_type:    content_type,
-              dest:            dest,
-              cookie_context:  cookies,
-              user_activated:  user_activated
-            ) or return NavigationHop.new('fail')
+            response = dispatch_navigation_hop(target, meth, network_headers, body: hop_body, content_type: content_type) or return NavigationHop.new('fail')
             status, headers, rack_body = response
           end
           # (…what the response makes of it — a top-level traversable's, each response's opener policy enforced as it comes,
-          # a redirect's too: navigation_fetch.rs `response`)
-          command, to_get, new_client = fetch.response(status, headers) { coop_facts(coop_realm) }
+          # a redirect's too: navigation_fetch.rs `response` — a network one's Set-Cookie stored as it comes)
+          command, to_get, new_client = fetch.response(status, headers, (cookie_now unless document)) { coop_facts(coop_realm) }
           close_rack_body(rack_body) unless command == 'document' || command == 'download'
           return NavigationHop.new(command, status, headers, rack_body, document, rid, ref_source, ref_policy) unless command == 'redirect'
 
@@ -6991,6 +6979,7 @@ module Capybara
         site_seed: nil,
         origin_null: false,
         cookie_context:,
+        network_headers:,
         dest: 'iframe',
         cookie_cross_site: false,
         navigation_cross_site: false,
@@ -7014,14 +7003,9 @@ module Capybara
         preload = if method.to_s.upcase == 'GET' && nav_preload_enabled?(preload_scope, site)
           navigation_preload_response(
             url,
-            referrer_source,
-            referrer_policy,
-            site_seed,
-            origin_null,
+            network_headers,
             nav_preload_state(preload_scope, site)['headerValue'],
-            dest:           dest,
-            cookie_context: cookie_context,
-            origin_url:     origin_url
+            cookie_context: cookie_context
           )
         end
         # A form submission navigates with the form's method + encoded body (a POST nav the SW reads
@@ -11207,21 +11191,23 @@ module Capybara
           # (…its cookies cross-site by the frame's ancestors' documents — a property of the frame the document commits
           # into, so it rides the SW fetch event too: a rewritten request keeps it)
           ancestors:                     @runtime.realm_direct_call(0, '__csimAncestorDocuments', realm_id.to_i),
-          client_origin:                 (document_origin(realm_id) if traversal)
+          client_origin:                 (document_origin(realm_id) if traversal),
+          dest:                          'iframe',
+          user_activated:                user_activated,
+          jar:                           @cookie_jar
         })
         hop = run_navigation_fetch(
           fetch,
-          body:           body,
-          content_type:   content_type,
-          dest:           'iframe',
-          origin_url:     origin_url,
-          is_reload:      is_reload,
-          is_history:     is_history,
-          user_activated: user_activated,
-          sw_site:        ->(_) { blob_partition_site(realm_id) },
-          sw_allowed:     ->(target) { !target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id) },
+          body:         body,
+          content_type: content_type,
+          dest:         'iframe',
+          origin_url:   origin_url,
+          is_reload:    is_reload,
+          is_history:   is_history,
+          sw_site:      ->(_) { blob_partition_site(realm_id) },
+          sw_allowed:   ->(target) { !target.start_with?('https://') || sw_may_control_frame_navigation?(realm_id) },
           # (…its session history entry the redirect's where it is followed, as the page's is: `redirect_history_entry`)
-          redirected:     lambda {
+          redirected:   lambda {
             history, id = frame_entry(realm_id)
             history&.set_url(id, fetch.target)
           }
@@ -11892,7 +11878,9 @@ module Capybara
           origin:                        origin,
           origin_null:                   origin_null,
           initiator_cross_site_ancestor: initiator_cross_site_ancestor,
-          top_level:                     true,
+          dest:                          'document',
+          user_activated:                user_activated,
+          jar:                           @cookie_jar,
           reloaded_cross_site:           reloaded_cross_site,
           client_origin:                 (document_origin(0) if traversed),
           traversed_initiator:           (@session_history.entry(@session_history.active(0))[:origin] if traversed),
@@ -11972,18 +11960,17 @@ module Capybara
           content_type = 'application/x-www-form-urlencoded' if body && content_type.to_s.empty?
           hop = run_navigation_fetch(
             fetch,
-            body:           req_body,
-            content_type:   content_type,
-            dest:           'document',
-            origin_url:     origin || initiator,
-            is_reload:      is_reload,
-            is_history:     from_history && !is_reload,
-            user_activated: user_activated,
-            coop_realm:     0,
-            client_ids:     false,
-            sw_site:        ->(target) { Native.site(target).to_s },
-            sw_allowed:     ->(_) { true },
-            hop:            lambda {|target|
+            body:         req_body,
+            content_type: content_type,
+            dest:         'document',
+            origin_url:   origin || initiator,
+            is_reload:    is_reload,
+            is_history:   from_history && !is_reload,
+            coop_realm:   0,
+            client_ids:   false,
+            sw_site:      ->(target) { Native.site(target).to_s },
+            sw_allowed:   ->(_) { true },
+            hop:          lambda {|target|
               @current_referer = fetch.referrer.to_s
               # (…whether the request its entry's document is reached by — the last hop's, an error document's too — was
               # cross-site, which a reload of it through a user interface element is judged by; a traversal's leaving it
@@ -11994,7 +11981,7 @@ module Capybara
               # (…a hop into the scope of a worker still activating waiting for it, each hop's: Handle Fetch)
               await_sw_activation(target, Native.site(target).to_s) if sw_registered?
             },
-            redirected:     -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
+            redirected:   -> { redirect_history_entry(fetch.target, get: fetch.request_method == 'GET') }
           )
           target = fetch.target
           case hop.command
@@ -12539,6 +12526,14 @@ module Capybara
       # an `Accept`, its `Referer` — and its cookies, as `cookie_context` lets the jar give them (the engine's for the
       # request: fetch_hop.rs, navigation_fetch.rs; nil, none).
       def apply_default_request_env(env, referer:, cookie_context:, force: true)
+        apply_user_agent_env(env, force: force)
+        referrer = Native.referrer_url(referer)
+        env['HTTP_REFERER'] = referrer if referrer
+        attach_cookies(env, env_request_url(env), cookie_context)
+      end
+      # …those of them the user agent sets of itself, whatever the request: its user agent, its client's address, a test's
+      # sticky headers and an `Accept` (`force: false` keeping any the caller set already).
+      def apply_user_agent_env(env, force: true)
         # `Rack::MockRequest.env_for` populates `SERVER_NAME` /
         # `SERVER_PORT` from the URL but leaves `HTTP_HOST` nil. Read
         # SERVER_NAME so the IPv4/IPv6 loopback choice still matches
@@ -12561,9 +12556,6 @@ module Capybara
         # server can negotiate — HTML-only routes still pick html,
         # both-available pick the first registered.
         env['HTTP_ACCEPT'] ||= DEFAULT_HTTP_ACCEPT
-        referrer = Native.referrer_url(referer)
-        env['HTTP_REFERER'] = referrer if referrer
-        attach_cookies(env, env_request_url(env), cookie_context)
       end
 
       # A request's `Cookie`, as its cookie context lets the jar give it (cookie_jar.rs) — none for nil, a request that
@@ -12583,36 +12575,6 @@ module Capybara
         return worker.url unless record&.key?(:site_for_cookies)
 
         record[:site_for_cookies] || 'null'
-      end
-
-      # Referer / Origin / Fetch-Metadata for a NAVIGATION request (a document load — form
-      # submit, location set, link activation). Unlike a fetch/XHR (which carries a per-request
-      # policy through rack_fetch), a navigation's request headers derive from the INITIATING
-      # document: its Referrer-Policy (referrer.rs `request_referrer`), its origin (an `Origin` header — sent
-      # only on an unsafe method, i.e. a form POST, never a GET/HEAD navigation), and the
-      # Fetch-Metadata triple. `dest` is 'document' for a top-level nav, 'iframe' for a subframe.
-      # `site_override` / `origin_null` carry redirect-chain latched state (navigate_realm_self_*
-      # thread it through each hop): Sec-Fetch-Site is the WIDEST initiator↔url relationship over the
-      # whole chain (a same-site redirect keeps 'same-site' even when the final hop is same-origin),
-      # and a form POST's Origin becomes the opaque 'null' once any hop has crossed origin.
-      # (…`origin_url` the URL whose origin a POST's Origin is — the initiating document's — where it is not the referrer
-      # source's: an about:blank document's, which its creator's origin is)
-      # (…its cookies by `cookie_context`, its navigation's)
-      def navigation_request_headers(env, method:, initiator_url:, target:, dest:, cookie_context:, referrer_policy: nil, user_activated: false, site_override: nil,
-                                     origin_null: false, origin_url: initiator_url)
-        env['HTTP_SEC_FETCH_SITE'] = site_override || Native.fetch_site(nil, initiator_url, target)
-        env['HTTP_SEC_FETCH_MODE'] = 'navigate'
-        env['HTTP_SEC_FETCH_DEST'] = dest.to_s
-        env['HTTP_SEC_FETCH_USER'] = '?1' if user_activated
-        apply_default_request_env(env, referer: Native.request_referrer(referrer_policy, initiator_url, target), cookie_context: cookie_context)
-        # Origin is appended to every non-GET/HEAD request (a form POST carries it; a GET navigation
-        # does not). From a KNOWN initiating document it's that document's origin serialization, or
-        # the literal 'null' when that origin is opaque (an about:blank / data: frame) or has been
-        # tainted by a cross-origin redirect — matching the fetch path's `effective_origin`
-        # convention. Omitted only when the initiator is unknown (a disposed realm → nil url).
-        if origin_url && !origin_url.to_s.empty? && !%w[GET HEAD].include?(method.to_s.upcase)
-          env['HTTP_ORIGIN'] = Native.origin_header((!origin_null && url_origin(origin_url)) || 'null', referrer_policy, target, false)
-        end
       end
 
       # The mode, credentials mode and referrer policy of the request a subresource's `plan` (subresource_plan.rs) is, as a
@@ -12636,88 +12598,43 @@ module Capybara
       # (referrer.rs `site_for_cookies`).
       private def site_for_cookies(realm_id) = @runtime.realm_direct_call(0, '__csimSiteForCookies', realm_id.to_i)
 
-      # Build + dispatch a navigation request (a document's load, a frame's or the page's) — the shared core of every
-      # navigation's hop and of the navigation-preload request, so all of them send the SAME Referer / Origin /
-      # Fetch-Metadata (dest `dest`) and can't silently diverge. `site` is the caller's already-widened Sec-Fetch-Site
-      # (threaded across the redirect chain it owns); `cookie_context` the context its cookies are sent and its
-      # response's stored in, its navigation's (navigation_fetch.rs `begin_hop`; nil, none); `extra_headers` carries any
-      # request-specific CGI header (the preload marker).
-      # Returns [status, headers, resp_body], its status an Integer, or nil for a network error — the caller handles
-      # redirects / the document / the preload wire.
-      def dispatch_navigation_request(
-        url,
-        method:,
-        referrer_source:,
-        referrer_policy:,
-        site:,
-        origin_null:,
-        body: nil,
-        content_type: nil,
-        extra_headers: nil,
-        cookie_context:,
-        dest: 'iframe',
-        origin_url: referrer_source,
-        user_activated: false
-      )
+      # A navigation's hop sent over the network — its request to `url` by method `method`, of `body` (nil none) and
+      # `content_type` — carrying the headers its navigation gives it (navigation_fetch.rs `begin_hop`: its Fetch
+      # metadata, Referer, Origin and cookies, as Rack env pairs; `extra_headers` beside them: the navigation preload
+      # marker) and those the user agent sets of itself. Its response [status, headers, body], its status an Integer, or
+      # nil for a network error; the caller has the engine judge it (`response`), its Set-Cookie with it.
+      def dispatch_navigation_hop(url, method, headers, body: nil, content_type: nil, extra_headers: nil)
         # (…a body's length sent with it alone — a POST's, an empty one's `0` — a GET's none: Fetch "HTTP-network fetch")
         env = body ? rack_env_for(url, method: method, input: body) : rack_env_for(url, method: method)
         if content_type
           env['CONTENT_TYPE']   = content_type.to_s.empty? ? 'application/x-www-form-urlencoded' : content_type
           env['CONTENT_LENGTH'] = body.to_s.bytesize.to_s
         end
-        navigation_request_headers(
-          env,
-          method:          method,
-          initiator_url:   referrer_source,
-          target:          url.to_s,
-          dest:            dest,
-          referrer_policy: referrer_policy,
-          site_override:   site,
-          origin_null:     origin_null,
-          origin_url:      origin_url,
-          user_activated:  user_activated,
-          cookie_context:  cookie_context
-        )
+        apply_user_agent_env(env)
+        headers.each {|k, v| env[k] = v }
         extra_headers&.each {|k, v| env[k] = v }
         response = dispatch_rack_or_http(url, env, method: method, body: body) or return nil
-        status, headers, resp_body = response
-        store_set_cookies(headers, url, cookie_context)
-        [status.to_i, headers, resp_body]
+        response[0] = response[0].to_i
+        response
       end
 
       # The Navigation Preload request: a parallel GET the browser issues for a navigation whose
-      # controlling SW has preload enabled, exposed to the SW as `event.preloadResponse`. It IS a
-      # navigation request (dest 'iframe', mode 'navigate', the frame's Referer / Sec-Fetch-Site — so
-      # the server sees exactly what a no-SW navigation would) plus the `Service-Worker-Navigation-
-      # Preload` header carrying the registration's header value. The SW intercepts the FINAL URL (a
-      # pre-SW network redirect already happened + widened `site_seed`), so this is a single hop — no
-      # redirect loop. Returns the response wire hash for the fetch-event JSON, or `PRELOAD_NETWORK_ERROR`
-      # on a network error.
-      def navigation_preload_response(
-        url,
-        referrer_source,
-        referrer_policy,
-        site_seed,
-        origin_null,
-        header_value,
-        cookie_context:,
-        dest: 'iframe',
-        origin_url: referrer_source
-      )
-        site = Native.fetch_site(site_seed, origin_url, url)
-        response = dispatch_navigation_request(
+      # controlling SW has preload enabled, exposed to the SW as `event.preloadResponse`. It IS the
+      # hop's navigation request (its `network_headers`: navigation_fetch.rs `begin_hop` — dest, mode
+      # 'navigate', Referer, Sec-Fetch-Site, cookies — so the server sees exactly what a no-SW navigation
+      # would) plus the `Service-Worker-Navigation-Preload` header carrying the registration's header
+      # value, its Set-Cookie stored in the hop's `cookie_context`. The SW intercepts the FINAL URL (a
+      # pre-SW network redirect already happened), so this is a single hop — no redirect loop. Returns
+      # the response wire hash for the fetch-event JSON, or `PRELOAD_NETWORK_ERROR` on a network error.
+      def navigation_preload_response(url, network_headers, header_value, cookie_context:)
+        response = dispatch_navigation_hop(
           url,
-          method:          'GET',
-          referrer_source: referrer_source,
-          origin_url:      origin_url,
-          referrer_policy: referrer_policy,
-          site:            site,
-          origin_null:     origin_null,
-          dest:            dest,
-          cookie_context:  cookie_context,
-          extra_headers:   {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
+          'GET',
+          network_headers,
+          extra_headers: {'HTTP_SERVICE_WORKER_NAVIGATION_PRELOAD' => header_value.to_s}
         ) or return PRELOAD_NETWORK_ERROR
         status, headers, resp_body = response
+        store_set_cookies(headers, url, cookie_context)
         cut_short = resp_body.is_a?(CutShortBody)
         {
           'status'     => status,
