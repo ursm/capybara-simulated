@@ -92,11 +92,12 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     poll_until(timeout: 20) { s.evaluate_script('got.fetch && got.xhr ? got : null') }
   end
 
-  # (…`got` came `at` ms of the virtual clock after the request — exactly, however loaded the machine — and as long or a
-  # little longer on `performance.now()`, which shows the time the scripts ran for beside it, more of it under load)
+  # (…`got` came `at` ms of the virtual clock after the request — exactly, however loaded the machine — and as long or
+  # longer on `performance.now()`, which shows the time the scripts ran for beside it — the page's and the worker's that
+  # answered, which its answer carries — hundreds of milliseconds of it on a machine under 64 CPU burners)
   def expect_at(got, at, what)
     expect(got[2]).to be_between(at, at + 1), "#{what}: #{got.inspect}"
-    expect(got[1]).to be_between(at, at + 100), "#{what}: #{got.inspect}"
+    expect(got[1]).to be_between(at, at + 300), "#{what}: #{got.inspect}"
   end
 
   it "resolves a page's fetch and XHR when the worker answers, before their timeout" do

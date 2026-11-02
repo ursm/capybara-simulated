@@ -14,8 +14,7 @@
 //
 // The script time is the agent's — its isolate's, one event loop for every realm of it. Another agent's work is none of
 // it: what crosses from one agent to another — a message, a worker's answer — carries its sender's time, and lands no
-// earlier (timers.js `clockAtLeast`, the gap `agentRan`): a service worker spinning 2 s in its fetch event answers 2 s on,
-// on the page's clock. Each realm's clock reads the script time from where it stood as the realm's time origin was
+// earlier (timers.js `atItsTime`): a service worker spinning 2 s in its fetch event answers 2 s on, on the page's clock. Each realm's clock reads the script time from where it stood as the realm's time origin was
 // taken, beside the virtual clock — its agent's: the window realms of one agent, one event loop, read and schedule on one
 // clock, a frame's raised to its main realm's as the main realm's tasks reach into it (timers.rs `script_clock`), its own
 // steps following its parent's to the parent's time (timers.js `drainChildRealms`).
@@ -28,7 +27,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::dom::{dom, realm_id, register};
 
-// An agent's script time: the turns closed and the gaps messages put on it, in milliseconds; the turn open, from when
+// An agent's script time: the turns closed, in milliseconds; the turn open, from when
 // it opened; and the synchronous host calls it waits inside, how many and since when the outermost began.
 #[derive(Default)]
 pub(crate) struct AgentTime {
@@ -80,7 +79,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clockEpoch", clock_epoch, context_id);
     register(scope, ns, "clockEpochSet", clock_epoch_set, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
-    register(scope, ns, "agentRan", agent_ran, context_id);
     register(scope, ns, "agentIdle", agent_idle, context_id);
     // SAFETY: a live context's handle, which the shim reads its microtask queue from.
     unsafe { csim_watch_checkpoints(scope.as_raw_isolate_ptr(), &*context) };
@@ -203,13 +201,6 @@ fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
     let waited = at.saturating_duration_since(began.max(open));
     let cut = std::time::Duration::from_secs_f64((moved / 1000.0).min(waited.as_secs_f64()));
     time.open = Some(open + cut);
-}
-
-// __dom.agentRan(ms) — the calling agent's clock on by `ms`, its virtual clock and its timers as they stand: what a message
-// from another agent, sent at a time it had not reached, puts on it as it lands (timers.js `clockAtLeast`).
-fn agent_ran(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(ms) = args.get(0).number_value(scope).filter(|t| t.is_finite() && *t > 0.0) else { return };
-    dom(scope).agent_time.closed += ms;
 }
 
 // __dom.agentIdle() — the calling agent's event loop step is over: a turn still open closes, whether or not a checkpoint

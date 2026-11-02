@@ -192,7 +192,8 @@ RSpec.describe 'Worker clock' do
 
   # Every message from another agent lands no earlier than its sender's time as it sent it, whatever carries it — a
   # transferred MessagePort, a BroadcastChannel, a SharedWorker's port, as a worker's own postMessage: a worker spinning
-  # 500 ms before posting on a port read 0 ms on its page; a SharedWorker's 101 (Chrome: 504 each).
+  # 500 ms before posting on a port read 0 ms on its page; a SharedWorker's 101 (Chrome: 504 each). (…a spin on the whole
+  # milliseconds `Date.now()` reads ends as much as one short of 500 of `performance.now()`)
   {
     'a transferred MessagePort' => [
       "onmessage = () => { const ch = new MessageChannel(); postMessage('port', [ch.port2]); spin(); ch.port1.postMessage('done'); };",
@@ -220,7 +221,7 @@ RSpec.describe 'Worker clock' do
       HTML
       session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
       session.visit('/')
-      expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(500, 650)
+      expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(499, 650)
     end
   end
 
@@ -237,7 +238,7 @@ RSpec.describe 'Worker clock' do
     HTML
     session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
     session.visit('/')
-    expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(500, 650)
+    expect(poll_until(timeout: 20) { session.evaluate_script('window.took') }).to be_between(499, 650)
   end
 
   # A post on a BroadcastChannel a worker listens on is taken at the time it was posted at, the window's step waiting for
@@ -300,6 +301,31 @@ RSpec.describe 'Worker clock' do
     start, waited = session.evaluate_script('window.log[0][0]')
     expect(start).to be_between(0, 5)
     expect(waited).to be_between(300, 400)
+  end
+
+  # A busy worker's answer is run at the time it was sent at, on the page's virtual clock: the page's own timers due
+  # before then run first, and every later one at its time. It ran as it came, the page's `Date` lifted 1 s by it — ahead
+  # of the page's `setTimeout(…, 300)` and `(…, 600)`, which then ran 1 s late, and its `(…, 1500)` read 2502 (Chrome:
+  # 300, 600, the answer at 1101, 1500).
+  it "runs a busy worker's answer at its time, among the page's timers" do
+    session = visit_page(<<~JS)
+      onmessage = () => { const a = Date.now(); while (Date.now() - a < 1000); postMessage('crunched'); };
+      postMessage('ready');
+    JS
+    session.execute_script(<<~JS)
+      window.order = [];
+      const t0 = performance.now();
+      const at = (what) => order.push([what, Math.round(performance.now() - t0)]);
+      w.onmessage = () => at('crunched');
+      setTimeout(() => w.postMessage('go'), 100);
+      for (const ms of [300, 600, 1500]) setTimeout(() => at(ms), ms);
+    JS
+    order = poll_until(timeout: 30) {
+      sleep 0.1
+      session.evaluate_script('order.length == 4 && order')
+    }
+    expect(order.map(&:first)).to eq([300, 600, 'crunched', 1500])
+    expect(order.last[1]).to be_between(1500, 1550)
   end
 
   # A worker busy on its own while the window waits on nothing of it is none of the window's time, however the host

@@ -60,7 +60,10 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', :every_host_
   end
 
   # (…and a worker inside a long call — ~300 ms of CPU a message — waited for, its own `Date.now()` moving on: only one
-  # that leaves a tick unanswered a round-trip budget (an endless loop) runs on its own, out of the lockstep)
+  # that leaves a tick unanswered a round-trip budget (an endless loop) runs on its own, out of the lockstep. What it
+  # posts after a long call carries its time, 300 ms on, and lands on the page then, after the page's timers due before
+  # it (timers.js `atItsTime`): its interval's ticks heard as late as its calls held them up, its echoes 300 ms after
+  # each post — no longer as if its calls took no time.)
   it "hears a worker busy in a long call at its times" do
     session = simulated_session(lambda {|env|
       worker = "let i = 0; setInterval(() => postMessage('t' + i++), 100);" \
@@ -78,7 +81,7 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', :every_host_
       HTML
     })
     session.visit '/a'
-    expect(poll_until(timeout: 20) { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[250:t1:1 550:t4:2 1050:t9:3 2050:t19:3 4050:t39:3])
+    expect(poll_until(timeout: 20) { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[250:t0:0 550:t3:1 1050:t8:3 2050:t18:3 4050:t38:3])
   end
 
   # (…and what a service worker posts while the window waits on its answer in place — a frame's navigation it answers off
