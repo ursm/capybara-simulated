@@ -29588,11 +29588,6 @@ css/css-animations/event-dispatch.tentative.html:
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
     specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
     path/suffix. CLAUDE.md rule 1.
-- name: The cancel event with an earlier position in animation list should be fired
-    earlier
-  reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux
-    specs bakes in churn). Re-enters in-scope automatically when WPT drops the tentative
-    path/suffix. CLAUDE.md rule 1.
 css/css-animations/event-order.tentative.html:
 - name: Same events on pseudo-elements follow the prescribed order (::marker)
   reason: Unratified `.tentative` spec — auto-classified out-of-scope (chasing in-flux

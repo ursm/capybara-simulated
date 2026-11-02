@@ -2068,10 +2068,10 @@ impl StyleEngine {
         // (…the CSS animations and transitions a cancel event was generated for, each with the owning element it was of:
         // sorted as owned by it still, before those of it not cancelled — css-animations-2 §2.2, "for the purpose of
         // sorting events", which a released one would otherwise sort after as an animation of no class)
-        let mut cancelled: Vec<(waapi::AnimationId, waapi::Target, bool, u64)> = Vec::new();
+        let mut cancelled: Vec<(waapi::AnimationId, waapi::Target, bool, u64, String)> = Vec::new();
         for e in css.iter().filter(|e| e.kind.ends_with("cancel")) {
             if !cancelled.iter().any(|(id, ..)| *id == e.animation) {
-                cancelled.push((e.animation, e.owner.clone(), e.transition, e.order));
+                cancelled.push((e.animation, e.owner.clone(), e.transition, e.order, e.name.clone()));
             }
         }
         if css.len() > 1 {
@@ -2133,28 +2133,52 @@ impl StyleEngine {
             // hideRaf:cancel plain:run plain:start`, where csim sent every cancel after the started ones' events — and ahead
             // of one at the same place, the animation that replaced it at its position (WPT css-animations
             // event-dispatch.tentative). One whose owner left the document after them, as Firefox sorts it.)
+            // (…its key: the owner's tree path, its pseudo-element, its generation or position, and a transition's property
+            // name — what composite order sorts them by, several transitions of one element and generation by their names'
+            // code points, cancelled or not: Firefox's `color opacity width`)
             let key_of = |x: &waapi::AnimationId| {
                 let css = model.animations.get(x)?.css.as_ref()?;
                 let owner = css.owner.as_ref()?;
-                let order = match &css.kind {
-                    crate::css::CssKind::Transition(t) => t.generation,
-                    crate::css::CssKind::Animation(a) => a.position as u64,
+                let (order, name) = match &css.kind {
+                    crate::css::CssKind::Transition(t) => (t.generation, css.name()),
+                    crate::css::CssKind::Animation(a) => (a.position as u64, String::new()),
                 };
-                Some((css.transition().is_some(), tree_path(arena, owner.node), waapi::pseudo_rank(&owner.pseudo), order))
+                Some((css.transition().is_some(), (tree_path(arena, owner.node), waapi::pseudo_rank(&owner.pseudo), order, name)))
             };
-            for (id, owner, transition, order) in &cancelled {
-                let Some(at) = ordered.iter().position(|x| x == id) else { continue };
+            let mut placing: Vec<_> = cancelled
+                .iter()
+                .map(|(id, owner, transition, order, name)| {
+                    let key = arena.is_connected(owner.node).then(|| {
+                        (tree_path(arena, owner.node), waapi::pseudo_rank(&owner.pseudo), *order, if *transition { name.clone() } else { String::new() })
+                    });
+                    (*id, *transition, key)
+                })
+                .collect();
+            // (…in the order of their keys, each placed after those of its class placed before it)
+            placing.sort_by(|a, b| a.2.cmp(&b.2));
+            let mut placed: std::collections::HashMap<waapi::AnimationId, (bool, _)> = std::collections::HashMap::new();
+            for (id, transition, key) in placing {
+                let Some(at) = ordered.iter().position(|x| *x == id) else { continue };
                 ordered.remove(at);
-                let before = if arena.is_connected(owner.node) {
-                    let own = (tree_path(arena, owner.node), waapi::pseudo_rank(&owner.pseudo), *order);
-                    let same_class = |x: &waapi::AnimationId| key_of(x).filter(|k| k.0 == *transition);
-                    let others: Vec<usize> = (0..ordered.len()).filter(|&i| !cancelled.iter().any(|(c, ..)| *c == ordered[i]) && same_class(&ordered[i]).is_some()).collect();
-                    let after = others.iter().copied().find(|&i| same_class(&ordered[i]).is_some_and(|k| (k.1, k.2, k.3) >= own));
-                    after.or_else(|| others.last().map(|&i| i + 1)).unwrap_or(at.min(ordered.len()))
-                } else {
-                    at.min(ordered.len())
+                let before = match &key {
+                    Some(own) => {
+                        let key_at = |x: &waapi::AnimationId| match placed.get(x) {
+                            Some((t, k)) => Some((*t, Clone::clone(k))),
+                            None if cancelled.iter().any(|(c, ..)| c == x) => None,
+                            None => key_of(x),
+                        };
+                        let same: Vec<(usize, _)> =
+                            (0..ordered.len()).filter_map(|i| key_at(&ordered[i]).filter(|k| k.0 == transition).map(|k| (i, k.1))).collect();
+                        // (…ahead of one at the same place, a live one there the animation that replaced it at its position)
+                        let after = same.iter().find(|(i, k)| if placed.contains_key(&ordered[*i]) { k > own } else { k >= own }).map(|(i, _)| *i);
+                        after.or_else(|| same.last().map(|(i, _)| i + 1)).unwrap_or(at.min(ordered.len()))
+                    },
+                    None => at.min(ordered.len()),
                 };
-                ordered.insert(before, *id);
+                ordered.insert(before, id);
+                if let Some(own) = key {
+                    placed.insert(id, (transition, own));
+                }
             }
             let rank: std::collections::HashMap<waapi::AnimationId, usize> = ordered.into_iter().enumerate().map(|(i, id)| (id, i)).collect();
             let keys: Vec<_> = events.iter().map(|e| (e.scheduled, e.animation, e.class, e.node.is_none())).collect();

@@ -428,4 +428,32 @@ RSpec.describe 'the event loop of a page and its frames' do
   it "sorts a pending transition's cancel at its element's place" do
     expect(transition_cases(%w[hideRaf plain cancelRaf])).to eq(%w[hideRaf:run plain:run raf1 hideRaf:cancel plain:start raf2 plain:end])
   end
+
+  # …and several transitions of one element and generation by their properties' names, cancelled as started: the code
+  # points' order, `color opacity width`, where the cancels came in the order of the list that held them. Firefox 159:
+  # `color:run opacity:run width:run color:start opacity:start width:start raf2 color:cancel opacity:cancel width:cancel`;
+  # Chrome 156 sends them in the `transition` list's order, `width color opacity`.
+  it "sorts one element's cancelled transitions by property name" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>multi</title>
+      <style>
+      .t { transition: opacity 100ms linear, color 100ms linear, width 100ms linear; opacity: 1; color: black; width: 10px }
+      .t.o { opacity: 0; color: red; width: 20px }
+      </style>
+      <div id="m" class="t">m</div><pre id="out"></pre>
+      <script>
+        const log = [];
+        onload = () => setTimeout(() => {
+          const m = document.getElementById('m');
+          for (const ev of ['transitionrun', 'transitionstart', 'transitioncancel']) m.addEventListener(ev, (e) => log.push(e.propertyName + ':' + ev.slice(10)));
+          getComputedStyle(m).opacity;
+          m.classList.add('o');
+          getComputedStyle(m).opacity;
+          requestAnimationFrame(() => requestAnimationFrame(() => { log.push('raf2'); m.style.transition = 'none'; }));
+          setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
+        }, 50);
+      </script>
+    HTML
+    expect(log).to eq(%w[color:run opacity:run width:run color:start opacity:start width:start raf2 color:cancel opacity:cancel width:cancel])
+  end
 end
