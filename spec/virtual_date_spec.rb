@@ -19,8 +19,12 @@ RSpec.describe 'the virtual clock’s Date' do
     allow(Time).to receive(:now).and_return(later)
     s = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8">']] })
     s.visit '/'
-    got = s.evaluate_script('[typeof Date(), Date.name, Date.length, Date.prototype.constructor === Date, new Date() instanceof Date, new Date().getFullYear(), Object.keys(Date).length]')
-    expect(got).to eq(['string', 'Date', 7, true, true, later.year, 0])
+    got = s.evaluate_script(<<~JS)
+      [typeof Date(), Date.name, Date.length, Date.prototype.constructor === Date, new Date() instanceof Date,
+       new Date().getFullYear(), Object.keys(Date).length, Function.prototype.toString.call(Date).includes('[native code]'),
+       Object.getPrototypeOf(Date) === Function.prototype, typeof Date.UTC, new (class extends Date {})(0).getTime()]
+    JS
+    expect(got).to eq(['string', 'Date', 7, true, true, later.year, 0, true, true, 'function', 0])
   end
 
   # `Date` and `performance.now()` read the virtual clock the timers run on, and beside it only the time the page's
