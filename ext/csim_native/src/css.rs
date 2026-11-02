@@ -13,12 +13,10 @@ pub(crate) struct Css {
     pub(crate) owner: Option<Target>,
     pub(crate) kind: CssKind,
     previous: (Phase, Option<f64>),
-    // Whether a rendering update has seen it pending — a transition, its play task not yet run (css-transitions-2:
-    // pending) — which it owes no event for, its `transitionrun` the commit's (`Animations::commit_pending`), but which a
-    // cancel then is from: a transition an animation frame callback takes out of `transition-property` owes its
-    // `transitioncancel` (WPT css-transitions/transitioncancel-002), where one made and cancelled before any update owes
-    // nothing (Firefox).
-    seen_pending: bool,
+    // Made by a rendering update's steps before its "update animations and send events" (`Animations::in_update`): that
+    // update does not look at it — its events are the next update's, from its commit — where one a task's style flush
+    // made is looked at pending, its `transitionrun` sent ahead of the animation frame callbacks (Chrome, Firefox).
+    pub(crate) fresh: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -29,7 +27,7 @@ pub(crate) enum CssKind {
 
 impl Css {
     pub(crate) fn new(owner: &Target, kind: CssKind) -> Css {
-        Css { owner: Some(owner.clone()), kind, previous: (Phase::Idle, None), seen_pending: false }
+        Css { owner: Some(owner.clone()), kind, previous: (Phase::Idle, None), fresh: false }
     }
 
     pub(crate) fn animation(&self) -> Option<&CssAnimation> {
@@ -94,7 +92,9 @@ impl Animations {
         self.css_by_owner.entry(owner.node).or_default().push(id);
         let a = self.animations.get_mut(&id).unwrap();
         a.handled = false;
-        a.css = Some(Css::new(owner, kind));
+        let mut css = Css::new(owner, kind);
+        css.fresh = self.in_update;
+        a.css = Some(css);
         if let Some(e) = a.effect.and_then(|e| self.effects.get_mut(&e)) {
             e.orphaned = true;
         }
@@ -145,10 +145,7 @@ impl Animations {
         let timing = a.effect.and_then(|e| self.effects.get(&e)).map(|e| e.timing.clone());
         let current = self.current_time(id);
         let (phase, iteration) = self.css_phase(id, canceling);
-        let (was, was_iteration) = match css.previous {
-            (Phase::Idle, _) if canceling && css.seen_pending => (Phase::Before, None),
-            previous => previous,
-        };
+        let (was, was_iteration) = css.previous;
         if (was, was_iteration) == (phase, iteration) {
             return;
         }
@@ -198,22 +195,23 @@ impl Animations {
         self.animations.get_mut(&id).unwrap().css.as_mut().unwrap().previous = (phase, iteration);
     }
 
-    // CSS animation or transition `id`'s phase and iteration now — idle, `canceling` it.
+    // CSS animation or transition `id`'s phase and iteration now — idle, `canceling` it. A transition with its play task
+    // pending is in the pending phase (css-transitions-2), owing `transitionrun` from idle and `transitionstart` only once
+    // its start time commits, after the animation frame callbacks of the update that saw it (`commit_pending`) — the
+    // before phase's events, which are a pending one's: from its hold time it read as running, its `transitionstart` sent
+    // ahead of the callbacks. A cancel from it owes `transitionrun` then `transitioncancel`, as Firefox sends them.
     fn css_phase(&self, id: AnimationId, canceling: bool) -> (Phase, Option<f64>) {
         let Some(a) = self.animations.get(&id) else { return (Phase::Idle, None) };
+        let transition = a.css.as_ref().is_some_and(|c| matches!(c.kind, CssKind::Transition(_)));
+        if !canceling && transition && a.pending.is_some() {
+            return (Phase::Before, None);
+        }
         match a.effect.and_then(|e| self.effects.get(&e)).map(|e| &e.timing) {
             Some(t) if !canceling => {
                 let computed = t.computed(self.current_time(id), a.playback_rate);
                 (computed.phase, computed.current_iteration)
             },
             _ => (Phase::Idle, None),
-        }
-    }
-
-    // A rendering update saw CSS transition `id` still pending (`Css::seen_pending`).
-    pub(crate) fn note_pending_transition(&mut self, id: AnimationId) {
-        if let Some(css) = self.animations.get_mut(&id).and_then(|a| a.css.as_mut()) {
-            css.seen_pending = true;
         }
     }
 

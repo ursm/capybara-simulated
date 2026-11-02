@@ -165,9 +165,10 @@ RSpec.describe 'the event loop of a page and its frames' do
     HTML
     tags = log.map {|e| e.split('@').first }
     expect([tags[0, 2], tags[2, 2].sort, tags[4..]]).to eq([%w[P20 F30], %w[W60 WF60], %w[P90]])
+    # (…a worker's 60 ms spun on its own `Date`, rounded apart from this page's: 59 at the least, as in Firefox)
     timed(log).each do |tag, at|
       due = tag[/\d+/].to_i
-      expect(at).to be_between(due, due + 10), "#{tag} ran at #{at}"
+      expect(at).to be_between(due - (tag.start_with?('W') ? 1 : 0), due + 10), "#{tag} ran at #{at}"
     end
   end
 
@@ -364,5 +365,58 @@ RSpec.describe 'the event loop of a page and its frames' do
     expect(log.first).to eq('raf1')
     expect(log - %w[F-ready]).to eq(%w[raf1 P-ready run start raf2 end])
     expect(log.index('F-ready')).to be < log.index('raf2')
+  end
+
+  # A transition a task's style flush made is pending at the next update, in the pending phase: idle to pending owes its
+  # `transitionrun`, sent ahead of the animation frame callbacks, and a callback that then cancels it — taking it out of
+  # `transition-property`, retargeting it, hiding or removing its element — owes its `transitioncancel` at the update
+  # after, the `transitionrun` before it. It sent a lone `transitioncancel`, its `transitionrun` left to a commit that
+  # never came. A transition made and removed in one task, and a CSS animation's, owe nothing of it. Firefox 159:
+  # `cancelRaf:run retarget:run hideRaf:run removeRaf:run raf1 animateApi:ready cancelRaf:cancel retarget:cancel
+  # retarget:run retarget:start hideRaf:cancel plain:run plain:start removeRaf:cancel raf2`; Chrome 156 sends a `start`
+  # with each `run` and `removeSync:run start cancel` too. (The order of the update's events across elements is the
+  # sort's, which puts csim's cancels after the started transitions'.)
+  it "sends a pending transition's run before the callbacks, and its cancel by one after them" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>tc2</title>
+      <style>
+      .t { transition: opacity 100ms linear; opacity: 1 } .t.o { opacity: 0 } .t.o2 { opacity: 0.5 }
+      @keyframes k { from { opacity: 0 } to { opacity: 1 } } .a { animation: k 100ms linear }
+      </style>
+      <div id="box"></div>
+      <pre id="out"></pre>
+      <script>
+        const log = [];
+        const evs = ['transitionrun', 'transitionstart', 'transitionend', 'transitioncancel', 'animationstart', 'animationend', 'animationcancel'];
+        function mk(name) {
+          const d = document.createElement('div'); d.className = 't'; d.textContent = name; document.getElementById('box').append(d);
+          for (const ev of evs) d.addEventListener(ev, () => log.push(name + ':' + ev.replace(/^(transition|animation)/, '')));
+          getComputedStyle(d).opacity;
+          return d;
+        }
+        const cases = {
+          cancelRaf(d) { d.classList.add('o'); requestAnimationFrame(() => { d.style.transition = 'none'; }); },
+          retarget(d) { d.classList.add('o'); requestAnimationFrame(() => { d.classList.remove('o'); d.classList.add('o2'); }); },
+          hideRaf(d) { d.classList.add('o'); requestAnimationFrame(() => { d.style.display = 'none'; }); },
+          removeRaf(d) { d.classList.add('o'); requestAnimationFrame(() => { d.remove(); }); },
+          removeSync(d) { d.classList.add('o'); getComputedStyle(d).opacity; d.remove(); },
+          animCancelRaf(d) { d.classList.add('a'); requestAnimationFrame(() => { d.classList.remove('a'); }); },
+          plain(d) { d.classList.add('o'); },
+        };
+        onload = () => setTimeout(() => {
+          for (const n of Object.keys(cases)) cases[n](mk(n));
+          requestAnimationFrame(() => { log.push('raf1'); requestAnimationFrame(() => log.push('raf2')); });
+          setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
+        }, 50);
+      </script>
+    HTML
+    raf1, raf2 = log.index('raf1'), log.index('raf2')
+    expect(log[0...raf1]).to eq(%w[cancelRaf:run retarget:run hideRaf:run removeRaf:run])
+    expect(log[raf1 + 1...raf2]).to contain_exactly(
+      'cancelRaf:cancel', 'retarget:cancel', 'retarget:run', 'retarget:start', 'hideRaf:cancel', 'plain:run', 'plain:start',
+      'removeRaf:cancel'
+    )
+    expect(log.index('retarget:cancel')).to be < log.rindex('retarget:run')
+    expect(log.grep(/removeSync|animCancelRaf/)).to eq([])
   end
 end

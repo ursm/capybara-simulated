@@ -3093,6 +3093,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_, ()>, ctx: &v8::Global<v8:
     register(scope, ns, "styleFlush", style_flush, context_id);
     register(scope, ns, "styleTick", style_tick, context_id);
     register(scope, ns, "styleCommitPending", style_commit_pending, context_id);
+    register(scope, ns, "styleUpdateBegins", style_update_begins, context_id);
     register(scope, ns, "styleTakeAnimationEvents", style_take_animation_events, context_id);
     crate::animation_ops::install(scope, ns, context_id);
     crate::walk_ops::install(scope, ns, context_id);
@@ -5720,6 +5721,15 @@ fn style_tick_unguarded(
     }
     arena.mark_retargeted(&retargeted);
     threw_verify_failures(scope, failures);
+}
+
+// __dom.styleUpdateBegins() — a rendering update of the calling realm's document has begun: what its steps' style flushes
+// make before its "update animations and send events" is its own (`Animations::in_update`).
+fn style_update_begins(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    if let Some(engine) = dom(scope).styles.get_mut(&cid) {
+        engine.web_animations.in_update = true;
+    }
 }
 
 // __dom.styleCommitPending(): the animations made since the rendering update moved the timeline started at its time

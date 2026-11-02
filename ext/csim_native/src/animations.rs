@@ -422,6 +422,11 @@ pub(crate) struct Animations {
     // Each element's effects, and the elements an op touched since the last flush.
     by_target: HashMap<NodeId, Vec<EffectId>>,
     dirty_targets: Vec<NodeId>,
+    // Whether a rendering update has begun and not yet reached its "update animations and send events": a CSS animation
+    // or transition its earlier steps' style flush made — the resize steps', which lay out a frame's container — is the
+    // update's own style update's, made after its animation frame callbacks in a browser, which runs no such flush there
+    // (`Css::fresh`).
+    pub(crate) in_update: bool,
     next_animation: AnimationId,
     next_effect: EffectId,
     next_sequence: u64,
@@ -1233,16 +1238,17 @@ impl Animations {
                 self.update_finished_state(id, false, false);
             }
         }
-        // (…a CSS transition still pending seen so: it owes nothing yet — its `transitionrun` and `transitionstart` the
-        // commit's, sent by the next update, after this one's animation frame callbacks, as Chrome and Firefox send them —
-        // but a cancel from here on is one of a transition that was running: `Css::seen_pending`)
+        // (…a CSS transition still pending too, in its pending phase: its `transitionrun` this update's — `css_phase` —
+        // but for one this update's own earlier steps made: `Css::fresh`)
+        self.in_update = false;
         for &id in &ids {
-            let Some(a) = self.animations.get(&id) else { continue };
-            let Some(css) = a.css.as_ref() else { continue };
-            if a.pending.is_none() {
+            let owes = self.animations.get(&id).is_some_and(|a| {
+                a.css.as_ref().is_some_and(|c| {
+                    a.pending.is_none() || (matches!(c.kind, crate::css::CssKind::Transition(_)) && !c.fresh)
+                })
+            });
+            if owes {
                 self.queue_css_events(id, false);
-            } else if matches!(css.kind, crate::css::CssKind::Transition(_)) {
-                self.note_pending_transition(id);
             }
         }
         self.retire_completed_transitions(&ids);
@@ -1267,6 +1273,9 @@ impl Animations {
                 _ => continue,
             }
             self.touch(id);
+            if let Some(css) = self.animations.get_mut(&id).and_then(|a| a.css.as_mut()) {
+                css.fresh = false;
+            }
             if self.animations.get(&id).is_some_and(|a| a.css.is_some() && a.pending.is_none()) {
                 self.queue_css_events(id, false);
             }
