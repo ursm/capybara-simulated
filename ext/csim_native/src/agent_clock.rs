@@ -412,8 +412,9 @@ pub(crate) fn timer_times(d: &mut Dom, cid: i32, timeout: f64) -> (f64, f64) {
     (at, read.lead())
 }
 
-// __dom.caughtUp(date, ahead, held) — a worker caught up with its window's own time `date`, `ahead` the virtual time its
-// step is still to move it by, which `date` already stands for; and with where the window's clock is held, `held`. Both
+// __dom.caughtUp(date, ahead, held, idle) — a worker caught up with its window's own time `date`, `ahead` the virtual time
+// its step is still to move it by, which `date` already stands for — moved by it now where it has nothing to run (`idle`)
+// — and with where the window's clock is held, `held`. Both
 // on the agent's `Date` scale, which the worker's own `Date` stands its anchor shift behind. Caught up before the move,
 // which `date` stands for: moved first, the move ran on from the last catch-up's time, and a worker whose scripts had run
 // past its window's held there a step further on for good — every answer of a service worker's after its 1 s one 100 ms
@@ -422,6 +423,7 @@ fn caught_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let date = args.get(0).number_value(scope).unwrap_or(0.0);
     let ahead = args.get(1).number_value(scope).unwrap_or(0.0);
     let held = args.get(2).number_value(scope).unwrap_or(0.0);
+    let idle = args.get(3).is_true();
     let cid = realm_id(scope, &args);
     let d = dom(scope);
     let script = d.agent_time.now(Instant::now());
@@ -429,14 +431,16 @@ fn caught_up(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     if held > 0.0 && held - window.anchor_shift > window.held {
         window.held = held - window.anchor_shift;
     }
-    if !(date > 0.0) {
-        return;
-    }
     let virtual_now = d.arena.event_loop.clock;
-    let read = read(d, cid, true);
-    let window = &mut read.clock.window;
-    window.own(read.epoch, read.hr);
-    window.caught_up = Some((date - window.anchor_shift, read.hr + ahead, virtual_now + ahead));
+    if date > 0.0 {
+        let read = read(d, cid, true);
+        let window = &mut read.clock.window;
+        window.own(read.epoch, read.hr);
+        window.caught_up = Some((date - window.anchor_shift, read.hr + ahead, virtual_now + ahead));
+    }
+    if idle && ahead > 0.0 {
+        crate::timers::move_clock(scope, virtual_now + ahead);
+    }
 }
 
 // __dom.stepDate() -> `[date, held]`: the calling realm's own time as an event loop step leaves it, and where it is held

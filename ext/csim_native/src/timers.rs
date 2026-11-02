@@ -142,6 +142,9 @@ pub(crate) struct EventLoop {
     // When its last rendering update ran (`renderBegins`) — none since its main realm's context, which its steps run
     // in, was made (`install`).
     rendered: Option<f64>,
+    // The host's function told of each move of the clock (`move_clock`), where workers follow the window's clock
+    // (`clockFollow`) — none since its main realm's context was made, as for `rendered`.
+    followed: Option<v8::Global<v8::Function>>,
 }
 
 impl EventLoop {
@@ -210,10 +213,9 @@ impl Timers {
         self.idle.clear();
         self.runnable.clear();
     }
-    #[allow(clippy::too_many_arguments)]
-    fn add(&mut self, key: i64, seq: u64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, turn: u8, period: Option<f64>, nesting: u32, not_early: Option<(f64, f64)>) {
-        self.order.insert((Due(due), turn, seq, key));
-        self.by_key.insert(key, Timer { due, turn, seq, handler: timer.0, args: timer.1, period, nesting, not_early });
+    fn add(&mut self, key: i64, timer: Timer) {
+        self.order.insert((Due(timer.due), timer.turn, timer.seq, key));
+        self.by_key.insert(key, timer);
     }
     fn clear(&mut self, key: i64) -> bool {
         let Some(t) = self.by_key.remove(&key) else { return false };
@@ -437,10 +439,15 @@ impl RealmArena {
 // behind them: `EventLoop::rendered`)
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     if context_id == 0 {
-        dom(scope).arena.event_loop.rendered = None;
+        let event_loop = &mut dom(scope).arena.event_loop;
+        event_loop.rendered = None;
+        event_loop.followed = None;
     }
     register(scope, ns, "clockNow", clock_now, context_id);
     register(scope, ns, "clockTo", clock_to, context_id);
+    register(scope, ns, "clockBy", clock_by, context_id);
+    register(scope, ns, "clockFollow", clock_follow, context_id);
+    register(scope, ns, "clockFollowed", clock_followed, context_id);
     register(scope, ns, "timerAdd", timer_add, context_id);
     register(scope, ns, "timerClear", timer_clear, context_id);
     register(scope, ns, "timerNext", timer_next, context_id);
@@ -451,7 +458,6 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "timerTaskEnd", timer_task_end, context_id);
     register(scope, ns, "agentStep", agent_step, context_id);
     register(scope, ns, "agentNext", agent_next, context_id);
-    register(scope, ns, "agentNextDue", agent_next_due, context_id);
     register(scope, ns, "crossingAdd", crossing_add, context_id);
     register(scope, ns, "crossingNext", crossing_next, context_id);
     register(scope, ns, "swAsked", sw_asked, context_id);
@@ -570,7 +576,8 @@ fn idle_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
             let due = arena.event_loop.clock + timeout;
             let seq = arena.event_loop.next_seq();
             arena.event_loop.changed();
-            arena.enter(cid).timers.add(key, seq, (timed_out, Some(list)), due, IN_TURN, None, 0, None);
+            let timer = Timer { due, turn: IN_TURN, seq, handler: timed_out, args: Some(list), period: None, nesting: 0, not_early: None };
+            arena.enter(cid).timers.add(key, timer);
             key
         });
         arena.enter(cid).timers.idle.push_back(IdleRequest { handle, callback, timeout });
@@ -648,10 +655,55 @@ fn clock_now(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArgume
     rv.set_double(dom(scope).arena.event_loop.clock);
 }
 
-// __dom.clockTo(time) — the event loop's clock reads `time`: it has reached it.
+// The event loop's clock on to `to`, where it stands before it — whether it moved — and the host told, where the window's
+// workers follow its clock (`EventLoop::followed`): a task in the middle of a step that posts to a worker posts at its
+// own time, and the worker must not read the time the step began at (Browser#run_worker). Every move of the clock is
+// this one, whichever op makes it.
+pub(crate) fn move_clock(scope: &mut v8::PinScope<'_, '_>, to: f64) -> bool {
+    let event_loop = &mut dom(scope).arena.event_loop;
+    if !(to > event_loop.clock) || !to.is_finite() {
+        return false;
+    }
+    event_loop.clock = to;
+    let tell = event_loop.followed.clone();
+    if let Some(tell) = tell.map(|f| v8::Local::new(scope, f)) {
+        let receiver = v8::undefined(scope).into();
+        let at = v8::Number::new(scope, to).into();
+        tell.call(scope, receiver, &[at]);
+    }
+    true
+}
+
+// __dom.clockTo(time) — the event loop's clock on to `time`, where it stands before it (`move_clock`): the virtual time a
+// worker's answer took while the window waited on it in place (Browser#await_worker_reply), which passed for the window
+// too.
 fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
-    let Some(time) = args.get(0).number_value(scope).filter(|t| t.is_finite()) else { return };
-    dom(scope).arena.event_loop.clock = time;
+    let Some(time) = args.get(0).number_value(scope) else { return };
+    move_clock(scope, time);
+}
+
+// __dom.clockBy(ms) — the event loop's clock on by `ms`: a script's that waited that long inside a sync XHR, for a
+// worker's answer or a server's modeled delay — which `Date` and `performance.now()` show as they advance by `ms`, the
+// real time the wait took none of their script time (agent_clock.rs `agentWait`).
+fn clock_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let ms = args.get(0).number_value(scope).unwrap_or(0.0);
+    if ms > 0.0 {
+        let to = dom(scope).arena.event_loop.clock + ms;
+        move_clock(scope, to);
+    }
+}
+
+// __dom.clockFollow(tell) — the window's workers follow its clock from now (a worker, a service worker or a remote port
+// made, in any realm of the agent): each move of it is told to the host through `tell` (`move_clock`).
+fn clock_follow(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Ok(tell) = v8::Local::<v8::Function>::try_from(args.get(0)) else { return };
+    let tell = v8::Global::new(scope, tell);
+    dom(scope).arena.event_loop.followed = Some(tell);
+}
+
+// __dom.clockFollowed() -> whether the window's workers follow its clock (`clockFollow`).
+fn clock_followed(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    rv.set_bool(dom(scope).arena.event_loop.followed.is_some());
 }
 
 // __dom.timerAdd(handler, args, timeout, repeats, task, ahead, source) -> its key: a timer of the calling realm's,
@@ -703,7 +755,8 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
         let seq = arena.event_loop.next_seq();
         arena.event_loop.changed();
         let timers = &mut arena.enter(cid).timers;
-        timers.add(key, seq, (handler, list), due, turn, period, if task { 0 } else { nesting + 1 }, not_early);
+        let nesting = if task { 0 } else { nesting + 1 };
+        timers.add(key, Timer { due, turn, seq, handler, args: list, period, nesting, not_early });
         if let Some(source) = source {
             timers.sources.insert(key, source);
         }
@@ -730,10 +783,10 @@ fn timer_task_end(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackAr
     dom(scope).arena.end_timer_task(cid);
 }
 
-// __dom.timerNext(limit) -> `[moved, handler, args, page]`: the calling realm's next timer, where it falls due by `limit`
-// — taken from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none.
-// The clock is moved to when it falls due (`moved`, where that is later), and its realm's clock held on to the time it
-// runs no earlier than (`Timer::not_early`) — a repeating one's next counted from now. A page's (`page`) is the timer task
+// __dom.timerNext(limit) -> `[handler, args, page]`: the calling realm's next timer, where it falls due by `limit` — taken
+// from the list, one that repeats to be scheduled again as its task ends (`timerTaskEnd`); undefined for none. The clock
+// is moved on to when it falls due (`move_clock`), and its realm's clock held on to the time it runs no earlier than
+// (`Timer::not_early`) — a repeating one's next counted from now. A page's (`page`) is the timer task
 // running from here, a platform task none. (A task a terminated handler never ended is ended here first.)
 fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
@@ -762,10 +815,8 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         }
     };
     arena.event_loop.task_nesting = nesting;
-    let moved = due > now;
-    if moved {
-        arena.event_loop.clock = due;
-    }
+    move_clock(scope, due);
+    let d = dom(scope);
     if let Some((at, timeout)) = not_early {
         crate::agent_clock::hold(d, cid, at);
         if repeats.is_some() {
@@ -775,11 +826,10 @@ fn timer_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
             }
         }
     }
-    let moved = v8::Boolean::new(scope, moved).into();
     let handler = v8::Local::new(scope, handler);
     let list = list.map_or_else(|| v8::undefined(scope).into(), |l| v8::Local::new(scope, l));
     let page = v8::Boolean::new(scope, key > 0).into();
-    rv.set(v8::Array::new_with_elements(scope, &[moved, handler, list, page]).into());
+    rv.set(v8::Array::new_with_elements(scope, &[handler, list, page]).into());
 }
 
 // __dom.realmPending(realm, subtree) -> whether realm `realm` (the calling one, for null) has work its event loop is to
@@ -855,18 +905,15 @@ fn timer_next_queued_by(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCall
 }
 
 // __dom.agentNext(limit) -> the realm whose task the event loop runs next, where one falls due by `limit` — the task due
-// first of all its realms' (`agent_first`), which that realm's `timerNext` takes — or -1 for none.
+// first of all its realms' (`agent_first`), which that realm's `timerNext` takes, the clock moved on to when it falls due
+// — or -1 for none.
 fn agent_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
-    let next = dom(scope).arena.agent_first().filter(|&((Due(due), ..), _)| due <= limit);
-    rv.set_int32(next.map_or(-1, |(_, realm)| realm));
-}
-
-// __dom.agentNextDue() -> when the event loop's next task falls due, any realm's of it, or undefined for none.
-fn agent_next_due(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
-    if let Some(((Due(due), ..), _)) = dom(scope).arena.agent_first() {
-        rv.set_double(due);
-    }
+    let Some(((Due(due), ..), realm)) = dom(scope).arena.agent_first().filter(|&((Due(due), ..), _)| due <= limit) else {
+        return rv.set_int32(-1);
+    };
+    move_clock(scope, due);
+    rv.set_int32(realm);
 }
 
 // What another agent sent a realm — a message on any channel, a service worker's answer — run at the time it was sent at
@@ -1001,37 +1048,38 @@ fn render_begins(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackAr
     event_loop.rendered = Some(event_loop.clock);
 }
 
-// __dom.stepRenderOwed(limit, animations) -> the instant a rendering update is owed at ahead of the next task, which falls
-// due later than it (within `limit`) — an animation frame callback queued, or, with `animations`, an animation needing a
-// frame now (pending, or with events queued to send), in any document of the event loop: the next rendering opportunity
-// — or undefined for none. The step takes it before it moves the clock on to the task: what a task — or a rendering
-// update's own callbacks — queued for the next frame, an animation frame callback, the events of an animation it
-// cancelled, is never put off behind a timer due later than that frame.
+// __dom.stepRenderOwed(limit, animations) -> whether a rendering update is owed ahead of the next task, which falls due
+// later than it (within `limit`) — an animation frame callback queued, or, with `animations`, an animation needing a
+// frame now (pending, or with events queued to send), in any document of the event loop — at the next rendering
+// opportunity, which the clock is moved on to. The step takes it before it moves the clock on to the task: what a task
+// — or a rendering update's own callbacks — queued for the next frame, an animation frame callback, the events of an
+// animation it cancelled, is never put off behind a timer due later than that frame.
 fn step_render_owed(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     let animations = args.get(1).is_true();
     let arena = &dom(scope).arena;
     let Some(((Due(due), ..), _)) = arena.agent_first() else { return };
     let at = arena.event_loop.clock.max(arena.event_loop.next_frame());
-    if due <= at || due > limit {
-        return;
+    if due <= at || due > limit || !frames_owed(scope, animations) {
+        return rv.set_bool(false);
     }
-    if frames_owed(scope, animations) {
-        rv.set_double(at);
-    }
+    move_clock(scope, at);
+    rv.set_bool(true);
 }
 
-// __dom.stepRenderAt(limit) -> the instant of the step's rendering update where it has no task due within `limit`: the
-// next rendering opportunity — undefined where the budget ends before it (a step that yielded, one of no budget, one its
-// clock was pinned short of the next frame): at most one a frame's interval, across steps — a rAF loop queuing a 1 ms
-// timer every frame ran its frames 1 ms apart and starved every later timer.
+// __dom.stepRenderAt(limit) -> whether the step takes a rendering update where it has no task due within `limit`: at the
+// next rendering opportunity, which the clock is moved on to — none where the budget ends before it (a step that
+// yielded, one of no budget, one its clock was pinned short of the next frame): at most one a frame's interval, across
+// steps — a rAF loop queuing a 1 ms timer every frame ran its frames 1 ms apart and starved every later timer.
 fn step_render_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     let event_loop = &dom(scope).arena.event_loop;
     let at = event_loop.clock.max(event_loop.next_frame());
-    if at <= limit {
-        rv.set_double(at);
+    if !(at <= limit) {
+        return rv.set_bool(false);
     }
+    move_clock(scope, at);
+    rv.set_bool(true);
 }
 
 // __dom.stepRendered() -> whether a rendering update ran at this instant: a step yielding at a settle change runs one
@@ -1041,39 +1089,43 @@ fn step_rendered(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackAr
     rv.set_bool(event_loop.rendered == Some(event_loop.clock));
 }
 
-// __dom.stepAnimFrameAt(limit) -> the instant, within `limit`, an animation the style engine runs in any of the event
-// loop's realms needs a frame at (`animation_ops::next_frame_delay_of`), later than now: the frame at which a transition
-// reaches its end is the one that sends its `transitionend` and settles its `finished`, and a step that rendered only at
-// its start and then moved the clock past the end never rendered it. Undefined for none — nor on a page that is drawing
-// frames of its own (a queued animation frame callback): its next frame comes anyway, and one between its frames would
-// run its callbacks off their cadence.
+// __dom.stepAnimFrameAt(limit) -> whether an animation the style engine runs in any of the event loop's realms needs a
+// frame later than now, within `limit` (`animation_ops::next_frame_delay_of`), the clock moved on to it: the frame at
+// which a transition reaches its end is the one that sends its `transitionend` and settles its `finished`, and a step
+// that rendered only at its start and then moved the clock past the end never rendered it. None on a page that is
+// drawing frames of its own (a queued animation frame callback): its next frame comes anyway, and one between its frames
+// would run its callbacks off their cadence.
 fn step_anim_frame_at(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     if frames_owed(scope, false) {
-        return;
+        return rv.set_bool(false);
     }
     let realms = dom(scope).arena.event_loop_realms();
     let delay = realms.into_iter().filter_map(|r| crate::animation_ops::next_frame_delay_of(scope, r)).reduce(f64::min);
     let now = dom(scope).arena.event_loop.clock;
-    if let Some(delay) = delay.filter(|&d| d > 0.0 && now + d <= limit) {
-        rv.set_double(now + delay);
-    }
+    let Some(delay) = delay.filter(|&d| d > 0.0 && now + d <= limit) else { return rv.set_bool(false) };
+    move_clock(scope, now + delay);
+    rv.set_bool(true);
 }
 
-// __dom.stepPin(limit, animations) -> the time the step leaves the clock at: `limit`, so a follow-up step reflects the
-// virtual time elapsed even where it was idle — but no later than a task its last rendering update queued within it (an
-// animation frame callback's `setTimeout(…, 50)`), which the next step then runs at its time, not late; nor than the
-// frame owed before it (`stepRenderOwed`) — the events of an animation that callback cancelled — which the next step
-// renders first.
-fn step_pin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+// __dom.stepPin(limit, animations) — the clock moved on to where the step leaves it: `limit`, so a follow-up step
+// reflects the virtual time elapsed even where it was idle — but no later than a task its last rendering update queued
+// within it (an animation frame callback's `setTimeout(…, 50)`), which the next step then runs at its time, not late; nor
+// than the frame owed before it (`stepRenderOwed`) — the events of an animation that callback cancelled — which the next
+// step renders first.
+fn step_pin(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let limit = args.get(0).number_value(scope).unwrap_or(f64::INFINITY);
     let animations = args.get(1).is_true();
     let arena = &dom(scope).arena;
     let now = arena.event_loop.clock;
     let next_frame = arena.event_loop.next_frame();
     let queued = arena.agent_first().map(|((Due(due), ..), _)| due).filter(|&due| due > now && due < limit);
-    let Some(queued) = queued else { return rv.set_double(limit) };
-    rv.set_double(if frames_owed(scope, animations) { now.max(queued.min(next_frame)) } else { queued });
+    let pin = match queued {
+        None => limit,
+        Some(queued) if frames_owed(scope, animations) => now.max(queued.min(next_frame)),
+        Some(queued) => queued,
+    };
+    move_clock(scope, pin);
 }
 
 // __dom.agentRealms() -> the realms of the documents of the event loop, in the order its rendering update takes them
