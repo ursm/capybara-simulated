@@ -57,6 +57,7 @@ fn system_now() -> f64 {
 
 pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Object>, context_id: i32) {
     register(scope, ns, "hrNow", hr_now, context_id);
+    register(scope, ns, "hrPeek", hr_peek, context_id);
     register(scope, ns, "clockEpoch", clock_epoch, context_id);
     register(scope, ns, "clockEpochSet", clock_epoch_set, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
@@ -119,6 +120,16 @@ fn origin_of(scope: &mut v8::PinScope<'_, '_>, cid: i32, script: f64) -> TimeOri
 fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
     let script = script_time(scope);
+    let origin = origin_of(scope, cid, script);
+    let clock = dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock);
+    rv.set_double(clock + script - origin.at);
+}
+
+// __dom.hrPeek() -> the same, read by the host — as a navigation leaves the page — which opens no turn: what runs next
+// in the realm, if anything, is the next document's.
+fn hr_peek(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    let cid = realm_id(scope, &args);
+    let script = dom(scope).agent_time.now(Instant::now());
     let origin = origin_of(scope, cid, script);
     let clock = dom(scope).arena.realm_state(cid).map_or(0.0, |s| s.clock);
     rv.set_double(clock + script - origin.at);
