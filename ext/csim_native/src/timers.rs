@@ -140,6 +140,15 @@ pub(crate) const AHEAD: u8 = 0;
 const IN_TURN: u8 = 1;
 
 impl Timers {
+    // Its page's timers (positive ids), animation frame and idle callbacks gone, the platform's tasks kept.
+    fn keep_platform_tasks(&mut self) {
+        self.order.retain(|&(.., key)| key < 0);
+        self.by_key.retain(|&key, _| key < 0);
+        self.frames.clear();
+        self.running.clear();
+        self.idle.clear();
+        self.runnable.clear();
+    }
     fn add(&mut self, key: i64, seq: u64, timer: (v8::Global<v8::Value>, Option<v8::Global<v8::Value>>), due: f64, turn: u8, period: Option<f64>, nesting: u32) {
         self.order.insert((Due(due), turn, seq, key));
         self.by_key.insert(key, Timer { due, turn, seq, handler: timer.0, args: timer.1, period, nesting });
@@ -312,8 +321,10 @@ impl RealmArena {
         }
         self.task_keys.realms.retain(|_, &mut c| c != cid);
     }
-    // …or its context disposed: gone now, or — by a task of its own — as the step under way ends (`Timers::in_task`) —
-    // and none taken after.
+    // …or its context disposed: gone now, or — by a task of its own — the tasks the platform queued for it as the step
+    // under way ends (`Timers::in_task`), its page's timers, animation frame and idle callbacks gone now (a frame's
+    // interval ran on to the end of the step its own script removed the frame in, where Chrome runs none of it) — and
+    // none taken after.
     pub(crate) fn discard_timers(&mut self, cid: i32) {
         self.task_keys.discarded.insert(cid);
         let runs_on = self.timers_of(cid).is_some_and(|t| t.in_task) && self.event_loop.steps.last_mut().is_some_and(|step| {
@@ -324,6 +335,8 @@ impl RealmArena {
         });
         if !runs_on {
             self.drop_timers(cid);
+        } else if let Some(timers) = self.timers_of(cid) {
+            timers.keep_platform_tasks();
         }
     }
     // …or begun anew, in a new context: it takes timers again.

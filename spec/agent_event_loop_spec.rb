@@ -206,4 +206,20 @@ RSpec.describe 'the event loop of a page and its frames' do
     HTML
     expect(log).to eq(%w[removed])
   end
+
+  # …nor one whose own task removed it: what the platform queued for it then still runs (a request it sent failing,
+  # WPT xhr/open-url-multi-window-4), its own timers not. Chrome 156 and Firefox 159: `selfremoved`.
+  it "runs no timer of a frame that removed itself" do
+    log = run(<<~HTML)
+      <!DOCTYPE html><meta charset="utf-8"><title>selfrm</title>#{frames}<pre id="out"></pre>
+      <script>
+        const log = window.log = [];
+        onload = () => {
+          document.getElementById('f').contentWindow.eval("const L = parent.log; setInterval(() => L.push('Fi'), 30); setTimeout(() => { frameElement.remove(); L.push('selfremoved'); }, 10);");
+          setTimeout(() => { document.getElementById('out').textContent = log.join(' '); document.title = 'done'; }, 400);
+        };
+      </script>
+    HTML
+    expect(log).to eq(%w[selfremoved])
+  end
 end
