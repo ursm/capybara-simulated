@@ -1165,6 +1165,8 @@ pub(crate) struct RealmState {
     pub(crate) timers: crate::timers::Timers,
     // …and its time origin, which its high resolution time counts from (agent_clock.rs): none until it is first read.
     pub(crate) time_origin: Option<crate::agent_clock::TimeOrigin>,
+    // …and what its clock reads beside its agent's: where it is held, a worker's catching up with its window.
+    pub(crate) clock: crate::agent_clock::RealmClock,
     // Its Window's user activation (user_activation.rs): its last activation timestamp — None for positive infinity, a
     // window never activated — and how many activation notifications reached it, which its close watcher manager
     // groups by.
