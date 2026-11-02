@@ -775,7 +775,7 @@ def handle(handler_path, method, url, headers, doc_root, body):
 def _of_tree(module, root):
     """Whether a module was loaded from the WPT tree (a handler's helper, or a namespace package of it)."""
     paths = [getattr(module, '__file__', None) or ''] + list(getattr(module, '__path__', None) or [])
-    return any(p and os.path.abspath(p).startswith(root) for p in paths)
+    return any(p and (os.path.abspath(p) == root or os.path.abspath(p).startswith(root + os.sep)) for p in paths)
 
 
 def serve():

@@ -307,17 +307,25 @@ module WptRunner
     meta, rbody = PY_EXEC_LOCK.synchronize do
       handler = py_handler_process or return nil
       stdin, stdout = handler
+      answered = false
       begin
         stdin.write(request, "\n", body)
         stdin.flush
         line  = stdout.gets or raise EOFError
         head  = JSON.parse(line)
-        [head, stdout.read(head['body_len'].to_i) || ''.b]
+        out   = [head, stdout.read(head['body_len'].to_i) || ''.b]
+        answered = true
+        out
       rescue StandardError
-        @py_handler = nil
-        stdin.close unless stdin.closed?
-        stdout.close unless stdout.closed?
         return nil
+      ensure
+        # (…an exchange cut short however — a raise, an exception thrown into the thread, an EventSource reader's cancel
+        # — leaves its answer unread, which the next request would take for its own: the process let go of)
+        unless answered
+          @py_handler = nil
+          stdin.close unless stdin.closed?
+          stdout.close unless stdout.closed?
+        end
       end
     end
     # (…the handler's header bytes, which its JSON carries Latin-1-decoded, as the bytes they are — what wptserve puts
