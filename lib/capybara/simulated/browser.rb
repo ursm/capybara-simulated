@@ -5649,8 +5649,9 @@ module Capybara
           worker[:answering].delete(fetch_id)
           if waiting
             # (…a worker's script waiting inside a sync XHR: its clock on by the time the answer took, as a window's is —
-            # its virtual clock by exactly that, its `Date` too, the real time the wait took left out of it)
-            waiting[:clock_moved_by]&.call(moved, (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000) if moved.positive?
+            # its virtual clock by exactly that, its `Date` too, the real time the wait took left out of it: in whole
+            # milliseconds, as a time value is — ECMAScript's TimeClip — so `Date.now()` stays an integer)
+            waiting[:clock_moved_by]&.call(moved, ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000).round) if moved.positive?
           else
             worker[:awaited] -= 1
             window_follows_awaited_worker(worker, follower, moved)

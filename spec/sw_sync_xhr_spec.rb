@@ -187,10 +187,13 @@ RSpec.describe 'a controlled client’s synchronous XHR', :every_host_local do
           try { x.send(); out.push(x.responseText); } catch (e) { out.push(e.name); }
           out.push(Math.round(performance.now() - p0));
         }
-        postMessage(out);`;
+        // (…and its Date a time value still: an integer, as a new Date's is — the two a whole number of ms apart, the
+        // clock free to tick between the reads)
+        postMessage([out, Number.isInteger(Date.now()), Number.isInteger(new Date().getTime() - Date.now())]);`;
       new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))).onmessage = (e) => { window.got = e.data; };
     JS
-    got = poll_until { session.evaluate_script('window.got') }
+    got, integral, consistent = poll_until { session.evaluate_script('window.got') }
+    expect([integral, consistent]).to eq([true, true])
     expect(got.each_slice(2).map(&:first)).to eq(%w[TimeoutError sw-slow TimeoutError hopped])
     # (…about: the wall clock's share of the wait is real time, as long as the machine takes)
     got.each_slice(2).map(&:last).zip([100, 300, 100, 240]) {|ms, want| expect(ms).to be_within(40).of(want) }
