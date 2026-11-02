@@ -31,6 +31,7 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
           while (Date.now() - a < Number(u.searchParams.get('spin')));
           return;
         }
+        if (u.searchParams.has('date')) return e.respondWith(new Response(String(Date.now())));
         if (!u.searchParams.has('ms')) return;
         const ms = Number(u.searchParams.get('ms')), hops = Number(u.searchParams.get('hops') || 0);
         const answer = () => hops > 0 ? Response.redirect(`/d.txt?ms=${ms}&hops=${hops - 1}`, 302) : new Response('sw');
@@ -185,6 +186,51 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     got = poll_until(timeout: 20) { s.evaluate_script('got') }
     expect(got[0]).to be_between(1000, 1200)
     expect(got[1]).to be_between(0, 20)
+  end
+
+  # …and one it takes after another it was busy with, at the time it gave it: after that one's time too, not the time
+  # the page asked it plus its own. Each `fetch` event is a task of the worker's one event loop (Handle Fetch), so the
+  # second's 300 ms timer starts as the first's 500 ms spin ends — it landed ahead of T600, before.
+  it 'lands an answer behind the request the worker was busy with' do
+    s = controlled_session
+    s.execute_script(<<~JS)
+      window.log = [];
+      const t0 = performance.now();
+      const at = (what) => log.push([what, performance.now() - t0]);
+      fetch('/d.txt?spin=500').then(() => at('spin'));
+      fetch('/d.txt?ms=300').then(() => at('ms300'));
+      for (const t of [600, 900]) setTimeout(() => at('T' + t), t);
+    JS
+    log = poll_until(timeout: 20) { l = s.evaluate_script('log'); l.size == 4 && l }
+    expect(log.map(&:first)).to eq(%w[spin T600 ms300 T900])
+    expect(log[2][1]).to be_between(800, 900)
+  end
+
+  # …and the worker's clock on with the page's after it: a quick answer at once, the worker's `Date` the page's, however
+  # long the page's clock stood held at the busy answer's time — the worker's ran on beneath it by every step of the
+  # page's virtual clock, and a step further where its own scripts ran past the window's: its `Date` 32 ms ahead, before.
+  it "keeps the worker's clock on the page's after a busy answer" do
+    s = controlled_session
+    s.execute_script(<<~JS)
+      window.got = null;
+      const quick = async () => {
+        const d = Date.now(), v = __virtualNow();
+        const sw = Number(await (await fetch('/d.txt?date')).text());
+        return [sw - d, Date.now() - d, __virtualNow() - v];
+      };
+      (async () => {
+        await fetch('/d.txt?spin=1000');
+        const a = await quick();
+        await new Promise((r) => setTimeout(r, 1500));
+        got = [a, await quick()];
+      })();
+    JS
+    got = poll_until(timeout: 20) { s.evaluate_script('got') }
+    got.each do |sw, page, virtual|
+      expect(sw).to be_between(-20, 20), got.inspect
+      expect(page).to be_between(0, 20), got.inspect
+      expect(virtual).to eq(0), got.inspect
+    end
   end
 
   it "resolves a dedicated worker's XHR when the service worker answers, before its timeout" do

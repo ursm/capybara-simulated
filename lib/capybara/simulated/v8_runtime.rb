@@ -490,6 +490,7 @@ module Capybara
           r = { 'fired' => 0, 'gen' => 0, 'dirtied' => false } unless r.is_a?(Hash)
           @clock = r['now'].to_f if r['now']
           @clock_date = r['date'].to_f if r['date']
+          @clock_held = r['held'].to_f if r['held']
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
           break unless cut || r['asked']
 
@@ -522,15 +523,24 @@ module Capybara
       # The window's virtual clock as its last event-loop step left it (ms), which a worker's clock follows — read from
       # the worker's own thread (Browser#run_worker).
       def clock = @clock || 0.0
-      # …and what its `Date` read then, before any offset — which a worker catching up with it takes (Browser#run_worker).
+      # …and what its `Date` read then, before any offset — its own time, which a worker catching up with it takes, and
+      # where it was held (timers.js `clockAtLeast`), which the worker's is held at with it (Browser#run_worker).
       def clock_date = @clock_date || 0.0
+      def clock_held = @clock_held || 0.0
 
       # Whether the page's realms are cross-origin isolated (its top-level document's COOP + COEP — `init_realm`), which
       # the browser sets as a document commits, ahead of the realm it builds for it.
       attr_accessor :cross_origin_isolated
       # …or as the step has moved it since, where the tab has a worker to follow it (timers.js `moveClock`): a worker
-      # reads the time a message posted in the middle of a step was sent at, and not the time before it.
-      def clock_at_least(ms) = (@clock = [clock, ms.to_f].max)
+      # reads the time a message posted in the middle of a step was sent at, and not the time before it. Its `Date` on
+      # with it, which a worker catches up to at that time: a window's moved on 3 s by a sync XHR's wait read 3 s back.
+      def clock_at_least(ms)
+        ms = ms.to_f
+        return unless ms > clock
+
+        @clock_date += ms - clock if @clock_date
+        @clock = ms
+      end
 
       # Per-iframe realms (`Isolate#create_context`): a separate V8 context —
       # own global + intrinsics (Function/Error/DOMParser/onerror) — per
@@ -2238,8 +2248,8 @@ module Capybara
         c.attach('__csim_swRaceNetwork', ->(fetch_id, realm_id, url, method, accept) { sw_hooks[:race_network]&.call(fetch_id, realm_id, url, method, accept); nil }) if sw_hooks[:race_network]
         c.attach('__csim_swUnregisterRequest',  ->             { sw_hooks[:unregister]&.call; nil }) if sw_hooks[:unregister]
         c.attach('__csim_swExtendedChanged',    ->(n)          { sw_hooks[:extended]&.call(n); nil }) if sw_hooks[:extended]
-        c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id, took = 0) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id, took); nil }) if sw_hooks[:fetch_respond]
-        c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id, took = 0) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id, took); nil }) if sw_hooks[:fetch_stream]
+        c.attach('__csim_swFetchRespond', ->(fetch_id, resp, realm_id, at = 0, took = 0) { sw_hooks[:fetch_respond]&.call(fetch_id, resp, realm_id, at, took); nil }) if sw_hooks[:fetch_respond]
+        c.attach('__csim_swFetchStream',  ->(fetch_id, kind, payload, realm_id, at = 0, took = 0) { sw_hooks[:fetch_stream]&.call(fetch_id, kind, payload, realm_id, at, took); nil }) if sw_hooks[:fetch_stream]
         # Cross-isolate MessagePort channels: the ends a worker's ports take and give up, and what they post.
         c.attach('__csim_workerPortPost',    ->(end_id, data) { sw_hooks[:port_post]&.call(end_id, data); nil }) if sw_hooks[:port_post]
         c.attach('__csim_workerPortEndHere', ->(end_id)       { sw_hooks[:port_here]&.call(end_id); nil }) if sw_hooks[:port_here]

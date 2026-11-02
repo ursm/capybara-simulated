@@ -474,11 +474,12 @@ fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     dom(scope).arena.enter(cid).clock = time;
 }
 
-// __dom.timerAdd(handler, args, timeout, repeats, task, ahead) -> its key: a timer of the calling realm's, falling due
-// `timeout` ms after now on its clock — never, for one that is no finite time — and, `repeats`, again that long after
+// __dom.timerAdd(handler, args, timeout, repeats, task, ahead, lead) -> its key: a timer of the calling realm's, falling
+// due `timeout` ms after now on its clock — never, for one that is no finite time — and, `repeats`, again that long after
 // each run: a page's (`task` false: a positive id), nested in the timer task running and clamped by its nesting
 // level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped — and, `ahead`,
-// runs ahead of those due with it (`AHEAD`; a page's timer never).
+// runs ahead of those due with it (`AHEAD`; a page's timer never). `lead` ms later the first time: what the realm's
+// `Date` stands ahead of this clock by (timers.js `clockLead`), which its timeout is counted from.
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let handler = v8::Global::new(scope, args.get(0));
     let list = args.get(1);
@@ -487,13 +488,14 @@ fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgumen
     let repeats = args.get(3).is_true();
     let task = args.get(4).is_true();
     let turn = if task && args.get(5).is_true() { AHEAD } else { IN_TURN };
+    let lead = args.get(6).number_value(scope).filter(|l| *l > 0.0).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
     let arena = &mut dom(scope).arena;
     let now = arena.script_clock(cid);
     let takes = arena.takes_timers(cid);
     let nesting = if task { 0 } else { arena.timers_of(cid).and_then(|t| t.task_nesting).unwrap_or(0) };
     let timeout = if task { timeout } else { clamped(timeout, nesting) };
-    let due = Some(now + timeout).filter(|d| d.is_finite()).unwrap_or(f64::MAX);
+    let due = Some(now + timeout + lead).filter(|d| d.is_finite()).unwrap_or(f64::MAX);
     let period = repeats.then_some(timeout);
     let key = if task {
         arena.task_keys.last -= 1;
