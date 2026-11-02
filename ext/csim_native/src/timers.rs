@@ -943,9 +943,9 @@ pub(crate) struct Crossings {
     asked: HashMap<u32, f64>,
 }
 
-// __dom.crossingAdd(key, at, run) -> whether the queue is to be run now: `run`, sent by `key`'s sender at `at` (on the
-// agent's `Date` scale, as a message's wire carries it — agent_clock.rs `agentShift` — 0 for no time), put in the
-// calling realm's crossing queue; none while a turn of it is queued, which runs it in its order.
+// __dom.crossingAdd(key, at, run) -> what to run now, as `crossingNext` answers it: `run`, sent by `key`'s sender at `at`
+// (on the agent's `Date` scale, as a message's wire carries it — agent_clock.rs `agentShift` — 0 for no time), put in the
+// calling realm's crossing queue — nothing while a turn of it is queued, which runs it in its order.
 fn crossing_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let key: std::rc::Rc<str> = args.get(0).to_rust_string_lossy(scope).into();
     let mut at = args.get(1).number_value(scope).unwrap_or(0.0);
@@ -962,7 +962,9 @@ fn crossing_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
     *waiting += 1;
     let at = crossings.queue.partition_point(|&(w, ..)| w <= when);
     crossings.queue.insert(at, (when, key, run));
-    rv.set_bool(!crossings.turn);
+    if !crossings.turn {
+        next_crossing(scope, cid, &mut rv);
+    }
 }
 
 // __dom.crossingNext(turnEnds) -> the calling realm's crossing queue's next to run, now: its head, taken, the realm's clock
@@ -975,11 +977,14 @@ fn crossing_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgu
 fn crossing_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let turn_ends = args.get(0).is_true();
     let cid = realm_id(scope, &args);
+    if turn_ends {
+        dom(scope).arena.enter(cid).crossings.turn = false;
+    }
+    next_crossing(scope, cid, &mut rv);
+}
+fn next_crossing(scope: &mut v8::PinScope<'_, '_>, cid: i32, rv: &mut v8::ReturnValue<'_, v8::Value>) {
     let d = dom(scope);
     let crossings = &mut d.arena.enter(cid).crossings;
-    if turn_ends {
-        crossings.turn = false;
-    }
     let Some(&(when, ..)) = crossings.queue.front() else { return };
     let ahead = if when > 0.0 { when - crate::agent_clock::own_now(d, cid) } else { 0.0 };
     if ahead > 0.0 {
