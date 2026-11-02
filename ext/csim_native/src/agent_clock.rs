@@ -28,13 +28,13 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::dom::{dom, realm_id, register, register_fast, Dom, RealmArena, RealmState};
 
 // An agent's script time: the turns closed, in milliseconds; the turn open, from when
-// it opened; and the synchronous host calls it waits inside, since when the outermost began and the event loop's clock as
-// each began.
+// it opened; and the synchronous host calls it waits inside, since when the outermost began, and the event loop's clock
+// as each began with the number it was begun as (unload_walks.rs `next_mark`).
 #[derive(Default)]
 pub(crate) struct AgentTime {
     closed: f64,
     open: Option<Instant>,
-    waits: Vec<f64>,
+    waits: Vec<(f64, u32)>,
     wait_began: Option<Instant>,
 }
 
@@ -46,11 +46,17 @@ impl AgentTime {
         self.closed = self.now(at);
         self.open = None;
     }
-    // The waits a terminated script left raised — it ran no `finally` to end them — ended, as none is under way: how
-    // many (unload_walks.rs `endLeftOpenSince`).
-    pub(crate) fn end_waits(&mut self) -> usize {
-        self.wait_began = None;
-        std::mem::take(&mut self.waits).len()
+    // The waits a terminated script left raised — it ran no `finally` to end them — ended: those begun after number
+    // `mark`, as the host's entry that failed was made (unload_walks.rs `end_left_open_since`), not one under way below
+    // it, which another entry began. How many.
+    pub(crate) fn end_waits_since(&mut self, mark: u32) -> usize {
+        let kept = self.waits.iter().take_while(|&&(_, id)| !crate::unload_walks::begun_after(id, mark)).count();
+        let ended = self.waits.len() - kept;
+        self.waits.truncate(kept);
+        if self.waits.is_empty() {
+            self.wait_began = None;
+        }
+        ended
     }
 }
 
@@ -535,10 +541,10 @@ fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
         if time.waits.is_empty() {
             time.wait_began = Some(at);
         }
-        time.waits.push(clock);
+        time.waits.push((clock, crate::unload_walks::next_mark()));
         return;
     }
-    let moved = time.waits.pop().map_or(0.0, |began| if whole { f64::MAX } else { clock - began });
+    let moved = time.waits.pop().map_or(0.0, |(began, _)| if whole { f64::MAX } else { clock - began });
     if !time.waits.is_empty() {
         return;
     }
@@ -560,3 +566,27 @@ fn agent_idle(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArgum
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::unload_walks::{last_mark, next_mark};
+
+    // A failed entry ends the waits begun since it was made, not one an outer entry began and is still inside.
+    #[test]
+    fn a_failed_entry_ends_only_its_own_waits() {
+        let mut time = AgentTime::default();
+        let first = next_mark();
+        time.waits.push((0.0, first));
+        time.wait_began = Some(Instant::now());
+        let mark = last_mark();
+        time.waits.push((10.0, next_mark()));
+        time.waits.push((20.0, next_mark()));
+        assert_eq!(time.end_waits_since(mark), 2);
+        assert_eq!(time.waits.len(), 1);
+        assert!(time.wait_began.is_some());
+        assert_eq!(time.end_waits_since(mark), 0);
+        assert_eq!(time.end_waits_since(first.wrapping_sub(1)), 1);
+        assert!(time.waits.is_empty() && time.wait_began.is_none());
+    }
+}
