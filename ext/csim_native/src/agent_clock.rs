@@ -28,12 +28,13 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::dom::{dom, realm_id, register, register_fast, Dom, RealmArena, RealmState};
 
 // An agent's script time: the turns closed, in milliseconds; the turn open, from when
-// it opened; and the synchronous host calls it waits inside, how many and since when the outermost began.
+// it opened; and the synchronous host calls it waits inside, since when the outermost began and the event loop's clock as
+// each began.
 #[derive(Default)]
 pub(crate) struct AgentTime {
     closed: f64,
     open: Option<Instant>,
-    waits: u32,
+    waits: Vec<f64>,
     wait_began: Option<Instant>,
 }
 
@@ -287,7 +288,7 @@ extern "C" fn csim_agent_checkpoint_done(isolate: v8::UnsafeRawIsolatePtr) {
     let isolate = unsafe { v8::Isolate::ref_from_raw_isolate_ptr_mut(&mut ptr) };
     if let Some(dom) = isolate.get_slot_mut::<Dom>() {
         let time = &mut dom.agent_time;
-        if time.waits == 0 && time.open.is_some() {
+        if time.waits.is_empty() && time.open.is_some() {
             time.close(Instant::now());
         }
     }
@@ -511,26 +512,29 @@ fn agent_shift(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgum
     rv.set_double(agent_shift_of(dom(scope), cid));
 }
 
-// __dom.agentWait(begins, moved) — a script of the calling agent's begins to wait inside a synchronous host call (true),
-// or has done (false), the event loop's virtual clock `moved` ms on meanwhile — a server's sleep the host moved it by, a
-// worker's answer: as much of the wait's real time as that is none of the script time, the virtual clock showing it (all
-// of it, a `moved` past the wait's length: a wait on a worker, whose answer brings the time it took — sw-client.js).
+// __dom.agentWait(begins, whole) — a script of the calling agent's begins to wait inside a synchronous host call (true),
+// or has done (false): as much of the wait's real time as the event loop's virtual clock moved meanwhile — a server's
+// sleep the host moved it by, a worker's answer — is none of the script time, the virtual clock showing it; all of it,
+// `whole`: a wait on another agent, whose answer brings the model time it took (sw-client.js).
 fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let begins = args.get(0).is_true();
-    let moved = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
+    let whole = args.get(1).is_true();
     let at = Instant::now();
-    let time = &mut dom(scope).agent_time;
+    let d = dom(scope);
+    let clock = d.arena.event_loop.clock;
+    let time = &mut d.agent_time;
     if begins {
-        time.waits += 1;
-        if time.waits == 1 {
+        if time.waits.is_empty() {
             time.wait_began = Some(at);
         }
+        time.waits.push(clock);
         return;
     }
-    time.waits = time.waits.saturating_sub(1);
-    if time.waits > 0 {
+    let moved = time.waits.pop().map_or(0.0, |began| if whole { f64::MAX } else { clock - began });
+    if !time.waits.is_empty() {
         return;
     }
+    let moved = if moved.is_finite() && moved > 0.0 { moved } else { 0.0 };
     let (Some(began), Some(open)) = (time.wait_began.take(), time.open) else { return };
     let waited = at.saturating_duration_since(began.max(open));
     let cut = std::time::Duration::from_secs_f64((moved / 1000.0).min(waited.as_secs_f64()));
@@ -543,7 +547,7 @@ fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgume
 // of: `agentWait`.)
 fn agent_idle(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let time = &mut dom(scope).agent_time;
-    if time.waits == 0 {
+    if time.waits.is_empty() {
         time.close(Instant::now());
     }
 }

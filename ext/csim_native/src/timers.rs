@@ -450,6 +450,7 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "swAsked", sw_asked, context_id);
     register(scope, ns, "swAnswered", sw_answered, context_id);
     register(scope, ns, "agentFramesOwed", agent_frames_owed, context_id);
+    register(scope, ns, "agentReady", agent_ready, context_id);
     register(scope, ns, "renderBegins", render_begins, context_id);
     register(scope, ns, "stepRenderOwed", step_render_owed, context_id);
     register(scope, ns, "stepRenderAt", step_render_at, context_id);
@@ -948,6 +949,18 @@ fn crossing_next(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArg
         crate::agent_clock::hold(d, cid, when);
     }
     rv.set(v8::Local::new(scope, run));
+}
+
+// __dom.agentReady() -> whether the event loop has work to run now: an animation frame callback requested of any of its
+// documents (it runs in the step's rendering update), or a task due — without the first a worker's requestAnimationFrame
+// with no timer beside it would never fire.
+fn agent_ready(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
+    if frames_owed(scope, false) {
+        return rv.set_bool(true);
+    }
+    let arena = &dom(scope).arena;
+    let clock = arena.event_loop.clock;
+    rv.set_bool(arena.agent_first().is_some_and(|((Due(due), ..), _)| due <= clock));
 }
 
 // __dom.agentFramesOwed(animations) -> whether a rendering update is owed to a document of the event loop's: an animation
