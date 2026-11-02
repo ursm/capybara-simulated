@@ -5754,18 +5754,43 @@ module Capybara
 
       # A controlled client's SYNCHRONOUS request — a sync XHR, a page's or a worker's — → the controlling SW's `fetch`
       # event, its answer awaited in place on the calling thread (`sw_direct_reply`): Handle Fetch is the request's whatever
-      # its caller waits on. Its wire JSON, or nil for the network — a worker gone, or one still activating, which the
-      # caller cannot wait for in place: the window's thread would be holding the activation its `activate` waitUntil may
-      # need (the script-subresource path's rule, sw_script_subresource_fetch).
+      # its caller waits on. Its wire JSON, or nil for the network — a worker gone, or one still activating that the wait
+      # for it gives up on (`sw_activated_in_place`).
       # (…`timeout_ms` the XHR's `timeout`, 0 for none: TIMEOUT_REPLY once that much of the worker's time passed)
       def service_worker_sync_fetch(handle, req_json, realm_id, timeout_ms = 0)
         sw_host.sw_dispatch_sync_fetch(handle, req_json, sw_realm_key(realm_id), self, timeout_ms.to_i)
       end
       # …the host's dispatch of it, `follower` the window whose script waits.
       def sw_dispatch_sync_fetch(handle, req_json, realm_key, follower, timeout_ms)
-        return nil if !@workers[handle.to_i] || sw_redundant?(handle) || !sw_live?(handle) || !Native.sw_worker_activated(@sw_partition, handle.to_i)
+        w = @workers[handle.to_i]
+        return nil if !w || sw_redundant?(handle) || !sw_live?(handle) || !sw_activated_in_place(handle, w)
 
         sw_direct_reply(handle, sw_fetch_request(req_json.to_s), realm_key.to_i, follower:, timeout_ms:)
+      end
+      # Handle Fetch: "If activeWorker's state is activating, wait for activeWorker's state to become activated" — waited
+      # for in place here, where the caller's script waits too: until the worker has run its `activate` event out (its
+      # 'activated' phase posted, `:activate_done` — the registry's state follows at the window's next step, which no task
+      # of a script on the stack may wait for), as long as it is at work. A client its `clients.claim()` controls is
+      # controlled while it is activating, and the claim and the phase reach the window in separate drains where the
+      # worker's thread is slow — a step between them, and a sync XHR of the page's went to the network, its worker
+      # bypassed. One whose `activate` waits on the window (stalled: no message, no timer of its own) is given up on, the
+      # request the network's as before: the window's thread may hold what it waits for.
+      private def sw_activated_in_place(handle, w)
+        return true if Native.sw_worker_activated(@sw_partition, handle.to_i)
+
+        w[:awaited] = w[:awaited].to_i + 1
+        deadline    = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WORKER_ROUND_TRIP_BUDGET
+        stalled     = 0
+        until w[:activate_done]
+          break unless w[:thread]&.alive? && Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          stalled = worker_stalled?(w) ? stalled + 1 : 0
+          break if stalled >= 2
+
+          sleep WORKER_POLL_INTERVAL
+        end
+        w[:activate_done] == true
+      ensure
+        w[:awaited] -= 1 if w && w[:awaited].to_i.positive?
       end
 
       # A controlled client cancelled a streaming respondWith body (`response.body.cancel()` or an
@@ -9801,6 +9826,7 @@ module Capybara
                 sw_phase_pending = ok ? 'activation' : nil
               else
                 outbox << {handle: handle, kind: 'sw_phase', phase: 'activated'}
+                record[:activate_done] = true if record
                 sw_phase_pending = nil
               end
             end

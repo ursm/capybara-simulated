@@ -251,7 +251,12 @@ worker, dedicated, shared or service, sets as its own scripts have run its
 `Date` past the clock it follows falls due on that clock all the same, running
 with its `Date` lifted to the timer's time
 (`notEarly`, timers.js), where HTML would run it that much later: falling due
-later would move it by the driver's own script time too. A navigation
+later would move it by the driver's own script time too; and a worker that
+outlives its window's document keeps its own `Date` where the next document's
+begins again at the wall clock, as far ahead of the page's as the last page's
+virtual time ran ahead of real time, its messages converted between the two
+(`anchorShift`, timers.js): one going back with the page's ran its
+`performance.now()` back too. A navigation
 into the scope of a worker still activating waits for it as Handle Fetch
 says — in place, as long as the worker is at work, the host's event loop
 stepped to whatever of it is due next (`await_sw_activation`), or deferred
