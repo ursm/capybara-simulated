@@ -81,7 +81,7 @@ RSpec.describe 'a worker beside a page timer, on one virtual time', :every_host_
       HTML
     })
     session.visit '/a'
-    expect(poll_until(timeout: 20) { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[250:t0:0 550:t3:1 1050:t8:3 2050:t18:3 4050:t38:3])
+    expect(poll_until(timeout: 20) { l = session.evaluate_script('log'); l.size == 5 && l }).to eq(%w[250:t0:0 550:t2:1 1050:t5:2 2050:t13:3 4050:t33:3])
   end
 
   # (…and what a service worker posts while the window waits on its answer in place — a frame's navigation it answers off

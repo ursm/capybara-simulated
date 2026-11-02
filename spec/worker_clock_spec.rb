@@ -328,6 +328,42 @@ RSpec.describe 'Worker clock' do
     expect(order.last[1]).to be_between(1500, 1550)
   end
 
+  # …and with several senders at once — three workers busy 300, 150 and 220 ms, one answering on a port, beside the page's
+  # own post to itself — each answer runs in its turn among the page's timers, by its time, and the page's `Date` is its
+  # virtual clock's again after them. With two waiting, each took the other's turn for a timer of the page's, or the
+  # clock the other had lifted for the page's own, and ran ahead of the page's timers, its `Date` 100–220 ms ahead for
+  # good (Chrome: self 11, T50 61, T100 111, B150 160, T200 211, Cport220 230, T250 261, A300 310, T350 361).
+  it 'runs the answers of several busy workers in turn among the page’s timers' do
+    html = <<~HTML
+      <!doctype html><meta charset="utf-8"><body><script>
+      const mk = (ms, tag) => new Worker(URL.createObjectURL(new Blob([`onmessage = () => { const d = Date.now(); while (Date.now() - d < ${ms}); postMessage('${tag}'); };`])));
+      const A = mk(300, 'A300'), B = mk(150, 'B150');
+      const mc = new MessageChannel();
+      const C = new Worker(URL.createObjectURL(new Blob([`onmessage = (e) => { const p = e.ports[0]; const d = Date.now(); while (Date.now() - d < 220); p.postMessage('Cport220'); };`])));
+      window.log = [];
+      const t0 = performance.now(), v0 = __virtualNow();
+      const at = (x) => log.push([x, performance.now() - t0, __virtualNow() - v0]);
+      A.onmessage = (e) => at(e.data); B.onmessage = (e) => at(e.data); mc.port1.onmessage = (e) => at(e.data);
+      window.onmessage = (e) => at(e.data);
+      setTimeout(() => {
+        A.postMessage(0); B.postMessage(0); C.postMessage(0, [mc.port2]);
+        postMessage('self', '*');
+        for (const t of [50, 100, 200, 250, 350]) setTimeout(() => at('T' + t), t);
+      }, 10);
+      </script></body>
+    HTML
+    session = simulated_session(->(_env) { [200, {'content-type' => 'text/html'}, [html]] })
+    session.visit('/')
+    log = poll_until(timeout: 30) {
+      sleep 0.1
+      l = session.evaluate_script('log')
+      l.size == 9 && l
+    }
+    expect(log.map(&:first)).to eq(%w[self T50 T100 B150 T200 Cport220 T250 A300 T350])
+    _, date, virtual = log.last
+    expect(date - virtual).to be_between(0, 30)
+  end
+
   # A worker busy on its own while the window waits on nothing of it is none of the window's time, however the host
   # waits for the worker's ticks: a page's `setTimeout(…, 3000)` beside a worker spinning 20 ms of every 50 read 3605.
   it "keeps a busy worker's ticks out of the window's time" do
