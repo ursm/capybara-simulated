@@ -203,7 +203,8 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     JS
     log = poll_until(timeout: 20) { l = s.evaluate_script('log'); l.size == 4 && l }
     expect(log.map(&:first)).to eq(%w[spin T600 ms300 T900])
-    expect(log[2][1]).to be_between(800, 900)
+    # (…the spin on whole milliseconds of `Date.now()`, as much as one short)
+    expect(log[2][1]).to be_between(799, 900)
   end
 
   # …and the worker's clock on with the page's after it: a quick answer at once, the worker's `Date` the page's, however
