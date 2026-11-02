@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require 'fileutils'
 require 'timeout'
+require 'tmpdir'
 require 'yaml'
 require 'capybara/simulated'
 require 'capybara/spec/spec_helper'
@@ -31,6 +33,9 @@ require_relative 'session_teardown'
 # nest its describe under a caller-owned group. On a capybara upgrade, diff
 # run_specs against this body.
 module CapybaraShared
+  # Where each example's own save path is made (`./save_path_tmp`, the spec helper's).
+  SAVE_ROOT = Capybara.save_path
+
   # Capabilities our driver doesn't provide, skipped via the gem's own
   # `capybara_skip` metadata filter (the shard files pass this to their
   # top-level describe).
@@ -181,9 +186,16 @@ RSpec.configure do |config|
   # puts everything back to defaults; without it we see false positives
   # like text-visibility tests failing because a prior spec turned
   # `ignore_hidden_elements` off and never turned it back on.
+  # …and each example its own save path, which Capybara's spec helper shares as `./save_path_tmp`: a download lands there
+  # under a fixed name (`#click_link can download a file` expects `download.csv` absent, then present, then deletes it),
+  # and the same example running in another process at once found the other's file there.
   config.around(:each, :capybara_skip) do |example|
     Capybara::SpecHelper.reset!
-    example.run
+    FileUtils.mkdir_p(CapybaraShared::SAVE_ROOT)
+    Dir.mktmpdir('example-', CapybaraShared::SAVE_ROOT) do |dir|
+      Capybara.save_path = dir
+      example.run
+    end
   ensure
     Capybara.app = nil
     Capybara.default_selector = :css
