@@ -3300,6 +3300,14 @@ pub(crate) fn fast_dom<'a>(options: *mut v8::fast_api::FastApiCallbackOptions<'a
     // SAFETY: V8 hands a fast call its options, whose isolate is the one calling, on its thread.
     unsafe { (*options).isolate_unchecked() }.get_slot::<Dom>()
 }
+// …to change, with the calling realm: the op's function data is the realm's id (`register_fast`).
+pub(crate) fn fast_dom_mut<'a>(options: *mut v8::fast_api::FastApiCallbackOptions<'a>) -> Option<(&'a mut Dom, i32)> {
+    // SAFETY: as `fast_dom`, with no borrow of the engine's state held across the call.
+    let options = unsafe { &mut *options };
+    let cid = v8::Local::<v8::Int32>::try_from(options.data).map_or(0, |i| i.value());
+    let isolate: *mut v8::Isolate = unsafe { options.isolate_unchecked_mut() };
+    unsafe { &mut *isolate }.get_slot_mut::<Dom>().map(|d| (d, cid))
+}
 
 // __dom.realmOf(nid) -> the realm whose tree the node is in, whose state answers for it (-1 for none).
 fn realm_of(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

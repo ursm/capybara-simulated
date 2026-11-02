@@ -98,7 +98,7 @@ unsafe extern "C" {
 // worker's catching up with its window.
 #[derive(Default)]
 pub(crate) struct RealmClock {
-    // The high resolution time last read, which no read goes back from — across a time origin taken again too.
+    // The high resolution time last read, which no read goes back from — across a time origin backdated too.
     last_hr: f64,
     // The time another agent's message, or a timer, brought the realm's clock on to (`clockAtLeast`): its high resolution
     // time reads no earlier until its own passes it.
@@ -294,15 +294,6 @@ extern "C" fn csim_agent_checkpoint_done(isolate: v8::UnsafeRawIsolatePtr) {
     }
 }
 
-// The engine's state and the calling realm, for a fast path: its function data is the realm's id (`register_fast`).
-fn fast_realm<'a>(options: *mut v8::fast_api::FastApiCallbackOptions<'a>) -> Option<(&'a mut Dom, i32)> {
-    // SAFETY: V8 hands a fast call its options, whose isolate is the one calling, on its thread, with no borrow of the
-    // engine's state held across the call.
-    let options = unsafe { &mut *options };
-    let cid = v8::Local::<v8::Int32>::try_from(options.data).map_or(0, |i| i.value());
-    let isolate: *mut v8::Isolate = unsafe { options.isolate_unchecked_mut() };
-    unsafe { &mut *isolate }.get_slot_mut::<Dom>().map(|d| (d, cid))
-}
 const NUMBER_FAST: v8::fast_api::CFunctionInfo = v8::fast_api::CFunctionInfo::new(
     v8::fast_api::Type::Float64.as_info(),
     &[v8::fast_api::Type::V8Value.as_info(), v8::fast_api::Type::CallbackOptions.as_info()],
@@ -318,7 +309,7 @@ fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     rv.set_double(read(dom(scope), cid, true).hr_now());
 }
 fn hr_now_fast(_receiver: v8::Local<v8::Value>, options: *mut v8::fast_api::FastApiCallbackOptions) -> f64 {
-    fast_realm(options).map_or(0.0, |(d, cid)| read(d, cid, true).hr_now())
+    crate::dom::fast_dom_mut(options).map_or(0.0, |(d, cid)| read(d, cid, true).hr_now())
 }
 const HR_NOW_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(hr_now_fast as _, &NUMBER_FAST)];
 
@@ -329,7 +320,7 @@ fn date_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
     rv.set_double(date_of(read(dom(scope), cid, true)));
 }
 fn date_now_fast(_receiver: v8::Local<v8::Value>, options: *mut v8::fast_api::FastApiCallbackOptions) -> f64 {
-    fast_realm(options).map_or(0.0, |(d, cid)| date_of(read(d, cid, true)))
+    crate::dom::fast_dom_mut(options).map_or(0.0, |(d, cid)| date_of(read(d, cid, true)))
 }
 const DATE_NOW_FAST: &[v8::fast_api::CFunction] = &[v8::fast_api::CFunction::new(date_now_fast as _, &NUMBER_FAST)];
 fn date_of(mut read: Read<'_>) -> f64 {

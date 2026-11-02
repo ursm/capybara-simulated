@@ -237,7 +237,7 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
 
   # …and on the asking window's clock, whichever window's clock the worker runs on: each window's `Date` is its own
   # virtual clock's, one that ran a 10 s timer chain 10 s from another's, and an answer carries the time it took, from
-  # the asking window's own ask (sw-client.js `answeredAt`). The time it was given at, carried as it was, read 9.1 s for
+  # the asking window's own ask (timers.rs `swAnswered`). The time it was given at, carried as it was, read 9.1 s for
   # a second window's quick answer after the first window's 10 s chain, its timers after it pushed out as far. (The
   # answer reads 0 run alone, and 101 after this file's other examples: delivered a 100 ms step on, as before.)
   it "lands an answer on the asking window's clock, not the worker's window's" do

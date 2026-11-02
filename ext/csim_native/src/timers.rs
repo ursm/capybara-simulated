@@ -37,7 +37,7 @@ struct Timer {
     // whose scripts ran longer than its window's step, a page a busy worker's answer brought on — a `setTimeout(…, 50)` set
     // then fell due as the virtual clock reached it, 50 ms behind: it runs with its realm's clock held on to that time,
     // its virtual clock and its due times as they stand (HTML timer initialization). Where another agent's time held the
-    // clock, it falls due that much later on the virtual clock instead (agent_clock.rs `clockLead`); where a worker's own
+    // clock, it falls due that much later on the virtual clock instead (agent_clock.rs `Read::lead`); where a worker's own
     // scripts did, not: a service worker's `setTimeout(…, 2000)` set as its 1 s computation ended falls due 2 s later on
     // the virtual clock and runs with its `Date` 3 s on — its answer, which carries that time, landing on the page 3 s on
     // all the same (sw-client.js). None for no timeout, nor a crossing queue's turn: due with a timer, not on to its delay
@@ -653,7 +653,7 @@ fn clock_to(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArgument
 // by its nesting level, or one the platform queues (`task` true: a negative key), which neither nests nor is clamped —
 // and, `ahead`, runs ahead of those due with it (`AHEAD`; a page's timer never). A page's, or a platform task of a
 // timeout — an XHR's `timeout`, an AbortSignal's — falls due later the first time by what the realm's `Date` stands ahead
-// of this clock by (agent_clock.rs `clockLead`), which its timeout is counted from, and runs no earlier on its realm's
+// of this clock by (agent_clock.rs `Read::lead`), which its timeout is counted from, and runs no earlier on its realm's
 // clock than its timeout after it was set (`Timer::not_early`). A platform task of a source the event loop treats apart
 // is kept as one (`source`: 1 a crossing queue's turn, which neither, 2 a request's — `Source`).
 fn timer_add(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {

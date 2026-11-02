@@ -5152,8 +5152,8 @@ module Capybara
         # the window's as its last step left it, its scripts' time among it, where it was held at least — and when, for the
         # time its start takes: agent_clock.rs)
         # (…and how far the agent's `Date` scale, which every message's time is on, stands ahead of its maker's `Date` —
-        # its creator's document's, else the page's: what it converts the times it is told and tells by, timers.js
-        # `anchorShift`)
+        # its creator's document's, else the page's: what it converts the times it is told and tells by, agent_clock.rs
+        # `WorkerClock::anchor_shift`)
         record[:shift]         = shift ? shift.to_f : @runtime.call('__csimAgentShift').to_f
         record[:epoch]         = if epoch_at then epoch_at.to_f
                                  elsif @runtime.clock_date.positive? then [@runtime.clock_date + record[:origin] - @runtime.clock, @runtime.clock_held].max - record[:shift]
@@ -6488,7 +6488,7 @@ module Capybara
       # time crosses from one window to another by the distance between the two as their last steps left them — to within
       # the steps a worker of `from` took since, beside this window's. Carried as it was, it held this window's clock at
       # the other's time, and pushed its timers out by the whole distance. (0 a time not given.) A service worker's
-      # answer carries no time at all, but the lengths of it (sw-client.js `answeredAt`).
+      # answer carries no time at all, but the lengths of it (timers.rs `swAnswered`).
       def date_at(at, from)
         return at if !at.positive? || from.nil? || from.equal?(self)
 
