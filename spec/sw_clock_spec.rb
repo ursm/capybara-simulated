@@ -95,10 +95,11 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
 
   # (…`got` came `at` ms of the virtual clock after the request — exactly, however loaded the machine — and as long or
   # longer on `performance.now()`, which shows the time the scripts ran for beside it — the page's and the worker's that
-  # answered, which its answer carries — hundreds of milliseconds of it on a machine under 64 CPU burners)
+  # answered, which its answer carries — hundreds of milliseconds of it on a machine under 64 CPU burners — at the
+  # 0.1 ms `performance.now()` resolves to, the difference of two of its readings a double's: 99.99999999999997)
   def expect_at(got, at, what)
     expect(got[2]).to be_between(at, at + 1), "#{what}: #{got.inspect}"
-    expect(got[1]).to be_between(at, at + 300), "#{what}: #{got.inspect}"
+    expect(got[1].round(1)).to be_between(at, at + 300), "#{what}: #{got.inspect}"
   end
 
   it "resolves a page's fetch and XHR when the worker answers, before their timeout" do
