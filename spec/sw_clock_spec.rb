@@ -96,7 +96,7 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
 
   it "resolves a page's fetch and XHR when the worker answers, before their timeout" do
     s = controlled_session
-    { 'ms=0' => 0, 'ms=50' => 50, 'ms=300' => 300, 'ms=1000' => 1000 }.each do |query, ms|
+    {'ms=0' => 0, 'ms=50' => 50, 'ms=300' => 300, 'ms=1000' => 1000}.each do |query, ms|
       got = page_requests(s, query, ms + 50)
       expect(got['fetch'][0]).to eq('sw'), "#{query}: #{got.inspect}"
       expect_at(got['fetch'], ms, query)
@@ -114,10 +114,50 @@ RSpec.describe 'a request a service worker answers, on the clock', :every_host_l
     expect_at(got['xhr'], 100, 'xhr')
   end
 
+  # A step that ends at a task that asked a worker something ends there for the window's frames too, and renders no frame
+  # of its own: a frame's interval runs at the page's times, its clock with the page's, and animation frames come at
+  # their 60 a second, however often the page posts.
+  it "keeps a frame's timers and the animation frames to their times while the page posts to a worker" do
+    s = simulated_session(->(env) {
+      case env['PATH_INFO']
+      when '/w.js' then [200, {'content-type' => 'text/javascript'}, ['onmessage = () => {};']]
+      when '/f'    then [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body>f']]
+      else [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><iframe src="/f"></iframe>']]
+      end
+    })
+    s.visit '/'
+    poll_until { s.evaluate_script("document.querySelector('iframe').contentDocument.body?.textContent == 'f'") }
+    s.execute_script(<<~JS)
+      const w = new Worker('/w.js'), fw = frames[0];
+      const p0 = __virtualNow(), f0 = fw.__virtualNow();
+      fw.eval('window.ticks = 0; setInterval(() => ticks++, 100)');
+      let rendered = 0;
+      const frame = () => { rendered++; requestAnimationFrame(frame); };
+      requestAnimationFrame(frame);
+      window.r = null;
+      const iv = setInterval(() => w.postMessage(1), 4);
+      setTimeout(() => { clearInterval(iv); r = [__virtualNow() - p0, fw.__virtualNow() - f0, fw.ticks, rendered]; }, 1000);
+    JS
+    r = poll_until(timeout: 30) {
+      sleep 0.05
+      s.evaluate_script('r')
+    }
+    expect(r[0]).to eq(1000)
+    expect(r[1]).to be_between(980, 1000)
+    expect(r[2]).to be_between(9, 10)
+    expect(r[3]).to be_between(58, 62)
+  end
+
   it "resolves a dedicated worker's XHR when the service worker answers, before its timeout" do
     s = controlled_session
     s.execute_script("window.log = []; window.w = new Worker('/w.js'); w.onmessage = (e) => log.push(e.data)")
-    [['ms=50', 100, 'load', 50], ['ms=2000', 100, 'timeout', 100], ['ms=80&hops=2', 100, 'timeout', 100], ['ms=80&hops=2', 500, 'load', 240]].each_with_index do |(query, timeout, outcome, at), i|
+    cases = [
+      ['ms=50', 100, 'load', 50],
+      ['ms=2000', 100, 'timeout', 100],
+      ['ms=80&hops=2', 100, 'timeout', 100],
+      ['ms=80&hops=2', 500, 'load', 240]
+    ]
+    cases.each_with_index do |(query, timeout, outcome, at), i|
       s.execute_script("w.postMessage(#{[query, timeout].to_json})")
       poll_until(timeout: 20) { s.evaluate_script('log.length') > i }
       got = s.evaluate_script("log[#{i}]")

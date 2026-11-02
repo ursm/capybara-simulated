@@ -3303,7 +3303,11 @@ module Capybara
       # clock) and a genuinely stuck fetch can't wedge the drain. Reports the REAL nearest timer —
       # holding the clock doesn't hide a parked timer, we simply haven't advanced to it yet.
       private def hold_for_sw_fetch(turns)
+        began = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         park_worker_reply(hold_deadline(ClockHolds::FETCH))
+        # (…the real time the page waited, its clock held, on the worker's work — a fetch event spinning on `Date.now()` —
+        # which its `Date` shows as its scripts' own: agent_clock.rs `agentRan`)
+        @runtime.call('__csimAgentRan', (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000)
         reply_ready = @worker_outbox_head || !@worker_outbox.empty?
         # A delivered reply refreshes the budget so the NEXT fetch in a sequence waits afresh instead
         # of inheriting a spent deadline (which would abandon it to a premature timeout).
@@ -5699,6 +5703,14 @@ module Capybara
 
         @runtime.realm_direct_call(0, '__csimClockAtLeast', at)
         true
+      end
+
+      # What the page's `Date` reads now, before any time-travel offset (timers.js `__csimClockNow`) — nil before the first
+      # page, or where its realm cannot answer.
+      private def last_page_clock
+        @clock_epoch_ms && @runtime.call('__csimClockNow')&.to_f
+      rescue StandardError
+        nil
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Counted as a fetch
@@ -12748,7 +12760,7 @@ module Capybara
         # that, its: a session's `Date` never goes back, however far its virtual clocks ran ahead of real time —
         # agent_clock.rs)
         wall = Process.clock_gettime(Process::CLOCK_REALTIME, :float_millisecond)
-        @clock_epoch_ms = @clock_epoch_ms ? [wall, @clock_epoch_ms + @runtime.clock].max : wall
+        @clock_epoch_ms = [wall, last_page_clock].compact.max
         # (…a new environment, as every document is, though its realm is the last one's: V8Runtime#init_page_realm)
         @runtime.rebuild_ctx(client_id: client_id)
         # (…and what the caller's new page holds before its document loads: a blob: document's copy of its own bytes)

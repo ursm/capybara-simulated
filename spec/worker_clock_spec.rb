@@ -127,9 +127,10 @@ RSpec.describe 'Worker clock' do
   end
 
   # Its time origin is the time it was made at, on the window's clock: its `timeOrigin + now()` reads what the window's
-  # does, as its `Date` does (HR-Time §5: one shared monotonic clock) — never behind it, and ahead by little more than
-  # the real time its start took, which its clock begins with. (It read a poll step behind: an idle worker's clock moved
-  # only with a timer to run.)
+  # does, as its `Date` does (HR-Time §5: one shared monotonic clock) — but for the time each agent's own scripts ran
+  # for, a few milliseconds of the window's, tens on a loaded machine; and ahead by little more than the real time its
+  # start took, which its clock begins with. (It read a poll step behind: an idle worker's clock moved only with a timer
+  # to run.)
   it "reads the window's time" do
     session = visit_page(<<~JS)
       postMessage('ready');
@@ -139,7 +140,27 @@ RSpec.describe 'Worker clock' do
     poll_until { session.evaluate_script('window.log.length') >= 2 }
     worker = session.evaluate_script('window.log[1][0]')
     window = session.evaluate_script('window.posted')
-    expect(worker[0] - window[0]).to be_between(-1, 500)
-    expect(worker[1] - window[1]).to be_between(-1, 500)
+    expect(worker[0] - window[0]).to be_between(-50, 500)
+    expect(worker[1] - window[1]).to be_between(-50, 500)
+  end
+
+  # A worker busy on its own — spinning, crunching — while the window rests is none of the window's time: the window's
+  # clock moves as the host steps it, and counting the worker's run beside that ran it at twice its pace.
+  it "leaves the window's clock to its own pace while it is busy" do
+    session = visit_page(<<~JS)
+      postMessage('ready');
+      onmessage = () => { const a = Date.now(); while (Date.now() - a < 2000); postMessage('spun'); };
+    JS
+    session.execute_script(<<~JS)
+      window.r = null;
+      const t0 = performance.now();
+      w.postMessage('go');
+      setTimeout(() => { r = performance.now() - t0; }, 1000);
+    JS
+    r = poll_until(timeout: 20) {
+      sleep 0.1
+      session.evaluate_script('r')
+    }
+    expect(r).to be_between(1000, 1200)
   end
 end

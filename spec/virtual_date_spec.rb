@@ -83,4 +83,32 @@ RSpec.describe 'the virtual clock’s Date' do
     expect(got[1]).to be_between(0, got[0])
     expect(got[2].abs).to be <= 1
   end
+
+  # A session's `Date` never goes back across a navigation: the next document's time origin is the last one's `Date`
+  # where that ran ahead of the wall clock — its virtual clock fast-forwarded to a timer, its scripts' time beside it.
+  it 'goes on across a navigation' do
+    s = simulated_session(->(env) { [200, {'content-type' => 'text/html'}, ["<!DOCTYPE html><meta charset=\"utf-8\"><body>#{env['PATH_INFO']}"]] })
+    s.visit '/a'
+    s.execute_script('window.r = null; setTimeout(() => { r = 1; }, 1500)')
+    poll_until(timeout: 20) { s.evaluate_script('r') }
+    last = s.evaluate_script('(() => { const a = Date.now(); while (Date.now() - a < 300); return Date.now(); })()')
+    s.execute_script("location.href = '/b'")
+    poll_until { s.has_text?('/b', wait: 0) }
+    expect(s.evaluate_script('Date.now()')).to be >= last
+  end
+
+  # A parser-blocking script whose fetch the server took a second over — a `sleep` the host's clock moves by — reads
+  # that second once: the virtual clock shows it, and the real time its script waited for it is none of its own.
+  it 'shows the time a parser-blocking fetch took once' do
+    s = simulated_session(->(env) {
+      if env['PATH_INFO'] == '/slow.js'
+        sleep 1
+        [200, {'content-type' => 'text/javascript'}, ['window.ran = performance.now();']]
+      else
+        [200, {'content-type' => 'text/html'}, ['<!DOCTYPE html><meta charset="utf-8"><body><script src="/slow.js"></script>']]
+      end
+    })
+    s.visit '/'
+    expect(s.evaluate_script('window.ran')).to be_between(1000, 1200)
+  end
 end

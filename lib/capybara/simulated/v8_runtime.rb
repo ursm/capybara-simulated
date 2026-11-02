@@ -492,7 +492,11 @@ module Capybara
           out = out ? out.merge(r, 'fired' => out['fired'].to_i + r['fired'].to_i, 'dirtied' => out['dirtied'] || r['dirtied']) : r
           break unless cut || r['asked']
 
-          waited   += @browser.run_workers_due
+          ran       = @browser.run_workers_due
+          waited   += ran
+          # (…the real time the window waited on them, its clock held, which its `Date` shows as its scripts' own:
+          # agent_clock.rs `agentRan`)
+          ctx.call('__csimAgentRan', ran * 1000) if ran.positive?
           left     -= r['asked'] ? clock - began : cut
           max_iter -= r['fired'].to_i
           break if left <= 0 || max_iter <= 0 || (yield_on_gen && r['dirtied'])

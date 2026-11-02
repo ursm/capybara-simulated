@@ -1,72 +1,45 @@
 // The clock a realm's `Date` and `performance.now()` read (High Resolution Time §4-5): its virtual clock — the time its
 // event loop has reached (timers.rs `clockNow`), which only an event loop step or a host's wait moves — and, beside it,
-// the real time scripts have run for, which no step moves: a script that spins until `Date.now()` has gone on by 50 ms
-// sees it go on all the same, as it would in a browser.
+// the real time its agent's scripts have run for, which no step moves: a script that spins until `Date.now()` has gone
+// on by 50 ms sees it go on all the same, as it would in a browser.
 //
-// Only the time INSIDE a script turn counts. A turn opens at an agent's first read of the clock after its last
-// microtask checkpoint and closes at the next one (a microtask the read queues). What passes between turns — the host
-// waiting between polls, serving a request — is the virtual clock's to show, which the host moves for it: counted on
-// both, a page at rest ran its `Date` at twice its timers' pace (a `setTimeout(…, 3000)` read 5,400 ms of
-// `performance.now()`). Nor does a script's wait inside a synchronous request (`agentWait`), which the virtual clock
-// shows by the time the answer took, if it takes any.
+// Only the time INSIDE a script turn counts. A turn opens at the agent's first read of the clock after its last
+// microtask checkpoint and closes at the next one (a microtask the read queues), or at the end of the event loop step
+// it is in, whichever comes first (`agentIdle`). What passes between turns — the host waiting between polls, serving a
+// request — is the virtual clock's to show, which the host moves for it: counted on both, a page at rest ran its `Date`
+// at twice its timers' pace (a `setTimeout(…, 3000)` read 5,400 ms of `performance.now()`). Nor does the part of a
+// script's wait inside a synchronous host call (`agentWait`) that the virtual clock shows: a server's sleep the host
+// moved it by, a worker's answer — the rest of the wait real time the script spent, as a network's would be.
 //
-// The script time is the process's: the real time during which ANY agent's turn was open — one shared clock, as HR-Time
-// has it, whose time passes for every agent while any of them runs. A service worker spinning 2 s on `Date.now()` in
-// its fetch event shows those 2 s on the page waiting for its answer; and a worker and its window read the same time.
-// Each realm's clock reads it from where it stood as the realm's time origin was taken, beside its own virtual clock.
-use std::sync::Mutex;
+// The script time is the agent's — its isolate's, one event loop for every realm of it — and so is another agent's work
+// it waits on with its clock held (`agentRan`): a worker's, which the host runs before the window's clock goes on, a
+// service worker spinning 2 s in its fetch event while the page's fetch waits for its answer. Another agent's work it
+// does NOT wait on is none of its time: its clock moves meanwhile, as the host steps it, and counting both ran a page at
+// rest at twice its pace while a worker crunched. Each realm's clock reads the script time from where it stood as the
+// realm's time origin was taken, beside its own virtual clock.
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::dom::{dom, realm_id, register};
 
-// The process's script time: the time its turns were open, in milliseconds, up to the last time none was — and how many
-// are open now, since when.
-struct ScriptTime {
-    closed: f64,
-    open: u32,
-    since: Option<Instant>,
-}
-
-static SCRIPT_TIME: Mutex<ScriptTime> = Mutex::new(ScriptTime { closed: 0.0, open: 0, since: None });
-
-fn script_time_at(at: Instant) -> f64 {
-    let t = SCRIPT_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    t.closed + t.since.map_or(0.0, |s| at.saturating_duration_since(s).as_secs_f64() * 1000.0)
-}
-
-fn turn_opens(at: Instant) {
-    let mut t = SCRIPT_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    if t.open == 0 {
-        t.since = Some(at);
-    }
-    t.open += 1;
-}
-
-fn turn_closes(at: Instant) {
-    let mut t = SCRIPT_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    t.open = t.open.saturating_sub(1);
-    if t.open == 0 {
-        if let Some(since) = t.since.take() {
-            t.closed += at.saturating_duration_since(since).as_secs_f64() * 1000.0;
-        }
-    }
-}
-
-// An agent's part in it (its isolate's, one event loop for every realm of it): whether it has a turn open, whether the
-// microtask that closes it is queued, and whether it waits inside a synchronous request, a turn it had open put by.
+// An agent's script time: the turns closed and the time it waited on others, in milliseconds; the turn open, from when
+// it opened; whether the microtask that closes it is queued; and the synchronous host calls it waits inside, how many
+// and since when the outermost began.
 #[derive(Default)]
 pub(crate) struct AgentTime {
-    open: bool,
+    closed: f64,
+    open: Option<Instant>,
     closing: bool,
-    waiting: bool,
+    waits: u32,
+    wait_began: Option<Instant>,
 }
 
-// …let go of with its isolate: a turn it left open — a worker terminated inside a script — open no more.
-impl Drop for AgentTime {
-    fn drop(&mut self) {
-        if self.open {
-            turn_closes(Instant::now());
-        }
+impl AgentTime {
+    fn now(&self, at: Instant) -> f64 {
+        self.closed + self.open.map_or(0.0, |o| at.saturating_duration_since(o).as_secs_f64() * 1000.0)
+    }
+    fn close(&mut self, at: Instant) {
+        self.closed = self.now(at);
+        self.open = None;
     }
 }
 
@@ -87,14 +60,15 @@ pub(crate) fn install(scope: &mut v8::PinScope<'_, '_>, ns: v8::Local<'_, v8::Ob
     register(scope, ns, "clockEpoch", clock_epoch, context_id);
     register(scope, ns, "clockEpochSet", clock_epoch_set, context_id);
     register(scope, ns, "agentWait", agent_wait, context_id);
+    register(scope, ns, "agentRan", agent_ran, context_id);
+    register(scope, ns, "agentIdle", agent_idle, context_id);
 }
 
 // The calling agent's turn opened where it has none, the microtask that closes it queued where none is.
 fn open_turn(scope: &mut v8::PinScope<'_, '_>, at: Instant) {
     let time = &mut dom(scope).agent_time;
-    if !time.open {
-        time.open = true;
-        turn_opens(at);
+    if time.open.is_none() {
+        time.open = Some(at);
     }
     if !time.closing {
         time.closing = true;
@@ -108,15 +82,16 @@ fn open_turn(scope: &mut v8::PinScope<'_, '_>, at: Instant) {
 fn script_time(scope: &mut v8::PinScope<'_, '_>) -> f64 {
     let at = Instant::now();
     open_turn(scope, at);
-    script_time_at(at)
+    dom(scope).agent_time.now(at)
 }
 
-// The microtask checkpoint the turn ends at has come.
+// The microtask checkpoint the turn ends at has come — unless it is one inside a synchronous wait (a step the host runs
+// in it, which drains the queue), whose end closes the turn's account first: `agentWait`.
 fn close_turn(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let time = &mut dom(scope).agent_time;
     time.closing = false;
-    if std::mem::take(&mut time.open) {
-        turn_closes(Instant::now());
+    if time.waits == 0 {
+        time.close(Instant::now());
     }
 }
 
@@ -149,10 +124,11 @@ fn hr_now(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<
     rv.set_double(clock + script - origin.script);
 }
 
-// __dom.clockEpoch() -> the calling realm's time origin, in milliseconds since the epoch.
+// __dom.clockEpoch() -> the calling realm's time origin, in milliseconds since the epoch. (A read of the origin, which
+// opens no turn: the host's, as it boots a document, whose load waits on fetches the virtual clock shows.)
 fn clock_epoch(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, mut rv: v8::ReturnValue<'_, v8::Value>) {
     let cid = realm_id(scope, &args);
-    let script = script_time(scope);
+    let script = dom(scope).agent_time.now(Instant::now());
     rv.set_double(origin_of(scope, cid, script).epoch);
 }
 
@@ -164,24 +140,54 @@ fn clock_epoch_set(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackA
     let Some(epoch) = args.get(0).number_value(scope).filter(|t| t.is_finite()) else { return };
     let since = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
     let cid = realm_id(scope, &args);
-    let script = script_time(scope);
+    let script = dom(scope).agent_time.now(Instant::now());
     let state = dom(scope).arena.enter(cid);
     state.time_origin = Some(TimeOrigin { epoch: epoch - state.clock, script: script - since });
 }
 
-// __dom.agentWait(waits) — a script of the calling agent's begins to wait inside a synchronous request (true), or has
-// done (false): its turn put by meanwhile, and taken up again after. The wait is the host's — a server's answer, a
-// worker's — whose time the virtual clock shows (`__csimClockMovedBy`), as much as the model says it took.
+// __dom.agentWait(begins, moved) — a script of the calling agent's begins to wait inside a synchronous host call (true),
+// or has done (false), its realm's virtual clock `moved` ms on meanwhile — a server's sleep the host moved it by, a
+// worker's answer: as much of the wait's real time as that is none of the script time, the virtual clock showing it.
 fn agent_wait(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
     let begins = args.get(0).is_true();
+    let moved = args.get(1).number_value(scope).filter(|t| t.is_finite() && *t > 0.0).unwrap_or(0.0);
     let at = Instant::now();
     let time = &mut dom(scope).agent_time;
     if begins {
-        if std::mem::take(&mut time.open) {
-            time.waiting = true;
-            turn_closes(at);
+        time.waits += 1;
+        if time.waits == 1 {
+            time.wait_began = Some(at);
         }
-    } else if std::mem::take(&mut time.waiting) {
-        open_turn(scope, at);
+        return;
     }
+    time.waits = time.waits.saturating_sub(1);
+    if time.waits > 0 {
+        return;
+    }
+    let (Some(began), Some(open)) = (time.wait_began.take(), time.open) else { return };
+    let cut = std::time::Duration::from_secs_f64(moved / 1000.0).min(at.saturating_duration_since(began.max(open)));
+    time.open = Some(open + cut);
+    // (…the turn closed at the next checkpoint still, where one inside the wait ran its microtask)
+    open_turn(scope, at);
+}
+
+// __dom.agentRan(ms) — the calling agent waited `ms` of real time, its clock held, on another agent's work — a worker the
+// host ran before the window's clock went on, a service worker's answer a fetch waited for: time it shows as it shows
+// its own scripts' (Browser#hold_for_sw_fetch, V8Runtime#run_loop_step).
+fn agent_ran(scope: &mut v8::PinScope<'_, '_>, args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let Some(ms) = args.get(0).number_value(scope).filter(|t| t.is_finite() && *t > 0.0) else { return };
+    dom(scope).agent_time.closed += ms;
+}
+
+// __dom.agentIdle() — the calling agent's event loop step is over: a turn still open closes, whether or not the
+// microtask that would have closed it ran (a realm's queue let go of undrained, a context reset) — and one that did not
+// is queued afresh by the next turn. (Not a step the host runs inside a script's synchronous wait — a server's sleep it
+// moves the clock by — whose turn the wait's end takes what the clock showed out of: `agentWait`.)
+fn agent_idle(scope: &mut v8::PinScope<'_, '_>, _args: v8::FunctionCallbackArguments<'_>, _rv: v8::ReturnValue<'_, v8::Value>) {
+    let time = &mut dom(scope).agent_time;
+    if time.waits > 0 {
+        return;
+    }
+    time.close(Instant::now());
+    time.closing = false;
 }
