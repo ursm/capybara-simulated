@@ -30,9 +30,9 @@ module Capybara
           # etc.) sleep too, but their Drivers — if any — were
           # registered under a different thread, so they skip; the
           # filter is load-bearing because rusty_racer VMs aren't
-          # thread-safe. Idle Drivers no-op
-          # (`tick_real_time` short-circuits when `@timers_active`
-          # is false), so the broadcast is cheap.
+          # thread-safe. An idle Driver's clock moves all the same — the
+          # time slept passes for its page's `Date` — a step with nothing
+          # due, so the broadcast is cheap.
           ms = (seconds.to_f * 1000).to_i
           Capybara::Simulated::Driver.each_live_on_thread(Thread.current) {|d|
             d.browser.advance_virtual_clock_ms(ms)

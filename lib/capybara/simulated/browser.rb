@@ -3065,10 +3065,11 @@ module Capybara
       # forwarding straight to a near-future timer when the page is otherwise idle.
       # Explicit `step_ms` is used by `SleepHook#advance_virtual_clock_ms` (from
       # `Kernel#sleep`) and by `Playwright::Page#wait_for_timeout` to step a
-      # precise virtual duration.
+      # precise virtual duration — on an idle page too: the time a test sleeps passes for its `Date` (agent_clock.rs), which
+      # reads no wall clock beside the virtual one (a `click(delay: 2)`'s mouseup two seconds after its mousedown).
       def tick_real_time(step_ms: nil)
         # (…a worker's timer too: its clock is the window's, which moves only as this advances it — `worker_due_within`)
-        return unless @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && worker_next_timer_at)
+        return unless step_ms || @timers_active || async_io_pending? || background_steps_pending? || (!@workers.empty? && worker_next_timer_at)
         # Re-entrancy guard. Capybara's `Result#each` triggers nested
         # finds (visible? per element); the outermost tick has already
         # advanced the clock, the inner calls would only re-drain
@@ -3089,7 +3090,7 @@ module Capybara
           # step SIZE below is deterministic.
           @last_tick_ts = now
           effective_step = step_ms || horizon_fast_forward_step
-          if (@timers_active || (!@workers.empty? && worker_next_timer_at)) && effective_step > 0
+          if (step_ms || @timers_active || (!@workers.empty? && worker_next_timer_at)) && effective_step > 0
             # When the page has work runnable NOW (a rAF chain / timer burst — set
             # by `horizon_fast_forward_step`), run the poll's worth of virtual time
             # in frame-sized chunks so the page renders at real-browser cadence

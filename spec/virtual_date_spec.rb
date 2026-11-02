@@ -42,6 +42,16 @@ RSpec.describe 'the virtual clock’s Date' do
     expect(r[1]).to be_between(2999, 3050)
   end
 
+  # …and a test's `sleep` passes for a page with nothing to run as well: no wall clock beside the virtual one shows it.
+  it 'shows the time a test sleeps on an idle page' do
+    s = blank_session
+    s.execute_script('window.d0 = Date.now(); window.p0 = performance.now()')
+    sleep 0.5
+    got = s.evaluate_script('[Date.now() - d0, performance.now() - p0]')
+    expect(got[0]).to be_between(500, 550)
+    expect(got[1]).to be_between(500, 550)
+  end
+
   # HR-Time §4 "coarsen time": a DOMHighResTimeStamp to 100 microseconds where the realm is not cross-origin isolated —
   # finer than the millisecond `Date` keeps, so a frame's delta or a benchmark's loop measures something — and a script
   # that spins on the clock sees it move, as no event loop step does inside one.
