@@ -5657,15 +5657,14 @@ module Capybara
           answered = worker[:answered].delete(fetch_id)
           moved    = took ? ((answered || worker[:now]).to_f - took).clamp(0, limit) : 0
           worker[:answering].delete(fetch_id)
-          # (…the real time the wait took, which the script that waited does not see beside the move: agent_clock.rs)
-          wall = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - began) * 1000
           if waiting
             # (…a worker's script waiting inside a sync XHR: its clock on by the time the answer took, as a window's is —
-            # its virtual clock by exactly that, its `Date` too)
-            waiting[:clock_moved_by]&.call(moved, wall)
+            # its virtual clock by exactly that, its `Date` too, the real time the wait took none of its script time:
+            # agent_clock.rs `agentWait`)
+            waiting[:clock_moved_by]&.call(moved) if moved.positive?
           else
             worker[:awaited] -= 1
-            window_follows_awaited_worker(worker, follower, moved, wall)
+            window_follows_awaited_worker(worker, follower, moved)
           end
         end
       end
@@ -5682,24 +5681,23 @@ module Capybara
       # (`moved`) — the worker's clock is its host window's, another window's for a pop-up, whose time is none of this one's
       # — what the worker posted delivered at its next step: after the timers overdue by then, which that step runs first,
       # HTML ordering no task sources against each other)
-      # (…`wall` the real time the window's thread waited, which a script of its that waited does not see beside the move)
-      private def window_follows_awaited_worker(worker, follower = nil, moved = 0, wall = 0)
+      private def window_follows_awaited_worker(worker, follower = nil, moved = 0)
         return unless worker[:awaited].zero? && worker[:now]
 
         if follower
-          follower.clock_moved_by(moved, wall)
-        elsif clock_at_least(worker[:now], wall)
+          follower.clock_moved_by(moved)
+        elsif clock_at_least(worker[:now])
           deliver_worker_messages
         end
       end
       # …this window's clock moved on by `ms`, no task of its run.
-      def clock_moved_by(ms, wall = 0) = clock_at_least(@runtime.clock + ms, wall)
-      # …this window's clock moved to `at` where it stands before it, no task of its run: whether it moved. (…and `wall`
-      # ms of real time a script of its waited meanwhile left out of its script time: timers.js `__csimClockAtLeast`)
-      def clock_at_least(at, wall = 0)
-        moves = at > @runtime.clock
-        @runtime.realm_direct_call(0, '__csimClockAtLeast', moves ? at : @runtime.clock, wall) if moves || wall.positive?
-        moves
+      def clock_moved_by(ms) = ms.positive? && clock_at_least(@runtime.clock + ms)
+      # …this window's clock moved to `at` where it stands before it, no task of its run: whether it moved.
+      def clock_at_least(at)
+        return false unless at > @runtime.clock
+
+        @runtime.realm_direct_call(0, '__csimClockAtLeast', at)
+        true
       end
 
       # A controlled client's fetch → the controlling SW's `fetch` event. Counted as a fetch
@@ -9486,8 +9484,7 @@ module Capybara
         record[:rt_lock].synchronize { record[:rt] = rt } if record
         # …and how its clock moves on by `ms`, nothing of its run — the time a worker's answer took, which its script
         # waited for inside a sync XHR (`await_worker_reply`): its time and its isolate's together.
-        # (…`wall_ms` the real time the wait took, which its `Date` does not show beside the move: agent_clock.rs)
-        record[:clock_moved_by] = ->(ms, wall_ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms, wall_ms) } if record
+        record[:clock_moved_by] = ->(ms) { worker_clock_step.call(worker_now + ms) && rt.call('__csimClockMovedBy', ms) } if record
         # A worker isolate loads the same snapshot as the main realm, so its `console.*`
         # is a no-op until `traceActive` is set (console.js). The main realm turns it on
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed

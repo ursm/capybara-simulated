@@ -127,9 +127,9 @@ RSpec.describe 'Worker clock' do
   end
 
   # Its time origin is the time it was made at, on the window's clock: its `timeOrigin + now()` reads what the window's
-  # does, as its `Date` does (HR-Time §5: one shared monotonic clock) — but for the time each agent's own scripts ran for
-  # beside it, the window's a few milliseconds, tens on a loaded machine. (It read a poll step behind: an idle worker's
-  # clock moved only with a timer to run.)
+  # does, as its `Date` does (HR-Time §5: one shared monotonic clock) — never behind it, and ahead by little more than
+  # the real time its start took, which its clock begins with. (It read a poll step behind: an idle worker's clock moved
+  # only with a timer to run.)
   it "reads the window's time" do
     session = visit_page(<<~JS)
       postMessage('ready');
@@ -139,7 +139,7 @@ RSpec.describe 'Worker clock' do
     poll_until { session.evaluate_script('window.log.length') >= 2 }
     worker = session.evaluate_script('window.log[1][0]')
     window = session.evaluate_script('window.posted')
-    expect(worker[0] - window[0]).to be_between(-50, 100)
-    expect(worker[1] - window[1]).to be_between(-50, 100)
+    expect(worker[0] - window[0]).to be_between(-1, 500)
+    expect(worker[1] - window[1]).to be_between(-1, 500)
   end
 end

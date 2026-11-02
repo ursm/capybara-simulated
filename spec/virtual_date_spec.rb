@@ -51,8 +51,7 @@ RSpec.describe 'the virtual clock’s Date' do
       (() => {
         const a = performance.now(), d = Date.now();
         const seen = new Set();
-        let b = a;
-        while ((b = performance.now()) - a < 2) seen.add(b);
+        while (seen.size < 50 && performance.now() - a < 1000) seen.add(performance.now());
         const grid = [...seen].every((t) => Math.abs(t * 10 - Math.round(t * 10)) < 1e-6);
         return [[...seen].some((t) => !Number.isInteger(t)), grid, Number.isInteger(Date.now()), Math.abs(performance.timeOrigin + performance.now() - Date.now()) < 1, Date.now() >= d];
       })()
