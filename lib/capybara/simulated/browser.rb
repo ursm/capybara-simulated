@@ -7824,8 +7824,13 @@ module Capybara
         try_clear_uninstalls if try_acts.any?
         sw_try_activate if try_acts.any?
         # A worker's port → the other end of its channel: a realm's, a worker's, or none yet (held for it —
-        # a client decodes a transferred port in the sw_client_msg processed just below).
-        port_msgs.each {|e| port_post(e[:end], e[:data]) }
+        # a client decodes a transferred port in the sw_client_msg processed just below). (…one posted after a claim held is
+        # causally after it, as a client message below is: the claim taken effect first — claim-shared-worker-fetch's
+        # 'PASS', posted on a port once `clients.claim()` resolved)
+        port_msgs.each do |e|
+          apply_controller_changes if controller_changes_held? && (held_before || (first_claim && order[e] > first_claim))
+          port_post(e[:end], e[:data])
+        end
         # A service worker → client message: deliver to the realm of the client it names, by the
         # registry's owner of its id (a document gone is no client: the message dropped).
         # A `client.postMessage` to a controlled IFRAME must reach THAT frame's navigator.service-
