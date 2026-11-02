@@ -270,6 +270,38 @@ RSpec.describe 'Worker clock' do
     expect(session.evaluate_script('window.log[1][0]')).to be_between(-1, 5)
   end
 
+  # A worker's clock is its window's as it last caught up with it, and its own time since — not its scripts' time from
+  # before then on top, which the window's clock went on through as well: a worker spinning 20 ms of every 50 read its
+  # page's `Date` 187, 386, 586 and 1186 ms ahead at 0.5, 1.5, 3 and 6 s (Chrome: 0 each). It reads no further ahead
+  # than the tick it is in.
+  it "keeps a busy worker's Date on its window's" do
+    session = visit_page(<<~JS)
+      setInterval(() => { const e = performance.now() + 20; while (performance.now() < e); }, 50);
+      onmessage = (e) => postMessage(Date.now() - e.data);
+      postMessage('ready');
+    JS
+    session.execute_script('for (const t of [500, 1500, 3000]) setTimeout(() => w.postMessage(Date.now()), t);')
+    poll_until(timeout: 30) {
+      sleep 0.1
+      session.evaluate_script('window.log.length') >= 4
+    }
+    gaps = session.evaluate_script('window.log.slice(1).map((l) => l[0])')
+    expect(gaps).to all(be_between(-1, 60))
+    expect(gaps.last - gaps.first).to be < 20
+  end
+
+  # …from its first statement: its clock begins just past its time origin, not at the real time its start took (its
+  # script fetched, its isolate made), and a timer it sets as it begins runs its timeout after on its clock, never before.
+  it 'begins its clock at its first statement' do
+    session = visit_page(<<~JS)
+      const start = performance.now();
+      setTimeout(() => postMessage([start, performance.now() - start]), 300);
+    JS
+    start, waited = session.evaluate_script('window.log[0][0]')
+    expect(start).to be_between(0, 5)
+    expect(waited).to be_between(300, 400)
+  end
+
   # A worker busy on its own while the window waits on nothing of it is none of the window's time, however the host
   # waits for the worker's ticks: a page's `setTimeout(…, 3000)` beside a worker spinning 20 ms of every 50 read 3605.
   it "keeps a busy worker's ticks out of the window's time" do

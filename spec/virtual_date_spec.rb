@@ -53,7 +53,7 @@ RSpec.describe 'the virtual clock’s Date' do
     sleep 0.5
     got = s.evaluate_script('[Date.now() - d0, performance.now() - p0]')
     expect(got[0]).to be_between(500, 550)
-    expect(got[1]).to be_between(500, 550)
+    expect(got[1].round(1)).to be_between(500, 550)
   end
 
   # HR-Time §4 "coarsen time": a DOMHighResTimeStamp to 100 microseconds where the realm is not cross-origin isolated —

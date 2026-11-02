@@ -9536,10 +9536,7 @@ module Capybara
         # from `CSIM_CONSOLE_STDERR`; without this a worker's console — and anything routed
         # through it, e.g. an Emscripten `printErr` — is silently dropped during debugging.
         rt.call('__csimSetTraceActive', true) if CONSOLE_STDERR
-        # Its time origin, the time it was made at — and its high resolution time beginning a step of its clock past it
-        # (WORKER_START_MS), as a browser's worker reads a time past its origin from its first statement: not the real time
-        # its start took, its script fetched and its isolate made, which its window's clock does not go on through — a
-        # worker read its window's `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
+        # Its time origin, the time it was made at (set again as its script begins, below).
         rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS) if record&.dig(:epoch)
         # …and the host's clock's offset from the real one, as its window has it (`travel_to`): what its `Date` and time
         # origin add, as the window's do.
@@ -9655,6 +9652,12 @@ module Capybara
         end
         # Booted: its script runs from here, what a window's wait on it is counted against (`worker_deadline`).
         record[:running_since] = Process.clock_gettime(Process::CLOCK_MONOTONIC) if record
+        # …and its clock from its time origin, the time it was made at — its high resolution time beginning a step of its
+        # clock past it (WORKER_START_MS), as a browser's worker reads a time past its origin from its first statement, and
+        # its scripts' time counted from that statement: not the real time its start took, its script fetched, its isolate
+        # made and its scope installed, which its window's clock does not go on through — a worker read its window's
+        # `Date` that far ahead for good, 25 ms on a loaded machine (agent_clock.rs).
+        rt.call('__csimSetClockEpoch', record[:epoch], WORKER_START_MS) if record&.dig(:epoch)
         if service
           # A SERVICE worker's registration is GATED on its script actually evaluating
           # ("Run Service Worker": an importScripts that 404s, a top-level throw, a
