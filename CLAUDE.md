@@ -246,9 +246,10 @@ worker runs on the event loop of the Browser that hosts the session's
 virtual clock — another window's controlled fetch, answered there, holds no
 clock of its own window's while it waits (`hold_for_sw_fetch` is the
 host's): the driver's windows run one at a time on virtual clocks of their
-own, which a worker of every window's has to follow one of — and a timer it
-sets as its own scripts have run its `Date` past that clock falls due on the
-clock all the same, running with its `Date` lifted to the timer's time
+own, which a worker of every window's has to follow one of — and a timer any
+worker, dedicated, shared or service, sets as its own scripts have run its
+`Date` past the clock it follows falls due on that clock all the same, running
+with its `Date` lifted to the timer's time
 (`notEarly`, timers.js), where HTML would run it that much later: falling due
 later would move it by the driver's own script time too. A navigation
 into the scope of a worker still activating waits for it as Handle Fetch
